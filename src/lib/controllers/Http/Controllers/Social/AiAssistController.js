@@ -1,0 +1,16 @@
+// Auto-generated stub for App\Http\Controllers\Social\AiAssistController
+
+export async function caption(req, res) {
+  // TODO: port logic from PHP controller method
+  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
+}
+
+export async function tags(req, res) {
+  // TODO: port logic from PHP controller method
+  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
+}
+
+export async function moderate(req, res) {
+  // TODO: port logic from PHP controller method
+  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
+}
