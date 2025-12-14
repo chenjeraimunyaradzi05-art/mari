@@ -2,14 +2,12 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
-  const __has_col_up_0 = await knex.schema.hasColumn('candidates', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!(await knex.schema.hasTable('candidates'))) return;
   const cols = ['professional_profile_url','github_url','portfolio_url','twitter_url','facebook_url','instagram_url'];
   const existing = {};
-  for (const col of cols) existing[col] = __has_col_up_0;
+  for (const c of cols) {
+    existing[c] = await knex.schema.hasColumn('candidates', c);
+  }
   await knex.schema.alterTable('candidates', (table) => {
     if (!existing.professional_profile_url) table.string('professional_profile_url').nullable();
     if (!existing.github_url) table.string('github_url').nullable();
@@ -23,8 +21,10 @@ exports.up = async function(knex) {
 exports.down = async function(knex) {
   if (!(await knex.schema.hasTable('candidates'))) return;
   const cols = ['instagram_url','facebook_url','twitter_url','portfolio_url','github_url','professional_profile_url'];
+  const orig = {};
+  for (const c of cols) orig[c] = await knex.schema.hasColumn('candidates', c);
   for (const col of cols) {
-    if (__has_col_up_0) {
+    if (!orig[col]) {
       await knex.schema.alterTable('candidates', (table) => {
         table.dropColumn(col);
       });

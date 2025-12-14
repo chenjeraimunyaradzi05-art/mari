@@ -2,10 +2,6 @@
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('candidates', 'provider');
   const __has_col_up_1 = await knex.schema.hasColumn('companies', 'provider');
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-
   // Create job_shares table
   const exists = await knex.schema.hasTable('job_shares');
   if (!exists) {

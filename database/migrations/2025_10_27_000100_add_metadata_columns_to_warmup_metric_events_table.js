@@ -7,21 +7,19 @@ exports.up = async function(knex) {
   const __has_col_up_2 = await knex.schema.hasColumn('warmup_metric_events', 'environment');
   const __has_col_up_3 = await knex.schema.hasColumn('warmup_metric_events', 'tags');
   const __has_col_up_4 = await knex.schema.hasColumn('warmup_metric_events', 'metadata');
-  const __has_col_up_5 = await knex.schema.hasColumn('warmup_metric_events', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-
   if (!(await knex.schema.hasTable('warmup_metric_events'))) return;
   const hasLatencyBucket = __has_col_up_0;
   const hasFailureCode = __has_col_up_1;
   const hasEnvironment = __has_col_up_2;
   const hasTags = __has_col_up_3;
   const hasMetadata = __has_col_up_4;
+  const originalHas = {
+    latency_bucket: __has_col_up_0,
+    failure_code: __has_col_up_1,
+    environment: __has_col_up_2,
+    tags: __has_col_up_3,
+    metadata: __has_col_up_4
+  };
 
   await knex.schema.alterTable('warmup_metric_events', (table) => {
     if (!hasLatencyBucket) table.string('latency_bucket').nullable().after('duration_ms');
@@ -42,7 +40,7 @@ exports.down = async function(knex) {
     }
   });
   for (const col of columns) {
-    if (__has_col_up_5) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('warmup_metric_events', (table) => {
         table.dropColumn(col);
       });

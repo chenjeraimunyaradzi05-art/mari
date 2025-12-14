@@ -1,18 +1,12 @@
 const knexLib = require('knex');
 const path = require('path');
-const files = [
-  '2025_11_03_000001_create_organizations_table.cjs',
-  '2025_11_03_000002_create_profiles_table.cjs',
-  '2025_11_03_000003_create_posts_table.cjs',
-  '2025_11_03_000004_create_reactions_table.cjs',
-  '2025_11_03_000005_create_comments_table.cjs',
-  '2025_11_03_000006_create_follows_table.cjs',
-  '2014_12_01_120000_create_phpdebugbar_storage_table.cjs',
-  '2013_11_04_163552_posts.cjs',
-  '2015_08_17_185144_authors.cjs',
-  '2019_01_05_293551_add-role-id-to-menu-items-table.cjs'
-];
+let files = []; // empty -> apply all .cjs files in tmp/migrations_cjs
 const tmpDir = path.resolve(__dirname, '..', 'tmp', 'migrations_cjs');
+
+// If files is empty or not defined, fallback to all .cjs files in tmpDir sorted by name
+if (!files || files.length === 0) {
+  files = require('fs').readdirSync(tmpDir).filter(f => f.endsWith('.cjs')).sort();
+}
 (async () => {
   const knex = knexLib({ client: 'sqlite3', connection: { filename: path.resolve(__dirname, '..', 'tmp', 'dev.sqlite3') }, useNullAsDefault: true });
   try {

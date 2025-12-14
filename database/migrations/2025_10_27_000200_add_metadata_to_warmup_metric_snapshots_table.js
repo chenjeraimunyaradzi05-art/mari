@@ -6,19 +6,17 @@ exports.up = async function(knex) {
   const __has_col_up_1 = await knex.schema.hasColumn('warmup_metric_snapshots', 'p99_duration_ms');
   const __has_col_up_2 = await knex.schema.hasColumn('warmup_metric_snapshots', 'notes');
   const __has_col_up_3 = await knex.schema.hasColumn('warmup_metric_snapshots', 'metadata');
-  const __has_col_up_4 = await knex.schema.hasColumn('warmup_metric_snapshots', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-
   if (!(await knex.schema.hasTable('warmup_metric_snapshots'))) return;
   const hasFailureRate = __has_col_up_0;
   const hasP99 = __has_col_up_1;
   const hasNotes = __has_col_up_2;
   const hasMetadata = __has_col_up_3;
+  const originalHas = {
+    failure_rate: __has_col_up_0,
+    p99_duration_ms: __has_col_up_1,
+    notes: __has_col_up_2,
+    metadata: __has_col_up_3
+  };
   await knex.schema.alterTable('warmup_metric_snapshots', (table) => {
     if (!hasFailureRate) table.decimal('failure_rate', 5, 2).notNullable().defaultTo(0).after('failure_count');
     if (!hasP99) table.integer('p99_duration_ms').unsigned().notNullable().defaultTo(0).after('p95_duration_ms');
@@ -31,7 +29,7 @@ exports.down = async function(knex) {
   if (!(await knex.schema.hasTable('warmup_metric_snapshots'))) return;
   const columns = ['failure_rate','p99_duration_ms','notes','metadata'];
   for (const col of columns) {
-    if (__has_col_up_4) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('warmup_metric_snapshots', (table) => {
         table.dropColumn(col);
       });

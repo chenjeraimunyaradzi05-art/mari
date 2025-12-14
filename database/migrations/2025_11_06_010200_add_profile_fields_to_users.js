@@ -7,15 +7,9 @@ exports.up = async function(knex) {
   const __has_col_up_2 = await knex.schema.hasColumn('users', 'pronouns');
   const __has_col_up_3 = await knex.schema.hasColumn('users', 'preferred_name');
   const __has_col_up_4 = await knex.schema.hasColumn('users', 'timezone');
-  const __has_col_up_5 = await knex.schema.hasColumn('users', c);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-
+  const cols = ['onboarding_step','persona_flags','pronouns','preferred_name','timezone'];
+  const originalHas = {};
+  for (const col of cols) originalHas[col] = await knex.schema.hasColumn('users', col);
   const client = (knex.client && knex.client.config && knex.client.config.client) || '';
 
   if (!__has_col_up_0) {
@@ -46,7 +40,7 @@ exports.up = async function(knex) {
 exports.down = async function(knex) {
   const cols = ['onboarding_step', 'persona_flags', 'pronouns', 'preferred_name', 'timezone'];
   for (const c of cols) {
-    if (__has_col_up_5) {
+    if (!originalHas[c]) {
       await knex.schema.alterTable('users', (table) => { table.dropColumn(c); });
     }
   }

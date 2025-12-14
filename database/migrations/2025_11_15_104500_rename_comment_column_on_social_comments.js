@@ -3,9 +3,6 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('social_comments', 'content');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!(await knex.schema.hasTable('social_comments'))) {
     return;
   }

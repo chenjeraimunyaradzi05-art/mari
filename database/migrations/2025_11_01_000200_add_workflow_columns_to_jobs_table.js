@@ -14,23 +14,10 @@ exports.up = async function(knex) {
   const __has_col_up_9 = await knex.schema.hasColumn('jobs', 'workflow_source');
   const __has_col_up_10 = await knex.schema.hasColumn('jobs', 'workflow_auto_publish_at');
   const __has_col_up_11 = await knex.schema.hasColumn('jobs', 'workflow_auto_archive_at');
-  const __has_col_up_12 = await knex.schema.hasColumn('jobs', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-  const __has_col_up_6 = __has_col_up_6;
-  const __has_col_up_7 = __has_col_up_7;
-  const __has_col_up_8 = __has_col_up_8;
-  const __has_col_up_9 = __has_col_up_9;
-  const __has_col_up_10 = __has_col_up_10;
-  const __has_col_up_11 = __has_col_up_11;
-  const __has_col_up_12 = __has_col_up_12;
-
   const added = { workflow_stage: false, workflow_status: false };
+  const columnsList = ['workflow_stage','workflow_status','workflow_priority','workflow_submitted_at','workflow_reviewed_at','workflow_last_transition_at','workflow_reviewer_id','workflow_notes','workflow_payload','workflow_source','workflow_auto_publish_at','workflow_auto_archive_at'];
+  const originalHas = {};
+  for (const c of columnsList) originalHas[c] = await knex.schema.hasColumn('jobs', c);
 
   await knex.schema.alterTable('jobs', function(table) {
     // Use conditional checks in JS
@@ -148,13 +135,11 @@ exports.down = async function(knex) {
     'workflow_stage',
   ];
 
-  const existing = [];
   for (const col of columns) {
-    if (__has_col_up_12) existing.push(col);
-  }
-  if (existing.length > 0) {
-    await knex.schema.alterTable('jobs', function(table) {
-      table.dropColumn(existing);
-    });
+    if (!originalHas[col]) {
+      await knex.schema.alterTable('jobs', function(table) {
+        table.dropColumn(col);
+      });
+    }
   }
 };

@@ -4,10 +4,6 @@
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('plans', 'allow_social_posts');
   const __has_col_up_1 = await knex.schema.hasColumn('plans', 'social_post_limit');
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-
   if (!await knex.schema.hasTable('plans')) return;
 
   if (!__has_col_up_0) {

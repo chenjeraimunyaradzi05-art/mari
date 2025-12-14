@@ -3,9 +3,6 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('users', 'account_classification');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!(__has_col_up_0)) {
     await knex.schema.alterTable('users', function(table) {
       table.string('account_classification').defaultTo('candidate').after('role');

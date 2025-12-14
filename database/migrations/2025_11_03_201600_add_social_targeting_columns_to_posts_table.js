@@ -8,16 +8,9 @@ exports.up = async function(knex) {
   const __has_col_up_3 = await knex.schema.hasColumn('posts', 'audience_skills');
   const __has_col_up_4 = await knex.schema.hasColumn('posts', 'metadata');
   const __has_col_up_5 = await knex.schema.hasColumn('posts', 'match_insights');
-  const __has_col_up_6 = await knex.schema.hasColumn('posts', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-  const __has_col_up_6 = __has_col_up_6;
-
+  const cols = ['author_type','tags','audience_sector','audience_skills','metadata','match_insights'];
+  const originalHas = {};
+  for (const c of cols) originalHas[c] = await knex.schema.hasColumn('posts', c);
   if (!await knex.schema.hasTable('posts')) return;
 
   if (!__has_col_up_0) {
@@ -61,7 +54,7 @@ exports.down = async function(knex) {
   if (!await knex.schema.hasTable('posts')) return;
   const cols = ['match_insights', 'metadata', 'audience_skills', 'audience_sector', 'tags', 'author_type'];
   for (const col of cols) {
-    if (__has_col_up_6) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('posts', table => { table.dropColumn(col); });
     }
   }

@@ -3,9 +3,6 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('social_threads', 'last_message_id');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!(await knex.schema.hasTable('social_messages'))) {
     await knex.schema.createTable('social_messages', (table) => {
       table.bigIncrements('id');

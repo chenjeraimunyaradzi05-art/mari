@@ -4,14 +4,6 @@ exports.up = async function(knex) {
   const __has_col_up_1 = await knex.schema.hasColumn('candidates', 'website');
   const __has_col_up_2 = await knex.schema.hasColumn('candidates', 'image');
   const __has_col_up_3 = await knex.schema.hasColumn('candidates', 'cv');
-  const __has_col_up_4 = await knex.schema.hasColumn('candidates', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-
   await knex.schema.alterTable('candidates', async function(table) {
     // Remove fields
     // Note: knex alterTable dropColumn doesn't check existence; guard
@@ -83,7 +75,7 @@ exports.down = async function(knex) {
     'profile_video_uploaded_at', 'personality_video_uploaded_at'
   ];
   for (const col of dropList) {
-    if (__has_col_up_4) {
+    if (await knex.schema.hasColumn('candidates', col)) {
       await knex.schema.alterTable('candidates', function(table) { table.dropColumn(col); });
     }
   }

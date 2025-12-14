@@ -3,9 +3,6 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('candidates', 'mobile');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (await knex.schema.hasTable('candidates')) {
     const hasMobile = __has_col_up_0;
     if (!hasMobile) {

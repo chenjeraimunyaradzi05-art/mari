@@ -1,0 +1,35 @@
+// Auto-generated from 2025_10_27_120100_add_social_links_to_candidates_table.php
+// Ported from Laravel migration to Knex up/down
+
+exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('candidates', col);
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  if (!(await knex.schema.hasTable('candidates'))) return;
+  const cols = ['professional_profile_url','github_url','portfolio_url','twitter_url','facebook_url','instagram_url'];
+  const existing = {};
+  for (const col of cols) existing[col] = __has_col_up_0;
+  await knex.schema.alterTable('candidates', (table) => {
+    if (!existing.professional_profile_url) table.string('professional_profile_url').nullable();
+    if (!existing.github_url) table.string('github_url').nullable();
+    if (!existing.portfolio_url) table.string('portfolio_url').nullable();
+    if (!existing.twitter_url) table.string('twitter_url').nullable();
+    if (!existing.facebook_url) table.string('facebook_url').nullable();
+    if (!existing.instagram_url) table.string('instagram_url').nullable();
+  });
+};
+
+exports.down = async function(knex) {
+  if (!(await knex.schema.hasTable('candidates'))) return;
+  const cols = ['instagram_url','facebook_url','twitter_url','portfolio_url','github_url','professional_profile_url'];
+  for (const col of cols) {
+    if (__has_col_up_0) {
+      await knex.schema.alterTable('candidates', (table) => {
+        table.dropColumn(col);
+      });
+    }
+  }
+};

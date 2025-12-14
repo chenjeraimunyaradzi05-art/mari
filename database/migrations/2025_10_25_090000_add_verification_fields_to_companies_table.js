@@ -12,18 +12,6 @@ exports.up = async function(knex) {
   const __has_col_up_7 = await knex.schema.hasColumn('companies', 'verification_notes');
   const __has_col_up_8 = await knex.schema.hasColumn('companies', 'verification_payload');
   const __has_col_up_9 = await knex.schema.hasColumn('companies', 'verification_source');
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-  const __has_col_up_6 = __has_col_up_6;
-  const __has_col_up_7 = __has_col_up_7;
-  const __has_col_up_8 = __has_col_up_8;
-  const __has_col_up_9 = __has_col_up_9;
-
   if (await knex.schema.hasTable('companies')) {
     const hasAbn = __has_col_up_0;
     const hasAsic = __has_col_up_1;

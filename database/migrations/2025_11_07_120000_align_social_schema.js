@@ -61,68 +61,18 @@ exports.up = async function(knex) {
   const __has_col_up_49 = await knex.schema.hasColumn('social_post_reactions', 'liked_at');
   const __has_col_up_50 = await knex.schema.hasColumn('social_post_reactions', 'likeable_type');
   const __has_col_up_51 = await knex.schema.hasColumn('social_posts','social_profile_id');
-  const __has_col_up_52 = await knex.schema.hasColumn('social_posts', col);
-  const __has_col_up_53 = await knex.schema.hasColumn('social_post_media', col);
-  const __has_col_up_54 = await knex.schema.hasColumn('social_post_comments', col);
-  const __has_col_up_55 = await knex.schema.hasColumn('social_profiles', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-  const __has_col_up_6 = __has_col_up_6;
-  const __has_col_up_7 = __has_col_up_7;
-  const __has_col_up_8 = __has_col_up_8;
-  const __has_col_up_9 = __has_col_up_9;
-  const __has_col_up_10 = __has_col_up_10;
-  const __has_col_up_11 = __has_col_up_11;
-  const __has_col_up_12 = __has_col_up_12;
-  const __has_col_up_13 = __has_col_up_13;
-  const __has_col_up_14 = __has_col_up_14;
-  const __has_col_up_15 = __has_col_up_15;
-  const __has_col_up_16 = __has_col_up_16;
-  const __has_col_up_17 = __has_col_up_17;
-  const __has_col_up_18 = __has_col_up_18;
-  const __has_col_up_19 = __has_col_up_19;
-  const __has_col_up_20 = __has_col_up_20;
-  const __has_col_up_21 = __has_col_up_21;
-  const __has_col_up_22 = __has_col_up_22;
-  const __has_col_up_23 = __has_col_up_23;
-  const __has_col_up_24 = __has_col_up_24;
-  const __has_col_up_25 = __has_col_up_25;
-  const __has_col_up_26 = __has_col_up_26;
-  const __has_col_up_27 = __has_col_up_27;
-  const __has_col_up_28 = __has_col_up_28;
-  const __has_col_up_29 = __has_col_up_29;
-  const __has_col_up_30 = __has_col_up_30;
-  const __has_col_up_31 = __has_col_up_31;
-  const __has_col_up_32 = __has_col_up_32;
-  const __has_col_up_33 = __has_col_up_33;
-  const __has_col_up_34 = __has_col_up_34;
-  const __has_col_up_35 = __has_col_up_35;
-  const __has_col_up_36 = __has_col_up_36;
-  const __has_col_up_37 = __has_col_up_37;
-  const __has_col_up_38 = __has_col_up_38;
-  const __has_col_up_39 = __has_col_up_39;
-  const __has_col_up_40 = __has_col_up_40;
-  const __has_col_up_41 = __has_col_up_41;
-  const __has_col_up_42 = __has_col_up_42;
-  const __has_col_up_43 = __has_col_up_43;
-  const __has_col_up_44 = __has_col_up_44;
-  const __has_col_up_45 = __has_col_up_45;
-  const __has_col_up_46 = __has_col_up_46;
-  const __has_col_up_47 = __has_col_up_47;
-  const __has_col_up_48 = __has_col_up_48;
-  const __has_col_up_49 = __has_col_up_49;
-  const __has_col_up_50 = __has_col_up_50;
-  const __has_col_up_51 = __has_col_up_51;
-  const __has_col_up_52 = __has_col_up_52;
-  const __has_col_up_53 = __has_col_up_53;
-  const __has_col_up_54 = __has_col_up_54;
-  const __has_col_up_55 = __has_col_up_55;
-
+  const postsCols = ['social_profile_id','post_type','caption','media','location','tags','mentions','likes_count','comments_count','shares_count','views_count','is_pinned','comments_disabled','expires_at','ai_engagement_score','ai_tags'];
+  const postMediaCols = ['thumbnail_path','mime_type','file_size','width','height','duration','sort_order','ai_analysis','filters'];
+  const postCommentCols = ['social_profile_id','mentions','likes_count','replies_count','is_pinned','ai_sentiment','deleted_at'];
+  const profileCols = ['profileable_type','profileable_id','username','display_name','bio','avatar','cover_photo','website','social_links','profile_type','is_verified','is_private','following_count','posts_count','deleted_at'];
+  const originalHasPosts = {};
+  const originalHasMedia = {};
+  const originalHasComments = {};
+  const originalHasProfiles = {};
+  for (const c of postsCols) originalHasPosts[c] = await knex.schema.hasColumn('social_posts', c);
+  for (const c of postMediaCols) originalHasMedia[c] = await knex.schema.hasColumn('social_post_media', c);
+  for (const c of postCommentCols) originalHasComments[c] = await knex.schema.hasColumn('social_post_comments', c);
+  for (const c of profileCols) originalHasProfiles[c] = await knex.schema.hasColumn('social_profiles', c);
   if (await knex.schema.hasTable('social_profiles')) {
     await knex.schema.alterTable('social_profiles', (table) => {});
 
@@ -318,7 +268,7 @@ exports.down = async function(knex) {
         // Not all DBs support dropping named index easily here
       }
       for (const col of columns) {
-        if (__has_col_up_52) {
+        if (!originalHasPosts[col]) {
           if (col !== 'social_profile_id') {
             table.dropColumn(col);
           }
@@ -331,7 +281,7 @@ exports.down = async function(knex) {
     await knex.schema.alterTable('social_post_media', (table) => {
       const columns = ['thumbnail_path','mime_type','file_size','width','height','duration','sort_order','ai_analysis','filters'];
       for (const col of columns) {
-        if (__has_col_up_53) {
+        if (!originalHasMedia[col]) {
           if (col === 'sort_order') {
             try { table.dropIndex(['social_post_id','sort_order'], 'spm_post_sort_idx'); } catch (e) {}
           }
@@ -345,7 +295,7 @@ exports.down = async function(knex) {
     await knex.schema.alterTable('social_post_comments', (table) => {
       const columns = ['social_profile_id','mentions','likes_count','replies_count','is_pinned','ai_sentiment'];
       for (const col of columns) {
-        if (__has_col_up_54) {
+        if (!originalHasComments[col]) {
           if (col === 'social_profile_id') {
             try { table.dropForeign('social_profile_id'); } catch (e) {}
           } else {
@@ -353,7 +303,7 @@ exports.down = async function(knex) {
           }
         }
       }
-      if (__has_col_up_47) {
+      if (!originalHasComments['deleted_at']) {
         try { table.dropColumn('deleted_at'); } catch (e) {}
       }
     });
@@ -386,7 +336,7 @@ exports.down = async function(knex) {
     await knex.schema.alterTable('social_profiles', (table) => {
       const profileDropColumns = ['profileable_type','profileable_id','username','display_name','bio','avatar','cover_photo','website','social_links','profile_type','is_verified','is_private','following_count','posts_count'];
       for (const col of profileDropColumns) {
-        if (__has_col_up_55) {
+        if (!originalHasProfiles[col]) {
           if (col === 'username') {
             try { table.dropUnique('social_profiles_username_unique'); } catch (e) {}
           }
@@ -396,7 +346,7 @@ exports.down = async function(knex) {
           try { table.dropColumn(col); } catch (e) {}
         }
       }
-      if (__has_col_up_13) {
+      if (!originalHasProfiles['deleted_at']) {
         try { table.dropColumn('deleted_at'); } catch (e) {}
       }
     });

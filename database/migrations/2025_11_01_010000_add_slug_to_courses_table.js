@@ -11,9 +11,6 @@ const slugify = (str) => {
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('courses', 'slug');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!__has_col_up_0) {
     await knex.schema.alterTable('courses', function(table) {
       table.string('slug').nullable().after('title');

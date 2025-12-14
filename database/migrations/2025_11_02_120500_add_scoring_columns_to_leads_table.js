@@ -8,16 +8,9 @@ exports.up = async function(knex) {
   const __has_col_up_3 = await knex.schema.hasColumn('leads', 'qualification_factors');
   const __has_col_up_4 = await knex.schema.hasColumn('leads', 'ai_summary');
   const __has_col_up_5 = await knex.schema.hasColumn('leads', 'ai_recommendations');
-  const __has_col_up_6 = await knex.schema.hasColumn('leads', c);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-  const __has_col_up_6 = __has_col_up_6;
-
+  const cols = ['qualification_score','qualification_grade','qualification_priority','qualification_factors','ai_summary','ai_recommendations'];
+  const originalHas = {};
+  for (const cc of cols) originalHas[cc] = await knex.schema.hasColumn('leads', cc);
   await knex.schema.alterTable('leads', function(table) {
     if (!table.hasColumn && false) {
       // placeholder - we use knex.schema.hasColumn checks outside callback
@@ -60,7 +53,21 @@ exports.up = async function(knex) {
     });
   }
 
-  if (!await knex.schema.hasIndex('leads', 'leads_qualification_priority_idx')) {
+  const hasIndex = async (tableName, indexName) => {
+    const client = String(knex.client.config.client);
+    if (client.includes('sqlite')) {
+      const r = await knex.raw("select name from sqlite_master where type='index' and name = ?", [indexName]);
+      // knex returns rows differently across drivers; check contents
+      return Array.isArray(r) ? (r.length > 0 && (Array.isArray(r[0]) ? r[0].length > 0 : true)) : !!r;
+    }
+    if (client.includes('mysql')) {
+      const r = await knex.raw('SHOW INDEX FROM ?? WHERE Key_name = ?', [tableName, indexName]);
+      return !!(r && r[0] && r[0].length > 0);
+    }
+    return false;
+  };
+
+  if (!(await hasIndex('leads', 'leads_qualification_priority_idx'))) {
     await knex.schema.alterTable('leads', function(table) {
       table.index('qualification_priority', 'leads_qualification_priority_idx');
     });
@@ -83,7 +90,7 @@ exports.down = async function(knex) {
     'ai_recommendations',
   ];
   for (const c of cols) {
-    if (__has_col_up_6) {
+    if (!originalHas[c]) {
       await knex.schema.alterTable('leads', function(table) { table.dropColumn(c); });
     }
   }

@@ -7,13 +7,6 @@ exports.up = async function(knex) {
   const __has_col_up_2 = await knex.schema.hasColumn('org_media_assets', 'moderation_labels');
   const __has_col_up_3 = await knex.schema.hasColumn('org_media_assets', 'moderation_status');
   const __has_col_up_4 = await knex.schema.hasColumn('org_media_assets', 'moderation_summary');
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-
   if (!await knex.schema.hasTable('org_media_assets')) return;
 
   if (!__has_col_up_0) {

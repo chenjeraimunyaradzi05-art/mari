@@ -3,19 +3,14 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('org_media_assets', 'uploaded_by');
-  const __has_col_up_1 = await knex.schema.hasColumn('org_media_assets', col);
   const __has_col_up_2 = await knex.schema.hasColumn('org_media_assets', 'meta');
   const __has_col_up_3 = await knex.schema.hasColumn('org_media_assets', 'status');
   const __has_col_up_4 = await knex.schema.hasColumn('org_media_assets', 'transcoded_at');
   const __has_col_up_5 = await knex.schema.hasColumn('org_media_assets', 'processing_errors');
 
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-  const __has_col_up_5 = __has_col_up_5;
-
+  const originalHas = {};
+  const checkCols = ['disk','original_filename','processed_path','thumbnail_path','captions_path','meta','status','transcoded_at','processing_errors'];
+  for (const c of checkCols) originalHas[c] = await knex.schema.hasColumn('org_media_assets', c);
   // Add columns to org_media_assets table if they do not exist
   const hasUploadedBy = __has_col_up_0;
   if (!hasUploadedBy) {
@@ -26,12 +21,12 @@ exports.up = async function(knex) {
   }
 
   const addStringColumn = async (col, after, opts = {}) => {
-    if (!__has_col_up_1) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('org_media_assets', function(table) {
         let t = table.string(col);
         if (opts.default) t.defaultTo(opts.default);
         if (opts.nullable) t.nullable();
-        if (after) t.after(after);
+        if (after && table.after) t.after(after);
       });
     }
   };
@@ -69,7 +64,7 @@ exports.up = async function(knex) {
 exports.down = async function(knex) {
   // Drop columns if they exist
   const dropIfExists = async (col, dropFn) => {
-    if (__has_col_up_1) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('org_media_assets', function(table) {
         dropFn(table, col);
       });

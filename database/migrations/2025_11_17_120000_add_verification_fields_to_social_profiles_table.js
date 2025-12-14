@@ -7,13 +7,6 @@ exports.up = async function(knex) {
   const __has_col_up_2 = await knex.schema.hasColumn('social_profiles', 'verification_reviewed_at');
   const __has_col_up_3 = await knex.schema.hasColumn('social_profiles', 'verification_reviewer_id');
   const __has_col_up_4 = await knex.schema.hasColumn('social_profiles', 'verification_notes');
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
-  const __has_col_up_2 = __has_col_up_2;
-  const __has_col_up_3 = __has_col_up_3;
-  const __has_col_up_4 = __has_col_up_4;
-
   if (await knex.schema.hasTable('social_profiles')) {
     if (!__has_col_up_0) {
       await knex.schema.alterTable('social_profiles', (table) => {

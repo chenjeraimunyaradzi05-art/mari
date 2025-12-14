@@ -3,9 +3,6 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('candidate_cvs', 'linkedin');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!(await knex.schema.hasTable('candidate_cvs'))) return;
   const hasLinkedin = __has_col_up_0;
   if (hasLinkedin) {

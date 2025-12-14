@@ -99,7 +99,11 @@ exports.up = async function(knex) {
     await knex.schema.createTable('interview_question_topic', (table) => {
       table.bigInteger('interview_question_id').unsigned().notNullable();
       table.bigInteger('interview_question_topic_id').unsigned().notNullable();
-      table.primary(['interview_question_id', 'interview_question_topic_id'], { constraintName: 'iq_topic_primary' });
+      if (knex && knex.client && String(knex.client.config.client).includes('sqlite')) {
+        table.primary(['interview_question_id', 'interview_question_topic_id']);
+      } else {
+        table.primary(['interview_question_id', 'interview_question_topic_id'], { constraintName: 'iq_topic_primary' });
+      }
       table.foreign('interview_question_id').references('id').inTable('interview_questions').onDelete('CASCADE');
       table.foreign('interview_question_topic_id').references('id').inTable('interview_question_topics').onDelete('CASCADE');
     });

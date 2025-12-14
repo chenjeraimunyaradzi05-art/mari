@@ -22,6 +22,7 @@ for (const file of files) {
     const tail = s.slice(insertPos);
     const endIdx = tail.search(/\n}\n\nexports\.|\n}\n\n$/);
     const funcBody = endIdx === -1 ? tail : tail.slice(0, endIdx);
+    const suffix = endIdx === -1 ? '' : tail.slice(endIdx);
 
     const regex = /await\s+knex\.schema\.hasColumn\([^)]*\)/g;
     const matches = [...funcBody.matchAll(regex)].map(m => m[0]);
@@ -29,6 +30,7 @@ for (const file of files) {
 
     const unique = Array.from(new Set(matches));
     let decls = '';
+    let newFuncBody = funcBody;
     unique.forEach((matchText, idx) => {
       const varName = `__has_col_${fn}_${idx}`;
       // create declaration using the same arguments
@@ -37,11 +39,11 @@ for (const file of files) {
       // replace all occurrences of this matchText in the function body with varName
       const matchEsc = matchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp(matchEsc, 'g');
-      s = s.replace(re, varName);
+      newFuncBody = newFuncBody.replace(re, varName);
     });
 
-    // insert decls after function opening brace
-    s = s.slice(0, insertPos) + '\n' + decls + s.slice(insertPos);
+    // insert decls after function opening brace and reconstruct function body
+    s = s.slice(0, insertPos) + '\n' + decls + newFuncBody + suffix;
   });
 
   if (s !== fs.readFileSync(filePath, 'utf8')) {

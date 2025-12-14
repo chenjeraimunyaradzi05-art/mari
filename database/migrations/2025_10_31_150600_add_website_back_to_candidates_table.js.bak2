@@ -1,0 +1,26 @@
+// Auto-generated from 2025_10_31_150600_add_website_back_to_candidates_table.php
+// Ported from Laravel migration to Knex up/down
+
+exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('candidates', 'website');
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  if (!__has_col_up_0) {
+    await knex.schema.alterTable('candidates', function(table) {
+      table.string('website').nullable();
+    });
+  }
+};
+
+exports.down = async function(knex) {
+  if (__has_col_up_0) {
+    await knex.schema.alterTable('candidates', function(table) {
+      table.dropColumn('website');
+    });
+  }
+};

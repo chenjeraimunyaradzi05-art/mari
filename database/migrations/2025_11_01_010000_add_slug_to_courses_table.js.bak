@@ -1,0 +1,73 @@
+// Auto-generated from 2025_11_01_010000_add_slug_to_courses_table.php
+// Ported from Laravel migration to Knex up/down
+
+const slugify = (str) => {
+  if (!str) return '';
+  return str.toString().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 191);
+};
+
+exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('courses', 'slug');
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  const __has_col_up_0 = __has_col_up_0;
+
+  if (!__has_col_up_0) {
+    await knex.schema.alterTable('courses', function(table) {
+      table.string('slug').nullable().after('title');
+      table.unique('slug');
+    });
+  }
+
+  // Backfill slugs
+  if (!__has_col_up_0) {
+    return;
+  }
+
+  // Process in batches using id cursor
+  let lastId = 0;
+  while (true) {
+    const batch = await knex('courses')
+      .select('id', 'title', 'slug')
+      .where('id', '>', lastId)
+      .orderBy('id')
+      .limit(100);
+    if (!batch || batch.length === 0) break;
+    for (const row of batch) {
+      lastId = row.id;
+      if (row.slug) continue;
+      const base = slugify(row.title) || `course-${row.id}`;
+      let slug = base;
+      let suffix = 1;
+      while (await knex('courses').where('slug', slug).whereNot('id', row.id).first()) {
+        slug = `${base}-${suffix++}`;
+      }
+      await knex('courses').where('id', row.id).update({ slug });
+    }
+  }
+
+  // Fill remaining null slugs quickly for MySQL-ish drivers
+  const client = (knex.client && (knex.client.config && knex.client.config.client)) || '';
+  if (client && client.toString().startsWith('mysql')) {
+    await knex('courses').whereNull('slug').update(knex.raw("CONCAT('course-', id)"));
+  } else {
+    // Final pass for rows still null
+    const nullRows = await knex('courses').select('id').whereNull('slug').orderBy('id');
+    for (const r of nullRows) {
+      await knex('courses').where('id', r.id).update({ slug: `course-${r.id}` });
+    }
+  }
+};
+
+exports.down = async function(knex) {
+  if (__has_col_up_0) {
+    await knex.schema.alterTable('courses', function(table) {
+      table.dropUnique('courses_slug_unique');
+      table.dropColumn('slug');
+    });
+  }
+};

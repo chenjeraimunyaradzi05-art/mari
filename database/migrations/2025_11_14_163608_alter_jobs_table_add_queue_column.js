@@ -3,9 +3,6 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('jobs', 'queue');
-
-  const __has_col_up_0 = __has_col_up_0;
-
   if (!(__has_col_up_0)) {
     await knex.schema.alterTable('jobs', (table) => {
       table.string('queue').defaultTo('default').after('id');

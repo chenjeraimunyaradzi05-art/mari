@@ -3,10 +3,9 @@
 
 exports.up = async function(knex) {
   const __has_col_up_0 = await knex.schema.hasColumn('companies', 'foundation_status');
-  const __has_col_up_1 = await knex.schema.hasColumn('companies', col);
-
-  const __has_col_up_0 = __has_col_up_0;
-  const __has_col_up_1 = __has_col_up_1;
+  const cols = ['foundation_summary','foundation_focus_areas','foundation_programs','foundation_impact_metrics','foundation_contact_name','foundation_contact_email','foundation_contact_phone','foundation_donation_url','foundation_video_url','foundation_cta_label','foundation_cta_url','foundation_launched_at','foundation_social_links'];
+  const originalHas = {};
+  for (const c of cols) originalHas[c] = await knex.schema.hasColumn('companies', c);
 
   if (!__has_col_up_0) {
     await knex.schema.alterTable('companies', function(table) {
@@ -19,7 +18,7 @@ exports.up = async function(knex) {
 
   const addIf = async (colPipe) => {
     const [col, cb] = colPipe;
-    if (!__has_col_up_1) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('companies', cb);
     }
   };
@@ -41,7 +40,7 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   const maybeDrop = async (col) => {
-    if (__has_col_up_1) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('companies', function(table) {
         table.dropColumn(col);
       });
