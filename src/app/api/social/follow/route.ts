@@ -1,3 +1,8 @@
+import SocialController from '@/lib/controllers/Http/Controllers/Api/V1/SocialController';
+
+export async function POST(req: Request) {
+  return SocialController.follow(req, null);
+}
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth';
