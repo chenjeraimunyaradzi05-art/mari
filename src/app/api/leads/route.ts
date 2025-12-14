@@ -1,3 +1,12 @@
+import LeadsController from '@/lib/controllers/Http/Controllers/Api/V1/LeadsController';
+
+export async function GET(req: Request) {
+  return LeadsController.list(req, null);
+}
+
+export async function POST(req: Request) {
+  return LeadsController.create(req, null);
+}
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { CaptureLead } from '@/lib/validations';

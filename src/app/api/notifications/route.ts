@@ -1,3 +1,13 @@
+import NotificationsController from '@/lib/controllers/Http/Controllers/Api/V1/NotificationsController';
+
+export async function GET(req: Request) {
+  return NotificationsController.list(req, null);
+}
+
+export async function POST(req: Request) {
+  // Use POST to mark as read
+  return NotificationsController.markRead(req, null);
+}
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth';

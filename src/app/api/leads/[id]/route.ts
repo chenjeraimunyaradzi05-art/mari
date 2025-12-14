@@ -1,3 +1,12 @@
+import LeadsController from '@/lib/controllers/Http/Controllers/Api/V1/LeadsController';
+
+export async function GET(req: Request) {
+  return LeadsController.show(req, null);
+}
+
+export async function DELETE(req: Request) {
+  return LeadsController.remove(req, null);
+}
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { UpdateLeadSchema } from '@/lib/validations';
