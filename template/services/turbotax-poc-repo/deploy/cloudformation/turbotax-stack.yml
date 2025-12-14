@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "TurboTax POC stack — ECR + ECS Fargate + ALB + SecretsManager (demo only)"
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into (if blank default will be used by CFN console selection)
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of public subnets for tasks and ALB
+  ContainerImageUri:
+    Type: String
+    Description: Full ECR image URI (e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/turbotax-poc:latest)
+
+Resources:
+  TurbotaxECRRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: turbotax-poc
+
+  TurbotaxLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: "/ecs/turbotax-poc"
+      RetentionInDays: 14
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties: {}
+
+  TurbotaxTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TurbotaxTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  TurbotaxTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Select [0, !Ref SubnetIds]
+
+  TurbotaxALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets: !Ref SubnetIds
+      Scheme: internet-facing
+
+  TurbotaxALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref TurbotaxALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TurbotaxTargetGroup
+
+  TurbotaxTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities: [ FARGATE ]
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt TurbotaxTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TurbotaxTaskRole.Arn
+      ContainerDefinitions:
+        - Name: turbotax
+          Image: !Ref ContainerImageUri
+          PortMappings:
+            - ContainerPort: 3000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/turbotax-poc
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: turbotax
+
+  TurbotaxService:
+    Type: AWS::ECS::Service
+    DependsOn: TurbotaxALBListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TurbotaxTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: turbotax
+          ContainerPort: 3000
+          TargetGroupArn: !Ref TurbotaxTargetGroup
+
+Outputs:
+  ALBDNS:
+    Description: "ALB DNS — public address for the microservice"
+    Value: !GetAtt TurbotaxALB.DNSName

@@ -2,30 +2,35 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('users', 'preferred_name');
+  const __has_col_up_1 = await knex.schema.hasColumn('users', 'pronouns');
+  const __has_col_up_2 = await knex.schema.hasColumn('users', 'timezone');
+  const __has_col_up_3 = await knex.schema.hasColumn('users', 'onboarding_step');
+  const __has_col_up_4 = await knex.schema.hasColumn('users', 'persona_flags');
   if (!await knex.schema.hasTable('users')) return;
 
-  if (!await knex.schema.hasColumn('users', 'preferred_name')) {
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('users', (table) => { table.string('preferred_name', 191).nullable(); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'pronouns')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('users', (table) => { table.string('pronouns', 50).nullable(); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'timezone')) {
+  if (!__has_col_up_2) {
     await knex.schema.alterTable('users', (table) => { table.string('timezone', 64).notNullable().defaultTo('UTC'); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'onboarding_step')) {
+  if (!__has_col_up_3) {
     await knex.schema.alterTable('users', (table) => { table.string('onboarding_step', 64).nullable(); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'persona_flags')) {
+  if (!__has_col_up_4) {
     await knex.schema.alterTable('users', (table) => { table.json('persona_flags').nullable(); });
   }
 
   // Set null timezone rows to UTC
-  if (await knex.schema.hasColumn('users', 'timezone')) {
+  if (__has_col_up_2) {
     await knex('users').whereNull('timezone').update({ timezone: 'UTC' });
   }
 };

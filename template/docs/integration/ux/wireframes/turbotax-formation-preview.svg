@@ -1,0 +1,21 @@
+<svg width="900" height="600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="600" fill="#ffffff"/>
+  <rect x="30" y="20" width="840" height="68" rx="6" fill="#f3f4f6" stroke="#e5e7eb"/>
+  <text x="50" y="58" fill="#111827" font-size="20" font-family="Arial">Formation Studio — After-tax Profit Preview</text>
+
+  <rect x="30" y="100" width="420" height="200" rx="8" fill="#f8fafc" stroke="#e7e9ee"/>
+  <text x="50" y="130" fill="#111827" font-size="16">Projected Revenue</text>
+  <text x="50" y="170" fill="#111827" font-size="28" font-weight="bold">$120,000</text>
+  <text x="50" y="200" fill="#6b7280">Tax estimate (annual): $12,540</text>
+
+  <rect x="470" y="100" width="400" height="200" rx="8" fill="#f8fafc" stroke="#e7e9ee"/>
+  <text x="490" y="130" fill="#111827" font-size="16">Entity recommendation (auto)</text>
+  <text x="490" y="170" fill="#111827" font-size="22">LLC → S-Corp (recommended)</text>
+  <text x="490" y="200" fill="#6b7280">Projected after-tax income: $95,300</text>
+
+  <rect x="30" y="320" width="840" height="220" rx="8" fill="#f7faf9" stroke="#e6ece6"/>
+  <text x="50" y="350" fill="#111827" font-size="16">Actions & Next Steps</text>
+  <text x="50" y="380" fill="#6b7280">• Map expense categories for tax filing</text>
+  <text x="50" y="404" fill="#6b7280">• Estimate quarterly tax payments</text>
+  <text x="50" y="428" fill="#6b7280">• Run full TurboTax projection and optionally create a draft return</text>
+</svg>

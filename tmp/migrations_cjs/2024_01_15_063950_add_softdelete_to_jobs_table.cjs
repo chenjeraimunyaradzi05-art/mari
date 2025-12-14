@@ -1,7 +1,8 @@
 // Auto-generated from 2024_01_15_063950_add_softdelete_to_jobs_table.php
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('jobs', 'deleted_at');
   // Add deleted_at column to jobs for soft deletes
-  if (!await knex.schema.hasColumn('jobs', 'deleted_at')) {
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('jobs', function(table) {
       table.timestamp('deleted_at').nullable();
     });
@@ -9,7 +10,7 @@ exports.up = async function(knex) {
 };
 
 exports.down = async function(knex) {
-  if (await knex.schema.hasColumn('jobs', 'deleted_at')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('jobs', function(table) {
       table.dropColumn('deleted_at');
     });

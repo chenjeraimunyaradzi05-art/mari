@@ -2,15 +2,17 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('plans', 'allow_social_posts');
+  const __has_col_up_1 = await knex.schema.hasColumn('plans', 'social_post_limit');
   if (!await knex.schema.hasTable('plans')) return;
 
-  if (!await knex.schema.hasColumn('plans', 'allow_social_posts')) {
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('plans', function(table) {
       table.boolean('allow_social_posts').notNullable().defaultTo(false);
     });
   }
 
-  if (!await knex.schema.hasColumn('plans', 'social_post_limit')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('plans', function(table) {
       table.integer('social_post_limit').notNullable().defaultTo(0);
     });
@@ -27,11 +29,11 @@ exports.up = async function(knex) {
 exports.down = async function(knex) {
   if (!await knex.schema.hasTable('plans')) return;
 
-  if (await knex.schema.hasColumn('plans', 'social_post_limit')) {
+  if (__has_col_up_1) {
     await knex.schema.alterTable('plans', function(table) { table.dropColumn('social_post_limit'); });
   }
 
-  if (await knex.schema.hasColumn('plans', 'allow_social_posts')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('plans', function(table) { table.dropColumn('allow_social_posts'); });
   }
 };

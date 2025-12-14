@@ -1,0 +1,17 @@
+<svg width="900" height="600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="600" fill="#f9fafb"/>
+  <rect x="30" y="30" width="840" height="120" rx="8" fill="#fff" stroke="#e6e9ee"/>
+  <text x="60" y="80" fill="#0f172a" font-size="22" font-family="Arial">TurboTax Onboarding — Data consent & connect</text>
+
+  <rect x="60" y="170" width="760" height="170" rx="6" fill="#ffffff" stroke="#e7eaee"/>
+  <text x="80" y="200" fill="#111827" font-size="16">We will share the following data with TurboTax to produce a tax estimate:</text>
+  <text x="80" y="230" fill="#374151">• Income sources (W2, 1099, rental income)</text>
+  <text x="80" y="254" fill="#374151">• Business expense categories (only totals, unless user chooses more)</text>
+  <text x="80" y="278" fill="#374151">• Filing preferences and entity type</text>
+
+  <rect x="80" y="358" width="640" height="60" rx="6" fill="#0ea5a3"/>
+  <text x="240" y="396" fill="#0f172a" font-size="18">Allow ATHENA to share my data (estimate only)</text>
+
+  <rect x="80" y="440" width="640" height="46" rx="6" fill="#efefef"/>
+  <text x="120" y="470" fill="#374151">Connect securely (OAuth) - Continue to TurboTax (sandbox)</text>
+</svg>

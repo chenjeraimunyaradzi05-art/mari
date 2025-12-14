@@ -5,47 +5,21 @@ export async function __construct(req, res) {
   return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
 }
 
-export async function store(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function loadMore(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
+/**
+ * Original PHP method body (for reference):
+ * $posts = SocialPostModel::query()
+ *             ->where('visibility', 'public')
+ *             ->where('moderation_status', 'approved')
+ *             ->latest('created_at')
+ *             ->get();
+ * 
+ *         // Tests only need to see the content text so return a simple body containing
+ *         // the approved posts' content.
+ *         $body = $posts->pluck('content')->implode("\n\n");
+ * 
+ *         return response($body, 200);
+ */
 export async function index(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function save(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function preview(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function like(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function share(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function repost(req, res) {
-  // TODO: port logic from PHP controller method
-  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
-}
-
-export async function likeComment(req, res) {
   // TODO: port logic from PHP controller method
   return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });
 }

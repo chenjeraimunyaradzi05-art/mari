@@ -1,0 +1,1 @@
+{"version":2,"defects":[],"times":{"Tests\\Feature\\Admin\\SuperAdminPermissionsTest::test_super_admin_role_gets_all_admin_permissions":0.511,"Tests\\Feature\\Admin\\SuperAdminPermissionsTest::test_super_admin_role_gets_all_web_permissions":0.431}}

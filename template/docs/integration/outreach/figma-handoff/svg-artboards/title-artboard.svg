@@ -1,0 +1,7 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='900' viewBox='0 0 1600 900'>
+  <rect width='1600' height='900' fill='#071426' rx='8' />
+  <g transform='translate(60,80)'>
+    <rect x='0' y='0' width='480' height='180' rx='8' fill='url(#g)' />
+  </g>
+  <text x='120' y='360' font-size='56' font-family='Inter, Arial' fill='#07B8B0' font-weight='700'>ATHENA × TurboTax</text>
+</svg>

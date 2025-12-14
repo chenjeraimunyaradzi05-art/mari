@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TurboTax — Onboarding (ATHENA)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { --athena-primary: #07B8B0; --athena-deep: #0B7285; --athena-mid: #071426; --athena-neutral:#111827; }
+    body { font-family: Inter, system-ui, -apple-system, Arial; background:#ffffff; color:var(--athena-neutral); margin:0; }
+    .wrap { max-width:800px; margin:36px auto; }
+    .card { background:white; border-radius:12px; padding:28px; box-shadow: 0 8px 26px rgba(7,20,40,0.08); }
+    h1 { margin:0; font-size:20px; }
+    .muted { color:#6b7280; }
+    .consent { margin-top:18px; background:#f0fffb; border-radius:8px; padding:18px; border:1px solid rgba(7,184,176,0.14); }
+    .btn { display:inline-block; padding:10px 14px; border-radius:10px; font-weight:700; text-decoration:none; }
+    .btn-accept { background:#07B8B0; color:#071426 }
+    .btn-continue { background:#eef2f7; color:#0f172a }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+      <div class="card">
+        <img src="/docs/integration/outreach/assets/official/logotype.png" alt="ATHENA" style="height:44px;margin-bottom:12px" />
+      <h1>Connect TurboTax for tax estimates</h1>
+      <div class="muted">ATHENA will only share the data you choose. This lets us provide personalized tax projections and drafting.</div>
+
+      <div class="consent" style="border-left:4px solid var(--athena-primary)">
+        <h3 style="margin:0">What we'd share</h3>
+        <ul>
+          <li>Income sources — W2, 1099, rental</li>
+          <li>Business expenses (category totals)</li>
+          <li>Filing preferences & entity choice</li>
+        </ul>
+
+          <div style="margin-top:12px; display:flex; gap:12px;">
+          <a href="#" class="btn btn-accept">Share (Estimate only)</a>
+          <a href="#" class="btn btn-continue">Continue to TurboTax (OAuth)</a>
+        </div>
+      </div>
+
+      <div style="margin-top:18px; color:#64748b">You can modify what is shared at any time from Settings → Integrations.</div>
+    </div>
+  </div>
+</body>
+</html>

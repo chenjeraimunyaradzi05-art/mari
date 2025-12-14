@@ -2,12 +2,14 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
-  if (!await knex.schema.hasColumn('lead_notes', 'is_system')) {
+  const __has_col_up_0 = await knex.schema.hasColumn('lead_notes', 'is_system');
+  const __has_col_up_1 = await knex.schema.hasColumn('lead_notes', 'metadata');
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('lead_notes', function(table) {
       table.boolean('is_system').notNullable().defaultTo(false);
     });
   }
-  if (!await knex.schema.hasColumn('lead_notes', 'metadata')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('lead_notes', function(table) {
       table.json('metadata').nullable();
     });
@@ -15,8 +17,8 @@ exports.up = async function(knex) {
 };
 
 exports.down = async function(knex) {
-  const hasIsSystem = await knex.schema.hasColumn('lead_notes', 'is_system');
-  const hasMetadata = await knex.schema.hasColumn('lead_notes', 'metadata');
+  const hasIsSystem = __has_col_up_0;
+  const hasMetadata = __has_col_up_1;
   if (hasIsSystem || hasMetadata) {
     await knex.schema.alterTable('lead_notes', function(table) {
       if (hasIsSystem) table.dropColumn('is_system');

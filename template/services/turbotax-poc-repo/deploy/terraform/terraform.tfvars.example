@@ -1,0 +1,13 @@
+# Copy this file to terraform.tfvars and update values for deploy
+region = "us-east-1"
+aws_account_id = "123456789012"
+ecr_repository_name = "turbotax-poc"
+container_image = "" # Optional: full ECR image URI (account.dkr.ecr.${var.region}.amazonaws.com/turbotax-poc:sha)
+desired_count = 1
+task_cpu = 256
+task_memory = 512
+# Optionally specify public subnet IDs to use instead of default VPC
+public_subnets = []
+
+# Example secrets (for demo only) - when secrets_map is set terraform will create a single secretsmanager secret
+# secrets_map = { "TURBOTAX_MASTER_KEY" = "super-secret-key-please-change", "INTUIT_CLIENT_ID" = "abc", "INTUIT_CLIENT_SECRET" = "xyz" }

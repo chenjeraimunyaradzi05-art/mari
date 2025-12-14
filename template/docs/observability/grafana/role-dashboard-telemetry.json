@@ -1,0 +1,172 @@
+{
+  "uid": "role-dashboard-telemetry",
+  "title": "Role Dashboard Telemetry",
+  "tags": [
+    "athena",
+    "role-dashboard"
+  ],
+  "timezone": "",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-14d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "MySQL data source",
+        "type": "datasource",
+        "query": "mysql",
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": "Athena MySQL",
+          "value": "MYSQL_DATASOURCE_UID"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Daily role dashboard views",
+      "type": "timeseries",
+      "datasource": {
+        "type": "mysql",
+        "uid": "${ds}"
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "spanNulls": true,
+            "lineInterpolation": "smooth"
+          },
+          "unit": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT\n  $__timeGroupAlias(captured_on, 1d),\n  role AS metric,\n  SUM(total_views) AS value\nFROM role_dashboard_adoption_daily\nWHERE $__timeFilter(captured_on)\nGROUP BY 1, role\nORDER BY 1",
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Widget SLA (render duration)",
+      "type": "table",
+      "datasource": {
+        "type": "mysql",
+        "uid": "${ds}"
+      },
+      "gridPos": { "h": 13, "w": 24, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT\n  captured_on,\n  role,\n  widget_key,\n  render_events,\n  avg_duration_ms,\n  max_duration_ms,\n  ROUND(breaches_over_400ms / NULLIF(render_events, 0) * 100, 2) AS breach_rate_percent\nFROM role_dashboard_widget_sla_daily\nWHERE $__timeFilter(captured_on)\nORDER BY captured_on DESC, role, widget_key\nLIMIT 500",
+          "editorMode": "code"
+        }
+      ],
+      "styles": [],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 3,
+      "title": "SLA breach watchdog",
+      "type": "stat",
+      "datasource": {
+        "type": "mysql",
+        "uid": "${ds}"
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 25 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT\n  $__timeGroupAlias(COALESCE(received_at, created_at), 5m),\n  ROUND(SUM(CASE WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(properties, '$.duration_ms')) AS DECIMAL(10,3)) > 400 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) * 100, 2) AS breach_rate_percent\nFROM analytics_events\nWHERE event = 'role_dashboard.widget.rendered'\n  AND $__timeFilter(COALESCE(received_at, created_at))\nGROUP BY 1\nORDER BY 1",
+          "editorMode": "code"
+        }
+      ],
+      "alert": {
+        "alertRuleTags": {
+          "service": "role-dashboards",
+          "severity": "high"
+        },
+        "conditions": [
+          {
+            "evaluator": {
+              "params": [5],
+              "type": "gt"
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": ["A", "5m", "now"]
+            },
+            "reducer": {
+              "params": [],
+              "type": "max"
+            },
+            "type": "query"
+          }
+        ],
+        "executionErrorState": "alerting",
+        "for": "5m",
+        "frequency": "1m",
+        "message": "Widget render breach rate stayed above 5% for 5 minutes.",
+        "name": "Role dashboard widget SLA breach",
+        "noDataState": "no_data"
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+groups:
+  - name: admin-login.rules
+    rules:
+      - alert: HighAdminLoginRate
+        expr: |
+          increase(app_events_total{event="admin.login"}[5m]) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of admin login events ({{ $value }})"
+          description: "The rate of admin.login events increased above expected threshold in the last 5m. Investigate possible brute-force or credential stuffing."

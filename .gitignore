@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# uploads (local temp storage)
+.uploads
+
 # production
 /build
 

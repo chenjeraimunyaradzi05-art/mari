@@ -2,83 +2,98 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('jobs', 'workflow_stage');
+  const __has_col_up_1 = await knex.schema.hasColumn('jobs', 'workflow_status');
+  const __has_col_up_2 = await knex.schema.hasColumn('jobs', 'workflow_priority');
+  const __has_col_up_3 = await knex.schema.hasColumn('jobs', 'workflow_submitted_at');
+  const __has_col_up_4 = await knex.schema.hasColumn('jobs', 'workflow_reviewed_at');
+  const __has_col_up_5 = await knex.schema.hasColumn('jobs', 'workflow_last_transition_at');
+  const __has_col_up_6 = await knex.schema.hasColumn('jobs', 'workflow_reviewer_id');
+  const __has_col_up_7 = await knex.schema.hasColumn('jobs', 'workflow_notes');
+  const __has_col_up_8 = await knex.schema.hasColumn('jobs', 'workflow_payload');
+  const __has_col_up_9 = await knex.schema.hasColumn('jobs', 'workflow_source');
+  const __has_col_up_10 = await knex.schema.hasColumn('jobs', 'workflow_auto_publish_at');
+  const __has_col_up_11 = await knex.schema.hasColumn('jobs', 'workflow_auto_archive_at');
   const added = { workflow_stage: false, workflow_status: false };
+  const columnsList = ['workflow_stage','workflow_status','workflow_priority','workflow_submitted_at','workflow_reviewed_at','workflow_last_transition_at','workflow_reviewer_id','workflow_notes','workflow_payload','workflow_source','workflow_auto_publish_at','workflow_auto_archive_at'];
+  const originalHas = {};
+  for (const c of columnsList) originalHas[c] = await knex.schema.hasColumn('jobs', c);
 
   await knex.schema.alterTable('jobs', function(table) {
     // Use conditional checks in JS
   });
 
   // We need to inspect and add columns one-by-one because alterTable callbacks don't provide hasColumn
-  if (!await knex.schema.hasColumn('jobs', 'workflow_stage')) {
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('jobs', function(table) {
       table.string('workflow_stage', 50).notNullable().defaultTo('draft');
     });
     added.workflow_stage = true;
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_status')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('jobs', function(table) {
       table.string('workflow_status', 50).notNullable().defaultTo('pending_review');
     });
     added.workflow_status = true;
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_priority')) {
+  if (!__has_col_up_2) {
     await knex.schema.alterTable('jobs', function(table) {
       table.string('workflow_priority', 20).notNullable().defaultTo('normal');
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_submitted_at')) {
+  if (!__has_col_up_3) {
     await knex.schema.alterTable('jobs', function(table) {
       table.timestamp('workflow_submitted_at').nullable();
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_reviewed_at')) {
+  if (!__has_col_up_4) {
     await knex.schema.alterTable('jobs', function(table) {
       table.timestamp('workflow_reviewed_at').nullable();
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_last_transition_at')) {
+  if (!__has_col_up_5) {
     await knex.schema.alterTable('jobs', function(table) {
       table.timestamp('workflow_last_transition_at').nullable();
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_reviewer_id')) {
+  if (!__has_col_up_6) {
     await knex.schema.alterTable('jobs', function(table) {
       table.bigInteger('workflow_reviewer_id').unsigned().nullable();
       table.foreign('workflow_reviewer_id').references('id').inTable('admins').onDelete('SET NULL');
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_notes')) {
+  if (!__has_col_up_7) {
     await knex.schema.alterTable('jobs', function(table) {
       table.text('workflow_notes').nullable();
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_payload')) {
+  if (!__has_col_up_8) {
     await knex.schema.alterTable('jobs', function(table) {
       table.json('workflow_payload').nullable();
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_source')) {
+  if (!__has_col_up_9) {
     await knex.schema.alterTable('jobs', function(table) {
       table.string('workflow_source', 50).notNullable().defaultTo('dashboard');
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_auto_publish_at')) {
+  if (!__has_col_up_10) {
     await knex.schema.alterTable('jobs', function(table) {
       table.timestamp('workflow_auto_publish_at').nullable();
     });
   }
 
-  if (!await knex.schema.hasColumn('jobs', 'workflow_auto_archive_at')) {
+  if (!__has_col_up_11) {
     await knex.schema.alterTable('jobs', function(table) {
       table.timestamp('workflow_auto_archive_at').nullable();
     });
@@ -99,7 +114,7 @@ exports.up = async function(knex) {
 };
 
 exports.down = async function(knex) {
-  if (await knex.schema.hasColumn('jobs', 'workflow_reviewer_id')) {
+  if (__has_col_up_6) {
     await knex.schema.alterTable('jobs', function(table) {
       table.dropForeign(['workflow_reviewer_id']);
     });
@@ -120,13 +135,11 @@ exports.down = async function(knex) {
     'workflow_stage',
   ];
 
-  const existing = [];
   for (const col of columns) {
-    if (await knex.schema.hasColumn('jobs', col)) existing.push(col);
-  }
-  if (existing.length > 0) {
-    await knex.schema.alterTable('jobs', function(table) {
-      table.dropColumn(existing);
-    });
+    if (!originalHas[col]) {
+      await knex.schema.alterTable('jobs', function(table) {
+        table.dropColumn(col);
+      });
+    }
   }
 };

@@ -1,0 +1,6 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='900' viewBox='0 0 1600 900'>
+  <rect width='1600' height='900' fill='#ffffff' rx='8' />
+  <text x='120' y='120' font-size='32' font-family='Inter, Arial' fill='#052f31' font-weight='700'>Tax Dashboard — Projection & Filing</text>
+  <rect x='120' y='160' width='560' height='300' rx='10' fill='#ffffff' stroke='#efefef' />
+  <rect x='700' y='160' width='700' height='300' rx='10' fill='#ffffff' stroke='#efefef' />
+</svg>

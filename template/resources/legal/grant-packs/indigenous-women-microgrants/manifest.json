@@ -1,0 +1,22 @@
+{
+    "slug": "indigenous-women-microgrants",
+    "version": "2025.11.24",
+    "assets": [
+        {
+            "key": "community-governance-addendum",
+            "label": "Community governance addendum",
+            "filename": "community-governance-addendum.md",
+            "type": "addendum",
+            "description": "Describes cultural governance anchors, advisory circles, and dispute pathways suitable for Indigenous micro-grant dossiers.",
+            "tags": ["community", "governance"]
+        },
+        {
+            "key": "cultural-safety-charter",
+            "label": "Cultural safety charter excerpt",
+            "filename": "cultural-safety-charter.md",
+            "type": "charter",
+            "description": "Extract summarising cultural safety guiding principles for use inside Articles of Association attachments.",
+            "tags": ["culture", "charter"]
+        }
+    ]
+}

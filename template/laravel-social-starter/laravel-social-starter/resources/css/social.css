@@ -1,0 +1,36 @@
+:root{
+  --rose-600:#d53f8c; /* rose */
+  --rose-400:#f687b3;
+  --blush-100:#ffe4ef;
+  --mauve-300:#cdb4db;
+  --lavender-300:#b8c0ff;
+  --midnight-900:#2f2432;
+  --cream-0:#ffffff;
+}
+
+body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial; background:var(--blush-100); color:var(--midnight-900);}
+a{color:var(--rose-600); text-decoration:none}
+a:hover{text-decoration:underline}
+.container{max-width:980px;margin:0 auto;padding:1rem}
+.nav{display:flex;gap:1rem;align-items:center;padding:.75rem 1rem;background:var(--cream-0)}
+.brand{font-weight:800;color:var(--rose-600);}
+.btn{border:none;border-radius:999px;padding:.6rem 1rem;cursor:pointer}
+.btn-primary{background:var(--rose-600);color:white}
+.alert.ok{background:#e7ffe7;border:1px solid #b2e5b2;padding:.75rem;border-radius:.5rem;margin:.5rem 0}
+.grid{display:grid;grid-template-columns:1fr;gap:1rem}
+@media(min-width:720px){.grid{grid-template-columns:repeat(2,1fr)}}
+.card{background:white;border-radius:1rem;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.04)}
+.card-h{display:flex;gap:.75rem;align-items:center;padding:1rem}
+.card-b{padding:0 1rem 1rem}
+.card-f{display:flex;align-items:center;justify-content:space-between;padding:1rem}
+.avatar{width:40px;height:40px;border-radius:999px;object-fit:cover}
+.media{width:100%;display:block;max-height:520px;object-fit:cover;background:#000}
+.tag{background:var(--lavender-300);padding:.2rem .5rem;border-radius:.5rem;margin-right:.25rem;font-size:.85rem}
+.caption{font-weight:600}
+.comments summary{cursor:pointer;color:var(--rose-600)}
+.profile .banner{height:200px;background-size:cover;background-position:center;border-radius:1rem}
+.profile .profile-inner{display:flex;gap:1rem;align-items:flex-end;margin-top:-48px;padding:0 1rem}
+.avatar-lg{width:96px;height:96px;border-radius:999px;border:4px solid white;object-fit:cover}
+.composer{background:white;padding:1rem;border-radius:1rem;box-shadow:0 6px 20px rgba(0,0,0,.05)}
+.composer .row{margin:.5rem 0}
+textarea,input,select{width:100%;padding:.7rem;border-radius:.7rem;border:1px solid #e1d4e6;background:#fff}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TurboTax — Formation Studio After-tax Preview (ATHENA)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, Arial; background:#ffffff; color:#0f172a; margin:0; }
+    .wrap { max-width:980px; margin:26px auto; }
+    :root { --athena-primary: #07B8B0; --athena-deep: #0B7285; --athena-mid: #071426; --athena-neutral:#111827; }
+    .hero { background:linear-gradient(90deg,#f0fffb 0%, #ecfeff 100%); padding:18px;border-radius:8px;border:1px solid rgba(7,184,176,0.12) }
+    .row { display:flex; gap:18px; }
+    .card { background:white; border-radius:8px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,0.04); flex:1 }
+    .callout { background:#07B8B0;color:#071426;padding:10px;border-radius:12px;font-weight:700;display:inline-block }
+    .muted { color:#6b7280 }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <img src="/docs/integration/outreach/assets/official/logotype.png" alt="ATHENA" style="height:48px; margin-bottom:8px" />
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <div>
+          <h2 style="margin:0">Formation Studio — After-tax profit preview</h2>
+          <div class="muted">Projected first-year totals based on inputs</div>
+        </div>
+        <div><span class="callout">Entity: LLC → S-Corp recommended</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px" class="row">
+      <div class="card">
+        <div style="font-size:14px;color:#6b7280">Projected Revenue</div>
+        <div style="font-size:26px;font-weight:800;margin-top:6px">$120,000</div>
+        <div style="margin-top:12px;color:#111827">Estimated tax (annual): <strong>$12,540</strong></div>
+        <div style="margin-top:12px;color:#6b7280">Projected after-tax income: <strong>$95,300</strong></div>
+
+        <div style="margin-top:14px; display:flex; gap:8px;">
+          <a class="callout" href="#">Run TurboTax projection</a>
+          <a href="#" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#0f172a;text-decoration:none">Estimate quarterly payments</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-size:14px;color:#6b7280">Tax Impact Preview</div>
+        <div style="margin-top:12px;color:#111827">• Self-employment tax estimate: $8,000</div>
+        <div style="margin-top:6px;color:#111827">• Home office deduction (if applicable): saves $1,200</div>
+        <div style="margin-top:6px;color:#111827">• Recommended election reduces payroll taxes by $2,120</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px" class="card">
+      <h3 style="margin:0">Actions to finalize</h3>
+      <ul>
+        <li>Map income/expense categories for accurate filing</li>
+        <li>Set up quarterly estimated tax reminders</li>
+        <li>Optionally connect TurboTax for a draft return</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

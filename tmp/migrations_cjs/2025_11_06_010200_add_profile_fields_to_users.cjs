@@ -2,9 +2,17 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('users', 'onboarding_step');
+  const __has_col_up_1 = await knex.schema.hasColumn('users', 'persona_flags');
+  const __has_col_up_2 = await knex.schema.hasColumn('users', 'pronouns');
+  const __has_col_up_3 = await knex.schema.hasColumn('users', 'preferred_name');
+  const __has_col_up_4 = await knex.schema.hasColumn('users', 'timezone');
+  const cols = ['onboarding_step','persona_flags','pronouns','preferred_name','timezone'];
+  const originalHas = {};
+  for (const col of cols) originalHas[col] = await knex.schema.hasColumn('users', col);
   const client = (knex.client && knex.client.config && knex.client.config.client) || '';
 
-  if (!await knex.schema.hasColumn('users', 'onboarding_step')) {
+  if (!__has_col_up_0) {
     if (client && client.toString().startsWith('sqlite')) {
       await knex.schema.alterTable('users', (table) => { table.string('onboarding_step').notNullable().defaultTo('welcome'); });
     } else {
@@ -12,19 +20,19 @@ exports.up = async function(knex) {
     }
   }
 
-  if (!await knex.schema.hasColumn('users', 'persona_flags')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('users', (table) => { table.json('persona_flags').nullable(); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'pronouns')) {
+  if (!__has_col_up_2) {
     await knex.schema.alterTable('users', (table) => { table.string('pronouns').nullable(); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'preferred_name')) {
+  if (!__has_col_up_3) {
     await knex.schema.alterTable('users', (table) => { table.string('preferred_name').nullable(); });
   }
 
-  if (!await knex.schema.hasColumn('users', 'timezone')) {
+  if (!__has_col_up_4) {
     await knex.schema.alterTable('users', (table) => { table.string('timezone').nullable(); });
   }
 };
@@ -32,7 +40,7 @@ exports.up = async function(knex) {
 exports.down = async function(knex) {
   const cols = ['onboarding_step', 'persona_flags', 'pronouns', 'preferred_name', 'timezone'];
   for (const c of cols) {
-    if (await knex.schema.hasColumn('users', c)) {
+    if (!originalHas[c]) {
       await knex.schema.alterTable('users', (table) => { table.dropColumn(c); });
     }
   }

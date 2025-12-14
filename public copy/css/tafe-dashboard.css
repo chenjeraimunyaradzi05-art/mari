@@ -1,0 +1,937 @@
+:root {
+    --tafe-ink: #0f0a1f;
+    --tafe-rose: #f472b6;
+    --tafe-violet: #8b5cf6;
+    --tafe-sky: #38bdf8;
+    --tafe-mint: #34d399;
+    --tafe-gold: #fbbf24;
+    --tafe-surface: #1b1342;
+    --tafe-card: rgba(56, 44, 114, 0.88);
+    --tafe-card-strong: rgba(62, 48, 128, 0.94);
+    --tafe-border: rgba(255, 255, 255, 0.22);
+    --tafe-text: #ffffff;
+    --tafe-muted: #ffffff;
+    --tafe-panel-glow: 0 18px 55px rgba(10, 6, 24, 0.45);
+}
+
+.tafe-shell,
+.tafe-shell * {
+    color: #ffffff !important;
+}
+
+.tafe-shell section {
+    padding-bottom: 1.5rem;
+}
+
+.tafe-shell div {
+    padding-bottom: 0.75rem;
+}
+
+.tafe-shell {
+    position: relative;
+    padding: 4rem 0 5rem;
+    background: radial-gradient(circle at 12% 22%, rgba(244, 114, 182, 0.32) 0, transparent 48%),
+        radial-gradient(circle at 82% 0%, rgba(56, 189, 248, 0.28) 0, transparent 52%),
+        linear-gradient(135deg, #1b1342, #2d1b60 65%);
+    color: var(--tafe-text);
+    overflow: hidden;
+}
+
+.tafe-aurora {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 60% 40%, rgba(139, 92, 246, 0.25), transparent 65%),
+        radial-gradient(circle at 20% 80%, rgba(244, 114, 182, 0.22), transparent 60%);
+    filter: blur(120px);
+    opacity: 0.55;
+}
+
+.tafe-shell .container {
+    position: relative;
+    z-index: 1;
+}
+
+.tafe-header {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.5rem;
+    align-items: start;
+    margin-bottom: 3rem;
+}
+
+.tafe-brand__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.08);
+    font-weight: 700;
+    color: #fff;
+    margin-right: 1rem;
+}
+
+.tafe-brand {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.tafe-brand__eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.75rem;
+    color: var(--tafe-muted);
+    margin-bottom: 0.35rem;
+}
+
+.tafe-brand__title {
+    margin: 0;
+    font-size: clamp(1.8rem, 2.8vw, 2.4rem);
+}
+
+.tafe-brand__tagline {
+    margin: 0.35rem 0 0;
+    color: var(--tafe-muted);
+}
+
+.tafe-nav__list {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    padding: 0;
+    margin: 0;
+}
+
+.tafe-nav__link,
+.tafe-link {
+    color: var(--tafe-muted);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.tafe-nav__link:hover,
+.tafe-link:hover,
+.tafe-nav__link:focus,
+.tafe-link:focus {
+    color: #fff;
+}
+
+.tafe-header__actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.tafe-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 2.5rem;
+    padding: 2.75rem;
+    border-radius: 32px;
+    background: linear-gradient(140deg, rgba(160, 120, 255, 0.5), rgba(54, 34, 112, 0.88)),
+        rgba(48, 30, 94, 0.9);
+    border: 1px solid var(--tafe-border);
+    box-shadow: var(--tafe-panel-glow);
+    margin-bottom: 2rem;
+    color: var(--tafe-text);
+}
+
+.tafe-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.75rem;
+    color: var(--tafe-gold);
+    margin-bottom: 0.75rem;
+}
+
+.tafe-hero__title {
+    font-size: clamp(2.2rem, 3.5vw, 3.2rem);
+    margin-bottom: 0.5rem;
+}
+
+.tafe-hero__subtitle {
+    color: var(--tafe-muted);
+    font-size: 1.05rem;
+    margin-bottom: 1.5rem;
+}
+
+.tafe-hero__meta {
+    padding: 0;
+    margin: 0 0 1.75rem;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    color: var(--tafe-muted);
+}
+
+.tafe-hero__actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.tafe-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.9rem 1.6rem;
+    border-radius: 999px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    text-decoration: none;
+}
+
+.tafe-btn--primary {
+    background: linear-gradient(135deg, var(--tafe-violet), var(--tafe-rose));
+    color: #fff;
+    box-shadow: 0 20px 40px rgba(139, 92, 246, 0.35);
+}
+
+.tafe-btn--secondary {
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.tafe-btn--ghost {
+    background: transparent;
+    color: var(--tafe-text);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.tafe-btn--full {
+    width: 100%;
+}
+
+.tafe-btn:hover,
+.tafe-btn:focus {
+    transform: translateY(-2px);
+}
+
+.tafe-hero__panel {
+    background: var(--tafe-card-strong);
+    border-radius: 24px;
+    padding: 1.75rem;
+    border: 1px solid var(--tafe-border);
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+    color: var(--tafe-text);
+    box-shadow: var(--tafe-panel-glow);
+}
+
+.tafe-hero__signal-label {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    color: var(--tafe-muted);
+    margin-bottom: 0.5rem;
+}
+
+.tafe-hero__signal-value {
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.tafe-hero__signal-note {
+    color: var(--tafe-muted);
+    margin: 0;
+}
+
+.tafe-hero__quickstats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.tafe-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.tafe-pill--light {
+    background: rgba(255, 255, 255, 0.28);
+    color: #fff;
+}
+
+.tafe-hero__quickstats-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0.25rem 0 0;
+}
+
+.tafe-programs-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 2rem;
+    margin-bottom: 2.5rem;
+}
+
+.tafe-programs-hero__content h1 {
+    font-size: clamp(2.1rem, 3.2vw, 3rem);
+    margin-bottom: 0.75rem;
+}
+
+.tafe-programs-hero__panel {
+    background: var(--tafe-card);
+    border-radius: 24px;
+    border: 1px solid var(--tafe-border);
+    padding: 1.75rem;
+    box-shadow: var(--tafe-panel-glow);
+}
+
+.tafe-programs-hero__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.tafe-programs-hero__actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
+}
+
+.tafe-programs-hero__hint {
+    margin: 0;
+    color: var(--tafe-muted);
+}
+
+.tafe-statbar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+}
+
+.tafe-statcard {
+    padding: 1.75rem;
+    border-radius: 22px;
+    background: var(--tafe-card);
+    border: 1px solid var(--tafe-border);
+    box-shadow: var(--tafe-panel-glow);
+    color: var(--tafe-text);
+}
+
+.tafe-statcard__label {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    color: var(--tafe-muted);
+    margin-bottom: 0.35rem;
+}
+
+.tafe-statcard__value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 0.35rem;
+}
+
+.tafe-statcard__hint {
+    margin: 0;
+    color: var(--tafe-muted);
+}
+
+.tafe-alert {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-radius: 16px;
+    margin-bottom: 2rem;
+    font-weight: 500;
+}
+
+.tafe-alert--success {
+    background: rgba(52, 211, 153, 0.12);
+    border: 1px solid rgba(52, 211, 153, 0.4);
+    color: #ecfdf5;
+}
+
+.tafe-grid {
+    display: grid;
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+}
+
+.tafe-grid--profile,
+.tafe-grid--journeys,
+.tafe-grid--insights {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.tafe-programs-filter__form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.tafe-programs-filter__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.tafe-programs-filter__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.tafe-programs-grid {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.tafe-program-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    min-height: 100%;
+}
+
+.tafe-program-card h3 {
+    margin: 0;
+}
+
+.tafe-program-card__meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.tafe-program-card__delivery,
+.tafe-program-card__institution,
+.tafe-program-card__footer span {
+    color: var(--tafe-muted);
+    margin: 0;
+}
+
+.tafe-program-card__footer {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.tafe-program-card__score {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.tafe-program-card__score-label {
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.tafe-programs-ai-callout p {
+    margin: 0;
+}
+
+.tafe-pagination {
+    margin-top: 2rem;
+    display: flex;
+    justify-content: center;
+}
+
+.tafe-pagination nav ul {
+    display: inline-flex;
+    gap: 0.35rem;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 999px;
+    padding: 0.25rem 0.5rem;
+}
+
+.tafe-pagination nav li a,
+.tafe-pagination nav li span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    border-radius: 999px;
+    padding: 0.35rem 0.85rem;
+    border: 1px solid transparent;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.tafe-pagination nav li span[aria-current="page"],
+.tafe-pagination nav li a:hover,
+.tafe-pagination nav li a:focus {
+    background: linear-gradient(135deg, var(--tafe-violet), var(--tafe-rose));
+    border-color: transparent;
+    color: #fff;
+}
+
+@media (max-width: 900px) {
+    .tafe-programs-hero {
+        grid-template-columns: 1fr;
+    }
+
+    .tafe-programs-hero__panel {
+        order: -1;
+    }
+
+    .tafe-programs-filter__actions {
+        justify-content: flex-start;
+    }
+}
+
+.tafe-card {
+    background: var(--tafe-card);
+    border-radius: 28px;
+    padding: 2rem;
+    border: 1px solid var(--tafe-border);
+    position: relative;
+    color: var(--tafe-text);
+    box-shadow: var(--tafe-panel-glow);
+}
+
+.tafe-card--panel {
+    margin-bottom: 2.5rem;
+}
+
+.tafe-card__header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 1.5rem;
+}
+
+.tafe-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.tafe-card__lead {
+    color: var(--tafe-muted);
+    margin-bottom: 1.5rem;
+}
+
+.tafe-chip {
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.tafe-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+}
+
+.tafe-field--split {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.tafe-field label {
+    font-weight: 600;
+}
+
+.tafe-input {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    background: rgba(7, 4, 20, 0.85);
+    color: #fff;
+    padding: 0.95rem 1.1rem;
+}
+
+.tafe-field select.tafe-input {
+    appearance: none;
+    background: rgba(15, 7, 36, 0.92);
+    border-color: rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    padding-right: 2.75rem;
+    position: relative;
+}
+
+.tafe-field select.tafe-input:focus {
+    outline: 2px solid rgba(247, 114, 182, 0.6);
+    outline-offset: 2px;
+}
+
+.tafe-field select.tafe-input option,
+.tafe-field select.tafe-input optgroup {
+    color: #0f0a1f !important;
+    background: #fff !important;
+}
+
+.tafe-field select.tafe-input option:checked {
+    background: linear-gradient(135deg, #ede9fe, #ffe4f3) !important;
+}
+
+.tafe-input--textarea {
+    min-height: 120px;
+    resize: vertical;
+}
+
+.tafe-error {
+    color: #fca5a5;
+    font-size: 0.85rem;
+}
+
+.tafe-note {
+    margin-top: 1rem;
+    color: var(--tafe-muted);
+    font-size: 0.9rem;
+}
+
+.tafe-callout {
+    background: rgba(139, 92, 246, 0.22);
+    border: 1px solid rgba(139, 92, 246, 0.55);
+    border-radius: 18px;
+    padding: 1.1rem 1.35rem;
+    margin-bottom: 1.25rem;
+}
+
+.tafe-empty-state {
+    padding: 1rem 1.25rem;
+    border-radius: 16px;
+    background: rgba(13, 8, 30, 0.9);
+    color: var(--tafe-text);
+    border: 1px dashed rgba(255, 255, 255, 0.32);
+}
+
+.tafe-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.tafe-career h4 {
+    margin-bottom: 0.35rem;
+}
+
+.tafe-career__meta {
+    color: var(--tafe-muted);
+    margin-bottom: 0.35rem;
+}
+
+.tafe-taglist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.tafe-tag {
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    font-size: 0.8rem;
+}
+
+.tafe-focus {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+}
+
+.tafe-bullet-list {
+    padding-left: 1.2rem;
+    color: var(--tafe-muted);
+    margin: 0;
+}
+
+.tafe-program-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.25rem;
+}
+
+.tafe-program {
+    padding: 1.25rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--tafe-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tafe-program__badge {
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--tafe-muted);
+    margin: 0;
+}
+
+.tafe-program__meta {
+    color: var(--tafe-muted);
+    margin: 0;
+}
+
+.tafe-program__score {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: auto;
+}
+
+.tafe-program__score span {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.tafe-journey__heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.tafe-journey__meta {
+    color: var(--tafe-muted);
+    margin: 0.25rem 0;
+}
+
+.tafe-journey__signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    color: var(--tafe-muted);
+    font-size: 0.9rem;
+}
+
+.tafe-journey__icon {
+    margin-right: 0.35rem;
+    color: var(--tafe-gold);
+}
+
+.tafe-header-tags {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-end;
+}
+
+.tafe-social-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.tafe-social-card {
+    border-radius: 20px;
+    border: 1px solid var(--tafe-border);
+    background: rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 220px;
+}
+
+.tafe-social-card__image {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+}
+
+.tafe-social-card__body {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.tafe-social-card__author {
+    font-weight: 600;
+    margin: 0;
+}
+
+.tafe-social-card__text {
+    color: var(--tafe-muted);
+    margin: 0;
+}
+
+.tafe-community {
+    margin-bottom: 2.5rem;
+}
+
+.tafe-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.tafe-community__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.5rem;
+}
+
+.tafe-community-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.tafe-community-card {
+    padding: 1.25rem;
+    border-radius: 18px;
+    border: 1px solid var(--tafe-border);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.tafe-community-card__head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.tafe-community-card__time {
+    color: var(--tafe-muted);
+    font-size: 0.85rem;
+}
+
+.tafe-institutions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.tafe-institution {
+    border-radius: 18px;
+    border: 1px solid var(--tafe-border);
+    padding: 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.tafe-institution__eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.7rem;
+    color: var(--tafe-muted);
+}
+
+.tafe-ecosystem {
+    margin-bottom: 2.5rem;
+}
+
+.tafe-ecosystem__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.tafe-ecosystem__card {
+    border-radius: 18px;
+    border: 1px solid var(--tafe-border);
+    padding: 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.tafe-ecosystem__card ul {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tafe-footer-cta {
+    border-radius: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(14, 10, 31, 0.8));
+    padding: 2.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: center;
+}
+
+.tafe-footer-cta__content {
+    flex: 1 1 260px;
+}
+
+.tafe-footer-cta__actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 992px) {
+    .tafe-hero {
+        grid-template-columns: 1fr;
+    }
+
+    .tafe-header {
+        grid-template-columns: 1fr;
+    }
+
+    .tafe-header__actions {
+        justify-content: flex-start;
+    }
+
+}
+
+@media (max-width: 576px) {
+    .tafe-shell {
+        padding: 3rem 0;
+    }
+
+    .tafe-card,
+    .tafe-hero {
+        padding: 1.5rem;
+    }
+
+    .tafe-footer-cta {
+        flex-direction: column;
+
+    .tafe-card--nested {
+        padding: 1.35rem;
+        border-radius: 20px;
+        background: rgba(13, 8, 30, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        box-shadow: none;
+    }
+        align-items: flex-start;
+    }
+
+    .tafe-nav__list {
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .tafe-header-tags {
+        align-items: flex-start;
+    }
+
+
+}

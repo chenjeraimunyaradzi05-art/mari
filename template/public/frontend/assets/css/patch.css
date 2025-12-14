@@ -1,0 +1,152 @@
+/* =============================================
+   patch.css — drop-in fixes for your stylesheet
+   Place this AFTER your existing CSS (or merge)
+   What it does:
+   - Adds missing CSS variables with sensible fallbacks
+   - Restores accessible :focus-visible outlines (previous rules used !important)
+   - Deduplicates ::selection and placeholder rules with correct vendor forms
+   - Replaces hard-coded greens with the primary token
+   - Tames over-broad transitions & respects reduced motion
+   ============================================= */
+
+/* ---- Design tokens (edit to taste) ---- */
+:root {
+  --color-primary: #1CA76F;            /* your brand green */
+  --color-primary-dark: #05264E;       /* used across headings/links */
+  --color-surface: #ffffff;            /* base surface */
+  --color-body-text: #4F5E64;          /* paragraph/body */
+  --shadow-hover: 0 10px 20px -5px rgb(10 42 105 / 6%);
+  /* some code uses rgba(var(--rgba-primary), x) */
+  --rgba-primary: 28, 167, 111;        /* approx. of #1CA76F */
+}
+
+/* ---- Respect reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- Selection (one canonical rule) ---- */
+::selection { background: var(--color-primary-dark); color: #fff; }
+
+/* ---- Fix placeholder selectors (correct vendor forms) ---- */
+/* WebKit/Blink */
+::-webkit-input-placeholder { color: #A0ABB8; opacity: 1; }
+/* Edge/IE 10-11 */
+:-ms-input-placeholder { color: #A0ABB8; opacity: 1; }
+::-ms-input-placeholder { color: #A0ABB8; opacity: 1; }
+/* Standard */
+::placeholder { color: #A0ABB8; opacity: 1; }
+
+/* ---- Restore keyboard focus visibility (override earlier !important resets) ---- */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-primary) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 4px rgb(var(--rgba-primary) / 0.12) !important;
+}
+
+/* Remove visible outline for pointer-only focus, keep keys visible */
+:where(button, input, select, textarea):focus:not(:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* ---- Normalize heading/body colors via tokens ---- */
+:where(h1, h2, h3, h4, h5, h6) { color: var(--color-primary-dark); }
+:where(body, p) { color: var(--color-body-text); }
+
+/* ---- Replace legacy hard-coded greens with token (non-destructive) ---- */
+/* Buttons & labels that used #1ca774/#1CA76F */
+.btn.btn-default,
+.btn-apply,
+.btn-apply-big,
+.btn-paragraph-2,
+.btn-send-message,
+.block-pricing .box-pricing-item .btn-border,
+.block-pricing .most-popular .btn-white-sm,
+.background-primary,
+.bg-green,
+.color-green,
+.text-lbl,
+.card-grid-2 .card-block-info .card-text-price,
+.card-grid-3 .card-block-info .card-text-price,
+.futured_jobs .card-grid-2 .card-text-price,
+.list-checkbox li .number-item {
+  color: var(--color-primary) !important;
+}
+
+.btn.btn-default,
+.btn-apply,
+.btn-apply-big,
+.btn-send-message,
+.block-pricing .box-pricing-item .btn-border,
+.paginations .pager li .pager-prev:hover,
+.paginations .pager li .pager-next:hover,
+#scroll-up,
+.bg-green,
+.block-pricing .box-pricing-item h3,
+.block-pricing .box-pricing-item .btn-border {
+  background-color: var(--color-primary) !important;
+}
+
+/* Any dotted "online"/progress accents */
+.box-progress-bar .progress .bg-paragraph-2,
+.box-progress-bar .progress .bg-paragraph-2::before,
+.box-progress-bar .progress .bg-brand-2,
+.box-progress-bar .progress .bg-brand-2::before {
+  background-color: var(--color-primary) !important;
+}
+
+/* ---- Tame global transitions (earlier wildcard *:hover adds jank) ---- */
+/* Prefer explicit properties on interactive elements */
+:where(a, button, .btn, [role="button"]) {
+  transition: color .2s ease, background-color .2s ease, border-color .2s ease, transform .2s ease, box-shadow .2s ease;
+}
+
+/* ---- Utility: visually-hidden for a11y (keep .hidden = display:none) ---- */
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---- Inputs: consistent focus border color ---- */
+:where(input, textarea, select):focus {
+  border-color: var(--color-primary) !important;
+}
+
+/* ---- Links default & hover via tokens ---- */
+:where(a) { color: var(--color-primary-dark); }
+:where(a):hover { color: var(--color-primary); }
+
+/* ---- Swiper nav hit-area visibility (keeps existing images) ---- */
+.box-swiper .swiper-button-next,
+.box-swiper .swiper-button-prev { opacity: .7; }
+.box-swiper .swiper-button-next:hover,
+.box-swiper .swiper-button-prev:hover { opacity: 1; }
+
+/* ---- Pagination active state ---- */
+.paginations .pager li a.pager-number.active,
+.paginations .pager li a.pager-number:hover {
+  background: var(--color-primary) !important;
+  color: #fff !important;
+}
+
+/* ---- NoUI slider colors to token ---- */
+.noUi-background { background: var(--color-primary); }
+.noUi-connect { background: #9777fa; } /* secondary accent kept */
+.noUi-horizontal .noUi-handle::before { background-color: var(--color-primary); }
+
+/* ---- Payment method button polish ---- */
+.payment-method-button {
+  border: 3px solid var(--color-primary);
+  color: var(--color-primary-dark);
+}
+.payment-method-button:hover { box-shadow: var(--shadow-hover); transform: translateY(-2px); }
+.payment-method-button:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 4px; }
+
+/* ---- Footer social hover ---- */
+.footer .icon-socials { background: var(--color-primary); }
+
+/* ---- Breadcrumb hover contrast ---- */
+.breadcrumbs li a:hover { color: var(--color-primary-dark); }

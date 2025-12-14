@@ -2,7 +2,12 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
-  if (!await knex.schema.hasColumn('companies', 'foundation_status')) {
+  const __has_col_up_0 = await knex.schema.hasColumn('companies', 'foundation_status');
+  const cols = ['foundation_summary','foundation_focus_areas','foundation_programs','foundation_impact_metrics','foundation_contact_name','foundation_contact_email','foundation_contact_phone','foundation_donation_url','foundation_video_url','foundation_cta_label','foundation_cta_url','foundation_launched_at','foundation_social_links'];
+  const originalHas = {};
+  for (const c of cols) originalHas[c] = await knex.schema.hasColumn('companies', c);
+
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('companies', function(table) {
       table.string('foundation_status', 50).notNullable().defaultTo('inactive');
     });
@@ -13,7 +18,7 @@ exports.up = async function(knex) {
 
   const addIf = async (colPipe) => {
     const [col, cb] = colPipe;
-    if (!await knex.schema.hasColumn('companies', col)) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('companies', cb);
     }
   };
@@ -35,7 +40,7 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   const maybeDrop = async (col) => {
-    if (await knex.schema.hasColumn('companies', col)) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('companies', function(table) {
         table.dropColumn(col);
       });
@@ -56,7 +61,7 @@ exports.down = async function(knex) {
   await maybeDrop('foundation_focus_areas');
   await maybeDrop('foundation_summary');
 
-  if (await knex.schema.hasColumn('companies', 'foundation_status')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('companies', function(table) {
       table.dropIndex(['foundation_status'], 'companies_foundation_status_index');
       table.dropColumn('foundation_status');

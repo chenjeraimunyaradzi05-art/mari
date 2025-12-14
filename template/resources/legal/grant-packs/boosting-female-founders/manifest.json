@@ -1,0 +1,22 @@
+{
+    "slug": "boosting-female-founders",
+    "version": "2025.11.24",
+    "assets": [
+        {
+            "key": "impact-clause-pack",
+            "label": "Impact clause pack",
+            "filename": "impact-clause-pack.md",
+            "type": "clause",
+            "description": "Mission-led constitution clauses that highlight gender equality KPIs and program guardrails.",
+            "tags": ["constitution", "impact", "sustainability"]
+        },
+        {
+            "key": "grant-cover-letter",
+            "label": "Grant-ready cover letter",
+            "filename": "grant-cover-letter.md",
+            "type": "letter",
+            "description": "One-page cover note referencing the Boosting Female Founders guidelines and impact reporting commitments.",
+            "tags": ["cover-letter", "founders"]
+        }
+    ]
+}

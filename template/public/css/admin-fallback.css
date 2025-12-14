@@ -1,0 +1,189 @@
+/*
+    Athena admin fallback stylesheet — full redesign
+    - Modern, slightly dark, spacious dashboard layout
+    - Responsive grid and table styles
+    - Smooth entrance/hover animations and accessible contrast
+    - Keeps compatibility for legacy classes like .card / .card-statistic-1
+*/
+
+/* vertical spacing scale: increased ~400% for a very spacious rhythm */
+:root{
+	--v-scale:1; /* compact helpers — keep rhythm sensible */
+	--bg:#071523;
+	--panel:#0b1220;
+	--muted:#98a4b2;
+	--text:#e6eef6;
+	--accent:#6fd3ff;
+	--accent-2:#ff7ad1;
+	--glass: rgba(255,255,255,0.03);
+	--radius:12px; /* slightly smaller for balanced spacing */
+	--card-shadow: 0 10px 30px rgba(2,9,23,0.45);
+}
+
+/* Base layout */
+html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;box-sizing:border-box;}
+body{background:linear-gradient(180deg,#071122 0%, #071523 40%), radial-gradient(ellipse at 20% 10%, rgba(111,211,255,0.06), transparent 25%);color:var(--text);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}
+/* vertical spacing scale: increased ~400% for comfortable rhythm */
+.container{max-width:1200px;margin:28px auto;padding:0 18px}
+
+/* Header */
+.athena-dashboard__header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:32px;padding:18px 0}
+.athena-dashboard__title{padding-left:8px}
+.athena-dashboard__title h1{font-size:28px;margin:0;color:var(--text);letter-spacing:0.2px}
+.athena-dashboard__title p.muted{color:var(--muted);margin:6px 0 0}
+
+.athena-dashboard__actions{display:flex;align-items:center;gap:12px}
+.search{display:inline-block}
+.search__input{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.04);padding:8px 10px;border-radius:8px;color:var(--text);outline:none;min-width:160px}
+.search__input::placeholder{color:rgba(230,238,246,0.5)}
+.action-buttons .btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:none;background:rgba(255,255,255,0.04);color:var(--text);cursor:pointer;transition:transform .12s ease,box-shadow .12s ease}
+.action-buttons .btn.btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));box-shadow: 0 12px 40px rgba(111,211,255,0.06);}
+.action-buttons .btn.btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.05)}
+.action-buttons .btn:hover{transform:translateY(-6px)}
+
+/* STATS GRID */
+.athena-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-bottom:24px}
+.stat{display:flex;align-items:center;gap:14px;padding:14px 16px;min-height:80px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:var(--card-shadow);transition:transform .12s ease,box-shadow .12s ease}
+.stat.small{padding:10px}
+.stat__icon{width:68px;height:68px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;flex-shrink:0}
+.stat__label{font-size:0.9rem;color:var(--muted)}
+.stat__value{font-size:1.35rem;font-weight:700;margin-top:4px}
+.stat__note{font-size:0.78rem;color:rgba(230,238,246,0.55)}
+.stat:hover{transform:translateY(-6px);box-shadow:0 28px 60px rgba(2,7,23,0.6)}
+
+.bg-gradient-primary{background:linear-gradient(135deg,#4fd1ff,#6fb9ff)}
+.bg-gradient-rose{background:linear-gradient(135deg,#ff6ea6,#ff7ad1)}
+.bg-gradient-amber{background:linear-gradient(135deg,#ffd37a,#ffb86a)}
+.bg-gradient-green{background:linear-gradient(135deg,#6ef5c7,#2ecc9f)}
+.bg-gradient-blue{background:linear-gradient(135deg,#4fb3ff,#2f8cff)}
+.bg-gradient-gray{background:linear-gradient(135deg,#7f8a99,#6b7380)}
+
+/* Make older .card classes still look good */
+.card{background:var(--panel);border-radius:var(--radius);border:1px solid rgba(255,255,255,0.04);box-shadow:var(--card-shadow);overflow:hidden;transition:transform .18s ease,box-shadow .18s ease;margin-bottom:24px}
+.card--elevated{padding:0;border-radius:16px;}
+.card--compact{padding:12px}
+.card__header{display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.03)}
+.card__header h3{margin:0;font-size:20px}
+.card__body{padding:16px}
+.card__footer{padding:12px;border-top:1px solid rgba(255,255,255,0.03);background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+
+/* Table and content */
+.table-responsive{overflow:auto;border-radius:10px}
+.table{width:100%;border-collapse:collapse;border-spacing:0;background:transparent}
+.table th,.table td{padding:14px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.03);vertical-align:middle;font-size:0.95rem;color:var(--text)}
+.table th{color:var(--muted);font-size:0.85rem;font-weight:600}
+.table--striped tbody tr:nth-of-type(odd){background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00))}
+.table--compact th,.table--compact td{padding:10px}
+
+.job-cell{display:flex;align-items:center;gap:12px}
+.job-cell__logo{width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid rgba(255,255,255,0.04)}
+.job-cell__fallback{width:44px;height:44px;border-radius:8px;background:rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.job-cell__meta{display:flex;flex-direction:column}
+.job-cell__title{font-weight:700}
+.salary-range{font-weight:600}
+
+.btn{background:transparent;border-radius:8px;padding:8px 12px;color:var(--text);border:1px solid rgba(255,255,255,0.06);cursor:pointer}
+.btn-sm{padding:6px 8px;font-size:0.85rem}
+.btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));border:none;color:#072033}
+.btn-outline{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text)}
+.btn-ghost{background:transparent;color:var(--text)}
+.btn-group .btn{margin-left:6px}
+
+.badge--warning{background:linear-gradient(90deg,#ffd37a,#ffb86a);color:#072033;padding:6px 8px;border-radius:999px;font-weight:700;font-size:0.82rem}
+
+/* sidebar / grid layout */
+.athena-grid{display:grid;grid-template-columns:1fr 320px;gap:66px}
+.athena-grid__main{min-width:0}
+.athena-grid__side{position:relative}
+.mini-list{list-style:none;padding:0;margin:0}
+.mini-list li{padding:8px 0;border-bottom:1px dashed rgba(255,255,255,0.03);display:flex;justify-content:space-between;align-items:center}
+.activity-list{list-style:none;padding:0;margin:0}
+.activity-list li{display:flex;gap:8px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.02)}
+.activity-list .dot{width:10px;height:10px;border-radius:999px;background:linear-gradient(180deg,#ffd37a,#ff7ad1)}
+.activity-list .event-meta{font-size:0.9rem}
+
+.athena-layout-spacer{height:48px}
+
+/* Analytics area styling */
+.athena-analytics{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:26px}
+.analytics-charts{background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));border-radius:12px;padding:72px;border:1px solid rgba(255,255,255,0.03);box-shadow:var(--card-shadow)}
+.analytics-summary{display:flex;flex-direction:column;gap:16px}
+.analytics-card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+.chart-placeholder{height:220px;border-radius:8px;background:linear-gradient(180deg, rgba(0,0,0,0.02), rgba(255,255,255,0.02));display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700;font-size:0.98rem}
+.small-chart{height:140px;border-radius:6px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.9rem}
+
+@media (max-width:1100px){.athena-analytics{grid-template-columns:1fr}} 
+
+/* Header + Sidebar background treatments */
+.navbar-bg{background:linear-gradient(90deg, rgba(111,211,255,0.06), rgba(255,122,209,0.04));backdrop-filter:blur(6px);height:82px}
+.main-navbar{background:linear-gradient(90deg, rgba(8,18,28,0.85), rgba(14,26,44,0.85));border-bottom:1px solid rgba(255,255,255,0.03);height:82px;position:fixed;top:0;left:250px;width:calc(100% - 250px);z-index:901;padding:0 28px;align-items:center;display:flex}
+.main-sidebar{background:linear-gradient(180deg, rgba(9,14,22,0.85), rgba(6,10,16,0.7));border-right:1px solid rgba(255,255,255,0.03);box-shadow:0 12px 36px rgba(2,8,18,0.6);padding-top:18px;}
+
+/* Sidebar content styles */
+.main-sidebar .sidebar-brand a{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:800;padding:0 18px;height:54px}
+.main-sidebar .sidebar-brand img{height:40px;width:auto;border-radius:8px}
+.sidebar .menu .nav-link{color:rgba(230,238,246,0.9)}
+.sidebar .menu button.nav-link{color:rgba(230,238,246,0.95);background:transparent;border:none;padding:10px 12px;text-align:left;display:flex;align-items:center;gap:10px;width:100%;cursor:pointer}
+.nav-brand{font-weight:800;padding:8px 12px;border-radius:8px;background:transparent;border:none}
+.btn-icon{background:transparent;border:none;padding:6px;display:inline-flex;align-items:center;justify-content:center}
+.main-sidebar .menu .menu-header{color:rgba(230,238,246,0.5);font-weight:600}
+
+/* Increase vertical rhythm for content blocks */
+.card, .stat {margin-bottom: 22px}
+.section {padding: 32px 0}
+
+/* center column safety and wrapping */
+.athena-grid__main{min-width:0;overflow-wrap:anywhere;word-wrap:break-word}
+.table-responsive{max-width:100%;overflow:auto;-webkit-overflow-scrolling:touch}
+.table{table-layout:auto}
+.table th,.table td{white-space:normal;word-break:break-word;max-width:36ch}
+
+/* transform ordinary links inside dashboard content into button-like elements */
+.athena-dashboard a:not(.btn){display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02);color:var(--text);text-decoration:none;transition:transform .12s ease,box-shadow .12s ease}
+.athena-dashboard a:not(.btn):hover{transform:translateY(-3px);box-shadow:0 8px 18px rgba(0,0,0,0.25)}
+
+/* helper utility for explicitly marking links as buttons */
+.link-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#072033;text-decoration:none}
+
+/* Make anchors across admin areas look and behave like buttons for accessibility */
+.athena-dashboard a, .main-sidebar a, .card a, .table a, .athena-grid a{
+	display:inline-flex;
+	align-items:center;
+	gap:8px;
+	padding:8px 10px;
+	border-radius:8px;
+	border:1px solid rgba(255,255,255,0.04);
+	background:rgba(255,255,255,0.02);
+	color:var(--text);
+	text-decoration:none;
+	cursor:pointer;
+}
+.athena-dashboard a:focus, .main-sidebar a:focus, .card a:focus, .table a:focus, .athena-grid a:focus{
+	outline:3px solid rgba(111,211,255,0.12);
+	box-shadow:0 6px 18px rgba(111,211,255,0.04);
+}
+
+/* Preserve explicit .btn or link-btn appearance */
+a[role="button"], a.btn, a.link-btn{display:inline-flex;align-items:center;justify-content:center}
+
+/* keep action icons in tables as compact button-group */
+.table .btn{padding:8px 10px;border-radius:8px}
+
+/* Animations */
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.animate-fade-up{animation:fadeUp .45s cubic-bezier(.2,.9,.4,1) both}
+
+/* Responsive */
+@media (max-width:1100px){.athena-stats-grid{grid-template-columns:repeat(2,1fr)}.athena-grid{grid-template-columns:1fr 320px}}
+@media (max-width:720px){.athena-stats-grid{grid-template-columns:1fr}.athena-dashboard__header{flex-direction:column;align-items:stretch}.action-buttons{display:flex;justify-content:flex-end;gap:8px}}
+
+/* Compatibility small helpers for older classes used by other views */
+.card-statistic-1{display:flex;align-items:center;padding:56px;gap:10px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03)}
+.card-statistic-1 .card-icon{width:64px;height:64px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;color:#fff}
+.card-wrap .card-header h4{margin:0;color:var(--muted)}
+.card-wrap .card-body{font-weight:700;color:var(--text);font-size:1.2rem}
+
+/* small legibility tweaks for admin pages that still use lighter backgrounds */
+body.light-bg .container{background:transparent}
+
+/* Make sure fallback file can be overridden by higher-precedence bundles (app.css, stisla etc.) */

@@ -1,0 +1,165 @@
+/* --- EXTENDED FROM TEMPLATE --- */
+.candidate-onboarding__stat-label {
+    display: block;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: rgba(15, 23, 42, 0.6);
+    margin-bottom: 0.35rem;
+}
+.candidate-onboarding__stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+}
+.candidate-onboarding__body {
+    margin-top: clamp(2rem, 5vw, 3.5rem);
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: clamp(1.5rem, 4vw, 3rem);
+}
+.candidate-onboarding__sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    position: sticky;
+    top: 6.5rem;
+    align-self: flex-start;
+}
+.candidate-onboarding__card,
+.candidate-onboarding__panel {
+    background: var(--candidate-onboarding-surface);
+    border-radius: 1.75rem;
+    padding: clamp(1.5rem, 3vw, 2.25rem);
+    border: 1px solid var(--candidate-onboarding-border);
+}
+.candidate-onboarding__card-header,
+.candidate-onboarding__panel-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+}
+.candidate-onboarding__pill {
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 0.75rem;
+    color: rgba(15, 23, 42, 0.6);
+    margin: 0 0 0.35rem;
+}
+.candidate-onboarding__badge {
+    border-radius: 999px;
+    padding: 0.35rem 0.85rem;
+    background: rgba(236, 72, 153, 0.12);
+    color: var(--aura-rose);
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+.candidate-onboarding__badge--soft {
+    background: rgba(34, 211, 238, 0.15);
+    color: #0e7490;
+}
+.candidate-onboarding__card-copy,
+.candidate-onboarding__panel-copy {
+    color: rgba(15, 23, 42, 0.65);
+    margin: 0 0 1.25rem;
+}
+.candidate-onboarding__loading {
+    padding: 1.25rem 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    color: rgba(15, 23, 42, 0.7);
+    text-align: center;
+}
+.candidate-onboarding__progress-meter {
+    width: 100%;
+    height: 0.65rem;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.08);
+    margin-bottom: 1.25rem;
+    appearance: none;
+}
+.candidate-onboarding__progress-meter::-webkit-progress-bar {
+    background: rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+}
+.candidate-onboarding__progress-meter::-webkit-progress-value {
+    background: var(--aura-gradient);
+    border-radius: 999px;
+}
+.candidate-onboarding__progress-meter::-moz-progress-bar {
+    background: var(--aura-gradient);
+    border-radius: 999px;
+}
+/* Add more as needed for full fidelity */
+/* Copied from template/public/css/candidate-onboarding.css for onboarding view. Add more as needed. */
+:root {
+    --candidate-onboarding-surface: #ffffff;
+    --candidate-onboarding-shell: rgba(236, 72, 153, 0.06);
+    --candidate-onboarding-border: rgba(15, 23, 42, 0.08);
+    --candidate-onboarding-shadow: 0 30px 60px rgba(15, 23, 42, 0.08);
+}
+.candidate-onboarding {
+    background: linear-gradient(180deg, var(--candidate-onboarding-shell), #fff 45%);
+    padding-bottom: clamp(3rem, 6vw, 5rem);
+}
+.candidate-onboarding__hero {
+    padding-top: clamp(2rem, 6vw, 4.5rem);
+}
+.candidate-onboarding__hero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-width: 520px;
+}
+.candidate-onboarding__hero-title {
+    margin: 0;
+    font-size: clamp(2.2rem, 5vw, 3.4rem);
+}
+.candidate-onboarding__hero-subtitle {
+    font-size: 1.05rem;
+    color: rgba(15, 23, 42, 0.7);
+    margin: 0;
+}
+.candidate-onboarding__hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+.candidate-onboarding__cta {
+    border-radius: 999px;
+    padding: 0.7rem 1.5rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.candidate-onboarding__cta:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.candidate-onboarding__cta--primary {
+    background: var(--aura-gradient);
+    color: #fff;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
+}
+.candidate-onboarding__cta--ghost {
+    background: rgba(99, 102, 241, 0.08);
+    color: var(--aura-violet);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+}
+.candidate-onboarding__hero-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+}
+.candidate-onboarding__stat {
+    border-radius: 1.25rem;
+    padding: 1.1rem;
+    border: 1px solid var(--candidate-onboarding-border);
+}

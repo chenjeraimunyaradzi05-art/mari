@@ -1,5 +1,7 @@
 // Auto-generated from 2024_01_20_000001_create_social_integration_tables.php
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('candidates', 'provider');
+  const __has_col_up_1 = await knex.schema.hasColumn('companies', 'provider');
   // Create job_shares table
   const exists = await knex.schema.hasTable('job_shares');
   if (!exists) {
@@ -20,7 +22,7 @@ exports.up = async function(knex) {
   }
 
   // Add provider columns to candidates, if missing
-  if (!await knex.schema.hasColumn('candidates', 'provider')) {
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('candidates', function(table) {
       table.string('provider').nullable();
       table.string('provider_id').nullable();
@@ -30,7 +32,7 @@ exports.up = async function(knex) {
   }
 
   // Add provider columns to companies, if missing
-  if (!await knex.schema.hasColumn('companies', 'provider')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('companies', function(table) {
       table.string('provider').nullable();
       table.string('provider_id').nullable();
@@ -47,7 +49,7 @@ exports.down = async function(knex) {
   }
 
   // Drop provider columns from candidates
-  if (await knex.schema.hasColumn('candidates', 'provider')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('candidates', function(table) {
       table.dropColumn('provider');
       table.dropColumn('provider_id');
@@ -56,7 +58,7 @@ exports.down = async function(knex) {
   }
 
   // Drop provider columns from companies
-  if (await knex.schema.hasColumn('companies', 'provider')) {
+  if (__has_col_up_1) {
     await knex.schema.alterTable('companies', function(table) {
       table.dropColumn('provider');
       table.dropColumn('provider_id');

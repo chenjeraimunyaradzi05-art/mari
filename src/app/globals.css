@@ -1,8 +1,57 @@
 @import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Aura Design System */
+  --aura-indigo: #312e81;
+  --aura-violet: #7c3aed;
+  --aura-rose: #ec4899;
+  --aura-slate: #0f172a;
+  --aura-border: rgba(15, 23, 42, 0.08);
+  --aura-card: #ffffff;
+  --aura-gradient: linear-gradient(135deg, #ec4899, #8b5cf6);
+
+  /* Brand primaries */
+  --color-primary: #8b5cf6;   /* Athena violet */
+  --color-primary-dark: #6d28d9;
+  --color-primary-soft: #ede9fe;
+
+  --color-secondary: #ec4899; /* Warm magenta-pink */
+  --color-secondary-soft: #fdf2f8;
+
+  --color-accent-teal: #14b8a6;   /* Inclusive, gender-neutral accent */
+  --color-accent-gold: #fbbf24;   /* Optimistic highlight */
+
+  /* Neutrals */
+  --color-bg: #f9fafb;
+  --color-surface: #ffffff;
+  --color-border-subtle: #e5e7eb;
+
+  --color-text-strong: #111827;
+  --color-text-muted: #6b7280;
+  --color-text-soft: #9ca3af;
+
+  /* Semantic states */
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+
+  --color-warning: #f97316;
+  --color-warning-soft: #fff7ed;
+
+  --color-danger: #dc2626;
+  --color-danger-soft: #fee2e2;
+
+  --color-info: #0ea5e9;
+  --color-info-soft: #e0f2fe;
+
+  /* Mappings for existing usage */
+  --background: var(--color-bg);
+  --foreground: var(--color-text-strong);
+  --accent: var(--color-secondary);
+  --accent-2: var(--color-primary);
+  --muted: var(--color-secondary-soft);
+  --card: var(--color-surface);
+  --border: var(--color-border-subtle);
 }
 
 @theme inline {
@@ -10,17 +59,101 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-primary: var(--color-primary);
+  --color-primary-dark: var(--color-primary-dark);
+  --color-primary-soft: var(--color-primary-soft);
+  --color-secondary: var(--color-secondary);
+  --color-secondary-soft: var(--color-secondary-soft);
+  --color-accent-teal: var(--color-accent-teal);
+  --color-accent-gold: var(--color-accent-gold);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  /* Dark mode overrides */
+  --color-bg: #0f172a; /* Slate 900 */
+  --color-surface: #1e293b; /* Slate 800 */
+  --color-border-subtle: #334155; /* Slate 700 */
+
+  --color-text-strong: #f8fafc; /* Slate 50 */
+  --color-text-muted: #cbd5e1; /* Slate 300 */
+  --color-text-soft: #94a3b8; /* Slate 400 */
+
+  --color-primary-soft: #4c1d95; /* Violet 900 */
+  --color-secondary-soft: #831843; /* Pink 900 */
+
+  --background: var(--color-bg);
+  --foreground: var(--color-text-strong);
+  --card: var(--color-surface);
+  --border: var(--color-border-subtle);
+  
+  --aura-card: #1e293b;
+  --aura-slate: #f8fafc; /* Invert slate for text */
+  --aura-border: rgba(255, 255, 255, 0.1);
 }
 
 body {
-  background: var(--background);
+  background: radial-gradient(circle at 20% 20%, rgba(233, 30, 140, 0.12), transparent 30%), radial-gradient(circle at 80% 0%, rgba(139, 92, 246, 0.12), transparent 30%), var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+a {
+  color: var(--accent);
+}
+
+/* Dashboard Custom Styles */
+.dashboard-gradient-text {
+  background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.dashboard-card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* 3D Icon Animations */
+.perspective-container {
+  perspective: 1000px;
+}
+
+.icon-3d-wrapper {
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.group:hover .icon-3d-wrapper {
+  transform: rotateY(180deg) scale(1.1);
+}
+
+.icon-3d-inner {
+  backface-visibility: hidden;
+}
+
+.icon-3d-back {
+  transform: rotateY(180deg);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: inherit;
+}
+
+/* Floating Animation */
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-float {
+  animation: float-slow 4s ease-in-out infinite;
+}
+

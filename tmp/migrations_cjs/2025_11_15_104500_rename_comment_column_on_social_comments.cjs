@@ -2,10 +2,11 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('social_comments', 'content');
   if (!(await knex.schema.hasTable('social_comments'))) {
     return;
   }
-  if (await knex.schema.hasColumn('social_comments', 'content')) {
+  if (__has_col_up_0) {
     return;
   }
   await knex.schema.alterTable('social_comments', (table) => {
@@ -17,7 +18,7 @@ exports.down = async function(knex) {
   if (!(await knex.schema.hasTable('social_comments'))) {
     return;
   }
-  if (!(await knex.schema.hasColumn('social_comments', 'content'))) {
+  if (!(__has_col_up_0)) {
     return;
   }
   await knex.schema.alterTable('social_comments', (table) => {

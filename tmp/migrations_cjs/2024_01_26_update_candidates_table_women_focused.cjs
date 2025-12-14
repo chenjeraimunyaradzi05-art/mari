@@ -1,24 +1,28 @@
 // Auto-generated from 2024_01_26_update_candidates_table_women_focused.php
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('candidates', 'gender');
+  const __has_col_up_1 = await knex.schema.hasColumn('candidates', 'website');
+  const __has_col_up_2 = await knex.schema.hasColumn('candidates', 'image');
+  const __has_col_up_3 = await knex.schema.hasColumn('candidates', 'cv');
   await knex.schema.alterTable('candidates', async function(table) {
     // Remove fields
     // Note: knex alterTable dropColumn doesn't check existence; guard
   });
 
   // Drop columns if they exist using conditional checks
-  if (await knex.schema.hasColumn('candidates', 'gender')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('candidates', function(table) { table.dropColumn('gender'); });
   }
 
-  if (await knex.schema.hasColumn('candidates', 'website')) {
+  if (__has_col_up_1) {
     await knex.schema.alterTable('candidates', function(table) { table.dropColumn('website'); });
   }
 
   // Make nullable: image and cv
-  if (await knex.schema.hasColumn('candidates', 'image')) {
+  if (__has_col_up_2) {
     await knex.schema.alterTable('candidates', function(table) { table.text('image').nullable().alter(); });
   }
-  if (await knex.schema.hasColumn('candidates', 'cv')) {
+  if (__has_col_up_3) {
     await knex.schema.alterTable('candidates', function(table) { table.text('cv').nullable().alter(); });
   }
 
@@ -77,10 +81,10 @@ exports.down = async function(knex) {
   }
 
   // Restore removed fields
-  if (!await knex.schema.hasColumn('candidates', 'gender')) {
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('candidates', function(table) { table.enu('gender', ['male', 'female', 'other']).nullable(); });
   }
-  if (!await knex.schema.hasColumn('candidates', 'website')) {
+  if (!__has_col_up_1) {
     await knex.schema.alterTable('candidates', function(table) { table.string('website').nullable(); });
   }
 };

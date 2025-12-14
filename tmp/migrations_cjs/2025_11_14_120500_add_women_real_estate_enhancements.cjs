@@ -2,6 +2,8 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('women_verified_agents', 'verification_stage');
+  const __has_col_up_1 = await knex.schema.hasColumn('women_listings', 'trust_score');
   if (!(await knex.schema.hasTable('ai_inference_logs'))) {
     await knex.schema.createTable('ai_inference_logs', (table) => {
       table.bigIncrements('id');
@@ -44,7 +46,7 @@ exports.up = async function(knex) {
   }
 
   // Add columns to women_verified_agents
-  if (!(await knex.schema.hasColumn('women_verified_agents', 'verification_stage'))) {
+  if (!(__has_col_up_0)) {
     await knex.schema.alterTable('women_verified_agents', (table) => {
       table.string('verification_stage').defaultTo('initial').after('status');
       table.specificType('trust_badge_level', 'tinyint unsigned').defaultTo(0).after('verification_stage');
@@ -56,7 +58,7 @@ exports.up = async function(knex) {
   }
 
   // Add columns to women_listings
-  if (!(await knex.schema.hasColumn('women_listings', 'trust_score'))) {
+  if (!(__has_col_up_1)) {
     await knex.schema.alterTable('women_listings', (table) => {
       table.decimal('trust_score', 5, 2).nullable().after('is_verified');
       table.decimal('market_score', 5, 2).nullable().after('trust_score');
@@ -68,7 +70,7 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   // Rollback women_listings columns
-  if (await knex.schema.hasColumn('women_listings', 'trust_score')) {
+  if (__has_col_up_1) {
     await knex.schema.alterTable('women_listings', (table) => {
       table.dropColumn('trust_score');
       table.dropColumn('market_score');
@@ -78,7 +80,7 @@ exports.down = async function(knex) {
   }
 
   // Rollback women_verified_agents columns
-  if (await knex.schema.hasColumn('women_verified_agents', 'verification_stage')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('women_verified_agents', (table) => {
       table.dropIndex(['status', 'verification_stage']);
       table.dropColumn('verification_stage');

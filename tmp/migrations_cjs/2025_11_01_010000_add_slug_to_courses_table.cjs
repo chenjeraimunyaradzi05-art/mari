@@ -10,7 +10,8 @@ const slugify = (str) => {
 };
 
 exports.up = async function(knex) {
-  if (!await knex.schema.hasColumn('courses', 'slug')) {
+  const __has_col_up_0 = await knex.schema.hasColumn('courses', 'slug');
+  if (!__has_col_up_0) {
     await knex.schema.alterTable('courses', function(table) {
       table.string('slug').nullable().after('title');
       table.unique('slug');
@@ -18,7 +19,7 @@ exports.up = async function(knex) {
   }
 
   // Backfill slugs
-  if (!await knex.schema.hasColumn('courses', 'slug')) {
+  if (!__has_col_up_0) {
     return;
   }
 
@@ -58,7 +59,7 @@ exports.up = async function(knex) {
 };
 
 exports.down = async function(knex) {
-  if (await knex.schema.hasColumn('courses', 'slug')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('courses', function(table) {
       table.dropUnique('courses_slug_unique');
       table.dropColumn('slug');

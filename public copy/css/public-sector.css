@@ -1,0 +1,244 @@
+:root {
+  --civic-bg: #f8fbff;
+  --civic-card: #ffffff;
+  --civic-border: rgba(15, 23, 42, 0.08);
+  --civic-text: #0f172a;
+  --civic-muted: #6b7280;
+  --civic-rose: #ec4899;
+  --civic-violet: #6366f1;
+  --civic-indigo: #4f46e5;
+  --civic-emerald: #10b981;
+}
+
+.civic-shell {
+  background: linear-gradient(180deg, var(--civic-bg), #eef2ff 40%, #ffffff);
+  padding: clamp(2rem, 4vw, 4rem) 0 4rem;
+}
+
+.civic-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(1.5rem, 3vw, 3rem);
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+  border-radius: 32px;
+  background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.18), transparent 55%), var(--civic-card);
+  border: 1px solid var(--civic-border);
+  box-shadow: 0 25px 60px rgba(15, 23, 42, 0.12);
+}
+
+.civic-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--civic-violet);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+}
+
+.civic-hero__title {
+  margin: 1rem 0 0.5rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.15;
+  color: var(--civic-text);
+}
+
+.civic-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.signal-card {
+  border-radius: 20px;
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--civic-border);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.05);
+}
+
+.signal-label {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: var(--civic-muted);
+  margin-bottom: 0.35rem;
+}
+
+.signal-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--civic-violet);
+  margin-bottom: 0.35rem;
+}
+
+.civic-section {
+  margin-top: clamp(2rem, 4vw, 3rem);
+}
+
+.section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.section-title {
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  margin: 0;
+}
+
+.opportunity-grid,
+.agency-grid,
+.program-grid,
+.social-grid,
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+
+.civic-card,
+.ai-playbook,
+.insight-card {
+  border-radius: 26px;
+  background: var(--civic-card);
+  border: 1px solid var(--civic-border);
+  padding: 1.5rem;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+  height: 100%;
+}
+
+.civic-card__eyebrow {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--civic-muted);
+  margin-bottom: 0.5rem;
+}
+
+.civic-card__title {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.civic-card__tags,
+.ai-list,
+.engagement-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.civic-tag {
+  padding: 0.25rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--civic-violet);
+  font-size: 0.85rem;
+}
+
+.civic-card__cta {
+  margin-top: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--civic-indigo);
+}
+
+.agency-follow {
+  margin-top: auto;
+  border-radius: 20px;
+  border: 1px solid var(--civic-violet);
+  padding: 0.6rem 1.1rem;
+  background: transparent;
+  color: var(--civic-violet);
+  font-weight: 600;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.agency-follow.is-active {
+  background: var(--civic-violet);
+  color: #fff;
+}
+
+.ai-playbook {
+  background: linear-gradient(160deg, rgba(99, 102, 241, 0.08), rgba(236, 72, 153, 0.08));
+}
+
+.ai-list {
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ai-list li {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.ai-list li span {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  background: var(--civic-card);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--civic-violet);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.2);
+}
+
+.engagement-list {
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.engagement-item {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.social-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.social-card__avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.insight-grid {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.insight-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--civic-emerald);
+  margin: 0.25rem 0;
+}
+
+@media (max-width: 768px) {
+  .civic-card,
+  .ai-playbook,
+  .insight-card {
+    padding: 1.25rem;
+  }
+}

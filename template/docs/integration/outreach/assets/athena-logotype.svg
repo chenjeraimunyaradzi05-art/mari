@@ -1,0 +1,16 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='800' height='200' viewBox='0 0 800 200'>
+  <rect width='800' height='200' rx='24' fill='#071426' />
+  <g transform='translate(36,36)'>
+    <circle cx='36' cy='36' r='36' fill='url(#grad)' />
+    <defs>
+      <linearGradient id='grad' x1='0' x2='1'>
+        <stop offset='0' stop-color='#07b8b0'/>
+        <stop offset='1' stop-color='#0b7285'/>
+      </linearGradient>
+    </defs>
+    <g transform='translate(80,6)'>
+      <text x='0' y='40' font-family='Inter, Arial' font-weight='700' font-size='48' fill='#ffffff'>ATHENA</text>
+      <text x='0' y='86' font-family='Inter, Arial' font-weight='400' font-size='16' fill='#cfeff0'>Life Operating System</text>
+    </g>
+  </g>
+</svg>

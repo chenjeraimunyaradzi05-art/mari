@@ -1,0 +1,221 @@
+/* Feminine Theme Color Overrides for Admin Dashboard */
+
+/* Override Bootstrap CSS Variables - Remove ALL Green */
+:root {
+    --green: #E91E8C !important;
+    --bs-green: #E91E8C !important;
+    --success: #E91E8C !important;
+    --bs-success: #E91E8C !important;
+    --bs-success-rgb: 233, 30, 140 !important;
+}
+
+/* Replace green with clean white backgrounds and pink accents */
+.bg-success {
+    background: #fff !important;
+    border-left: 3px solid #E91E8C !important;
+    color: #333 !important;
+}
+
+.text-success {
+    color: #E91E8C !important;
+    background: none !important;
+}
+
+.badge-success {
+    background: #E91E8C !important;
+    color: #fff !important;
+}
+
+.btn-success {
+    background: #E91E8C !important;
+    border-color: #E91E8C !important;
+    color: #fff !important;
+}
+
+.btn-success:hover {
+    background: #C01A79 !important;
+    border-color: #C01A79 !important;
+    box-shadow: 0 2px 8px rgba(233, 30, 140, 0.2);
+}
+
+.btn-success:focus {
+    background: #E91E8C !important;
+    border-color: #E91E8C !important;
+    box-shadow: 0 0 0 0.2rem rgba(233, 30, 140, 0.15);
+}
+
+/* Card icons - Solid pink */
+.card-icon.bg-success {
+    background: #E91E8C !important;
+}
+
+/* Stats cards - Clean white with pink accent */
+.stats-card.bg-success {
+    background: #fff !important;
+    border-left: 4px solid #E91E8C !important;
+    color: #333 !important;
+}
+
+/* Alert success - Clean background with pink border */
+.alert-success {
+    background-color: #f8f9fa !important;
+    border-left: 4px solid #E91E8C !important;
+    border-top: 1px solid #E0E6F7 !important;
+    border-right: 1px solid #E0E6F7 !important;
+    border-bottom: 1px solid #E0E6F7 !important;
+    color: #333 !important;
+}
+
+/* Progress bars - Pink only */
+.progress-bar-success,
+.progress-bar.bg-success {
+    background: #E91E8C !important;
+}
+
+/* Table row hover - Very subtle */
+.table-success,
+.table-success > th,
+.table-success > td {
+    background-color: #fafafa !important;
+    border-left: 2px solid #E91E8C !important;
+}
+
+/* Border success */
+.border-success {
+    border-color: #E91E8C !important;
+}
+
+/* List group items - Clean background */
+.list-group-item-success {
+    background-color: #f8f9fa !important;
+    border-left: 3px solid #E91E8C !important;
+    color: #333 !important;
+}
+
+/* Custom checkbox/radio success state */
+.custom-control-input:checked ~ .custom-control-label::before {
+    background-color: #E91E8C !important;
+    border-color: #E91E8C !important;
+}
+
+/* Form validation success */
+.is-valid ~ .valid-feedback,
+.is-valid ~ .valid-tooltip {
+    color: #E91E8C !important;
+}
+
+.was-validated .form-control:valid,
+.form-control.is-valid {
+    border-color: #E91E8C !important;
+}
+
+.was-validated .form-control:valid:focus,
+.form-control.is-valid:focus {
+    border-color: #E91E8C !important;
+    box-shadow: 0 0 0 0.2rem rgba(233, 30, 140, 0.25) !important;
+}
+
+/* Switch/Toggle success state */
+.custom-switch .custom-control-input:checked ~ .custom-control-label::before {
+    background-color: #E91E8C !important;
+    border-color: #E91E8C !important;
+}
+
+/* Toastr/Notification success - override green */
+.toast-success {
+    background-color: #E91E8C !important;
+}
+
+/* IziToast success override */
+.iziToast.iziToast-color-green,
+.iziToast-color-green {
+    background: rgba(233, 30, 140, 0.9) !important;
+    border-color: rgba(233, 30, 140, 0.9) !important;
+}
+
+/* DataTables success states */
+.dataTables_wrapper .dataTables_processing {
+    background: rgba(233, 30, 140, 0.1) !important;
+    border: 1px solid #E91E8C !important;
+}
+
+/* Notyf success notification override */
+.notyf__toast--success {
+    background: #E91E8C !important; /* Solid pink for notifications */
+}
+
+/* Select2 success */
+.select2-container--default .select2-results__option--highlighted[aria-selected] {
+    background-color: #E91E8C !important; /* Solid pink for selections */
+}
+
+/* Swal2 success */
+.swal2-success {
+    border-color: #E91E8C !important;
+}
+
+.swal2-success .swal2-success-ring {
+    border-color: rgba(233, 30, 140, 0.3) !important;
+}
+
+.swal2-success .swal2-success-line-tip,
+.swal2-success .swal2-success-line-long {
+    background-color: #E91E8C !important;
+}
+
+/* Chart.js success colors override */
+.chart-success {
+    color: #E91E8C !important;
+}
+
+/* Dropzone success */
+.dropzone .dz-preview .dz-success-mark {
+    color: #E91E8C !important;
+}
+
+.dropzone .dz-preview.dz-success .dz-success-mark svg {
+    fill: #E91E8C !important;
+}
+
+/* Badge pill success */
+.badge-pill.badge-success {
+    background: #E91E8C !important; /* Solid pink for badges */
+}
+
+/* Spinner/Loading with success color */
+.spinner-border.text-success,
+.spinner-grow.text-success {
+    color: #E91E8C !important;
+}
+
+/* Override Dropzone green upload progress */
+.dropzone .dz-preview .dz-progress .dz-upload {
+    background: #E91E8C !important; /* Solid pink for progress */
+}
+
+/* Override any remaining green text colors */
+.text-green,
+.color-green {
+    color: #E91E8C !important;
+}
+
+/* Override any remaining green backgrounds */
+.bg-green {
+    background: #fff !important;
+    border-left: 3px solid #E91E8C !important;
+    color: #333 !important;
+}
+
+/* Override IziToast green completely */
+.iziToast-color-green .iziToast-body {
+    background: #E91E8C !important; /* Solid pink for toasts */
+}
+
+/* Force override any CSS variable based colors */
+[style*="--green"],
+[style*="--bs-green"],
+[style*="#28a745"],
+[style*="#198754"] {
+    --green: #E91E8C !important;
+    --bs-green: #E91E8C !important;
+}

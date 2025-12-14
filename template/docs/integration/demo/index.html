@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ATHENA TurboTax Integration Demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body { font-family: Inter, Arial, sans-serif; background:#f7fafc; color:#071426; padding:28px }
+  .card { background:white; border-radius:10px; padding:18px; box-shadow:0 6px 18px rgba(7,20,40,0.06); max-width:980px; margin-bottom:18px }
+  button { background:#07B8B0; color:#071426; padding:10px 14px; border-radius:8px; border: none; font-weight:700 }
+  pre { background:#0f172a; color:#f0fff5; padding:12px; border-radius:6px; overflow:auto }
+  label { display:block; margin-top:8px }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h2>TurboTax OAuth POC</h2>
+    <p>This demo calls the POC OAuth start endpoint and projection endpoint on your running ATHENA backend.</p>
+
+    <label>API base URL (optional — use for staging or to point to a public backend)</label>
+    <input id="apiBase" style="width:100%; padding:8px; border-radius:6px; border:1px solid #dde6ef" placeholder="Leave blank to use the current origin" />
+    <div style="margin-top:8px; display:flex; gap:8px">
+      <button id="saveApi">Save</button>
+      <button id="clearApi" style="background:#ef4444">Clear</button>
+    </div>
+
+    <div>
+      <button id="start">Start OAuth Flow (POST /api/v1/turbotax/oauth/start)</button>
+      <div style="margin-top:8px"><strong>Response</strong></div>
+      <pre id="startOut">(not called yet)</pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Projection API</h2>
+    <p>Send a small tax_context to /api/v1/turbotax/projection</p>
+    <label>Example payload (JSON)</label>
+    <textarea id="projPayload" rows="6" style="width:100%">{"income_sources":[{"type":"w2","amount":50000}],"biz_expenses":[{"category":"supplies","amount":2000}]}</textarea>
+    <div style="margin-top:10px">
+      <button id="proj">Run Projection (POST /api/v1/turbotax/projection)</button>
+    </div>
+    <div style="margin-top:8px"><strong>Response</strong></div>
+    <pre id="projOut">(not called yet)</pre>
+  </div>
+
+  <script>
+  // ---- runtime config helpers ----
+  function getQueryParam(name){
+    try {
+      const url = new URL(window.location.href);
+      return url.searchParams.get(name);
+    } catch(e){ return null }
+  }
+
+  function apiBaseFromStorageOrQuery(){
+    // Priority: query param -> localStorage -> origin
+    const q = getQueryParam('apiBase');
+    if(q) return q.replace(/\/+$/,'');
+    const stored = localStorage.getItem('demo.apiBase');
+    if(stored) return stored.replace(/\/+$/,'');
+    // default to current origin
+    return window.location.origin;
+  }
+
+  // Initialize UI
+  document.getElementById('apiBase').value = getQueryParam('apiBase') || localStorage.getItem('demo.apiBase') || '';
+
+  document.getElementById('saveApi').addEventListener('click', ()=>{
+    const v = document.getElementById('apiBase').value.trim();
+    if(v){ localStorage.setItem('demo.apiBase', v.replace(/\/+$/,'')); alert('Saved apiBase to localStorage for future visits'); }
+    else { localStorage.removeItem('demo.apiBase'); alert('Cleared saved apiBase'); }
+  });
+
+  document.getElementById('clearApi').addEventListener('click', ()=>{
+    document.getElementById('apiBase').value = '';
+    localStorage.removeItem('demo.apiBase');
+    alert('Cleared saved apiBase');
+  });
+
+  function makeUrl(path){
+    const base = apiBaseFromStorageOrQuery();
+    // If path already looks like absolute URL, return it
+    if(/^https?:\/\//i.test(path)) return path;
+    return base.replace(/\/+$/,'') + '/' + path.replace(/^\/+/, '');
+  }
+  async function doPost(url, body){
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const json = await res.json();
+      return JSON.stringify(json, null, 2);
+    } catch(e){
+      return 'Error: ' + e.toString();
+    }
+  }
+
+  document.getElementById('start').addEventListener('click', async ()=>{
+    document.getElementById('startOut').textContent = 'Calling...';
+    const out = await doPost(makeUrl('/api/v1/turbotax/oauth/start'), {});
+    document.getElementById('startOut').textContent = out;
+  });
+
+  document.getElementById('proj').addEventListener('click', async ()=>{
+    const payload = JSON.parse(document.getElementById('projPayload').value || '{}');
+    document.getElementById('projOut').textContent = 'Calling...';
+    const out = await doPost(makeUrl('/api/v1/turbotax/projection'), { tax_context: payload });
+    document.getElementById('projOut').textContent = out;
+  });
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1">
+      <stop offset="0" stop-color="#0ea5a3" />
+      <stop offset="1" stop-color="#0b7285" />
+    </linearGradient>
+  </defs>
+  <rect rx="18" width="400" height="120" fill="#071428" />
+  <g transform="translate(26,18) scale(1)">
+    <circle cx="36" cy="36" r="36" fill="url(#g)" />
+    <text x="76" y="48" font-family="Inter, Arial" font-weight="700" font-size="28" fill="#ffffff">ATHENA</text>
+    <text x="76" y="74" font-family="Inter, Arial" font-weight="400" font-size="14" fill="#cfeff0">Life Operating System</text>
+  </g>
+</svg>

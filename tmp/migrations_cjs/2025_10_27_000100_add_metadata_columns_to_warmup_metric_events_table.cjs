@@ -2,12 +2,24 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('warmup_metric_events', 'latency_bucket');
+  const __has_col_up_1 = await knex.schema.hasColumn('warmup_metric_events', 'failure_code');
+  const __has_col_up_2 = await knex.schema.hasColumn('warmup_metric_events', 'environment');
+  const __has_col_up_3 = await knex.schema.hasColumn('warmup_metric_events', 'tags');
+  const __has_col_up_4 = await knex.schema.hasColumn('warmup_metric_events', 'metadata');
   if (!(await knex.schema.hasTable('warmup_metric_events'))) return;
-  const hasLatencyBucket = await knex.schema.hasColumn('warmup_metric_events', 'latency_bucket');
-  const hasFailureCode = await knex.schema.hasColumn('warmup_metric_events', 'failure_code');
-  const hasEnvironment = await knex.schema.hasColumn('warmup_metric_events', 'environment');
-  const hasTags = await knex.schema.hasColumn('warmup_metric_events', 'tags');
-  const hasMetadata = await knex.schema.hasColumn('warmup_metric_events', 'metadata');
+  const hasLatencyBucket = __has_col_up_0;
+  const hasFailureCode = __has_col_up_1;
+  const hasEnvironment = __has_col_up_2;
+  const hasTags = __has_col_up_3;
+  const hasMetadata = __has_col_up_4;
+  const originalHas = {
+    latency_bucket: __has_col_up_0,
+    failure_code: __has_col_up_1,
+    environment: __has_col_up_2,
+    tags: __has_col_up_3,
+    metadata: __has_col_up_4
+  };
 
   await knex.schema.alterTable('warmup_metric_events', (table) => {
     if (!hasLatencyBucket) table.string('latency_bucket').nullable().after('duration_ms');
@@ -28,7 +40,7 @@ exports.down = async function(knex) {
     }
   });
   for (const col of columns) {
-    if (await knex.schema.hasColumn('warmup_metric_events', col)) {
+    if (!originalHas[col]) {
       await knex.schema.alterTable('warmup_metric_events', (table) => {
         table.dropColumn(col);
       });

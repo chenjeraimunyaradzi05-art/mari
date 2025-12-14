@@ -1,0 +1,65 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "#000000",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "id": 2,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}},
+      "targets": [
+        {
+          "expr": "increase(app_events_total{event=\"admin.login\"}[5m])",
+          "legendFormat": "admin logins (last 5m)",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin logins — 5m rolling increase",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "id": 3,
+      "options": {},
+      "targets": [
+        {
+          "expr": "count_over_time(app_events_total{event=\"admin.login\",result=\"failure\"}[1h])",
+          "legendFormat": "failed admin logins (1h)",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin login failures (1h)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 30,
+  "style": "dark",
+  "tags": ["security", "admin", "siem"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Admin Login — SIEM & Rate Monitoring",
+  "uid": "admin-logins-siem-001",
+  "version": 1
+}

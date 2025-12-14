@@ -2,17 +2,27 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('companies', 'abn');
+  const __has_col_up_1 = await knex.schema.hasColumn('companies', 'asic_number');
+  const __has_col_up_2 = await knex.schema.hasColumn('companies', 'domain');
+  const __has_col_up_3 = await knex.schema.hasColumn('companies', 'verification_status');
+  const __has_col_up_4 = await knex.schema.hasColumn('companies', 'verification_submitted_at');
+  const __has_col_up_5 = await knex.schema.hasColumn('companies', 'verified_at');
+  const __has_col_up_6 = await knex.schema.hasColumn('companies', 'verification_admin_id');
+  const __has_col_up_7 = await knex.schema.hasColumn('companies', 'verification_notes');
+  const __has_col_up_8 = await knex.schema.hasColumn('companies', 'verification_payload');
+  const __has_col_up_9 = await knex.schema.hasColumn('companies', 'verification_source');
   if (await knex.schema.hasTable('companies')) {
-    const hasAbn = await knex.schema.hasColumn('companies', 'abn');
-    const hasAsic = await knex.schema.hasColumn('companies', 'asic_number');
-    const hasDomain = await knex.schema.hasColumn('companies', 'domain');
-    const hasVerificationStatus = await knex.schema.hasColumn('companies', 'verification_status');
-    const hasSubmittedAt = await knex.schema.hasColumn('companies', 'verification_submitted_at');
-    const hasVerifiedAt = await knex.schema.hasColumn('companies', 'verified_at');
-    const hasAdminId = await knex.schema.hasColumn('companies', 'verification_admin_id');
-    const hasNotes = await knex.schema.hasColumn('companies', 'verification_notes');
-    const hasPayload = await knex.schema.hasColumn('companies', 'verification_payload');
-    const hasSource = await knex.schema.hasColumn('companies', 'verification_source');
+    const hasAbn = __has_col_up_0;
+    const hasAsic = __has_col_up_1;
+    const hasDomain = __has_col_up_2;
+    const hasVerificationStatus = __has_col_up_3;
+    const hasSubmittedAt = __has_col_up_4;
+    const hasVerifiedAt = __has_col_up_5;
+    const hasAdminId = __has_col_up_6;
+    const hasNotes = __has_col_up_7;
+    const hasPayload = __has_col_up_8;
+    const hasSource = __has_col_up_9;
 
     await knex.schema.alterTable('companies', (table) => {
       if (!hasAbn) {
@@ -64,16 +74,16 @@ exports.down = async function(knex) {
       if (table.hasOwnProperty) { }
     });
     // Reverse operations safely by checking column existence
-    const hasSource = await knex.schema.hasColumn('companies', 'verification_source');
-    const hasPayload = await knex.schema.hasColumn('companies', 'verification_payload');
-    const hasNotes = await knex.schema.hasColumn('companies', 'verification_notes');
-    const hasAdminId = await knex.schema.hasColumn('companies', 'verification_admin_id');
-    const hasVerifiedAt = await knex.schema.hasColumn('companies', 'verified_at');
-    const hasSubmittedAt = await knex.schema.hasColumn('companies', 'verification_submitted_at');
-    const hasVerificationStatus = await knex.schema.hasColumn('companies', 'verification_status');
-    const hasDomain = await knex.schema.hasColumn('companies', 'domain');
-    const hasAsic = await knex.schema.hasColumn('companies', 'asic_number');
-    const hasAbn = await knex.schema.hasColumn('companies', 'abn');
+    const hasSource = __has_col_up_9;
+    const hasPayload = __has_col_up_8;
+    const hasNotes = __has_col_up_7;
+    const hasAdminId = __has_col_up_6;
+    const hasVerifiedAt = __has_col_up_5;
+    const hasSubmittedAt = __has_col_up_4;
+    const hasVerificationStatus = __has_col_up_3;
+    const hasDomain = __has_col_up_2;
+    const hasAsic = __has_col_up_1;
+    const hasAbn = __has_col_up_0;
 
     await knex.schema.alterTable('companies', (table) => {
       if (hasSource) table.dropColumn('verification_source');

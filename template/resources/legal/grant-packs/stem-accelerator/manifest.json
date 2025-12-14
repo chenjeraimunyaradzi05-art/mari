@@ -1,0 +1,22 @@
+{
+    "slug": "stem-accelerator",
+    "version": "2025.11.24",
+    "assets": [
+        {
+            "key": "ip-assignment-acknowledgement",
+            "label": "IP assignment acknowledgement",
+            "filename": "ip-assignment-acknowledgement.md",
+            "type": "form",
+            "description": "One-page acknowledgement confirming background IP provenance and assignment into the company prior to STEM accelerator diligence.",
+            "tags": ["ip", "assignment"]
+        },
+        {
+            "key": "convertible-note-brief",
+            "label": "Convertible note & option brief",
+            "filename": "convertible-note-brief.md",
+            "type": "brief",
+            "description": "Explainer that summarises the hybrid funding instrument used alongside grant proceeds, highlighting cap table impacts.",
+            "tags": ["capital", "options"]
+        }
+    ]
+}

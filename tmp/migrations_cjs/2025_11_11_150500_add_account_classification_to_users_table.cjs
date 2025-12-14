@@ -2,7 +2,8 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
-  if (!(await knex.schema.hasColumn('users', 'account_classification'))) {
+  const __has_col_up_0 = await knex.schema.hasColumn('users', 'account_classification');
+  if (!(__has_col_up_0)) {
     await knex.schema.alterTable('users', function(table) {
       table.string('account_classification').defaultTo('candidate').after('role');
       table.index('account_classification');
@@ -11,7 +12,7 @@ exports.up = async function(knex) {
 };
 
 exports.down = async function(knex) {
-  if (await knex.schema.hasColumn('users', 'account_classification')) {
+  if (__has_col_up_0) {
     await knex.schema.alterTable('users', function(table) {
       table.dropIndex('account_classification');
       table.dropColumn('account_classification');

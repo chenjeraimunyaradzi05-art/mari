@@ -1,0 +1,11 @@
+// Auto-generated React page/component from Blade: show.jsx
+import React from 'react'
+
+export default function show_jsx() {
+  return (
+    <div>
+      <h1>Page skeleton for show.jsx</h1>
+      <p>Converted from viewstemplate/frontend/company-dashboard/advertising/campaigns/show.blade.php</p>
+    </div>
+  )
+}

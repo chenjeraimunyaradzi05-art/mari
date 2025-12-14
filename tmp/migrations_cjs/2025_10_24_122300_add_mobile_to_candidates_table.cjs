@@ -2,8 +2,9 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('candidates', 'mobile');
   if (await knex.schema.hasTable('candidates')) {
-    const hasMobile = await knex.schema.hasColumn('candidates', 'mobile');
+    const hasMobile = __has_col_up_0;
     if (!hasMobile) {
       await knex.schema.alterTable('candidates', (table) => {
         table.string('mobile').nullable().after('phone_two');
@@ -14,7 +15,7 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   if (await knex.schema.hasTable('candidates')) {
-    const hasMobile = await knex.schema.hasColumn('candidates', 'mobile');
+    const hasMobile = __has_col_up_0;
     if (hasMobile) {
       await knex.schema.alterTable('candidates', (table) => {
         table.dropColumn('mobile');

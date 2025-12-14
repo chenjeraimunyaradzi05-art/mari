@@ -1,0 +1,133 @@
+openapi: 3.0.0
+info:
+  title: ATHENA Platform API
+  version: 1.0.0
+  description: RESTful API for ATHENA women's empowerment platform
+  contact:
+    email: api@athena.com
+
+servers:
+  - url: https://api.athena.com/v1
+    description: Production
+  - url: https://staging-api.athena.com/v1
+    description: Staging
+
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  expires_in:
+                    type: integer
+        '401':
+          description: Invalid credentials
+
+  /jobs:
+    get:
+      summary: Search jobs
+      tags: [Jobs]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: country
+          in: query
+          schema:
+            type: string
+            enum: [AU, NZ, CA]
+        - name: industry
+          in: query
+          schema:
+            type: string
+        - name: salary_min
+          in: query
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Job listings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Job:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        company_name:
+          type: string
+        location:
+          type: string
+        salary_min:
+          type: integer
+        salary_max:
+          type: integer
+        description:
+          type: string
+        posted_at:
+          type: string
+          format: date-time
+
+    PaginationMeta:
+      type: object
+      properties:
+        current_page:
+          type: integer
+        from:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+        to:
+          type: integer
+        total:
+          type: integer

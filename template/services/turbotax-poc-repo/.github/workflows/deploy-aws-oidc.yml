@@ -1,0 +1,52 @@
+name: Deploy TurboTax POC to AWS (ECR + Terraform using OIDC)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS OIDC credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          AWS_REGION=${{ secrets.AWS_REGION }}
+          ACCOUNT=${{ secrets.AWS_ACCOUNT_ID }}
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      - name: Build Docker image and push
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          REPO=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}
+          docker build -t ${REPO} -f services/turbotax-poc/Dockerfile services/turbotax-poc
+          docker push ${REPO}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform init & apply (deploy)
+        working-directory: services/turbotax-poc-repo/deploy/terraform
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          terraform init -upgrade
+          terraform apply -auto-approve -var="container_image=${IMAGE_URI}" -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}"

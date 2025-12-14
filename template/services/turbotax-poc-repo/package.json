@@ -1,0 +1,23 @@
+{
+  "name": "turbotax-poc",
+  "version": "0.1.0",
+  "description": "Integration Gateway POC for ATHENA & TurboTax",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js --legacy-watch",
+    "test": "jest --runInBand"
+  },
+  "author": "ATHENA",
+  "license": "MIT",
+  "dependencies": {
+    "body-parser": "^1.20.2",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "jest": "^29.6.1",
+    "supertest": "^6.4.3",
+    "nodemon": "^3.0.1",
+    "node-fetch": "^2.6.7"
+  }
+}

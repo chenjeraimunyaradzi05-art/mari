@@ -1,0 +1,16 @@
+{
+  "colors": {
+    "primary": "#07B8B0",
+    "accent": "#FF8A67",
+    "deep_teal": "#0B7285",
+    "midnight": "#071426",
+    "soft_mint": "#DFF8F6",
+    "neutral_text": "#111827"
+  },
+  "type": {
+    "heading": {"fontFamily": "Inter", "weight": 700, "size": 32},
+    "body": {"fontFamily": "Inter", "weight": 400, "size": 16},
+    "caption": {"fontFamily": "Inter", "weight": 300, "size": 12}
+  },
+  "spacings": {"gutter": 24, "padding": 16}
+}

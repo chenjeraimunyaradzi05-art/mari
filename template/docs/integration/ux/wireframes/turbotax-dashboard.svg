@@ -1,0 +1,22 @@
+<svg width="900" height="600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="600" fill="#f4f6f8"/>
+  <rect x="30" y="20" width="840" height="80" rx="6" fill="#ffffff" stroke="#d1d5db"/>
+  <text x="60" y="60" fill="#111827" font-size="22" font-family="Arial">Tax Dashboard — Projected Taxes & Filing Status</text>
+
+  <rect x="30" y="120" width="400" height="180" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="50" y="150" fill="#111827" font-size="16">Estimated Annual Tax</text>
+  <text x="50" y="190" fill="#111827" font-size="36" font-family="Arial" font-weight="bold">$3,672</text>
+  <text x="50" y="225" fill="#6b7280">Taxable income: $30,600</text>
+
+  <rect x="470" y="120" width="400" height="180" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="490" y="150" fill="#111827" font-size="16">Filing Status</text>
+  <text x="490" y="190" fill="#111827" font-size="24">Single – W2 + 1099</text>
+  <rect x="490" y="220" width="140" height="36" rx="6" fill="#0ea5a3"/>
+  <text x="520" y="245" fill="#0f172a" font-size="14">Connect TurboTax</text>
+
+  <rect x="30" y="320" width="840" height="240" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="50" y="350" fill="#111827" font-size="16">Breakdown & Recommendations</text>
+  <text x="50" y="380" fill="#6b7280">• Review categories — business expenses vs personal deductions</text>
+  <text x="50" y="404" fill="#6b7280">• Consider S-Corp election for tax optimization</text>
+  <text x="50" y="428" fill="#6b7280">• Next step: Run a detailed projection with TurboTax</text>
+</svg>

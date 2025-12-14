@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <defs>
+    <linearGradient id="gradE" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4ade80" />
+      <stop offset="100%" stop-color="#16a34a" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="520" rx="48" fill="url(#gradE)" />
+  <path d="M80 360 Q200 220 320 320 T560 300" stroke="rgba(15,23,42,0.2)" stroke-width="30" fill="none" stroke-linecap="round" />
+  <circle cx="180" cy="160" r="70" fill="rgba(255,255,255,0.25)" />
+  <circle cx="620" cy="360" r="90" fill="rgba(255,255,255,0.25)" />
+  <text x="50%" y="46%" dominant-baseline="middle" text-anchor="middle" font-family="'Rubik', 'Segoe UI', sans-serif" font-size="44" fill="rgba(15,23,42,0.85)">Wellbeing Pods</text>
+  <text x="50%" y="62%" dominant-baseline="middle" text-anchor="middle" font-family="'Rubik', 'Segoe UI', sans-serif" font-size="26" fill="rgba(15,23,42,0.7)">Rest, care, signal-rich chats</text>
+</svg>

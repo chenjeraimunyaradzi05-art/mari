@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Project-specific ignores to skip legacy/vendor assets not linted by Next app
+    "template/**",
+    "viewstemplate/**",
+    "code/**",
+    "app.bak/**",
   ]),
 ]);
 

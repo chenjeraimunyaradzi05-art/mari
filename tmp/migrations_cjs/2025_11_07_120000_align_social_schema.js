@@ -1,0 +1,411 @@
+// Auto-generated from 2025_11_07_120000_align_social_schema.php
+// Ported from Laravel migration to Knex up/down
+
+async function hasIndex(knex, tableName, indexName) {
+  const client = (knex.client && knex.client.config && knex.client.config.client) || '';
+  if (!client || !client.toString().startsWith('mysql')) return false;
+  const result = await knex.raw(`SHOW INDEX FROM \`${tableName}\` WHERE Key_name = ?`, [indexName]);
+  return result && result[0] && result[0].length > 0;
+}
+
+exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('social_profiles', 'profileable_type');
+  const __has_col_up_1 = await knex.schema.hasColumn('social_profiles', 'username');
+  const __has_col_up_2 = await knex.schema.hasColumn('social_profiles', 'display_name');
+  const __has_col_up_3 = await knex.schema.hasColumn('social_profiles', 'bio');
+  const __has_col_up_4 = await knex.schema.hasColumn('social_profiles', 'avatar');
+  const __has_col_up_5 = await knex.schema.hasColumn('social_profiles', 'cover_photo');
+  const __has_col_up_6 = await knex.schema.hasColumn('social_profiles', 'website');
+  const __has_col_up_7 = await knex.schema.hasColumn('social_profiles', 'social_links');
+  const __has_col_up_8 = await knex.schema.hasColumn('social_profiles', 'profile_type');
+  const __has_col_up_9 = await knex.schema.hasColumn('social_profiles', 'is_verified');
+  const __has_col_up_10 = await knex.schema.hasColumn('social_profiles', 'is_private');
+  const __has_col_up_11 = await knex.schema.hasColumn('social_profiles', 'following_count');
+  const __has_col_up_12 = await knex.schema.hasColumn('social_profiles', 'posts_count');
+  const __has_col_up_13 = await knex.schema.hasColumn('social_profiles', 'deleted_at');
+  const __has_col_up_14 = await knex.schema.hasColumn('social_profiles', 'handle');
+  const __has_col_up_15 = await knex.schema.hasColumn('social_posts', 'social_profile_id');
+  const __has_col_up_16 = await knex.schema.hasColumn('social_posts', 'post_type');
+  const __has_col_up_17 = await knex.schema.hasColumn('social_posts', 'caption');
+  const __has_col_up_18 = await knex.schema.hasColumn('social_posts', 'media');
+  const __has_col_up_19 = await knex.schema.hasColumn('social_posts', 'location');
+  const __has_col_up_20 = await knex.schema.hasColumn('social_posts', 'tags');
+  const __has_col_up_21 = await knex.schema.hasColumn('social_posts', 'mentions');
+  const __has_col_up_22 = await knex.schema.hasColumn('social_posts', 'likes_count');
+  const __has_col_up_23 = await knex.schema.hasColumn('social_posts', 'comments_count');
+  const __has_col_up_24 = await knex.schema.hasColumn('social_posts', 'shares_count');
+  const __has_col_up_25 = await knex.schema.hasColumn('social_posts', 'views_count');
+  const __has_col_up_26 = await knex.schema.hasColumn('social_posts', 'is_pinned');
+  const __has_col_up_27 = await knex.schema.hasColumn('social_posts', 'comments_disabled');
+  const __has_col_up_28 = await knex.schema.hasColumn('social_posts', 'expires_at');
+  const __has_col_up_29 = await knex.schema.hasColumn('social_posts', 'ai_engagement_score');
+  const __has_col_up_30 = await knex.schema.hasColumn('social_posts', 'ai_tags');
+  const __has_col_up_31 = await knex.schema.hasColumn('social_posts', 'content');
+  const __has_col_up_32 = await knex.schema.hasColumn('social_post_media', 'thumbnail_path');
+  const __has_col_up_33 = await knex.schema.hasColumn('social_post_media', 'mime_type');
+  const __has_col_up_34 = await knex.schema.hasColumn('social_post_media', 'file_size');
+  const __has_col_up_35 = await knex.schema.hasColumn('social_post_media', 'width');
+  const __has_col_up_36 = await knex.schema.hasColumn('social_post_media', 'height');
+  const __has_col_up_37 = await knex.schema.hasColumn('social_post_media', 'duration');
+  const __has_col_up_38 = await knex.schema.hasColumn('social_post_media', 'sort_order');
+  const __has_col_up_39 = await knex.schema.hasColumn('social_post_media', 'ai_analysis');
+  const __has_col_up_40 = await knex.schema.hasColumn('social_post_media', 'filters');
+  const __has_col_up_41 = await knex.schema.hasColumn('social_post_comments', 'social_profile_id');
+  const __has_col_up_42 = await knex.schema.hasColumn('social_post_comments', 'mentions');
+  const __has_col_up_43 = await knex.schema.hasColumn('social_post_comments', 'likes_count');
+  const __has_col_up_44 = await knex.schema.hasColumn('social_post_comments', 'replies_count');
+  const __has_col_up_45 = await knex.schema.hasColumn('social_post_comments', 'is_pinned');
+  const __has_col_up_46 = await knex.schema.hasColumn('social_post_comments', 'ai_sentiment');
+  const __has_col_up_47 = await knex.schema.hasColumn('social_post_comments', 'deleted_at');
+  const __has_col_up_48 = await knex.schema.hasColumn('social_post_reactions', 'social_profile_id');
+  const __has_col_up_49 = await knex.schema.hasColumn('social_post_reactions', 'liked_at');
+  const __has_col_up_50 = await knex.schema.hasColumn('social_post_reactions', 'likeable_type');
+  const __has_col_up_51 = await knex.schema.hasColumn('social_posts','social_profile_id');
+  const __has_col_up_52 = await knex.schema.hasColumn('social_posts', col);
+  const __has_col_up_53 = await knex.schema.hasColumn('social_post_media', col);
+  const __has_col_up_54 = await knex.schema.hasColumn('social_post_comments', col);
+  const __has_col_up_55 = await knex.schema.hasColumn('social_profiles', col);
+
+  const __has_col_up_0 = __has_col_up_0;
+  const __has_col_up_1 = __has_col_up_1;
+  const __has_col_up_2 = __has_col_up_2;
+  const __has_col_up_3 = __has_col_up_3;
+  const __has_col_up_4 = __has_col_up_4;
+  const __has_col_up_5 = __has_col_up_5;
+  const __has_col_up_6 = __has_col_up_6;
+  const __has_col_up_7 = __has_col_up_7;
+  const __has_col_up_8 = __has_col_up_8;
+  const __has_col_up_9 = __has_col_up_9;
+  const __has_col_up_10 = __has_col_up_10;
+  const __has_col_up_11 = __has_col_up_11;
+  const __has_col_up_12 = __has_col_up_12;
+  const __has_col_up_13 = __has_col_up_13;
+  const __has_col_up_14 = __has_col_up_14;
+  const __has_col_up_15 = __has_col_up_15;
+  const __has_col_up_16 = __has_col_up_16;
+  const __has_col_up_17 = __has_col_up_17;
+  const __has_col_up_18 = __has_col_up_18;
+  const __has_col_up_19 = __has_col_up_19;
+  const __has_col_up_20 = __has_col_up_20;
+  const __has_col_up_21 = __has_col_up_21;
+  const __has_col_up_22 = __has_col_up_22;
+  const __has_col_up_23 = __has_col_up_23;
+  const __has_col_up_24 = __has_col_up_24;
+  const __has_col_up_25 = __has_col_up_25;
+  const __has_col_up_26 = __has_col_up_26;
+  const __has_col_up_27 = __has_col_up_27;
+  const __has_col_up_28 = __has_col_up_28;
+  const __has_col_up_29 = __has_col_up_29;
+  const __has_col_up_30 = __has_col_up_30;
+  const __has_col_up_31 = __has_col_up_31;
+  const __has_col_up_32 = __has_col_up_32;
+  const __has_col_up_33 = __has_col_up_33;
+  const __has_col_up_34 = __has_col_up_34;
+  const __has_col_up_35 = __has_col_up_35;
+  const __has_col_up_36 = __has_col_up_36;
+  const __has_col_up_37 = __has_col_up_37;
+  const __has_col_up_38 = __has_col_up_38;
+  const __has_col_up_39 = __has_col_up_39;
+  const __has_col_up_40 = __has_col_up_40;
+  const __has_col_up_41 = __has_col_up_41;
+  const __has_col_up_42 = __has_col_up_42;
+  const __has_col_up_43 = __has_col_up_43;
+  const __has_col_up_44 = __has_col_up_44;
+  const __has_col_up_45 = __has_col_up_45;
+  const __has_col_up_46 = __has_col_up_46;
+  const __has_col_up_47 = __has_col_up_47;
+  const __has_col_up_48 = __has_col_up_48;
+  const __has_col_up_49 = __has_col_up_49;
+  const __has_col_up_50 = __has_col_up_50;
+  const __has_col_up_51 = __has_col_up_51;
+  const __has_col_up_52 = __has_col_up_52;
+  const __has_col_up_53 = __has_col_up_53;
+  const __has_col_up_54 = __has_col_up_54;
+  const __has_col_up_55 = __has_col_up_55;
+
+  if (await knex.schema.hasTable('social_profiles')) {
+    await knex.schema.alterTable('social_profiles', (table) => {});
+
+    if (!__has_col_up_0) {
+      await knex.schema.alterTable('social_profiles', (table) => {
+        table.string('profileable_type').nullable();
+        table.bigInteger('profileable_id').unsigned().nullable();
+        table.index(['profileable_type', 'profileable_id'], 'social_profiles_profileable_index');
+      });
+    }
+
+    if (!__has_col_up_1) {
+      await knex.schema.alterTable('social_profiles', (table) => {
+        table.string('username').nullable();
+        table.unique('username', 'social_profiles_username_unique');
+      });
+    }
+
+    if (!__has_col_up_2) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.string('display_name').nullable(); });
+    }
+
+    if (!__has_col_up_3) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.text('bio').nullable(); });
+    }
+
+    if (!__has_col_up_4) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.string('avatar').nullable(); });
+    }
+
+    if (!__has_col_up_5) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.string('cover_photo').nullable(); });
+    }
+
+    if (!__has_col_up_6) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.string('website').nullable(); });
+    }
+
+    if (!__has_col_up_7) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.json('social_links').nullable(); });
+    }
+
+    if (!__has_col_up_8) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.string('profile_type', 40).notNullable().defaultTo('candidate'); table.index('profile_type', 'social_profiles_profile_type_index'); });
+    }
+
+    if (!__has_col_up_9) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.boolean('is_verified').notNullable().defaultTo(false); });
+    }
+
+    if (!__has_col_up_10) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.boolean('is_private').notNullable().defaultTo(false); });
+    }
+
+    if (!__has_col_up_11) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.integer('following_count').unsigned().notNullable().defaultTo(0); });
+    }
+
+    if (!__has_col_up_12) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.integer('posts_count').unsigned().notNullable().defaultTo(0); });
+    }
+
+    if (!__has_col_up_13) {
+      await knex.schema.alterTable('social_profiles', (table) => { table.timestamp('deleted_at').nullable(); });
+    }
+
+    // Copy handle -> username if needed
+    if (__has_col_up_14) {
+      await knex('social_profiles').whereNull('username').whereNotNull('handle').update({ username: knex.raw('handle') });
+    }
+
+    const client = (knex.client && (knex.client.config && knex.client.config.client)) || '';
+    const driver = client && client.toString().startsWith('sqlite') ? 'sqlite' : client && client.toString().startsWith('mysql') ? 'mysql' : 'other';
+    // display_name default fill
+    if (driver === 'sqlite') {
+      await knex('social_profiles').whereNull('display_name').update({ display_name: knex.raw("COALESCE(username, 'profile-' || id)") });
+    } else {
+      await knex('social_profiles').whereNull('display_name').update({ display_name: knex.raw("COALESCE(username, CONCAT('profile-', id))") });
+    }
+
+    // MySQL fulltext
+    if (client && client.toString().startsWith('mysql')) {
+      const hasFt = await hasIndex(knex, 'social_profiles', 'social_profiles_search_fulltext');
+      if (!hasFt && __has_col_up_1) {
+        await knex.raw('ALTER TABLE social_profiles ADD FULLTEXT INDEX social_profiles_search_fulltext (username, display_name, bio)');
+      }
+    }
+  }
+
+  if (await knex.schema.hasTable('social_posts')) {
+    if (!__has_col_up_15) {
+      await knex.schema.alterTable('social_posts', (table) => {
+        table.bigInteger('social_profile_id').unsigned().nullable();
+        table.foreign('social_profile_id').references('id').inTable('social_profiles').onDelete('SET NULL');
+        table.index('social_profile_id', 'social_posts_profile_index');
+      });
+    }
+
+    if (!__has_col_up_16) {
+      await knex.schema.alterTable('social_posts', (table) => { table.enu('post_type', ['post','reel','story','article']).notNullable().defaultTo('post'); });
+    }
+
+    if (!__has_col_up_17) await knex.schema.alterTable('social_posts', (table) => { table.text('caption').nullable(); });
+    if (!__has_col_up_18) await knex.schema.alterTable('social_posts', (table) => { table.json('media').nullable(); });
+    if (!__has_col_up_19) await knex.schema.alterTable('social_posts', (table) => { table.string('location').nullable(); });
+    if (!__has_col_up_20) await knex.schema.alterTable('social_posts', (table) => { table.json('tags').nullable(); });
+    if (!__has_col_up_21) await knex.schema.alterTable('social_posts', (table) => { table.json('mentions').nullable(); });
+    if (!__has_col_up_22) await knex.schema.alterTable('social_posts', (table) => { table.integer('likes_count').unsigned().notNullable().defaultTo(0); });
+    if (!__has_col_up_23) await knex.schema.alterTable('social_posts', (table) => { table.integer('comments_count').unsigned().notNullable().defaultTo(0); });
+    if (!__has_col_up_24) await knex.schema.alterTable('social_posts', (table) => { table.integer('shares_count').unsigned().notNullable().defaultTo(0); });
+    if (!__has_col_up_25) await knex.schema.alterTable('social_posts', (table) => { table.integer('views_count').unsigned().notNullable().defaultTo(0); });
+    if (!__has_col_up_26) await knex.schema.alterTable('social_posts', (table) => { table.boolean('is_pinned').notNullable().defaultTo(false); });
+    if (!__has_col_up_27) await knex.schema.alterTable('social_posts', (table) => { table.boolean('comments_disabled').notNullable().defaultTo(false); });
+    if (!__has_col_up_28) await knex.schema.alterTable('social_posts', (table) => { table.timestamp('expires_at').nullable(); });
+    if (!__has_col_up_29) await knex.schema.alterTable('social_posts', (table) => { table.float('ai_engagement_score').notNullable().defaultTo(0); });
+    if (!__has_col_up_30) await knex.schema.alterTable('social_posts', (table) => { table.json('ai_tags').nullable(); });
+
+    // Copy content -> caption if caption missing
+    if (__has_col_up_31 && __has_col_up_17) {
+      await knex('social_posts').whereNull('caption').update({ caption: knex.raw('content') });
+    }
+  }
+
+  if (await knex.schema.hasTable('social_post_media')) {
+    if (!__has_col_up_32) await knex.schema.alterTable('social_post_media', (table) => { table.string('thumbnail_path').nullable(); });
+    if (!__has_col_up_33) await knex.schema.alterTable('social_post_media', (table) => { table.string('mime_type', 120).nullable(); });
+    if (!__has_col_up_34) await knex.schema.alterTable('social_post_media', (table) => { table.integer('file_size').unsigned().nullable(); });
+    if (!__has_col_up_35) await knex.schema.alterTable('social_post_media', (table) => { table.integer('width').unsigned().nullable(); });
+    if (!__has_col_up_36) await knex.schema.alterTable('social_post_media', (table) => { table.integer('height').unsigned().nullable(); });
+    if (!__has_col_up_37) await knex.schema.alterTable('social_post_media', (table) => { table.integer('duration').unsigned().nullable(); });
+    if (!__has_col_up_38) {
+      await knex.schema.alterTable('social_post_media', (table) => { table.smallint('sort_order').unsigned().notNullable().defaultTo(0); table.index(['social_post_id', 'sort_order'], 'spm_post_sort_idx'); });
+    }
+    if (!__has_col_up_39) await knex.schema.alterTable('social_post_media', (table) => { table.json('ai_analysis').nullable(); });
+    if (!__has_col_up_40) await knex.schema.alterTable('social_post_media', (table) => { table.json('filters').nullable(); });
+  }
+
+  if (await knex.schema.hasTable('social_post_comments')) {
+    if (!__has_col_up_41) {
+      await knex.schema.alterTable('social_post_comments', (table) => {
+        table.bigInteger('social_profile_id').unsigned().nullable();
+        table.foreign('social_profile_id').references('id').inTable('social_profiles').onDelete('SET NULL');
+      });
+    }
+    if (!__has_col_up_42) await knex.schema.alterTable('social_post_comments', (table) => { table.json('mentions').nullable(); });
+    if (!__has_col_up_43) await knex.schema.alterTable('social_post_comments', (table) => { table.integer('likes_count').unsigned().notNullable().defaultTo(0); });
+    if (!__has_col_up_44) await knex.schema.alterTable('social_post_comments', (table) => { table.integer('replies_count').unsigned().notNullable().defaultTo(0); });
+    if (!__has_col_up_45) await knex.schema.alterTable('social_post_comments', (table) => { table.boolean('is_pinned').notNullable().defaultTo(false); });
+    if (!__has_col_up_46) await knex.schema.alterTable('social_post_comments', (table) => { table.json('ai_sentiment').nullable(); });
+    if (!__has_col_up_47) await knex.schema.alterTable('social_post_comments', (table) => { table.timestamp('deleted_at').nullable(); });
+  }
+
+  if (await knex.schema.hasTable('social_post_reactions')) {
+    if (!__has_col_up_48) await knex.schema.alterTable('social_post_reactions', (table) => { table.bigInteger('social_profile_id').unsigned().nullable(); table.foreign('social_profile_id').references('id').inTable('social_profiles').onDelete('SET NULL'); });
+    if (!__has_col_up_49) await knex.schema.alterTable('social_post_reactions', (table) => { table.timestamp('liked_at').defaultTo(knex.fn.now()).notNullable(); });
+    if (!__has_col_up_50) {
+      await knex.schema.alterTable('social_post_reactions', (table) => { table.string('likeable_type').nullable(); table.bigInteger('likeable_id').unsigned().nullable(); table.unique(['social_profile_id', 'likeable_type', 'likeable_id'], 'social_post_reactions_likeable_unique'); });
+    }
+  }
+
+  // Migrate legacy social_follows table name if present
+  if (await knex.schema.hasTable('social_follows') && !await knex.schema.hasTable('legacy_social_follows')) {
+    await knex.schema.renameTable('social_follows', 'legacy_social_follows');
+  }
+
+  if (!await knex.schema.hasTable('social_follows')) {
+    await knex.schema.createTable('social_follows', (table) => {
+      table.bigIncrements('id');
+      table.bigInteger('follower_id').unsigned().notNullable();
+      table.bigInteger('following_id').unsigned().notNullable();
+      table.boolean('is_close_friend').notNullable().defaultTo(false);
+      table.boolean('notifications_enabled').notNullable().defaultTo(true);
+      table.timestamp('followed_at').defaultTo(knex.fn.now()).notNullable();
+      table.timestamps(true, true);
+
+      table.unique(['follower_id', 'following_id'], 'social_follows_unique_pair');
+      table.index(['follower_id', 'followed_at'], 'social_follows_follower_idx');
+      table.index(['following_id', 'followed_at'], 'social_follows_following_idx');
+      table.foreign('follower_id', 'social_follows_profile_follower_fk').references('id').inTable('social_profiles').onDelete('CASCADE');
+      table.foreign('following_id', 'social_follows_profile_following_fk').references('id').inTable('social_profiles').onDelete('CASCADE');
+    });
+  }
+};
+
+exports.down = async function(knex) {
+  // Reverse operations in roughly reverse order
+  if (await knex.schema.hasTable('social_posts')) {
+    await knex.schema.alterTable('social_posts', (table) => {
+      const columns = ['social_profile_id','post_type','caption','media','location','tags','mentions','likes_count','comments_count','shares_count','views_count','is_pinned','comments_disabled','expires_at','ai_engagement_score','ai_tags'];
+      // For 'social_profile_id' we need to drop FK and index
+      if (columns.includes('social_profile_id') && __has_col_up_51) {
+        table.dropForeign('social_profile_id');
+        // Not all DBs support dropping named index easily here
+      }
+      for (const col of columns) {
+        if (__has_col_up_52) {
+          if (col !== 'social_profile_id') {
+            table.dropColumn(col);
+          }
+        }
+      }
+    });
+  }
+
+  if (await knex.schema.hasTable('social_post_media')) {
+    await knex.schema.alterTable('social_post_media', (table) => {
+      const columns = ['thumbnail_path','mime_type','file_size','width','height','duration','sort_order','ai_analysis','filters'];
+      for (const col of columns) {
+        if (__has_col_up_53) {
+          if (col === 'sort_order') {
+            try { table.dropIndex(['social_post_id','sort_order'], 'spm_post_sort_idx'); } catch (e) {}
+          }
+          try { table.dropColumn(col); } catch (e) {}
+        }
+      }
+    });
+  }
+
+  if (await knex.schema.hasTable('social_post_comments')) {
+    await knex.schema.alterTable('social_post_comments', (table) => {
+      const columns = ['social_profile_id','mentions','likes_count','replies_count','is_pinned','ai_sentiment'];
+      for (const col of columns) {
+        if (__has_col_up_54) {
+          if (col === 'social_profile_id') {
+            try { table.dropForeign('social_profile_id'); } catch (e) {}
+          } else {
+            try { table.dropColumn(col); } catch (e) {}
+          }
+        }
+      }
+      if (__has_col_up_47) {
+        try { table.dropColumn('deleted_at'); } catch (e) {}
+      }
+    });
+  }
+
+  if (await knex.schema.hasTable('social_post_reactions')) {
+    await knex.schema.alterTable('social_post_reactions', (table) => {
+      if (__has_col_up_48) {
+        try { table.dropForeign('social_profile_id'); } catch (e) {}
+      }
+      if (__has_col_up_49) {
+        try { table.dropColumn('liked_at'); } catch (e) {}
+      }
+      if (__has_col_up_50) {
+        try { table.dropUnique('social_post_reactions_likeable_unique'); } catch (e) {}
+        try { table.dropColumn('likeable_type'); table.dropColumn('likeable_id'); } catch (e) {}
+      }
+    });
+  }
+
+  if (await knex.schema.hasTable('social_follows')) {
+    await knex.schema.dropTable('social_follows');
+  }
+
+  if (await knex.schema.hasTable('legacy_social_follows') && !await knex.schema.hasTable('social_follows')) {
+    await knex.schema.renameTable('legacy_social_follows', 'social_follows');
+  }
+
+  if (await knex.schema.hasTable('social_profiles')) {
+    await knex.schema.alterTable('social_profiles', (table) => {
+      const profileDropColumns = ['profileable_type','profileable_id','username','display_name','bio','avatar','cover_photo','website','social_links','profile_type','is_verified','is_private','following_count','posts_count'];
+      for (const col of profileDropColumns) {
+        if (__has_col_up_55) {
+          if (col === 'username') {
+            try { table.dropUnique('social_profiles_username_unique'); } catch (e) {}
+          }
+          if (col === 'profile_type') {
+            try { table.dropIndex(['profile_type'], 'social_profiles_profile_type_index'); } catch (e) {}
+          }
+          try { table.dropColumn(col); } catch (e) {}
+        }
+      }
+      if (__has_col_up_13) {
+        try { table.dropColumn('deleted_at'); } catch (e) {}
+      }
+    });
+    const client = (knex.client && knex.client.config && knex.client.config.client) || '';
+    if (client && client.toString().startsWith('mysql')) {
+      const hasFt = await hasIndex(knex, 'social_profiles', 'social_profiles_search_fulltext');
+      if (hasFt) {
+        await knex.raw('ALTER TABLE social_profiles DROP INDEX social_profiles_search_fulltext');
+      }
+    }
+  }
+};

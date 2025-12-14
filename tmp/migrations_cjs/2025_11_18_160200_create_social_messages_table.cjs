@@ -2,6 +2,7 @@
 // Ported from Laravel migration to Knex up/down
 
 exports.up = async function(knex) {
+  const __has_col_up_0 = await knex.schema.hasColumn('social_threads', 'last_message_id');
   if (!(await knex.schema.hasTable('social_messages'))) {
     await knex.schema.createTable('social_messages', (table) => {
       table.bigIncrements('id');
@@ -31,7 +32,7 @@ exports.up = async function(knex) {
     });
 
     // add FK on social_threads.last_message_id -> social_messages.id if column exists
-    if (await knex.schema.hasTable('social_threads') && await knex.schema.hasColumn('social_threads', 'last_message_id')) {
+    if (await knex.schema.hasTable('social_threads') && __has_col_up_0) {
       try {
         await knex.schema.alterTable('social_threads', (table) => { table.foreign('last_message_id').references('social_messages.id').onDelete('SET NULL'); });
       } catch (e) {}
@@ -40,7 +41,7 @@ exports.up = async function(knex) {
 };
 
 exports.down = async function(knex) {
-  if (await knex.schema.hasTable('social_threads') && await knex.schema.hasColumn('social_threads', 'last_message_id')) {
+  if (await knex.schema.hasTable('social_threads') && __has_col_up_0) {
     try { await knex.schema.alterTable('social_threads', (table) => { table.dropForeign(['last_message_id']); }); } catch (e) {}
   }
   await knex.schema.dropTableIfExists('social_messages');

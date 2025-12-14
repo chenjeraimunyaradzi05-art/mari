@@ -1,0 +1,153 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Source API",
+    "version": "1.0.0",
+    "description": "Interactive documentation for the Source platform APIs."
+  },
+  "servers": [
+    {
+      "url": "https://example.com",
+      "description": "Primary production server"
+    }
+  ],
+  "paths": {
+    "/api/resume/parse": {
+      "post": {
+        "summary": "Parse resume file and extract information",
+        "tags": ["AI - Resume Parser"],
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resume": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Resume file (PDF, DOC, DOCX)"
+                  }
+                },
+                "required": ["resume"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resume parsed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "name": {"type": "string", "example": "John Doe"},
+                        "email": {"type": "string", "format": "email", "example": "john@example.com"},
+                        "phone": {"type": "string", "example": "+1234567890"},
+                        "summary": {"type": "string"},
+                        "skills": {"type": "array", "items": {"type": "string"}},
+                        "experience": {"type": "array", "items": {"type": "object"}},
+                        "education": {"type": "array", "items": {"type": "object"}}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {"description": "Validation error"}
+        }
+      }
+    },
+    "/api/jobs/recommendations": {
+      "get": {
+        "summary": "Get AI-powered job recommendations",
+        "tags": ["AI - Job Matching"],
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {"type": "integer", "default": 10}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job recommendations retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "job_id": {"type": "integer"},
+                          "title": {"type": "string"},
+                          "match_score": {"type": "number"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/career/insights": {
+      "get": {
+        "summary": "Get AI-powered career insights",
+        "tags": ["AI - Career Insights"],
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "Career insights retrieved"}
+        }
+      }
+    },
+    "/api/jobs/generate-description": {
+      "post": {
+        "summary": "Generate AI-powered job description",
+        "tags": ["AI - Smart Posting"],
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {"type": "string", "example": "Senior Laravel Developer"},
+                  "experience": {"type": "string", "example": "senior"}
+                },
+                "required": ["title", "experience"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Job description generated"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}
