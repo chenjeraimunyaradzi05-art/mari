@@ -16,11 +16,26 @@ function parsePhpController(filePath) {
   if (!clsMatch) return null;
   const namespace = nsMatch ? nsMatch[1].trim() : '';
   const className = clsMatch[1];
-  const methodRegex = /public\s+function\s+(\w+)\s*\(/g;
+  const methodRegex = /public\s+function\s+(\w+)\s*\([^)]*\)\s*\{/g;
   const methods = [];
+  const methodBodies = {};
   let m;
-  while ((m = methodRegex.exec(s))) methods.push(m[1]);
-  return { namespace, className, methods };
+  while ((m = methodRegex.exec(s))) {
+    const name = m[1];
+    methods.push(name);
+    // crude extract: find opening brace position and capture until matching closing brace
+    const start = m.index + m[0].length - 1; // position of '{'
+    let depth = 1;
+    let i = start + 1;
+    while (i < s.length && depth > 0) {
+      if (s[i] === '{') depth++;
+      else if (s[i] === '}') depth--;
+      i++;
+    }
+    const body = s.slice(start + 1, i - 1).trim();
+    methodBodies[name] = body;
+  }
+  return { namespace, className, methods, methodBodies };
 }
 
 function writeControllerStub(info, srcRoot) {
@@ -32,6 +47,13 @@ function writeControllerStub(info, srcRoot) {
   lines.push(`// Auto-generated stub for ${info.namespace}\\${info.className}`);
   lines.push('');
   info.methods.forEach((m) => {
+    const phpBody = info.methodBodies && info.methodBodies[m] ? info.methodBodies[m] : '';
+    if (phpBody) {
+      lines.push('/**');
+      lines.push(' * Original PHP method body (for reference):');
+      phpBody.split('\n').forEach((ln) => lines.push(' * ' + ln.replace(/\r$/, '')));
+      lines.push(' */');
+    }
     lines.push(`export async function ${m}(req, res) {`);
     lines.push("  // TODO: port logic from PHP controller method");
     lines.push("  return new Response(JSON.stringify({ message: 'Not implemented' }), { status: 501 });");
