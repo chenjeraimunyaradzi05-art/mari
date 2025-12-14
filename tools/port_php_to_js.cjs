@@ -87,11 +87,9 @@ function parseRoutesAndGenerate(routeFile, srcRoot) {
   for (const f of files) {
     const info = parsePhpController(f);
     if (!info) continue;
-    // only port Api namespace for first pass
-    if (info.namespace && info.namespace.includes('Api')) {
-      const out = writeControllerStub(info, srcRoot);
-      console.log('Wrote', out);
-    }
+    // port all namespaces
+    const out = writeControllerStub(info, srcRoot);
+    console.log('Wrote', out);
   }
 
   // parse route files
