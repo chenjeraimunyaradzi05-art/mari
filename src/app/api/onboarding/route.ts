@@ -30,13 +30,40 @@ let onboardingData = {
   recommendations: { supports: [] }
 };
 
+// Simple in-memory list of onboarding submissions for testing/demo purposes
+const submissions: Array<{ id: number; payload: any; created_at: string }> = [];
+
+function validatePayload(body: any) {
+  const errors: Record<string, string> = {};
+  if (!body || typeof body !== 'object') {
+    errors.body = 'Invalid payload';
+    return errors;
+  }
+  if (!body.name || String(body.name).trim().length < 2) errors.name = 'Name is required (min 2 chars)';
+  const allowed = ['member', 'creator', 'business', 'student', 'jobseeker', 'parent'];
+  if (!body.role || !allowed.includes(body.role)) errors.role = `Role must be one of: ${allowed.join(', ')}`;
+  if (!body.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email)) errors.email = 'Valid email is required';
+  return errors;
+}
+
 export async function GET() {
   return NextResponse.json(onboardingData);
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  // Update dummy data for demonstration
-  onboardingData = { ...onboardingData, ...body };
-  return NextResponse.json(onboardingData);
+  const errors = validatePayload(body);
+  if (Object.keys(errors).length) {
+    return NextResponse.json({ ok: false, errors }, { status: 422 });
+  }
+
+  // Persist submission in-memory (demo)
+  const id = submissions.length + 1;
+  const record = { id, payload: body, created_at: new Date().toISOString() };
+  submissions.push(record);
+
+  // Optionally update onboardingData snapshot for preview endpoints
+  onboardingData = { ...onboardingData, user: { ...onboardingData.user, ...body } };
+
+  return NextResponse.json({ ok: true, id, onboarding: record }, { status: 201 });
 }
