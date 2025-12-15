@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { ensureCorrelationId } from '@/lib/metrics';
+import { authorizeByRole } from '@/lib/rbac';
 
 const PUBLIC_PATHS = [
   '/',
@@ -93,6 +94,14 @@ export async function middleware(request: NextRequest) {
 
   const response = NextResponse.next();
   response.headers.set('x-correlation-id', correlationId);
+  // 3. RBAC enforcement for role-protected routes
+  const rbac = authorizeByRole(token, pathname);
+  if (rbac) {
+    // rbacs returns a NextResponse (redirect for pages or 403 JSON for APIs)
+    rbac.headers.set('x-correlation-id', correlationId);
+    rbac.headers.set('x-locale', locale);
+    return rbac
+  }
   return response;
 }
 
