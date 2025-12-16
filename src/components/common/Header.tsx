@@ -14,7 +14,7 @@ export default function Header(){
             <li><Link href="/" className="text-gray-700 hover:text-emerald-600">Home</Link></li>
             <li><Link href="/dashboard" className="text-gray-700 hover:text-emerald-600">Dashboard</Link></li>
             <li><Link href="/social/feed" className="text-gray-700 hover:text-emerald-600">Feed</Link></li>
-            <li><Link href="/api/auth/signin" className="text-sm font-medium text-emerald-700">Login</Link></li>
+            <li><Link href="/login" className="text-sm font-medium text-emerald-700">Login</Link></li>
           </ul>
         </nav>
       </div>
