@@ -155,7 +155,7 @@ athena-frontend/
 │   ├── images/
 │   ├── icons/
 │   └── fonts/
-├── middleware.ts                 # Next.js middleware (auth, routing)
+├── proxy.ts                      # Root proxy shim (forwards to `app/proxy.ts`) — Next.js 16 proxy pattern (auth, routing)
 ├── next.config.ts
 ├── tsconfig.json
 ├── tailwind.config.ts
@@ -637,7 +637,7 @@ class OnboardingController extends Controller {
 **Objective:** Implement role-based access control with Next.js middleware and conditional navigation
 
 ```typescript
-// middleware.ts (Next.js)
+// proxy.ts (Next.js 16 proxy pattern)
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
