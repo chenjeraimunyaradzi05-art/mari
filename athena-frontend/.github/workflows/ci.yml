@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./athena-frontend
+      - name: Build
+        run: npm run build --if-present
+        working-directory: ./athena-frontend
+      - name: Run lint
+        run: npm run lint --if-present
+        working-directory: ./athena-frontend
+      - name: Run checkout E2E (mock)
+        run: |
+          # Start mock API in background and allow it to boot
+          npm run mock-api &
+          sleep 2
+          npm run test-checkout
+        working-directory: ./athena-frontend
+      - name: Run match API integration (mock)
+        run: |
+          npm run mock-api &
+          sleep 2
+          npm run test-match
+        working-directory: ./athena-frontend
+      - name: Run onboarding integration (mock)
+        run: |
+          npm run mock-api &
+          sleep 2
+          npm run test-onboarding
+        working-directory: ./athena-frontend
+      - name: Run feed & housing integration tests
+        run: |
+          npm run mock-api &
+          sleep 2
+          npm run test-feed
+          npm run test-housing
+        working-directory: ./athena-frontend
+      - name: Run matching evaluation harness
+        run: |
+          npm run matching-eval
+        working-directory: ./athena-frontend
+      - name: Run reports integration (mock)
+        run: |
+          npm run mock-api &
+          sleep 2
+          npm run test-report
+        working-directory: ./athena-frontend
+      - name: Run AI mock integration
+        run: |
+          npm run mock-api &
+          sleep 2
+          npm run test-ai
+        working-directory: ./athena-frontend
+      - name: Run Auth Service integration
+        run: |
+          # Start auth service and run auth tests
+          (cd .. && cd auth-service && npm install) || true
+          (cd .. && cd auth-service && npm start &) || true
+          sleep 2
+          npm run test-auth-service
+        working-directory: ./athena-frontend
+      - name: Run Auth Refresh test
+        run: |
+          (cd .. && cd auth-service && npm start &) || true
+          sleep 2
+          npm run test-auth-refresh
+        working-directory: ./athena-frontend

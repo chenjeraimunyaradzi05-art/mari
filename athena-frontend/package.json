@@ -1,0 +1,44 @@
+{
+  "name": "athena-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "mock-api": "node ./mock-api/index.js",
+    "simulate-webhook": "node ./scripts/simulate-stripe-webhook.js",
+    "test-checkout": "node ./scripts/test-checkout-flow.js",
+    "matching-harness": "node ./scripts/matching/harness.js",
+    "test-match": "node ./scripts/test-match.js",
+    "test-onboarding": "node ./scripts/test-onboarding.js",
+    "matching-eval": "node ./scripts/matching/harness.js",
+    "test-report": "node ./scripts/test-report.js",
+    "test-ai": "node ./scripts/test-ai.js",
+    "test-auth-service": "node ./scripts/test-auth-service.js",
+    "test-auth-refresh": "node ./scripts/test-auth-refresh.js",
+    "test-feed": "node ./scripts/test-feed.js",
+    "test-housing": "node ./scripts/test-housing.js",
+    "load-test": "k6 run tools/load-tests/k6/script.js",
+    "ci:load-test": "docker run --rm -v %cd%:/scripts -w /scripts loadimpact/k6 run tools/load-tests/k6/script.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "next": "latest",
+    "node-fetch": "^2.7.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "zustand": "^4.4.0",
+    "prom-client": "^14.0.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "latest",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest"
+  }
+}

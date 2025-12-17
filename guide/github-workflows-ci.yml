@@ -1,0 +1,74 @@
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_password
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 3306:3306
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run Prisma migrations
+        env:
+          DATABASE_URL: mysql://test_user:test_password@localhost:3306/test_db
+        run: npx prisma migrate deploy || npx prisma migrate dev --name ci
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build Next.js
+        run: npm run build
+
+  deploy-preview:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy to Vercel (Preview)
+        uses: amondnet/vercel-action@v20
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          scope: ${{ secrets.VERCEL_ORG_ID }}

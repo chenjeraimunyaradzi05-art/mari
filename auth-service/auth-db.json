@@ -1,0 +1,32 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "email": "dev+1765814269652@example.com",
+      "name": "Dev User",
+      "password_hash": "$2a$10$LyGApq5S/x2bxgmkpYRHO.zF7exW6zRx1uFqFpkNp2zX7Ge9i08U2",
+      "created_at": "2025-12-15T15:57:49.725Z"
+    },
+    {
+      "id": 2,
+      "email": "refresh+1765814447143@example.com",
+      "name": "",
+      "password_hash": "$2a$10$UxLNNZSTlAH1xd.BRJCk5.IzZuQ1jL.QZJaYXCANcmzQAtSMhCIHy",
+      "created_at": "2025-12-15T16:00:47.218Z"
+    },
+    {
+      "id": 3,
+      "email": "ci+1765815537692@example.com",
+      "name": "",
+      "password_hash": "$2a$10$bqzpLrDDjQdrohG.dGszueCEryaH9WcLvLVQfBsImEjHqqJp11e3u",
+      "created_at": "2025-12-15T16:18:57.768Z"
+    },
+    {
+      "id": 4,
+      "email": "ci+1765815543406@example.com",
+      "name": "",
+      "password_hash": "$2a$10$8WwSs6I.4/5FYvKJYLZGT.5J.6YF0G0YBfOWPuKGMLpzAmwvSjDDS",
+      "created_at": "2025-12-15T16:19:03.482Z"
+    }
+  ]
+}

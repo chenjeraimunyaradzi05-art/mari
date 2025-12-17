@@ -1,0 +1,119 @@
+name: Playwright E2E Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: nextjs_app
+          MYSQL_USER: nextjs_user
+          MYSQL_PASSWORD: nextjs_password
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+        ports: ['3306:3306']
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+        ports: ['6379:6379']
+
+    env:
+      DATABASE_URL: mysql://nextjs_user:nextjs_password@127.0.0.1:3306/nextjs_app
+      REDIS_URL: redis://127.0.0.1:6379
+      NEXTAUTH_SECRET: ci_nextauth_secret_change_me
+      NEXTAUTH_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: guide/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('guide/package-lock.json', 'guide/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: guide
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: guide
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Wait for MySQL to be ready
+        run: npx wait-on tcp:3306 -t 120000
+
+      - name: Ensure Prisma migrations are present
+        working-directory: guide
+        run: |
+          if [ -d prisma/migrations ] && [ "$(ls -A prisma/migrations)" ]; then
+            echo "Migrations found. Proceeding to deploy."
+          else
+            echo "ERROR: No Prisma migrations found in prisma/migrations." >&2
+            echo "Create migrations locally with 'npx prisma migrate dev --name init', verify them, and commit the prisma/migrations folder before running CI." >&2
+            exit 1
+          fi
+
+      - name: Run Prisma migrations (safe deploy)
+        working-directory: guide
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: |
+          echo "Deploying committed Prisma migrations..."
+          npx prisma migrate deploy --schema=prisma/schema.prisma
+
+      - name: Show migration status (for diagnostics)
+        working-directory: guide
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npx prisma migrate status --schema=prisma/schema.prisma || true
+
+      - name: Seed database
+        run: node prisma/seed.js
+        working-directory: guide
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Start Next.js dev server
+        working-directory: guide
+        run: npm run dev &
+
+      - name: Wait for Next.js to be ready
+        run: npx wait-on http://localhost:3000 -t 120000
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+        working-directory: guide
+
+      - name: Run Playwright tests
+        run: npx playwright test --reporter=list
+        working-directory: guide
+
+      - name: Upload Playwright artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: guide/test-results/

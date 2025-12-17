@@ -1,0 +1,5 @@
+/* Port placeholder for vendor/menu-builder/style.css */
+@import url('/vendor/menu-builder/style.css');
+
+/* Small overrides (if needed) */
+#hwpwrap { padding: 8px; }

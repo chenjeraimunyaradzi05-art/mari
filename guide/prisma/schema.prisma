@@ -1,0 +1,398 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Profile {
+  id                      String    @id @default(cuid())
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personaType             String    @default("personal")
+  displayName             String
+  handle                  String    @unique
+  bio                     String?
+  avatarPath              String?
+  coverPath               String?
+  pronouns                String?
+  location                String?
+  gender                  String?
+  ageBracket              String?
+  womenSafetyMode         Boolean   @default(false)
+  privacyLevel            String    @default("public")
+  dmPolicy                String    @default("everyone")
+  tagPolicy               String    @default("everyone")
+  mentionPolicy           String    @default("everyone")
+  locationVisibility      String    @default("public")
+  goals                   Json?
+  interests               Json?
+  skills                  Json?
+  healthInterests         Json?
+  safetyOverrides         Json?
+  isPrimary               Boolean   @default(false)
+  isActive                Boolean   @default(true)
+  lastSafetyModeAppliedAt DateTime?
+  privacySettings         Json?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  deletedAt               DateTime?
+
+  @@index([userId, personaType])
+  @@index([privacyLevel])
+  @@index([womenSafetyMode])
+  @@map("profiles")
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String?   @unique
+  emailVerified  DateTime?
+  password       String?
+  image          String?
+  role           String    @default("user")
+  mfaEnabled     Boolean   @default(false)
+  mfaSecret      String?
+  mfaBackupCodes Json?
+  lastLogin      DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts                 Account[]
+  sessions                 Session[]
+  profiles                 Profile[]
+  posts                    Post[]
+  comments                 Comment[]
+  likes                    Like[]
+  reports                  Report[]
+  // social following relations
+  followers                Follow[]                  @relation("followers")
+  following                Follow[]                  @relation("following")
+  // invites
+  invitesSent              Invite[]                  @relation("InviteSender")
+  // connections
+  connectionsA             Connection[]              @relation("connA")
+  connectionsB             Connection[]              @relation("connB")
+  // sensitive terms created by this user
+  sensitiveTermsCreated    SensitiveTerm[]           @relation("sensitiveTermsCreated")
+  // blocks where this user is the blocker/blocked
+  blocksAsBlocker          Block[]                   @relation("blocker")
+  blocksAsBlocked          Block[]                   @relation("blocked")
+  // messaging
+  messages                 Message[]
+  conversationParticipants ConversationParticipant[]
+  notifications            Notification[]
+  incidentReports          IncidentReport[]
+
+  @@map("users")
+}
+
+model Conversation {
+  id            String                    @id @default(cuid())
+  title         String?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime?
+  participants  ConversationParticipant[]
+  messages      Message[]
+  lastMessageAt DateTime?
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content        String       @db.Text
+  attachments    Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([authorId])
+  @@map("messages")
+}
+
+model ModerationEvent {
+  id           String   @id @default(cuid())
+  socialPostId String?
+  eventType    String
+  actorType    String
+  actorId      String?
+  payload      Json?
+  occurredAt   DateTime @default(now())
+
+  @@index([socialPostId])
+  @@map("social_moderation_events")
+}
+
+model EnforcementAction {
+  id           String   @id @default(cuid())
+  subjectType  String
+  subjectId    String
+  actionType   String
+  status       String
+  reason       String?
+  notes        String?
+  issuedBy     String?
+  issuedByType String?
+  reportId     String?
+  createdAt    DateTime @default(now())
+
+  @@index([subjectId])
+  @@index([reportId])
+  @@map("social_enforcement_actions")
+}
+
+model TransparencyLog {
+  id         String   @id @default(cuid())
+  action     String
+  decision   String?
+  rationale  String?
+  visibility String?  @default("public")
+  createdAt  DateTime @default(now())
+
+  @@map("social_transparency_logs")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actorType String?
+  type      String
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Follow {
+  id         String   @id @default(cuid())
+  followerId String
+  follower   User     @relation("following", fields: [followerId], references: [id], onDelete: Cascade)
+  targetId   String
+  target     User     @relation("followers", fields: [targetId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([followerId, targetId])
+  @@index([targetId])
+  @@index([followerId])
+  @@map("follows")
+}
+
+model Invite {
+  id          String    @id @default(cuid())
+  senderId    String
+  sender      User      @relation("InviteSender", fields: [senderId], references: [id], onDelete: Cascade)
+  targetEmail String
+  token       String    @unique
+  message     String?
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now())
+  acceptedAt  DateTime?
+
+  @@index([targetEmail])
+  @@map("invites")
+}
+
+model Connection {
+  id        String   @id @default(cuid())
+  userAId   String
+  userA     User     @relation("connA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId   String
+  userB     User     @relation("connB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
+  @@map("connections")
+}
+
+model Report {
+  id         String    @id @default(cuid())
+  reporterId String
+  reporter   User      @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  postId     String
+  reason     String?
+  status     String    @default("open")
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([postId])
+  @@map("reports")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content     String   @db.Text
+  imagePath   String?
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  comments Comment[]
+  likes    Like[]
+
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([postId])
+  @@index([authorId])
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+  @@map("likes")
+}
+
+model SensitiveTerm {
+  id            String    @id @default(cuid())
+  term          String
+  severity      String
+  replacement   String?
+  tags          Json?
+  contexts      Json?
+  isActive      Boolean   @default(true)
+  createdBy     String?
+  createdByUser User?     @relation("sensitiveTermsCreated", fields: [createdBy], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime?
+
+  @@index([term])
+  @@map("sensitive_terms")
+}
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+
+  @@index([blockerId])
+  @@index([blockedId])
+  @@map("social_blocks")
+}
+
+model IncidentReport {
+  id          String          @id @default(cuid())
+  reporterId  String
+  reporter    User            @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  subjectId   String?
+  category    String
+  severity    String          @default("medium")
+  description String?
+  status      String          @default("open")
+  metadata    Json?
+  occurredAt  DateTime?
+  events      IncidentEvent[]
+  createdAt   DateTime        @default(now())
+
+  @@index([reporterId])
+  @@index([subjectId])
+  @@map("incident_reports")
+}
+
+model IncidentEvent {
+  id         String         @id @default(cuid())
+  incidentId String
+  incident   IncidentReport @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  action     String
+  notes      String?
+  payload    Json?
+  occurredAt DateTime       @default(now())
+
+  @@index([incidentId])
+  @@map("incident_events")
+}

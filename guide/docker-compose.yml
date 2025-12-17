@@ -1,0 +1,60 @@
+
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: laravel_to_nextjs_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: nextjs_app
+      MYSQL_USER: nextjs_user
+      MYSQL_PASSWORD: nextjs_password
+    command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: laravel_to_nextjs_cache
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laravel_to_nextjs_app
+    ports:
+      - '3000:3000'
+    environment:
+      DATABASE_URL: mysql://nextjs_user:nextjs_password@mysql:3306/nextjs_app
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: your_nextauth_secret_change_this_in_production
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: development
+      PRISMA_QUERY_ENGINE_LIBRARY: /app/node_modules/.prisma/client/libquery_engine-debian-openssl-1.1.x.so.node
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -lc "npx prisma generate && npm run dev"
+
+volumes:
+  mysql_data:

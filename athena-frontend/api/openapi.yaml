@@ -1,0 +1,94 @@
+openapi: 3.0.1
+info:
+  title: ATHENA Frontend Mock API
+  version: 0.1.0
+servers:
+  - url: http://localhost:4001
+paths:
+  /api/login:
+    post:
+      summary: Login or create dev user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/onboarding:
+    post:
+      summary: Submit onboarding data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+  /api/jobs:
+    get:
+      summary: List jobs (stub)
+      responses:
+        '200':
+          description: OK
+  /api/housing:
+    get:
+      summary: List properties (stub)
+      responses:
+        '200':
+          description: OK
+  /api/stripe/create-session:
+    post:
+      summary: Create a mock checkout session (dev only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan:
+                  type: string
+                user_id:
+                  type: integer
+      responses:
+        '200':
+          description: returns { id, url }
+  /api/stripe/webhook:
+    post:
+      summary: Webhook endpoint to receive mock events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+  /api/match/score:
+    post:
+      summary: Score jobs for a profile (MVP)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile_id:
+                  type: integer
+                job_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: OK
