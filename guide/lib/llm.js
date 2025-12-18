@@ -7,7 +7,8 @@ function getLLMProvider() {
 }
 
 function getLLMModel() {
-  return process.env.LLM_MODEL || process.env.NEXT_PUBLIC_LLM_MODEL || 'claude-sonnet-4.5'
+  // Respect FORCE_LLM_MODEL env var which forces a model globally across clients.
+  return process.env.FORCE_LLM_MODEL || process.env.LLM_MODEL || process.env.NEXT_PUBLIC_LLM_MODEL || 'claude-sonnet-4.5'
 }
 
 async function generateCompletion(prompt, opts) {

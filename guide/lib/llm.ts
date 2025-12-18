@@ -8,7 +8,8 @@ export function getLLMProvider(): Provider {
 }
 
 export function getLLMModel(): string {
-  return (process.env.LLM_MODEL || process.env.NEXT_PUBLIC_LLM_MODEL || 'claude-sonnet-4.5')
+  // FORCE_LLM_MODEL, when set, overrides any other model setting to force a model globally.
+  return (process.env.FORCE_LLM_MODEL || process.env.LLM_MODEL || process.env.NEXT_PUBLIC_LLM_MODEL || 'claude-sonnet-4.5')
 }
 
 export async function generateCompletion(prompt: string, opts?: { model?: string; temperature?: number }) {

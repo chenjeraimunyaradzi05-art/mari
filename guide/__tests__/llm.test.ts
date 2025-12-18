@@ -20,4 +20,21 @@ describe('LLM wrapper', () => {
     delete process.env.LLM_PROVIDER
     delete process.env.LLM_MODEL
   })
+
+  it('respects FORCE_LLM_MODEL override for getLLMModel', () => {
+    process.env.FORCE_LLM_MODEL = 'forced-model'
+    process.env.LLM_MODEL = 'other-model'
+    expect(getLLMModel()).toBe('forced-model')
+    delete process.env.FORCE_LLM_MODEL
+    delete process.env.LLM_MODEL
+  })
+
+  it('respects FORCE_LLM_MODEL for generateCompletion with mock provider', async () => {
+    process.env.LLM_PROVIDER = 'mock'
+    process.env.FORCE_LLM_MODEL = 'forced-model'
+    const res = await generateCompletion('Hello X')
+    expect(res.text.startsWith('[mock:forced-model]')).toBeTruthy()
+    delete process.env.LLM_PROVIDER
+    delete process.env.FORCE_LLM_MODEL
+  })
 })
