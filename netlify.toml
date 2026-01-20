@@ -11,14 +11,8 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Redirect API calls to backend
-[[redirects]]
-  from = "/api/*"
-  to = "https://api.athena.com/api/:splat"
-  status = 200
-  force = true
-
-# Handle Next.js routing
+# Handle Next.js routing - API calls go through Next.js rewrites
+# Set NEXT_PUBLIC_API_URL in Netlify environment variables
 [[redirects]]
   from = "/*"
   to = "/.netlify/functions/___netlify-handler"
