@@ -90,7 +90,8 @@ import { register } from './utils/metrics';
 import { initializeSocketHandlers } from './services/socket.service';
 // import { initializeOpenSearch } from './utils/opensearch'; // Disabled - needs OpenSearch
 import { presenceService } from './services/presence.service';
-import { startAllWorkers, stopAllWorkers } from './services/workers.service';
+// Workers are dynamically imported to avoid Redis connection when disabled
+// import { startAllWorkers, stopAllWorkers } from './services/workers.service';
 
 // Initialize Express app
 const app: Application = express();
@@ -120,8 +121,10 @@ let isShuttingDown = false;
 // Initialize background workers (video processing, notifications, etc.)
 // Disabled by default - requires Redis. Set ENABLE_WORKERS=true to enable
 if (process.env.ENABLE_WORKERS === 'true') {
-  startAllWorkers().catch((err: Error) => {
-    logger.error('Failed to start background workers', err);
+  import('./services/workers.service').then(({ startAllWorkers }) => {
+    startAllWorkers().catch((err: Error) => {
+      logger.error('Failed to start background workers', err);
+    });
   });
 }
 
@@ -449,12 +452,15 @@ if (require.main === module) {
     // Give load balancers time to stop routing traffic
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // Stop background workers
-    try {
-      await stopAllWorkers();
-      logger.info('Background workers stopped');
-    } catch (err) {
-      logger.error('Error stopping workers', err);
+    // Stop background workers (only if enabled)
+    if (process.env.ENABLE_WORKERS === 'true') {
+      try {
+        const { stopAllWorkers } = await import('./services/workers.service');
+        await stopAllWorkers();
+        logger.info('Background workers stopped');
+      } catch (err) {
+        logger.error('Error stopping workers', err);
+      }
     }
 
     // Cleanup presence service (remove all presence data for this instance)
