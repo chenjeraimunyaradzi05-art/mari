@@ -5,15 +5,16 @@
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
+  NEXT_PUBLIC_API_URL = "https://mari-production-3246.up.railway.app"
 
 # Enable Next.js runtime
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Redirect API calls to backend (update URL for production)
+# Redirect API calls to backend
 [[redirects]]
   from = "/api/*"
-  to = "${NEXT_PUBLIC_API_URL}/:splat"
+  to = "https://mari-production-3246.up.railway.app/:splat"
   status = 200
   force = true
 

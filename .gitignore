@@ -67,3 +67,6 @@ ENV/
 *.aab
 *.ipa
 .expo/
+
+# Local Netlify folder
+.netlify
