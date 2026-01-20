@@ -9,7 +9,8 @@ import { prisma } from '../utils/prisma';
 import { getRedisClient } from '../utils/cache';
 import { getOpenSearchClient } from '../utils/opensearch';
 import { mlService } from '../services/ml.service';
-import { getAllQueueStats } from '../utils/queue';
+// Queue utils are dynamically imported to avoid Redis connection when workers disabled
+// import { getAllQueueStats } from '../utils/queue';
 import { logger } from '../utils/logger';
 import os from 'os';
 
@@ -239,7 +240,16 @@ async function checkMLService(): Promise<ComponentHealth> {
 }
 
 async function checkQueues(): Promise<ComponentHealth> {
+  // Only check queues if workers are enabled
+  if (process.env.ENABLE_WORKERS !== 'true') {
+    return {
+      status: 'up',
+      message: 'Queue workers disabled',
+    };
+  }
+  
   try {
+    const { getAllQueueStats } = await import('../utils/queue');
     const stats = await getAllQueueStats();
     
     // Check for any queues with high failure rates
