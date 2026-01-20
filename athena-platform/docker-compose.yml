@@ -1,0 +1,242 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # PRIMARY DATABASE
+  # ===========================================
+  db:
+    image: postgres:16-alpine
+    container_name: athena_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: athena_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # REDIS - CACHING & QUEUE
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: athena_redis
+    restart: always
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # OPENSEARCH - FULL-TEXT SEARCH
+  # ===========================================
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: athena_opensearch
+    restart: always
+    environment:
+      - cluster.name=athena-cluster
+      - node.name=opensearch-node1
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "DISABLE_SECURITY_PLUGIN=true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ===========================================
+  # OPENSEARCH DASHBOARDS (Optional UI)
+  # ===========================================
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.0
+    container_name: athena_opensearch_dashboards
+    restart: always
+    environment:
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - "DISABLE_SECURITY_DASHBOARDS_PLUGIN=true"
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  # ===========================================
+  # ML SERVICE (Python FastAPI)
+  # ===========================================
+  ml-service:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile
+      target: development
+    container_name: athena_ml
+    restart: always
+    environment:
+      - DEBUG=true
+      - MODEL_PATH=/app/models
+      - NODE_SERVICE_URL=http://server:3001
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ml:/app
+      - ml_models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================
+  # NODE.JS SERVER
+  # ===========================================
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: athena_server
+    restart: always
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/athena_dev
+      - REDIS_URL=redis://redis:6379
+      - OPENSEARCH_NODE=http://opensearch:9200
+      - ML_SERVICE_URL=http://ml-service:8000
+      - PORT=3001
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # NEXT.JS CLIENT
+  # ===========================================
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: athena_client
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+      - NEXT_PUBLIC_WS_URL=ws://localhost:3001
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - server
+
+  # ===========================================
+  # BACKGROUND WORKERS
+  # ===========================================
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: athena_worker
+    restart: always
+    command: ["node", "dist/workers/index.js"]
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/athena_dev
+      - REDIS_URL=redis://redis:6379
+      - OPENSEARCH_NODE=http://opensearch:9200
+      - ML_SERVICE_URL=http://ml-service:8000
+      - WORKER_CONCURRENCY=5
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ===========================================
+  # LOCALSTACK (AWS S3 MOCK)
+  # ===========================================
+  localstack:
+    image: localstack/localstack:latest
+    container_name: athena_localstack
+    restart: always
+    environment:
+      - SERVICES=s3
+      - DEFAULT_REGION=ap-southeast-2
+      - DATA_DIR=/tmp/localstack/data
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/tmp/localstack
+
+  # ===========================================
+  # ADMINER (DATABASE GUI)
+  # ===========================================
+  adminer:
+    image: adminer
+    container_name: athena_adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+  # ===========================================
+  # MAILHOG (EMAIL TESTING)
+  # ===========================================
+  mailhog:
+    image: mailhog/mailhog
+    container_name: athena_mailhog
+    restart: always
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  db_data:
+  redis_data:
+  opensearch_data:
+  ml_models:
+  localstack_data:

@@ -1,0 +1,20 @@
+-- Minimal migration for Phase 4/5/6/7 schema sync
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'Region') THEN
+    CREATE TYPE "Region" AS ENUM ('ANZ', 'US', 'SEA', 'MEA');
+  END IF;
+END $$;
+
+ALTER TABLE "Subscription" ADD COLUMN IF NOT EXISTS "currency" TEXT;
+
+ALTER TABLE "User"
+  ADD COLUMN IF NOT EXISTS "consentCookies" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "consentDataProcessing" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "consentDoNotSell" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "consentMarketing" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "consentUpdatedAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "preferredCurrency" TEXT NOT NULL DEFAULT 'AUD',
+  ADD COLUMN IF NOT EXISTS "preferredLocale" TEXT NOT NULL DEFAULT 'en-AU',
+  ADD COLUMN IF NOT EXISTS "region" "Region" NOT NULL DEFAULT 'ANZ',
+  ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'Australia/Sydney';

@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "ATHENA",
+    "slug": "athena-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "athena",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#6366f1"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.athena.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow ATHENA to access your camera to update profile photos.",
+        "NSPhotoLibraryAddUsageDescription": "Allow ATHENA to save media to your library."
+      },
+      "associatedDomains": [
+        "applinks:athena.app",
+        "applinks:www.athena.app"
+      ]
+    },
+    "android": {
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "RECEIVE_BOOT_COMPLETED"],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#6366f1"
+      },
+      "package": "com.athena.mobile",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "https",
+              "host": "athena.app"
+            },
+            {
+              "scheme": "https",
+              "host": "www.athena.app"
+            },
+            {
+              "scheme": "athena"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiUrl": "https://api.athena.com",
+      "eas": {
+        "projectId": "your-project-id"
+      }
+    },
+    "plugins": []
+  }
+}

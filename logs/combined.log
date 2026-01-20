@@ -1,0 +1,4 @@
+2026-01-12 18:27:59 [[32minfo[39m]: 🚀 ATHENA Server running on port 5000
+2026-01-12 18:27:59 [[32minfo[39m]: 📍 Environment: development
+2026-01-12 18:28:20 [[32minfo[39m]: Received SIGINT. Starting graceful shutdown...
+2026-01-12 18:28:22 [[32minfo[39m]: HTTP server closed

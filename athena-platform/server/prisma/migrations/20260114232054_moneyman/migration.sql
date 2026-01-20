@@ -1,0 +1,26 @@
+-- AlterEnum
+-- This migration adds more than one value to an enum.
+-- With PostgreSQL versions 11 and earlier, this is not possible
+-- in a single migration. This can be worked around by creating
+-- multiple migrations, each migration adding only one value to
+-- the enum.
+
+
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_USER_UPDATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_USER_DELETE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_POST_HIDE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_POST_UNHIDE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_POST_DELETE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_POST_CLEAR_REPORTS';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_COMMENT_DELETE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_GROUP_CREATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_GROUP_UPDATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_GROUP_DELETE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_GROUP_MEMBER_ROLE_UPDATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_GROUP_POST_DELETE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_EVENT_CREATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_EVENT_UPDATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_EVENT_DELETE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_JOB_UPDATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_SUBSCRIPTION_UPDATE';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_SUBSCRIPTION_GRANT';

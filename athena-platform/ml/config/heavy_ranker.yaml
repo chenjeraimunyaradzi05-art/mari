@@ -1,0 +1,24 @@
+model:
+  input_dim: 12
+  hidden_dims: [256, 128, 64]
+  dropout: 0.2
+training:
+  epochs: 20
+  batch_size: 256
+  learning_rate: 0.001
+  test_split: 0.2
+schema:
+  target: relevance_score
+  feature_columns:
+    - engagement_rate
+    - recency_hours
+    - content_quality
+    - creator_reputation
+    - user_interest_score
+    - diversity_boost
+    - completion_rate
+    - sharing_rate
+    - watch_time
+    - comment_rate
+    - profile_match
+    - session_depth

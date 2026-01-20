@@ -1,0 +1,24 @@
+model:
+  type: xgboost_regressor
+  params:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.08
+    subsample: 0.9
+    colsample_bytree: 0.9
+    objective: reg:squarederror
+training:
+  test_size: 0.2
+  random_state: 42
+schema:
+  target: career_growth_score
+  feature_columns:
+    - years_experience
+    - current_salary
+    - education_level
+    - industry_growth
+    - skills_score
+    - leadership_score
+    - certifications
+    - location_index
+    - company_size

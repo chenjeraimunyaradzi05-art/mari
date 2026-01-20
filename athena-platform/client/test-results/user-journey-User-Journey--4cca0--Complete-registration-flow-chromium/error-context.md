@@ -1,0 +1,53 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e4]:
+      - generic [ref=e7]: ATHENA
+      - heading "Welcome back" [level=1] [ref=e8]
+      - paragraph [ref=e9]: Sign in to continue your journey
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic [ref=e12]: Email
+          - textbox "Email" [ref=e13]:
+            - /placeholder: you@example.com
+        - generic [ref=e14]:
+          - generic [ref=e15]: Password
+          - generic [ref=e16]:
+            - textbox "Password" [ref=e17]:
+              - /placeholder: ••••••••
+            - button [ref=e18] [cursor=pointer]:
+              - img [ref=e19]
+        - generic [ref=e22]:
+          - generic [ref=e23]:
+            - checkbox "Remember me" [ref=e24]
+            - generic [ref=e25]: Remember me
+          - link "Forgot password?" [ref=e26] [cursor=pointer]:
+            - /url: /forgot-password
+        - button "Sign in" [ref=e27] [cursor=pointer]:
+          - text: Sign in
+          - img [ref=e28]
+      - generic [ref=e30]:
+        - generic [ref=e35]: Or continue with
+        - generic [ref=e36]:
+          - button "Google" [ref=e37] [cursor=pointer]:
+            - img [ref=e38]
+            - text: Google
+          - button "LinkedIn" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - text: LinkedIn
+      - paragraph [ref=e46]:
+        - text: Don't have an account?
+        - link "Create one free" [ref=e47] [cursor=pointer]:
+          - /url: /register
+    - generic [ref=e51]:
+      - heading "Unlock Your Potential" [level=2] [ref=e52]
+      - paragraph [ref=e53]: Join 50,000+ women transforming their careers with AI-powered tools and a supportive community.
+  - status [ref=e59]: Welcome to ATHENA!
+  - generic [ref=e60]:
+    - img [ref=e62]
+    - button "Open Tanstack query devtools" [ref=e110] [cursor=pointer]:
+      - img [ref=e111]
+  - alert [ref=e159]
+```

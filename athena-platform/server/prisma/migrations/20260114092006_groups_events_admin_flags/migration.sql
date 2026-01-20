@@ -1,0 +1,9 @@
+-- AlterTable
+ALTER TABLE "Event" ADD COLUMN     "isFeatured" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "isHidden" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "isPinned" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "Group" ADD COLUMN     "isFeatured" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "isHidden" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "isPinned" BOOLEAN NOT NULL DEFAULT false;
