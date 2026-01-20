@@ -6,10 +6,15 @@ import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import dotenv from 'dotenv';
-import { prisma } from './utils/prisma';
 
-// Load environment variables
+// Load environment variables FIRST
 dotenv.config();
+
+// Initialize Sentry for error monitoring (must be early)
+import { initSentry, Sentry } from './utils/sentry';
+initSentry();
+
+import { prisma } from './utils/prisma';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -489,6 +494,17 @@ if (require.main === module) {
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  
+  // Capture unhandled errors with Sentry
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+    Sentry.captureException(error);
+  });
+  
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled Rejection:', reason);
+    Sentry.captureException(reason as Error);
+  });
 }
 
 export default app;

@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const { i18n } = require('./next-i18next.config');
+const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
   i18n,
@@ -29,4 +30,17 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// Sentry configuration for production error tracking
+const sentryWebpackPluginOptions = {
+  // Suppresses source map uploading logs during build
+  silent: true,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  // Only upload source maps in production
+  dryRun: process.env.NODE_ENV !== 'production',
+};
+
+// Export with Sentry wrapper if DSN is configured
+module.exports = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, sentryWebpackPluginOptions)
+  : nextConfig;

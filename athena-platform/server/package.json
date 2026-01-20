@@ -24,6 +24,7 @@
     "@aws-sdk/s3-request-presigner": "^3.490.0",
     "@opensearch-project/opensearch": "^3.5.1",
     "@prisma/client": "^6.19.2",
+    "@sentry/node": "^10.35.0",
     "@types/pdfkit": "^0.17.4",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.1.0",
