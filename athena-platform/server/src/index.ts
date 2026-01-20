@@ -118,7 +118,8 @@ let isShuttingDown = false;
 // See: prisma client extensions or use queueSearchIndexing in services
 
 // Initialize background workers (video processing, notifications, etc.)
-if (process.env.ENABLE_WORKERS !== 'false') {
+// Disabled by default - requires Redis. Set ENABLE_WORKERS=true to enable
+if (process.env.ENABLE_WORKERS === 'true') {
   startAllWorkers().catch((err: Error) => {
     logger.error('Failed to start background workers', err);
   });
