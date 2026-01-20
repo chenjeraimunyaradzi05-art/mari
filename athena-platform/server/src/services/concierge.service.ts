@@ -7,10 +7,9 @@ import OpenAI from 'openai';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-});
+// Initialize OpenAI client (optional - will skip AI features if not configured)
+const apiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+const openai = apiKey ? new OpenAI({ apiKey }) : null;
 
 export interface ConciergeContext {
   userId: string;

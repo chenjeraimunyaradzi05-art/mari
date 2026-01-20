@@ -8,10 +8,10 @@ import { RekognitionClient, DetectModerationLabelsCommand } from "@aws-sdk/clien
 import { logger } from '../utils/logger';
 import { cacheGet, cacheSet } from '../utils/cache';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Initialize OpenAI client (optional - will skip AI moderation if not configured)
+const openai = process.env.OPENAI_API_KEY 
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 // Initialize Rekognition client
 const rekognition = new RekognitionClient({
