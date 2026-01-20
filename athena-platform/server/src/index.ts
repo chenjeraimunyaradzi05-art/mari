@@ -81,14 +81,14 @@ import complianceRoutes from './routes/compliance.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { requestIdMiddleware } from './middleware/requestId';
 import { responseTimeMiddleware } from './middleware/responseTime';
-import { createOpenSearchMiddleware } from './middleware/opensearch-sync';
+// import { createOpenSearchMiddleware } from './middleware/opensearch-sync'; // Disabled - needs OpenSearch
 import { createRateLimiter } from './middleware/rateLimiter';
 import { logger } from './utils/logger';
 import { register } from './utils/metrics';
 
 // Import services
 import { initializeSocketHandlers } from './services/socket.service';
-import { initializeOpenSearch } from './utils/opensearch';
+// import { initializeOpenSearch } from './utils/opensearch'; // Disabled - needs OpenSearch
 import { presenceService } from './services/presence.service';
 import { startAllWorkers, stopAllWorkers } from './services/workers.service';
 
@@ -111,8 +111,8 @@ let isShuttingDown = false;
 // INITIALIZE SERVICES
 // ===========================================
 
-// Initialize OpenSearch for full-text search
-initializeOpenSearch();
+// Initialize OpenSearch for full-text search (disabled)
+// initializeOpenSearch();
 
 // Note: OpenSearch sync is handled via Prisma middleware extension
 // See: prisma client extensions or use queueSearchIndexing in services

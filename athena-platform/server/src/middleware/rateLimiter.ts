@@ -203,8 +203,8 @@ export const apiLimiter = async (req: Request, res: Response, next: NextFunction
   let config = RATE_LIMITS.anonymous;
 
   if (authReq.user) {
-    // Determine tier based on subscription
-    const tier = authReq.user.subscriptionTier || 'FREE';
+    // Determine tier based on subscription (default to FREE if not present)
+    const tier = (authReq.user as any).subscriptionTier || 'FREE';
     if (tier.startsWith('ENTERPRISE')) {
       config = RATE_LIMITS.enterprise;
     } else if (tier.startsWith('PREMIUM')) {

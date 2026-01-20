@@ -70,7 +70,7 @@ export async function chat(
   const systemPrompt = buildSystemPrompt(userContext, context);
 
   try {
-    if (!openai.apiKey) {
+    if (!openai || !openai.apiKey) {
       return getSimulatedResponse(message, userContext);
     }
 

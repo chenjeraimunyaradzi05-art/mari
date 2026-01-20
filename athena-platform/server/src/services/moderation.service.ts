@@ -59,7 +59,7 @@ export interface SafetyScoreResult {
  * Moderate text content using OpenAI Moderation API
  */
 export async function moderateText(content: string): Promise<ModerationResult> {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.OPENAI_API_KEY || !openai) {
     logger.warn('OpenAI API key not configured, skipping moderation');
     return { flagged: false, categories: [], scores: {}, action: 'allow' };
   }

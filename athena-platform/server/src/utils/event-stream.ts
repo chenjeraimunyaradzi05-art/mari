@@ -104,7 +104,7 @@ export async function consumeEvents(
   );
 
   if (!response) return;
-  const [, messages] = response[0];
+  const [, messages] = response[0] as [string, any[]];
   for (const message of messages) {
     const event = parseEventMessage(message);
     if (!event) continue;
