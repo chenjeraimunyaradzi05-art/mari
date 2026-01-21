@@ -575,6 +575,22 @@ export function useUnlikePost() {
   });
 }
 
+export function useDeletePost() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: postApi.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['post'] });
+      toast.success('Post deleted');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to delete post');
+    },
+  });
+}
+
 export function useCommentOnPost() {
   const queryClient = useQueryClient();
 

@@ -131,9 +131,13 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
     const { type } = req.params;
     const file = req.file;
 
+    logger.info(`Upload request received: type=${type}, hasFile=${!!file}`);
+
     if (!file) {
       throw new ApiError(400, 'No file provided');
     }
+
+    logger.info(`File details: name=${file.originalname}, size=${file.size}, mimetype=${file.mimetype}`);
 
     const config = FILE_CONFIGS[type as keyof typeof FILE_CONFIGS];
     if (!config) {
@@ -178,37 +182,55 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
 
     let publicUrl: string;
 
-    // Use AWS S3 if credentials are present
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-      await s3Client.send(
-        new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
-          Body: processedBuffer,
-          ContentType: contentType,
-          Metadata: {
-            userId: req.user!.id,
-            originalName: file.originalname,
-          },
-        })
-      );
-      publicUrl = `${CDN_URL}/${key}`;
-    } else {
-      // Fallback to local storage
+    // Helper function to save file locally
+    const saveLocally = async (buffer: Buffer): Promise<string> => {
       const uploadsDir = path.join(__dirname, '../../uploads');
       const filePath = path.join(uploadsDir, key);
       const dir = path.dirname(filePath);
 
+      logger.info(`Saving file locally: uploadsDir=${uploadsDir}, filePath=${filePath}`);
+
       if (!fs.existsSync(dir)) {
+        logger.info(`Creating directory: ${dir}`);
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      fs.writeFileSync(filePath, processedBuffer);
+      fs.writeFileSync(filePath, buffer);
+      logger.info(`File written successfully: ${filePath}, size=${buffer.length}`);
       
       const apiUrl = process.env.API_URL || 'http://localhost:5000';
-      publicUrl = `${apiUrl}/uploads/${key}`;
+      const localUrl = `${apiUrl}/uploads/${key}`;
       
-      logger.info(`File saved locally (no S3 creds): ${filePath}`);
+      logger.info(`File saved locally: ${filePath}, URL: ${localUrl}`);
+      return localUrl;
+    };
+
+    logger.info(`AWS credentials check: hasKeyId=${!!process.env.AWS_ACCESS_KEY_ID}, hasSecret=${!!process.env.AWS_SECRET_ACCESS_KEY}`);
+
+    // Try S3 if credentials are present, fallback to local storage on failure
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      try {
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: key,
+            Body: processedBuffer,
+            ContentType: contentType,
+            Metadata: {
+              userId: req.user!.id,
+              originalName: file.originalname,
+            },
+          })
+        );
+        publicUrl = `${CDN_URL}/${key}`;
+      } catch (s3Error) {
+        // S3 failed, fallback to local storage
+        logger.warn(`S3 upload failed, falling back to local storage: ${(s3Error as Error).message}`);
+        publicUrl = await saveLocally(processedBuffer);
+      }
+    } else {
+      // No S3 credentials, use local storage
+      publicUrl = await saveLocally(processedBuffer);
     }
 
     // Update user profile if avatar
@@ -324,20 +346,48 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
     const fileExtension = path.extname(file.originalname);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype,
-        Metadata: {
-          userId: req.user!.id,
-          originalName: file.originalname,
-        },
-      })
-    );
+    let publicUrl: string;
 
-    const publicUrl = `${CDN_URL}/${key}`;
+    // Helper function to save file locally
+    const saveLocally = async (buffer: Buffer): Promise<string> => {
+      const uploadsDir = path.join(__dirname, '../../uploads');
+      const filePath = path.join(uploadsDir, key);
+      const dir = path.dirname(filePath);
+
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      fs.writeFileSync(filePath, buffer);
+      
+      const apiUrl = process.env.API_URL || 'http://localhost:5000';
+      logger.info(`Resume saved locally: ${filePath}`);
+      return `${apiUrl}/uploads/${key}`;
+    };
+
+    // Try S3 if credentials are present, fallback to local storage on failure
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      try {
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: key,
+            Body: file.buffer,
+            ContentType: file.mimetype,
+            Metadata: {
+              userId: req.user!.id,
+              originalName: file.originalname,
+            },
+          })
+        );
+        publicUrl = `${CDN_URL}/${key}`;
+      } catch (s3Error) {
+        logger.warn(`S3 resume upload failed, falling back to local storage: ${(s3Error as Error).message}`);
+        publicUrl = await saveLocally(file.buffer);
+      }
+    } else {
+      publicUrl = await saveLocally(file.buffer);
+    }
 
     // Store resume as media asset - URL is returned to client
     // Resume can be fetched from MediaAsset by type 'resume'
@@ -400,22 +450,52 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
       const fileExtension = contentType === 'image/webp' ? '.webp' : path.extname(file.originalname);
       const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
-      await s3Client.send(
-        new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
-          Body: processedBuffer,
-          ContentType: contentType,
-          Metadata: {
-            userId: req.user!.id,
-            originalName: file.originalname,
-          },
-        })
-      );
+      let fileUrl: string;
+
+      // Helper function to save file locally
+      const saveLocally = async (buffer: Buffer, fileKey: string): Promise<string> => {
+        const uploadsDir = path.join(__dirname, '../../uploads');
+        const filePath = path.join(uploadsDir, fileKey);
+        const dir = path.dirname(filePath);
+
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        fs.writeFileSync(filePath, buffer);
+        
+        const apiUrl = process.env.API_URL || 'http://localhost:5000';
+        logger.info(`Post image saved locally: ${filePath}`);
+        return `${apiUrl}/uploads/${fileKey}`;
+      };
+
+      // Try S3 if credentials are present, fallback to local storage on failure
+      if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+        try {
+          await s3Client.send(
+            new PutObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: key,
+              Body: processedBuffer,
+              ContentType: contentType,
+              Metadata: {
+                userId: req.user!.id,
+                originalName: file.originalname,
+              },
+            })
+          );
+          fileUrl = `${CDN_URL}/${key}`;
+        } catch (s3Error) {
+          logger.warn(`S3 post image upload failed, falling back to local storage: ${(s3Error as Error).message}`);
+          fileUrl = await saveLocally(processedBuffer, key);
+        }
+      } else {
+        fileUrl = await saveLocally(processedBuffer, key);
+      }
 
       uploadedFiles.push({
         key,
-        url: `${CDN_URL}/${key}`,
+        url: fileUrl,
         contentType,
         size: processedBuffer.length,
       });

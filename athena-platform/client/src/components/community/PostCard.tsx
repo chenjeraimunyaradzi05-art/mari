@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, Share2, MoreHorizontal } from 'lucide-react';
-import { useLikePost, useUnlikePost, useAuthStore } from '@/lib/hooks';
+import { Heart, MessageCircle, Share2, MoreHorizontal, Trash2 } from 'lucide-react';
+import { useLikePost, useUnlikePost, useDeletePost, useAuthStore } from '@/lib/hooks';
 import { Avatar } from '@/components/ui/avatar';
 import CommentSection from './CommentSection';
 
@@ -15,7 +15,30 @@ export default function PostCard({ post }: PostCardProps) {
   const { user } = useAuthStore();
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
+  const deletePost = useDeletePost();
   const [showComments, setShowComments] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleDelete = () => {
+    if (confirm('Are you sure you want to delete this post?')) {
+      deletePost.mutate(post.id);
+    }
+    setShowMenu(false);
+  };
+
+  const isOwner = user?.id === post.author?.id;
 
   const authorName =
     post?.author?.displayName ||
@@ -55,9 +78,27 @@ export default function PostCard({ post }: PostCardProps) {
             </p>
           </div>
         </div>
-        <button className="text-gray-400 hover:text-gray-600 p-1">
-          <MoreHorizontal size={20} />
-        </button>
+        {isOwner && (
+          <div className="relative" ref={menuRef}>
+            <button 
+              onClick={() => setShowMenu(!showMenu)}
+              className="text-gray-400 hover:text-gray-600 p-1"
+            >
+              <MoreHorizontal size={20} />
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10 min-w-[120px]">
+                <button
+                  onClick={handleDelete}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={16} />
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content */}

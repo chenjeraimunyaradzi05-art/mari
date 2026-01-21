@@ -59,6 +59,10 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         clearTokens();
+        // Clear persisted auth state from localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('athena-auth');
+        }
         set({
           user: null,
           accessToken: null,
