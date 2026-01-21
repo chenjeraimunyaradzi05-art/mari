@@ -159,14 +159,8 @@ const io = new SocketIOServer(httpServer, {
 // MIDDLEWARE
 // ===========================================
 
-// Security headers
-app.use(helmet());
-
-// Static uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
 // CORS - Allow multiple origins for development and configurable production list
-
+// CORS must come before other middleware that might respond to requests
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl)
@@ -174,10 +168,22 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+    // Log rejected origins for debugging
+    console.log('CORS rejected origin:', origin, 'Allowed:', allowedOrigins);
     callback(null, false);
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
 }));
+
+// Security headers (after CORS)
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+
+// Static uploads
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Request correlation ID
 app.use(requestIdMiddleware);
