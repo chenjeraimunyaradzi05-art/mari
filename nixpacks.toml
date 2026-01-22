@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs-20_x", "python3", "gcc", "gnumake", "openssl"]
+
+[phases.install]
+cmds = ["cd athena-platform/server && npm install"]
+
+[phases.build]
+cmds = ["cd athena-platform/server && npx prisma generate && npm run build"]
+
+[start]
+cmd = "cd athena-platform/server && npm start"
