@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Home,
   Briefcase,
@@ -185,9 +186,13 @@ export default function DashboardSidebar() {
 
         {/* Logo (Mobile only) */}
         <div className="lg:hidden flex items-center space-x-2 p-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-purple-500 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-lg">A</span>
-          </div>
+          <Image
+            src="/logo.png"
+            alt="ATHENA"
+            width={32}
+            height={32}
+            className="w-8 h-8 object-contain rounded-lg"
+          />
           {!sidebarCollapsed && (
             <span className="text-xl font-bold bg-gradient-to-r from-primary-500 to-purple-500 bg-clip-text text-transparent">
               ATHENA
