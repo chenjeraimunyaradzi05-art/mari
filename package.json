@@ -1,0 +1,14 @@
+{
+  "name": "athena-monorepo-root",
+  "version": "1.0.0",
+  "description": "Root deployment configuration for Athena Platform",
+  "private": true,
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "postinstall": "cd athena-platform/server && npm install",
+    "build": "cd athena-platform/server && npx prisma generate && npm run build",
+    "start": "cd athena-platform/server && npm start"
+  }
+}
