@@ -181,6 +181,7 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
     let publicUrl: string;
+    const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
 
     // Helper function to save file locally
     const saveLocally = async (buffer: Buffer): Promise<string> => {
@@ -198,8 +199,7 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
       fs.writeFileSync(filePath, buffer);
       logger.info(`File written successfully: ${filePath}, size=${buffer.length}`);
       
-      const apiUrl = process.env.API_URL || 'http://localhost:5000';
-      const localUrl = `${apiUrl}/uploads/${key}`;
+      const localUrl = `${baseUrl}/uploads/${key}`;
       
       logger.info(`File saved locally: ${filePath}, URL: ${localUrl}`);
       return localUrl;
@@ -347,6 +347,7 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
     let publicUrl: string;
+    const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
 
     // Helper function to save file locally
     const saveLocally = async (buffer: Buffer): Promise<string> => {
@@ -360,9 +361,8 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
 
       fs.writeFileSync(filePath, buffer);
       
-      const apiUrl = process.env.API_URL || 'http://localhost:5000';
       logger.info(`Resume saved locally: ${filePath}`);
-      return `${apiUrl}/uploads/${key}`;
+      return `${baseUrl}/uploads/${key}`;
     };
 
     // Try S3 if credentials are present, fallback to local storage on failure
@@ -421,6 +421,7 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
     }
 
     const config = FILE_CONFIGS.post;
+    const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
     const uploadedFiles = [];
 
     for (const file of files) {
@@ -464,9 +465,8 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
 
         fs.writeFileSync(filePath, buffer);
         
-        const apiUrl = process.env.API_URL || 'http://localhost:5000';
         logger.info(`Post image saved locally: ${filePath}`);
-        return `${apiUrl}/uploads/${fileKey}`;
+        return `${baseUrl}/uploads/${fileKey}`;
       };
 
       // Try S3 if credentials are present, fallback to local storage on failure
