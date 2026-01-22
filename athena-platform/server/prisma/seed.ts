@@ -357,38 +357,49 @@ async function main() {
 
   // Create posts
   console.log('📱 Creating posts...');
-  for (let i = 0; i < 20; i++) {
-    const author = randomElement(users);
-    const includeImage = Math.random() > 0.5;
-    
-    await prisma.post.create({
-      data: {
-        authorId: author.id,
-        type: includeImage ? PostType.IMAGE : PostType.TEXT,
-        content: randomElement(POST_CONTENT),
-        mediaUrls: includeImage ? [randomElement(POST_IMAGES)] : undefined,
-        likeCount: randomInt(0, 50),
-        commentCount: randomInt(0, 10),
-        viewCount: randomInt(10, 200),
-        isPublic: true,
-      },
-    });
+  const postCount = await prisma.post.count();
+  if (postCount === 0) {
+    for (let i = 0; i < 20; i++) {
+      const author = randomElement(users);
+      const includeImage = Math.random() > 0.5;
+      
+      await prisma.post.create({
+        data: {
+          authorId: author.id,
+          type: includeImage ? PostType.IMAGE : PostType.TEXT,
+          content: randomElement(POST_CONTENT),
+          mediaUrls: includeImage ? [randomElement(POST_IMAGES)] : undefined,
+          likeCount: randomInt(0, 50),
+          commentCount: randomInt(0, 10),
+          viewCount: randomInt(10, 200),
+          isPublic: true,
+        },
+      });
+    }
+    console.log('   Created 20 posts');
+  } else {
+    console.log(`   Skipped (already have ${postCount} posts)`);
   }
-  console.log('   Created 20 posts');
 
   // Create notifications for demo user
   console.log('🔔 Creating notifications...');
-  for (let i = 0; i < 5; i++) {
-    await prisma.notification.create({
-      data: {
-        userId: demoUser.id,
-        type: randomElement(Object.values(NotificationType)),
-        title: `Notification ${i + 1}`,
-        message: 'This is a sample notification.',
-        link: '/dashboard',
-        isRead: i < 2,
-      },
-    });
+  const notifCount = await prisma.notification.count({ where: { userId: demoUser.id } });
+  if (notifCount === 0) {
+    for (let i = 0; i < 5; i++) {
+        await prisma.notification.create({
+        data: {
+            userId: demoUser.id,
+            type: randomElement(Object.values(NotificationType)),
+            title: `Notification ${i + 1}`,
+            message: 'This is a sample notification.',
+            link: '/dashboard',
+            isRead: i < 2,
+        },
+        });
+    }
+     console.log('   Created 5 notifications');
+  } else {
+    console.log(`   Skipped (already have ${notifCount} notifications)`);
   }
 
   // Create groups (Prisma-backed)

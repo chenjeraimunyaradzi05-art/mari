@@ -8,4 +8,4 @@ cmds = ["cd athena-platform/server && npm install"]
 cmds = ["cd athena-platform/server && npx prisma generate && npm run build"]
 
 [start]
-cmd = "cd athena-platform/server && npm start"
+cmd = "cd athena-platform/server && npm run db:seed && npm start"
