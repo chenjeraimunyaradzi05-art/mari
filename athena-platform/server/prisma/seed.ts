@@ -93,6 +93,64 @@ const POST_IMAGES = [
   "https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop"
 ];
 
+const COURSES = [
+  {
+    title: 'Advanced React patterns',
+    description: 'Master modern React with hooks, context, and performance optimization techniques.',
+    type: 'certificate',
+    durationMonths: 2,
+    studyMode: ['online', 'self-paced'],
+    cost: 199,
+    fundingOptions: [],
+    employmentRate: 92,
+    avgStartingSalary: 110000
+  },
+  {
+    title: 'Data Science Bootcamp',
+    description: 'Intensive 12-week program covering Python, SQL, Machine Learning, and Neural Networks.',
+    type: 'bootcamp',
+    durationMonths: 3,
+    studyMode: ['full-time', 'online'],
+    cost: 12000,
+    fundingOptions: ['ISA', 'Payment Plan'],
+    employmentRate: 88,
+    avgStartingSalary: 95000
+  },
+  {
+    title: 'Digital Marketing diploma',
+    description: 'Learn SEO, SEM, content marketing, and analytics to drive growth for any business.',
+    type: 'diploma',
+    durationMonths: 6,
+    studyMode: ['part-time', 'online'],
+    cost: 4500,
+    fundingOptions: ['Payment Plan'],
+    employmentRate: 85,
+    avgStartingSalary: 75000
+  },
+  {
+    title: 'UX/UI Design Fundamentals',
+    description: 'Build a portfolio of beautiful, functional user interfaces using Figma and design principles.',
+    type: 'certificate',
+    durationMonths: 2,
+    studyMode: ['self-paced'],
+    cost: 499,
+    fundingOptions: [],
+    employmentRate: 89,
+    avgStartingSalary: 85000
+  },
+  {
+    title: 'Financial Analysis for Leaders',
+    description: 'Understand balance sheets, P&L, and cash flow to make better business decisions.',
+    type: 'short_course',
+    durationMonths: 1,
+    studyMode: ['online'],
+    cost: 299,
+    fundingOptions: [],
+    employmentRate: 95,
+    avgStartingSalary: 120000
+  }
+];
+
 // ==========================================
 // MAIN SEED FUNCTION
 // ==========================================
@@ -470,7 +528,40 @@ async function main() {
   } else {
     console.log(`   Skipped (already have ${eventCount} events)`);
   }
-
+  // Create courses
+  console.log('🎓 Creating courses...');
+  const courseCount = await prisma.course.count();
+  if (courseCount === 0) {
+    for (const courseData of COURSES) {
+      const org = randomElement(orgs); // Associate with one of the organizations as provider
+      const slug = generateSlug(courseData.title);
+      
+      await prisma.course.create({
+        data: {
+          title: courseData.title,
+          slug: slug,
+          description: courseData.description,
+          organizationId: org.id,
+          providerName: org.name,
+          type: courseData.type,
+          durationMonths: courseData.durationMonths,
+          studyMode: courseData.studyMode,
+          cost: courseData.cost,
+          fundingOptions: courseData.fundingOptions,
+          employmentRate: courseData.employmentRate,
+          avgStartingSalary: courseData.avgStartingSalary,
+          intakeDates: [
+            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+          ],
+          isActive: true
+        }
+      });
+    }
+    console.log(`   Created ${COURSES.length} courses`);
+  } else {
+    console.log(`   Skipped (already have ${courseCount} courses)`);
+  }
   console.log('\n✅ Database seed completed!\n');
   console.log('🔑 Demo Accounts:');
   console.log('   - Admin: admin@athena.com / Demo123!');
