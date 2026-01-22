@@ -8,6 +8,7 @@ import { SubscriptionTier } from '@/lib/types';
 
 interface PaywallGateProps {
   children: React.ReactNode;
+  feature?: string;
   featureName?: string;
   minTier?: SubscriptionTier;
 }
