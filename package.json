@@ -9,6 +9,7 @@
   "scripts": {
     "postinstall": "cd athena-platform/server && npm install",
     "build": "cd athena-platform/server && npx prisma generate && npm run build",
-    "start": "cd athena-platform/server && npm start"
+    "start": "cd athena-platform/server && npm start",
+    "db:seed": "cd athena-platform/server && npm run db:seed"
   }
 }
