@@ -260,7 +260,12 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const uploadsPath = path.join(process.cwd(), 'uploads');
+console.log('Mounting static uploads at /uploads from:', uploadsPath);
+app.use('/uploads', (req, res, next) => {
+  console.log(`Static file request: ${req.method} ${req.path}`);
+  next();
+}, express.static(uploadsPath));
 
 // ===========================================
 // ROUTES
