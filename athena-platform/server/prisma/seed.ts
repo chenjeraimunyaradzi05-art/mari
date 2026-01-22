@@ -85,6 +85,14 @@ const POST_CONTENT = [
   "Looking for advice on negotiating salary. Any tips from the community?",
 ];
 
+const POST_IMAGES = [
+  "https://images.unsplash.com/photo-1573164713988-8665fc963095?w=800&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=800&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&auto=format&fit=crop",
+  "https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop"
+];
+
 // ==========================================
 // MAIN SEED FUNCTION
 // ==========================================
@@ -293,11 +301,14 @@ async function main() {
   console.log('📱 Creating posts...');
   for (let i = 0; i < 20; i++) {
     const author = randomElement(users);
+    const includeImage = Math.random() > 0.5;
+    
     await prisma.post.create({
       data: {
         authorId: author.id,
-        type: PostType.TEXT,
+        type: includeImage ? PostType.IMAGE : PostType.TEXT,
         content: randomElement(POST_CONTENT),
+        mediaUrls: includeImage ? [randomElement(POST_IMAGES)] : undefined,
         likeCount: randomInt(0, 50),
         commentCount: randomInt(0, 10),
         viewCount: randomInt(10, 200),

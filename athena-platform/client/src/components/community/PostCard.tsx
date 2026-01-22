@@ -18,6 +18,7 @@ export default function PostCard({ post }: PostCardProps) {
   const deletePost = useDeletePost();
   const [showComments, setShowComments] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [mediaError, setMediaError] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -107,18 +108,20 @@ export default function PostCard({ post }: PostCardProps) {
       </div>
 
       {/* Media */}
-      {Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0 && (
+      {Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0 && !mediaError && (
         <div className="mt-2">
           {String(post.type).toUpperCase() === 'VIDEO' ? (
             <video
               src={post.mediaUrls[0]}
               controls
+              onError={() => setMediaError(true)}
               className="w-full max-h-[520px] object-contain bg-black"
             />
           ) : (
             <img
               src={post.mediaUrls[0]}
               alt="Post media"
+              onError={() => setMediaError(true)}
               className="w-full h-auto object-cover max-h-[520px]"
             />
           )}
