@@ -32,7 +32,6 @@ export interface Post {
 interface CreatePostValues {
   content: string;
   type?: string;
-  visibility?: string;
   mediaUrls?: string[];
 }
 

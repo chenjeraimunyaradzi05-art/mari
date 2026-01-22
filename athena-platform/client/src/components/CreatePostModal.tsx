@@ -20,8 +20,6 @@ import {
 import { useCreatePost, useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { RichTextEditor } from '@/components/ui/RichTextEditor';
-import { mediaApi } from '@/lib/api';
-import { toast } from 'sonner';
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -50,67 +48,24 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
   const [showVisibilityMenu, setShowVisibilityMenu] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const { mutate: createPost, isPending } = useCreatePost();
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!content.trim()) return;
 
-    try {
-      let mediaUrls: string[] = [];
-
-      // Upload attachments first if any
-      if (attachments.length > 0) {
-        setIsUploading(true);
-        const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
-        const videoFiles = attachments.filter(f => f.type.startsWith('video/'));
-
-        // Upload images
-        for (const file of imageFiles) {
-          try {
-            const response = await mediaApi.upload('post', file);
-            if (response.data?.data?.url) {
-              mediaUrls.push(response.data.data.url);
-            }
-          } catch (err: any) {
-            console.error('Failed to upload image:', err);
-            toast.error(`Failed to upload ${file.name}`);
-          }
-        }
-
-        // Upload videos
-        for (const file of videoFiles) {
-          try {
-            const response = await mediaApi.upload('video', file);
-            if (response.data?.data?.url) {
-              mediaUrls.push(response.data.data.url);
-            }
-          } catch (err: any) {
-            console.error('Failed to upload video:', err);
-            toast.error(`Failed to upload ${file.name}`);
-          }
-        }
-        setIsUploading(false);
+    createPost(
+      { content, visibility, type: postType },
+      {
+        onSuccess: () => {
+          setContent('');
+          setAttachments([]);
+          setPreviewUrls([]);
+          onClose();
+        },
       }
-
-      createPost(
-        { content, visibility, type: postType, mediaUrls },
-        {
-          onSuccess: () => {
-            setContent('');
-            setAttachments([]);
-            setPreviewUrls([]);
-            onClose();
-          },
-        }
-      );
-    } catch (error) {
-      console.error('Failed to create post:', error);
-      setIsUploading(false);
-    }
+    );
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,7 +236,6 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
               <Image className="w-5 h-5" />
             </button>
             <button
-              onClick={() => videoInputRef.current?.click()}
               className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               title="Add video"
             >
@@ -320,13 +274,6 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
             onChange={handleFileSelect}
             className="hidden"
           />
-          <input
-            ref={videoInputRef}
-            type="file"
-            accept="video/*"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
         </div>
 
         {/* Footer */}
@@ -336,13 +283,13 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
           </span>
           <button
             onClick={handleSubmit}
-            disabled={!content.trim() || isPending || isUploading}
+            disabled={!content.trim() || isPending}
             className="btn-primary flex items-center space-x-2 disabled:opacity-50"
           >
-            {isPending || isUploading ? (
+            {isPending ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>{isUploading ? 'Uploading...' : 'Posting...'}</span>
+                <span>Posting...</span>
               </>
             ) : (
               <>
