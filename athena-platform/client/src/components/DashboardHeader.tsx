@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   Menu,
@@ -52,9 +53,13 @@ export default function DashboardHeader() {
 
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-purple-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">A</span>
-            </div>
+            <Image
+              src="/logo.png"
+              alt="ATHENA"
+              width={40}
+              height={40}
+              className="w-10 h-10 object-contain rounded-lg"
+            />
             <span className="hidden md:block text-xl font-bold bg-gradient-to-r from-primary-500 to-purple-500 bg-clip-text text-transparent">
               ATHENA
             </span>
