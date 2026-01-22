@@ -184,7 +184,8 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
 
     // Helper function to save file locally
     const saveLocally = async (buffer: Buffer): Promise<string> => {
-      const uploadsDir = path.join(__dirname, '../../uploads');
+      // Use process.cwd() to ensure we point to the project root, NOT the transient ts-node folder
+      const uploadsDir = path.join(process.cwd(), 'uploads');
       const filePath = path.join(uploadsDir, key);
       const dir = path.dirname(filePath);
 
@@ -198,9 +199,8 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
       fs.writeFileSync(filePath, buffer);
       logger.info(`File written successfully: ${filePath}, size=${buffer.length}`);
       
-      // Return relative path so it works with Next.js rewrites and avoiding mixed content/CORS issues
-      // The Next.js frontend is configured to proxy /uploads/* to the backend
-      const localUrl = `/uploads/${key}`;
+      const apiUrl = process.env.API_URL || 'http://localhost:5000';
+      const localUrl = `${apiUrl}/uploads/${key}`;
       
       logger.info(`File saved locally: ${filePath}, URL: ${localUrl}`);
       return localUrl;
