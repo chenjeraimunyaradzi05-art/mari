@@ -40,7 +40,7 @@ export default function AIChatPage() {
       const assistantText =
         typeof data === 'string'
           ? data
-          : data?.message || data?.content || JSON.stringify(data);
+          : data?.response || data?.data?.response || data?.message || data?.content || JSON.stringify(data);
 
       setMessages((prev) => [...prev, { role: 'assistant', content: assistantText }]);
     } finally {
