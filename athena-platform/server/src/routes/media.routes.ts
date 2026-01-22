@@ -198,8 +198,9 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
       fs.writeFileSync(filePath, buffer);
       logger.info(`File written successfully: ${filePath}, size=${buffer.length}`);
       
-      const apiUrl = process.env.API_URL || 'http://localhost:5000';
-      const localUrl = `${apiUrl}/uploads/${key}`;
+      // Return relative path so it works with Next.js rewrites and avoiding mixed content/CORS issues
+      // The Next.js frontend is configured to proxy /uploads/* to the backend
+      const localUrl = `/uploads/${key}`;
       
       logger.info(`File saved locally: ${filePath}, URL: ${localUrl}`);
       return localUrl;
