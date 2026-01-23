@@ -45,7 +45,7 @@ export default function RegisterPage() {
       if (redirect && redirect.startsWith('/')) {
         router.replace(redirect);
       } else {
-        router.replace('/dashboard');
+        router.replace('/dashboard/persona');
       }
     }
   }, [isAuthenticated, isLoading, router, searchParams]);

@@ -19,6 +19,10 @@ const nextConfig = {
         hostname: '*.cloudfront.net',
       },
       {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
+      {
         protocol: 'http',
         hostname: 'localhost',
         port: '5000',
