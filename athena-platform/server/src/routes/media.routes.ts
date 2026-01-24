@@ -262,24 +262,6 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
 // ===========================================
 // DELETE FILE
 // ===========================================
-
-/**
- * Verify file ownership by checking the S3 key structure.
- * Keys follow the pattern: {folder}/{userId}/{uuid}.{ext}
- * This ensures the userId is in the correct position, not just anywhere in the key.
- */
-function verifyFileOwnership(key: string, userId: string): boolean {
-  if (!key || !userId) return false;
-  
-  const parts = key.split('/');
-  // Key format: folder/userId/filename
-  // The userId should be exactly in position 1 (0-indexed)
-  if (parts.length < 3) return false;
-  
-  const keyUserId = parts[1];
-  return keyUserId === userId;
-}
-
 router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { key } = req.body;
@@ -288,13 +270,28 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    // Verify ownership by validating the key structure (folder/userId/filename)
-    if (!verifyFileOwnership(key, req.user!.id)) {
+    // Verify ownership by checking the key path structure
+    // Files are stored as: {folder}/{userId}/{uuid}.{ext}
+    // We must validate that the userId segment matches the authenticated user
+    const keyParts = key.split('/');
+    if (keyParts.length < 3) {
+      throw new ApiError(400, 'Invalid file key format');
+    }
+    
+    const userIdInPath = keyParts[1];
+    if (userIdInPath !== req.user!.id) {
       logger.warn('Unauthorized file deletion attempt', {
         userId: req.user!.id,
         attemptedKey: key,
+        keyUserId: userIdInPath,
       });
       throw new ApiError(403, 'Not authorized to delete this file');
+    }
+    
+    // Additional validation: ensure folder is a known upload folder
+    const validFolders = ['avatars', 'covers', 'posts', 'videos', 'documents', 'resumes'];
+    if (!validFolders.includes(keyParts[0])) {
+      throw new ApiError(400, 'Invalid file path');
     }
 
     await s3Client.send(

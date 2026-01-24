@@ -6,56 +6,34 @@
 
 import DOMPurify from 'dompurify';
 
-// DOMPurify configuration for safe HTML
-const DOMPURIFY_CONFIG = {
-  ALLOWED_TAGS: [
-    'p', 'br', 'b', 'i', 'u', 'strong', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre', 'span', 'div',
-  ],
-  ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id'],
-  ALLOW_DATA_ATTR: false,
-  // Force all links to open in new tab with security attributes
-  ADD_ATTR: ['target', 'rel'] as string[],
-};
+// Configure DOMPurify with safe defaults
+const ALLOWED_TAGS = [
+  'p', 'br', 'b', 'i', 'u', 'strong', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre', 'span', 'div',
+];
+
+const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'id'];
 
 /**
  * Sanitize HTML content to prevent XSS attacks
- * Uses DOMPurify for comprehensive protection against XSS vectors
+ * Uses DOMPurify with strict configuration
  */
 export function sanitizeHtml(html: string): string {
   if (!html || typeof html !== 'string') return '';
   
   // Check if we're in a browser environment
   if (typeof window !== 'undefined') {
-    // Browser: use DOMPurify directly
-    const clean = DOMPurify.sanitize(html, DOMPURIFY_CONFIG);
-    
-    // Post-process to ensure all links have proper security attributes
-    return clean.replace(/<a\s+([^>]*)>/gi, (match, attrs) => {
-      let cleanAttrs = attrs || '';
-      // Ensure target="_blank" for external links
-      if (!cleanAttrs.includes('target=')) {
-        cleanAttrs += ' target="_blank"';
-      }
-      // Ensure rel="noopener noreferrer"
-      if (!cleanAttrs.includes('rel=')) {
-        cleanAttrs += ' rel="noopener noreferrer"';
-      } else {
-        cleanAttrs = cleanAttrs.replace(/rel=["'][^"']*["']/i, 'rel="noopener noreferrer"');
-      }
-      return `<a ${cleanAttrs.trim()}>`;
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS,
+      ALLOWED_ATTR,
+      ALLOW_DATA_ATTR: false,
+      ADD_ATTR: ['target'], // Allow target attribute
+      FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+      FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
     });
   }
   
-  // Server-side: use regex fallback (for SSR)
-  return serverSideSanitize(html);
-}
-
-/**
- * Server-side sanitization fallback for SSR environments
- * Uses regex-based approach when DOMPurify's DOM dependency isn't available
- */
-function serverSideSanitize(html: string): string {
+  // Server-side fallback: use regex-based sanitization
   return html
     // Remove script tags and their content
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
@@ -68,25 +46,33 @@ function serverSideSanitize(html: string): string {
     .replace(/data\s*:/gi, 'blocked:')
     // Remove vbscript: URLs
     .replace(/vbscript\s*:/gi, 'blocked:')
-    // Remove style tags (can contain CSS expressions)
+    // Remove dangerous tags
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-    // Remove iframe tags
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
     .replace(/<iframe\b[^>]*\/?>/gi, '')
-    // Remove object/embed tags
     .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
     .replace(/<embed\b[^>]*\/?>/gi, '')
-    // Remove form elements
     .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '')
     .replace(/<input\b[^>]*\/?>/gi, '')
-    .replace(/<button\b[^<]*(?:(?!<\/button>)<[^<]*)*<\/button>/gi, '')
-    // Sanitize anchor tags
-    .replace(/<a\s+([^>]*)\s*>/gi, (match, attrs) => {
-      const cleanAttrs = (attrs || '')
-        .replace(/target\s*=\s*["']?_(?:top|parent)["']?/gi, 'target="_blank"')
-        .replace(/rel\s*=\s*["'][^"']*["']/gi, 'rel="noopener noreferrer"');
-      return `<a ${cleanAttrs} rel="noopener noreferrer">`;
+    .replace(/<button\b[^<]*(?:(?!<\/button>)<[^<]*)*<\/button>/gi, '');
+}
+
+/**
+ * Sanitize HTML with custom allowed tags
+ */
+export function sanitizeHtmlWithTags(html: string, allowedTags: string[]): string {
+  if (!html || typeof html !== 'string') return '';
+  
+  if (typeof window !== 'undefined') {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: allowedTags,
+      ALLOWED_ATTR,
+      ALLOW_DATA_ATTR: false,
     });
+  }
+  
+  // Fallback to basic sanitization on server
+  return sanitizeHtml(html);
 }
 
 /**

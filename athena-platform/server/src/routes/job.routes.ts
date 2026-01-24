@@ -272,7 +272,7 @@ router.post(
         },
       });
 
-      // Add skills if provided - batch operations to avoid N+1 queries
+      // Add skills if provided - batch operation to avoid N+1 queries
       if (skills && skills.length > 0) {
         const normalizedSkills = skills.map((s: string) => s.toLowerCase());
         
@@ -283,15 +283,15 @@ router.post(
         const existingSkillNames = new Set(existingSkills.map(s => s.name));
         
         // Create missing skills in batch
-        const missingSkillNames = normalizedSkills.filter(name => !existingSkillNames.has(name));
+        const missingSkillNames = normalizedSkills.filter((name: string) => !existingSkillNames.has(name));
         if (missingSkillNames.length > 0) {
           await prisma.skill.createMany({
-            data: missingSkillNames.map(name => ({ name })),
+            data: missingSkillNames.map((name: string) => ({ name })),
             skipDuplicates: true,
           });
         }
         
-        // Fetch all skills (including newly created) in one query
+        // Fetch all skills (including newly created ones)
         const allSkills = await prisma.skill.findMany({
           where: { name: { in: normalizedSkills } },
         });

@@ -340,26 +340,26 @@ router.post(
         },
       });
 
-      // Add skills if provided - batch operations to avoid N+1 queries
+      // Add skills if provided - batch operation to avoid N+1 queries
       if (skills && Array.isArray(skills)) {
         const normalizedSkills = skills.map((s: string) => s.toLowerCase());
         
-        // Find existing skills in one query (case-insensitive)
+        // Find existing skills in one query
         const existingSkills = await prisma.skill.findMany({
           where: { name: { in: normalizedSkills, mode: 'insensitive' } },
         });
-        const existingSkillNamesLower = new Set(existingSkills.map(s => s.name.toLowerCase()));
+        const existingSkillNames = new Set(existingSkills.map(s => s.name.toLowerCase()));
         
         // Create missing skills in batch
-        const missingSkillNames = normalizedSkills.filter(name => !existingSkillNamesLower.has(name));
+        const missingSkillNames = normalizedSkills.filter((name: string) => !existingSkillNames.has(name));
         if (missingSkillNames.length > 0) {
           await prisma.skill.createMany({
-            data: missingSkillNames.map(name => ({ name })),
+            data: missingSkillNames.map((name: string) => ({ name })),
             skipDuplicates: true,
           });
         }
         
-        // Fetch all skills (including newly created) in one query
+        // Fetch all skills (including newly created ones)
         const allSkills = await prisma.skill.findMany({
           where: { name: { in: normalizedSkills, mode: 'insensitive' } },
         });
