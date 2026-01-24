@@ -1,7 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
-import { UnauthorizedError } from './errorHandler';
+import { UnauthorizedError, InternalServerError } from './errorHandler';
+
+// Validate JWT_SECRET exists on startup
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: JWT_SECRET environment variable is required in production');
+}
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-not-for-production';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -25,6 +32,11 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
+    // Fail-safe: reject requests if no JWT secret in production
+    if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+      throw InternalServerError('Authentication service misconfigured');
+    }
+
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -39,7 +51,7 @@ export const authenticate = async (
 
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || 'fallback-secret'
+      EFFECTIVE_JWT_SECRET
     ) as JwtPayload;
 
     // Verify user still exists
@@ -85,7 +97,7 @@ export const optionalAuth = async (
       if (token) {
         const decoded = jwt.verify(
           token,
-          process.env.JWT_SECRET || 'fallback-secret'
+          EFFECTIVE_JWT_SECRET
         ) as JwtPayload;
 
         const user = await prisma.user.findUnique({

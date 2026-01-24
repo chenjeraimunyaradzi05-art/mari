@@ -10,6 +10,10 @@ import dotenv from 'dotenv';
 // Load environment variables FIRST
 dotenv.config();
 
+// Validate environment variables before anything else
+import { validateEnvironmentOrExit } from './utils/env';
+validateEnvironmentOrExit();
+
 // Initialize Sentry for error monitoring (must be early)
 import { initSentry, Sentry } from './utils/sentry';
 initSentry();
@@ -169,7 +173,7 @@ app.use(cors({
       return callback(null, true);
     }
     // Log rejected origins for debugging
-    console.log('CORS rejected origin:', origin, 'Allowed:', allowedOrigins);
+    logger.warn('CORS rejected origin', { origin, allowedOrigins });
     callback(null, false);
   },
   credentials: true,
