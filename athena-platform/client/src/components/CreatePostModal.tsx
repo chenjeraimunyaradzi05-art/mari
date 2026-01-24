@@ -18,10 +18,9 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useCreatePost, useAuthStore } from '@/lib/hooks';
+import { mediaApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { RichTextEditor } from '@/components/ui/RichTextEditor';
-import { mediaApi } from '@/lib/api';
-import { toast } from 'sonner';
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -50,6 +49,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
   const [showVisibilityMenu, setShowVisibilityMenu] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -59,23 +59,24 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
   const handleSubmit = async () => {
     if (!content.trim() && attachments.length === 0) return;
 
-    setIsUploading(true);
     try {
-      // Upload files first if any
-      const mediaUrls: string[] = [];
-      let detectedType = 'TEXT';
-      
-      for (const file of attachments) {
-        const uploadType = file.type.startsWith('video/') ? 'video' : 'post';
-        if (file.type.startsWith('video/')) {
-          detectedType = 'VIDEO';
-        } else if (file.type.startsWith('image/') && detectedType !== 'VIDEO') {
-          detectedType = 'IMAGE';
-        }
-        
-        const response = await mediaApi.upload(uploadType, file);
-        if (response.data?.data?.url) {
-          mediaUrls.push(response.data.data.url);
+      setIsUploading(true);
+      let uploadedUrls: string[] = [];
+      let determinedType = postType;
+
+      // Upload attachments first
+      if (attachments.length > 0) {
+        for (const file of attachments) {
+          const uploadType = file.type.startsWith('video/') ? 'video' : 'post';
+          const res = await mediaApi.upload(uploadType, file);
+          const url = res.data?.data?.url;
+          if (url) {
+            uploadedUrls.push(url);
+            // Set type based on first media file
+            if (uploadedUrls.length === 1) {
+              determinedType = file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
+            }
+          }
         }
       }
 
@@ -83,65 +84,59 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
         { 
           content, 
           visibility, 
-          type: detectedType,
-          mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
+          type: determinedType,
+          mediaUrls: uploadedUrls.length > 0 ? uploadedUrls : undefined,
         },
         {
           onSuccess: () => {
             setContent('');
             setAttachments([]);
             setPreviewUrls([]);
-            setIsUploading(false);
+            setMediaUrls([]);
             onClose();
-          },
-          onError: () => {
-            setIsUploading(false);
           },
         }
       );
     } catch (error) {
       console.error('Upload failed:', error);
-      toast.error('Failed to upload media');
+    } finally {
       setIsUploading(false);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, fileType: 'image' | 'video' = 'image') => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    // Validate file types
-    const validFiles = files.filter(file => {
-      if (fileType === 'video') {
-        return file.type.startsWith('video/');
+    setAttachments((prev) => [...prev, ...files]);
+
+    // Create preview URLs for images
+    files.forEach((file) => {
+      if (file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file);
+        setPreviewUrls((prev) => [...prev, url]);
       }
-      return file.type.startsWith('image/');
     });
-
-    if (validFiles.length === 0) {
-      toast.error(`Please select valid ${fileType} files`);
-      return;
-    }
-
-    setAttachments((prev) => [...prev, ...validFiles]);
-
-    // Create preview URLs
-    validFiles.forEach((file) => {
-      const url = URL.createObjectURL(file);
-      setPreviewUrls((prev) => [...prev, url]);
-    });
-    
-    // Reset input
-    e.target.value = '';
   };
 
   const removeAttachment = (index: number) => {
-    // Revoke object URL to free memory
-    if (previewUrls[index]) {
-      URL.revokeObjectURL(previewUrls[index]);
-    }
     setAttachments((prev) => prev.filter((_, i) => i !== index));
     setPreviewUrls((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    setAttachments((prev) => [...prev, ...files]);
+
+    // Create preview URLs for videos
+    files.forEach((file) => {
+      if (file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        setPreviewUrls((prev) => [...prev, url]);
+      }
+    });
   };
 
   if (!isOpen) return null;
@@ -260,27 +255,23 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
           />
 
           {/* Media Previews */}
-          {attachments.length > 0 && (
+          {previewUrls.length > 0 && (
             <div className="grid grid-cols-2 gap-2 mt-4">
-              {attachments.map((file, index) => (
+              {previewUrls.map((url, index) => (
                 <div key={index} className="relative">
-                  {file.type.startsWith('video/') ? (
+                  {attachments[index]?.type?.startsWith('video/') ? (
                     <video
-                      src={previewUrls[index]}
+                      src={url}
                       className="w-full h-32 object-cover rounded-lg bg-black"
-                      controls={false}
-                      muted
+                      controls
                     />
                   ) : (
                     <img
-                      src={previewUrls[index]}
+                      src={url}
                       alt="Attachment"
                       className="w-full h-32 object-cover rounded-lg"
                     />
                   )}
-                  <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/60 text-white text-xs rounded">
-                    {file.type.startsWith('video/') ? 'Video' : 'Image'}
-                  </div>
                   <button
                     onClick={() => removeAttachment(index)}
                     className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white hover:bg-black/70"
@@ -300,7 +291,6 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
               onClick={() => fileInputRef.current?.click()}
               className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               title="Add image"
-              disabled={isUploading}
             >
               <Image className="w-5 h-5" />
             </button>
@@ -308,7 +298,6 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
               onClick={() => videoInputRef.current?.click()}
               className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               title="Add video"
-              disabled={isUploading}
             >
               <Video className="w-5 h-5" />
             </button>
@@ -342,14 +331,14 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
             type="file"
             accept="image/*"
             multiple
-            onChange={(e) => handleFileSelect(e, 'image')}
+            onChange={handleFileSelect}
             className="hidden"
           />
           <input
             ref={videoInputRef}
             type="file"
             accept="video/*"
-            onChange={(e) => handleFileSelect(e, 'video')}
+            onChange={handleVideoSelect}
             className="hidden"
           />
         </div>
