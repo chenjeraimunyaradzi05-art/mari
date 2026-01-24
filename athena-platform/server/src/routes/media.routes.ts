@@ -370,7 +370,7 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
 
     // Helper function to save file locally
     const saveLocally = async (buffer: Buffer): Promise<string> => {
-      const uploadsDir = path.join(__dirname, '../../uploads');
+      const uploadsDir = path.join(process.cwd(), 'uploads');
       const filePath = path.join(uploadsDir, key);
       const dir = path.dirname(filePath);
 
@@ -474,7 +474,7 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
 
       // Helper function to save file locally
       const saveLocally = async (buffer: Buffer, fileKey: string): Promise<string> => {
-        const uploadsDir = path.join(__dirname, '../../uploads');
+        const uploadsDir = path.join(process.cwd(), 'uploads');
         const filePath = path.join(uploadsDir, fileKey);
         const dir = path.dirname(filePath);
 

@@ -184,8 +184,10 @@ app.use(cors({
 // Security headers (after CORS)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false, // Allow inline scripts/styles for development
 }));
+
+// Static uploads
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Request correlation ID
 app.use(requestIdMiddleware);
@@ -293,26 +295,9 @@ app.use(express.urlencoded({ extended: true }));
 const uploadsPath = path.join(process.cwd(), 'uploads');
 logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
-  // Set CORS and caching headers for media files
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  
-  // Set appropriate content type for video files
-  const ext = path.extname(req.path).toLowerCase();
-  if (ext === '.mp4') res.setHeader('Content-Type', 'video/mp4');
-  else if (ext === '.webm') res.setHeader('Content-Type', 'video/webm');
-  else if (ext === '.mov') res.setHeader('Content-Type', 'video/quicktime');
-  else if (ext === '.webp') res.setHeader('Content-Type', 'image/webp');
-  else if (ext === '.jpg' || ext === '.jpeg') res.setHeader('Content-Type', 'image/jpeg');
-  else if (ext === '.png') res.setHeader('Content-Type', 'image/png');
-  else if (ext === '.gif') res.setHeader('Content-Type', 'image/gif');
-  
-  logger.debug('Static file request', { method: req.method, path: req.path, ext });
+  logger.debug('Static file request', { method: req.method, path: req.path });
   next();
-}, express.static(uploadsPath, {
-  maxAge: '1d',
-  etag: true,
-}));
+}, express.static(uploadsPath));
 
 // ===========================================
 // ROUTES
