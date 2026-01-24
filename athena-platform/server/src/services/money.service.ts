@@ -59,7 +59,7 @@ export async function createMoneyTransaction(data: {
   });
 }
 
-export async function updateMoneyTransaction(id: string, data: {
+export async function updateMoneyTransaction(id: string, userId: string, data: {
   status?: 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELED';
   provider?: string;
   reference?: string;
@@ -68,6 +68,16 @@ export async function updateMoneyTransaction(id: string, data: {
   if (data.status && !STATUSES.includes(data.status)) {
     throw new ApiError(400, 'Invalid transaction status');
   }
+  
+  // Verify ownership before updating
+  const transaction = await prisma.moneyTransaction.findUnique({ where: { id } });
+  if (!transaction) {
+    throw new ApiError(404, 'Transaction not found');
+  }
+  if (transaction.userId !== userId) {
+    throw new ApiError(403, 'Not authorized to update this transaction');
+  }
+  
   return prisma.moneyTransaction.update({
     where: { id },
     data: {
@@ -79,7 +89,16 @@ export async function updateMoneyTransaction(id: string, data: {
   });
 }
 
-export async function deleteMoneyTransaction(id: string) {
+export async function deleteMoneyTransaction(id: string, userId: string) {
+  // Verify ownership before deleting
+  const transaction = await prisma.moneyTransaction.findUnique({ where: { id } });
+  if (!transaction) {
+    throw new ApiError(404, 'Transaction not found');
+  }
+  if (transaction.userId !== userId) {
+    throw new ApiError(403, 'Not authorized to delete this transaction');
+  }
+  
   return prisma.moneyTransaction.delete({
     where: { id },
   });

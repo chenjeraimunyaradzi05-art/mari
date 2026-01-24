@@ -142,7 +142,7 @@ export async function createTaxReturn(data: {
   });
 }
 
-export async function updateTaxReturn(id: string, data: {
+export async function updateTaxReturn(id: string, userId: string, data: {
   periodStart?: string | Date;
   periodEnd?: string | Date;
   currency?: string;
@@ -153,6 +153,10 @@ export async function updateTaxReturn(id: string, data: {
 }) {
   const record = await prisma.taxReturn.findUnique({ where: { id } });
   if (!record) throw new ApiError(404, 'Tax return not found');
+  // Verify ownership
+  if (record.userId !== userId) {
+    throw new ApiError(403, 'Not authorized to update this tax return');
+  }
   if (record.status !== 'DRAFT') {
     throw new ApiError(400, 'Only draft returns can be edited');
   }
@@ -193,9 +197,13 @@ export async function updateTaxReturn(id: string, data: {
   });
 }
 
-export async function submitTaxReturn(id: string) {
+export async function submitTaxReturn(id: string, userId: string) {
   const record = await prisma.taxReturn.findUnique({ where: { id } });
   if (!record) throw new ApiError(404, 'Tax return not found');
+  // Verify ownership
+  if (record.userId !== userId) {
+    throw new ApiError(403, 'Not authorized to submit this tax return');
+  }
 
   if (record.status !== 'DRAFT') {
     throw new ApiError(400, 'Only draft returns can be submitted');
@@ -213,9 +221,13 @@ export async function deleteTaxRate(id: string) {
   });
 }
 
-export async function deleteTaxReturn(id: string) {
+export async function deleteTaxReturn(id: string, userId: string) {
   const record = await prisma.taxReturn.findUnique({ where: { id } });
   if (!record) throw new ApiError(404, 'Tax return not found');
+  // Verify ownership
+  if (record.userId !== userId) {
+    throw new ApiError(403, 'Not authorized to delete this tax return');
+  }
   if (record.status !== 'DRAFT') {
     throw new ApiError(400, 'Only draft returns can be deleted');
   }

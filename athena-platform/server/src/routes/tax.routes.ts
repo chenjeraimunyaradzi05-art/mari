@@ -107,7 +107,12 @@ router.post('/returns', authenticate, async (req: Request, res: Response) => {
 
 router.patch('/returns/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const record = await updateTaxReturn(req.params.id, {
+    const userId = (req as any).user?.id as string;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const record = await updateTaxReturn(req.params.id, userId, {
       periodStart: req.body.periodStart,
       periodEnd: req.body.periodEnd,
       currency: req.body.currency,
@@ -125,7 +130,12 @@ router.patch('/returns/:id', authenticate, async (req: Request, res: Response) =
 
 router.post('/returns/:id/submit', authenticate, async (req: Request, res: Response) => {
   try {
-    const record = await submitTaxReturn(req.params.id);
+    const userId = (req as any).user?.id as string;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const record = await submitTaxReturn(req.params.id, userId);
     res.json({ data: record });
   } catch (error: any) {
     logger.error('Failed to submit tax return', { error });
@@ -135,7 +145,12 @@ router.post('/returns/:id/submit', authenticate, async (req: Request, res: Respo
 
 router.delete('/returns/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    await deleteTaxReturn(req.params.id);
+    const userId = (req as any).user?.id as string;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    await deleteTaxReturn(req.params.id, userId);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete tax return', { error });

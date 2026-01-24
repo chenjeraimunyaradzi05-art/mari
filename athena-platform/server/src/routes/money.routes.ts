@@ -43,7 +43,12 @@ router.post('/transactions', authenticate, async (req: Request, res: Response) =
 
 router.patch('/transactions/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const transaction = await updateMoneyTransaction(req.params.id, req.body);
+    const userId = (req as any).user?.id as string;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const transaction = await updateMoneyTransaction(req.params.id, userId, req.body);
     res.json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to update money transaction', { error });
@@ -53,7 +58,12 @@ router.patch('/transactions/:id', authenticate, async (req: Request, res: Respon
 
 router.delete('/transactions/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    await deleteMoneyTransaction(req.params.id);
+    const userId = (req as any).user?.id as string;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    await deleteMoneyTransaction(req.params.id, userId);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete money transaction', { error });
