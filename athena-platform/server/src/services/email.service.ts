@@ -1,13 +1,7 @@
 /**
  * Email Service for ATHENA Platform
  * Handles all transactional and marketing emails
- * 
- * This is the consolidated email service. Auth-related functions are also
- * available in ../utils/email.ts for backward compatibility.
  */
-
-import { escapeHtml, getClientUrl, buildClientUrl } from '../utils/email';
-import { logger } from '../utils/logger';
 
 interface EmailOptions {
   to: string;
@@ -24,10 +18,7 @@ interface EmailTemplate {
 
 // Email templates
 const templates = {
-  welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => {
-    const safeFirstName = escapeHtml(data.firstName);
-    const clientUrl = getClientUrl();
-    return {
+  welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => ({
     subject: 'Welcome to ATHENA - Your Journey Begins! 🚀',
     html: `
       <!DOCTYPE html>
@@ -43,7 +34,7 @@ const templates = {
           <p style="color: #666; margin: 5px 0;">The Life Operating System for Women</p>
         </div>
         
-        <h2 style="color: #1f2937;">Welcome, ${safeFirstName}! 👋</h2>
+        <h2 style="color: #1f2937;">Welcome, ${data.firstName}! 👋</h2>
         
         <p>We're thrilled to have you join ATHENA - where ambitious women connect, grow, and thrive together.</p>
         
@@ -63,19 +54,19 @@ const templates = {
         
         ${data.referralCode ? `
         <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 0; font-weight: 600;">Your Referral Code: <span style="color: #7c3aed; font-size: 18px;">${escapeHtml(data.referralCode)}</span></p>
+          <p style="margin: 0; font-weight: 600;">Your Referral Code: <span style="color: #7c3aed; font-size: 18px;">${data.referralCode}</span></p>
           <p style="margin: 5px 0 0 0; font-size: 14px; color: #666;">Share with friends - you both get 100 credits when they sign up!</p>
         </div>
         ` : ''}
         
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${clientUrl}/dashboard" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Go to Dashboard</a>
+          <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Go to Dashboard</a>
         </div>
         
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         
         <p style="font-size: 14px; color: #666; text-align: center;">
-          Questions? Reply to this email or visit our <a href="${clientUrl}/help" style="color: #7c3aed;">Help Center</a>.
+          Questions? Reply to this email or visit our <a href="${process.env.CLIENT_URL}/help" style="color: #7c3aed;">Help Center</a>.
         </p>
         
         <p style="font-size: 12px; color: #999; text-align: center;">
@@ -98,21 +89,16 @@ What you can do on ATHENA:
 
 ${data.referralCode ? `Your Referral Code: ${data.referralCode}\nShare with friends - you both get 100 credits when they sign up!\n` : ''}
 
-Get started: ${clientUrl}/dashboard
+Get started: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 
 Questions? Reply to this email.
 
 © ${new Date().getFullYear()} ATHENA. All rights reserved.
     `,
-  };
-  },
+  }),
 
-  referralSignup: (data: { referrerName: string; referredName: string; credits: number }): EmailTemplate => {
-    const safeReferrerName = escapeHtml(data.referrerName);
-    const safeReferredName = escapeHtml(data.referredName);
-    const clientUrl = getClientUrl();
-    return {
-    subject: `🎉 ${safeReferredName} joined ATHENA with your referral!`,
+  referralSignup: (data: { referrerName: string; referredName: string; credits: number }): EmailTemplate => ({
+    subject: `🎉 ${data.referredName} joined ATHENA with your referral!`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -127,11 +113,11 @@ Questions? Reply to this email.
         
         <div style="text-align: center; padding: 20px;">
           <div style="font-size: 60px; margin-bottom: 10px;">🎉</div>
-          <h2 style="color: #1f2937; margin: 0;">Great news, ${safeReferrerName}!</h2>
+          <h2 style="color: #1f2937; margin: 0;">Great news, ${data.referrerName}!</h2>
         </div>
         
         <p style="text-align: center; font-size: 18px;">
-          <strong>${safeReferredName}</strong> just signed up using your referral link!
+          <strong>${data.referredName}</strong> just signed up using your referral link!
         </p>
         
         <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 20px; border-radius: 12px; color: white; text-align: center; margin: 20px 0;">
@@ -142,7 +128,7 @@ Questions? Reply to this email.
         <p style="text-align: center;">Keep sharing and earning! Every friend who joins gets you both credits.</p>
         
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${clientUrl}/dashboard/referrals" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">View Your Referrals</a>
+          <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard/referrals" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">View Your Referrals</a>
         </div>
         
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
@@ -162,18 +148,14 @@ You've earned ${data.credits} Credits!
 
 Keep sharing and earning! Every friend who joins gets you both credits.
 
-View your referrals: ${clientUrl}/dashboard/referrals
+View your referrals: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard/referrals
 
 © ${new Date().getFullYear()} ATHENA.
     `,
-  };
-  },
+  }),
 
-  reEngagement: (data: { firstName: string; daysInactive: number }): EmailTemplate => {
-    const safeFirstName = escapeHtml(data.firstName);
-    const clientUrl = getClientUrl();
-    return {
-    subject: `We miss you, ${safeFirstName}! 💜`,
+  reEngagement: (data: { firstName: string; daysInactive: number }): EmailTemplate => ({
+    subject: `We miss you, ${data.firstName}! 💜`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -186,7 +168,7 @@ View your referrals: ${clientUrl}/dashboard/referrals
           <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
         </div>
         
-        <h2 style="color: #1f2937;">Hey ${safeFirstName},</h2>
+        <h2 style="color: #1f2937;">Hey ${data.firstName},</h2>
         
         <p>It's been ${data.daysInactive} days since we last saw you on ATHENA. A lot has been happening while you were away!</p>
         
@@ -203,13 +185,13 @@ View your referrals: ${clientUrl}/dashboard/referrals
         <p>Your community is waiting for you. Jump back in and continue your journey!</p>
         
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${clientUrl}/dashboard" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Return to ATHENA</a>
+          <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Return to ATHENA</a>
         </div>
         
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         
         <p style="font-size: 12px; color: #999; text-align: center;">
-          Don't want these emails? <a href="${clientUrl}/settings/notifications" style="color: #666;">Manage preferences</a>
+          Don't want these emails? <a href="${process.env.CLIENT_URL}/settings/notifications" style="color: #666;">Manage preferences</a>
         </p>
       </body>
       </html>
@@ -227,22 +209,18 @@ What's new:
 
 Your community is waiting for you. Jump back in and continue your journey!
 
-Return to ATHENA: ${clientUrl}/dashboard
+Return to ATHENA: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 
-Don't want these emails? Manage preferences: ${clientUrl}/settings/notifications
+Don't want these emails? Manage preferences: ${process.env.CLIENT_URL}/settings/notifications
     `,
-  };
-  },
+  }),
 
   weeklyDigest: (data: { 
     firstName: string; 
     newJobs: number; 
     newConnections: number;
     upcomingEvents: number;
-  }): EmailTemplate => {
-    const safeFirstName = escapeHtml(data.firstName);
-    const clientUrl = getClientUrl();
-    return {
+  }): EmailTemplate => ({
     subject: `Your ATHENA Weekly Update 📊`,
     html: `
       <!DOCTYPE html>
@@ -257,7 +235,7 @@ Don't want these emails? Manage preferences: ${clientUrl}/settings/notifications
           <p style="color: #666; margin: 5px 0;">Your Weekly Update</p>
         </div>
         
-        <h2 style="color: #1f2937;">Hi ${safeFirstName}! 👋</h2>
+        <h2 style="color: #1f2937;">Hi ${data.firstName}! 👋</h2>
         
         <p>Here's what happened on ATHENA this week:</p>
         
@@ -277,13 +255,13 @@ Don't want these emails? Manage preferences: ${clientUrl}/settings/notifications
         </div>
         
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${clientUrl}/dashboard" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Explore Now</a>
+          <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Explore Now</a>
         </div>
         
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         
         <p style="font-size: 12px; color: #999; text-align: center;">
-          <a href="${clientUrl}/settings/notifications" style="color: #666;">Unsubscribe</a> • 
+          <a href="${process.env.CLIENT_URL}/settings/notifications" style="color: #666;">Unsubscribe</a> • 
           © ${new Date().getFullYear()} ATHENA
         </p>
       </body>
@@ -298,13 +276,12 @@ Here's what happened on ATHENA this week:
 - ${data.newConnections} New Connections
 - ${data.upcomingEvents} Upcoming Events
 
-Explore now: ${clientUrl}/dashboard
+Explore now: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 
-Unsubscribe: ${clientUrl}/settings/notifications
+Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
 © ${new Date().getFullYear()} ATHENA
     `,
-  };
-  },
+  }),
 
   // Phase 2: Additional transactional email templates
   passwordReset: (data: { firstName: string; resetLink: string; expiresIn: string }): EmailTemplate => ({
@@ -533,38 +510,22 @@ Unsubscribe: ${clientUrl}/settings/notifications
 
 /**
  * Send an email using the configured provider
- * Uses SendGrid in production, logs to console in development
+ * Currently logs to console; integrate with SendGrid/SES for production
  */
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  const { to, subject, html, text } = options;
-
-  // In development or without API key, just log the email
-  if (process.env.NODE_ENV !== 'production' || !process.env.SENDGRID_API_KEY) {
-    logger.info(`📧 Email would be sent to: ${to}`);
-    logger.info(`   Subject: ${subject}`);
-    logger.info(`   (Email sending disabled - set SENDGRID_API_KEY in production)`);
-    return true;
-  }
-
-  try {
-    // Dynamic import to avoid issues if package not installed
-    const sgMail = await import('@sendgrid/mail');
-    sgMail.default.setApiKey(process.env.SENDGRID_API_KEY);
-
-    await sgMail.default.send({
-      to,
-      from: process.env.SENDGRID_FROM_EMAIL || 'noreply@athena.com',
-      subject,
-      html,
-      text: text || subject,
-    });
-
-    logger.info(`📧 Email sent successfully to: ${to}`);
-    return true;
-  } catch (error) {
-    logger.error('Failed to send email:', error);
-    return false;
-  }
+  // In production, integrate with SendGrid, AWS SES, or similar
+  // For now, log the email
+  console.log('📧 Email would be sent:');
+  console.log(`   To: ${options.to}`);
+  console.log(`   Subject: ${options.subject}`);
+  
+  // Simulate async email sending
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      console.log('   ✅ Email sent successfully (simulated)');
+      resolve(true);
+    }, 100);
+  });
 }
 
 /**
