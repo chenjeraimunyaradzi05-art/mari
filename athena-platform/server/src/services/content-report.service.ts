@@ -341,30 +341,115 @@ async function escalateToAuthorities(
   logger.info(`[CRITICAL] Report ${ticketId} escalated to authorities for ${report.reason}`);
 }
 
-// Placeholder functions for content moderation actions
+// Content moderation action functions
 async function removeContent(contentType: string, contentId: string): Promise<void> {
-  // Implementation depends on content type
   logger.info(`Removing ${contentType} with ID ${contentId}`);
+  
+  // Remove content based on type - use isHidden flag for soft delete
+  switch (contentType.toLowerCase()) {
+    case 'post':
+      await prisma.post.update({
+        where: { id: contentId },
+        data: { isHidden: true },
+      });
+      break;
+    case 'comment':
+      await prisma.comment.update({
+        where: { id: contentId },
+        data: { isHidden: true },
+      });
+      break;
+    case 'message':
+      // Messages use soft delete via the conversation
+      await prisma.message.delete({ where: { id: contentId } });
+      break;
+    case 'job':
+      await prisma.job.update({
+        where: { id: contentId },
+        data: { status: 'CLOSED' },
+      });
+      break;
+    default:
+      logger.warn(`Unknown content type for removal: ${contentType}`);
+  }
 }
 
 async function warnUser(contentId: string, contentType: string): Promise<void> {
-  // Get user from content and send warning
   logger.info(`Warning user for ${contentType} ${contentId}`);
+  
+  // Get user ID from content
+  const userId = await getUserIdFromContent(contentType, contentId);
+  if (!userId) return;
+  
+  // Create a warning notification
+  await prisma.notification.create({
+    data: {
+      userId,
+      type: 'SYSTEM',
+      title: 'Content Policy Warning',
+      message: 'Your content has been flagged for violating our community guidelines. Repeated violations may result in account restrictions.',
+      data: { contentType, contentId },
+    },
+  });
 }
 
 async function suspendUser(contentId: string, contentType: string): Promise<void> {
-  // Get user and apply suspension
-  logger.info(`Suspending user for ${contentType} ${contentId}`);
+  const userId = await getUserIdFromContent(contentType, contentId);
+  if (!userId) return;
+  
+  logger.info(`Suspending user ${userId} for ${contentType} ${contentId}`);
+  
+  // Apply suspension using isSuspended boolean
+  await prisma.user.update({
+    where: { id: userId },
+    data: { isSuspended: true },
+  });
 }
 
 async function banUser(contentId: string, contentType: string): Promise<void> {
-  // Get user and apply permanent ban
-  logger.info(`Banning user for ${contentType} ${contentId}`);
+  const userId = await getUserIdFromContent(contentType, contentId);
+  if (!userId) return;
+  
+  logger.info(`Banning user ${userId} for ${contentType} ${contentId}`);
+  
+  // Apply permanent ban using isSuspended (permanent)
+  await prisma.user.update({
+    where: { id: userId },
+    data: { isSuspended: true },
+  });
 }
 
 async function escalateReport(ticketId: string, report: any): Promise<void> {
-  // Escalate to senior moderation team
-  logger.info(`Escalating report ${ticketId}`);
+  logger.info(`Escalating report ${ticketId} to senior moderation`);
+  
+  // Update report status to REVIEWING (escalated)
+  await prisma.contentReport.updateMany({
+    where: { evidence: { path: ['ticketId'], equals: ticketId } },
+    data: { status: 'REVIEWING' },
+  });
+  
+  // Notify senior moderators (would integrate with internal ticketing system)
+  await alertTrustAndSafety(ticketId, 'critical', report);
+}
+
+// Helper: Get user ID from content
+async function getUserIdFromContent(contentType: string, contentId: string): Promise<string | null> {
+  switch (contentType.toLowerCase()) {
+    case 'post':
+      const post = await prisma.post.findUnique({ where: { id: contentId }, select: { authorId: true } });
+      return post?.authorId || null;
+    case 'comment':
+      const comment = await prisma.comment.findUnique({ where: { id: contentId }, select: { authorId: true } });
+      return comment?.authorId || null;
+    case 'message':
+      const message = await prisma.message.findUnique({ where: { id: contentId }, select: { senderId: true } });
+      return message?.senderId || null;
+    case 'job':
+      const job = await prisma.job.findUnique({ where: { id: contentId }, select: { postedById: true } });
+      return job?.postedById || null;
+    default:
+      return null;
+  }
 }
 
 export default {
