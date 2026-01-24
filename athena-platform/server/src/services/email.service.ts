@@ -1,6 +1,10 @@
 /**
  * Email Service for ATHENA Platform
  * Handles all transactional and marketing emails
+ * 
+ * NOTE: This module contains additional email templates beyond the core auth templates.
+ * For auth-related emails (verification, password reset, welcome), see utils/email.ts.
+ * Both modules use the same SendGrid integration pattern for production.
  */
 
 interface EmailOptions {
@@ -510,22 +514,37 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
 
 /**
  * Send an email using the configured provider
- * Currently logs to console; integrate with SendGrid/SES for production
+ * Uses SendGrid in production, logs in development
  */
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  // In production, integrate with SendGrid, AWS SES, or similar
-  // For now, log the email
-  console.log('📧 Email would be sent:');
-  console.log(`   To: ${options.to}`);
-  console.log(`   Subject: ${options.subject}`);
-  
-  // Simulate async email sending
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log('   ✅ Email sent successfully (simulated)');
-      resolve(true);
-    }, 100);
-  });
+  // In development or when SendGrid is not configured, log the email
+  if (process.env.NODE_ENV !== 'production' || !process.env.SENDGRID_API_KEY) {
+    console.log('📧 Email would be sent:');
+    console.log(`   To: ${options.to}`);
+    console.log(`   Subject: ${options.subject}`);
+    console.log('   (Email sending disabled in development)');
+    return true;
+  }
+
+  try {
+    // Dynamic import to avoid issues if package not installed
+    const sgMail = await import('@sendgrid/mail');
+    sgMail.default.setApiKey(process.env.SENDGRID_API_KEY);
+
+    await sgMail.default.send({
+      to: options.to,
+      from: process.env.SENDGRID_FROM_EMAIL || 'noreply@athena.com',
+      subject: options.subject,
+      html: options.html,
+      text: options.text || options.subject,
+    });
+
+    console.log(`📧 Email sent successfully to: ${options.to}`);
+    return true;
+  } catch (error) {
+    console.error('Failed to send email:', error);
+    return false;
+  }
 }
 
 /**

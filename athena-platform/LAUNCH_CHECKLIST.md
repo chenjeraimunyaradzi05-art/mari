@@ -130,7 +130,7 @@ Ensure `netlify.toml` or `vercel.json` includes:
 
 ### 5.2 SendGrid (Email)
 - [ ] **Domain Verified** for sending
-- [x] **Templates Created** for transactional emails (welcome, password reset, verification, referral, re-engagement, weekly digest, mentor booking, application updates, payment receipts, session reminders, course completion)
+- [x] **Templates Created** for transactional emails (Welcome, Password Reset, Verification, Booking Confirmed, Weekly Digest, Re-engagement, Payment Receipt, Application Update)
 - [ ] **API Key** with send permissions
 
 ### 5.3 OpenAI (AI Features)
@@ -282,10 +282,10 @@ npx prisma migrate dev     # Development
 
 | Role | Contact |
 |------|---------|
-| On-Call Engineer | oncall@athena.com / PagerDuty escalation |
-| Database Admin | dba@athena.com / See Runbook: ONCALL.md |
-| AWS Support | AWS Support Console (Business Support Plan) |
-| Stripe Support | https://support.stripe.com / Dashboard > Help |
+| On-Call Engineer | oncall@athena.com / PagerDuty |
+| Database Admin | dba@athena.com |
+| AWS Support | aws.amazon.com/support (Business Support Plan) |
+| Stripe Support | support.stripe.com (Dashboard > Help)
 
 ---
 
