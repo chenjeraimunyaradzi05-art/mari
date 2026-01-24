@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -34,7 +35,7 @@ router.get('/programs', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: programs });
   } catch (error) {
-    console.error('Error fetching support programs:', error);
+    logger.error('Error fetching support programs', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch support programs' });
   }
 });
@@ -62,7 +63,7 @@ router.get('/programs/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: program });
   } catch (error) {
-    console.error('Error fetching support program:', error);
+    logger.error('Error fetching support program', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch support program' });
   }
 });
@@ -116,7 +117,7 @@ router.post('/programs/:id/enroll', authenticate, async (req: AuthRequest, res: 
 
     res.status(201).json({ success: true, data: enrollment });
   } catch (error) {
-    console.error('Error enrolling in program:', error);
+    logger.error('Error enrolling in program', { error });
     res.status(500).json({ success: false, error: 'Failed to enroll in program' });
   }
 });
@@ -143,7 +144,7 @@ router.get('/my/enrollments', authenticate, async (req: AuthRequest, res: Respon
 
     res.json({ success: true, data: enrollments });
   } catch (error) {
-    console.error('Error fetching enrollments:', error);
+    logger.error('Error fetching enrollments', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch enrollments' });
   }
 });
@@ -184,7 +185,7 @@ router.patch('/enrollments/:id/milestone', authenticate, async (req: AuthRequest
 
     res.json({ success: true, data: progress });
   } catch (error) {
-    console.error('Error updating milestone progress:', error);
+    logger.error('Error updating milestone progress', { error });
     res.status(500).json({ success: false, error: 'Failed to update milestone progress' });
   }
 });
@@ -210,7 +211,7 @@ router.get('/indigenous/communities', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: communities });
   } catch (error) {
-    console.error('Error fetching indigenous communities:', error);
+    logger.error('Error fetching indigenous communities', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch communities' });
   }
 });
@@ -236,7 +237,7 @@ router.get('/indigenous/communities/:id', async (req: Request, res: Response) =>
 
     res.json({ success: true, data: community });
   } catch (error) {
-    console.error('Error fetching indigenous community:', error);
+    logger.error('Error fetching indigenous community', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch community' });
   }
 });
@@ -274,7 +275,7 @@ router.post('/indigenous/communities/:id/join', authenticate, async (req: AuthRe
     if (err.code === 'P2002') {
       return res.status(400).json({ success: false, error: 'Already a member' });
     }
-    console.error('Error joining community:', error);
+    logger.error('Error joining community', { error });
     res.status(500).json({ success: false, error: 'Failed to join community' });
   }
 });
@@ -295,7 +296,7 @@ router.get('/indigenous/resources', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: resources });
   } catch (error) {
-    console.error('Error fetching indigenous resources:', error);
+    logger.error('Error fetching indigenous resources', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch resources' });
   }
 });
@@ -315,7 +316,7 @@ router.get('/language-profile', authenticate, async (req: AuthRequest, res: Resp
 
     res.json({ success: true, data: profile });
   } catch (error) {
-    console.error('Error fetching language profile:', error);
+    logger.error('Error fetching language profile', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch language profile' });
   }
 });
@@ -360,7 +361,7 @@ router.post('/language-profile', authenticate, async (req: AuthRequest, res: Res
 
     res.json({ success: true, data: profile });
   } catch (error) {
-    console.error('Error saving language profile:', error);
+    logger.error('Error saving language profile', { error });
     res.status(500).json({ success: false, error: 'Failed to save language profile' });
   }
 });
@@ -377,7 +378,7 @@ router.get('/credentials', authenticate, async (req: AuthRequest, res: Response)
 
     res.json({ success: true, data: credentials });
   } catch (error) {
-    console.error('Error fetching credentials:', error);
+    logger.error('Error fetching credentials', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch credentials' });
   }
 });
@@ -415,7 +416,7 @@ router.post('/credentials', authenticate, async (req: AuthRequest, res: Response
 
     res.status(201).json({ success: true, data: credential });
   } catch (error) {
-    console.error('Error adding credential:', error);
+    logger.error('Error adding credential', { error });
     res.status(500).json({ success: false, error: 'Failed to add credential' });
   }
 });
@@ -437,7 +438,7 @@ router.get('/bridging-programs', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: programs });
   } catch (error) {
-    console.error('Error fetching bridging programs:', error);
+    logger.error('Error fetching bridging programs', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch bridging programs' });
   }
 });
@@ -474,7 +475,7 @@ router.post('/bridging-programs/:id/enroll', authenticate, async (req: AuthReque
     if (err.code === 'P2002') {
       return res.status(400).json({ success: false, error: 'Already enrolled' });
     }
-    console.error('Error enrolling in bridging program:', error);
+    logger.error('Error enrolling in bridging program', { error });
     res.status(500).json({ success: false, error: 'Failed to enroll' });
   }
 });
@@ -494,7 +495,7 @@ router.get('/my/bridging-enrollments', authenticate, async (req: AuthRequest, re
 
     res.json({ success: true, data: enrollments });
   } catch (error) {
-    console.error('Error fetching bridging enrollments:', error);
+    logger.error('Error fetching bridging enrollments', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch enrollments' });
   }
 });

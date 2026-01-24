@@ -6,6 +6,7 @@ import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { aiService } from '../services/ai.service'; // Added import
 import { generateFeed, getVideoFeed, recordPostView } from '../services/feed.service';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -298,7 +299,7 @@ router.post(
            enrichedData = await aiService.enrichSocialContent(content, mediaUrls);
         }
       } catch (err) {
-        console.warn('AI enrichment skipped:', err);
+        logger.warn('AI enrichment skipped', { error: err });
       }
 
       const post = await prisma.post.create({

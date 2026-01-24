@@ -5,6 +5,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRegionConfig, normalizeRegion } from '../utils/region';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -53,7 +54,7 @@ const syncUserToIndex = async (userId: string) => {
 
     await indexDocument(IndexNames.USERS, user.id, doc);
   } catch (error) {
-    console.error(`Failed to sync user ${userId} to OpenSearch:`, error);
+    logger.error(`Failed to sync user ${userId} to OpenSearch`, { error });
   }
 };
 

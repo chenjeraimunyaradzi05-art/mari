@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { logger } from '../utils/logger';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -26,7 +27,7 @@ router.get('/career-compass', async (req: Request, res: Response) => {
 
     res.json({ data: prediction });
   } catch (error) {
-    console.error('Error fetching career prediction:', error);
+    logger.error('Error fetching career prediction', { error });
     res.status(500).json({ error: 'Failed to fetch career prediction' });
   }
 });
@@ -68,7 +69,7 @@ router.post('/career-compass/generate', async (req: Request, res: Response) => {
 
     res.json({ data: prediction });
   } catch (error) {
-    console.error('Error generating career prediction:', error);
+    logger.error('Error generating career prediction', { error });
     res.status(500).json({ error: 'Failed to generate career prediction' });
   }
 });
@@ -103,7 +104,7 @@ router.get('/opportunity-scan', async (req: Request, res: Response) => {
 
     res.json({ data: opportunities });
   } catch (error) {
-    console.error('Error fetching opportunities:', error);
+    logger.error('Error fetching opportunities', { error });
     res.status(500).json({ error: 'Failed to fetch opportunities' });
   }
 });
@@ -128,7 +129,7 @@ router.patch('/opportunity-scan/:id/view', async (req: Request, res: Response) =
 
     res.json({ data: opportunity });
   } catch (error) {
-    console.error('Error marking opportunity viewed:', error);
+    logger.error('Error marking opportunity viewed', { error });
     res.status(500).json({ error: 'Failed to update opportunity' });
   }
 });
@@ -155,7 +156,7 @@ router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Respons
 
     res.json({ data: opportunity });
   } catch (error) {
-    console.error('Error recording feedback:', error);
+    logger.error('Error recording feedback', { error });
     res.status(500).json({ error: 'Failed to record feedback' });
   }
 });
@@ -220,7 +221,7 @@ router.post('/salary-equity/submit', async (req: Request, res: Response) => {
 
     res.json({ data: { id: dataPoint.id }, message: 'Salary data submitted successfully' });
   } catch (error) {
-    console.error('Error submitting salary data:', error);
+    logger.error('Error submitting salary data', { error });
     res.status(500).json({ error: 'Failed to submit salary data' });
   }
 });
@@ -305,7 +306,7 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response) => {
 
     res.json({ data: analysis });
   } catch (error) {
-    console.error('Error analyzing salary:', error);
+    logger.error('Error analyzing salary', { error });
     res.status(500).json({ error: 'Failed to analyze salary data' });
   }
 });
@@ -326,7 +327,7 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response) => 
 
     res.json({ data: analyses });
   } catch (error) {
-    console.error('Error fetching analyses:', error);
+    logger.error('Error fetching analyses', { error });
     res.status(500).json({ error: 'Failed to fetch salary analyses' });
   }
 });
@@ -365,7 +366,7 @@ router.get('/mentor-match', async (req: Request, res: Response) => {
 
     res.json({ data: matches });
   } catch (error) {
-    console.error('Error fetching mentor matches:', error);
+    logger.error('Error fetching mentor matches', { error });
     res.status(500).json({ error: 'Failed to fetch mentor matches' });
   }
 });
@@ -403,7 +404,7 @@ router.get('/mentor-match/:mentorId', async (req: Request, res: Response) => {
 
     res.json({ data: match });
   } catch (error) {
-    console.error('Error fetching mentor match:', error);
+    logger.error('Error fetching mentor match', { error });
     res.status(500).json({ error: 'Failed to fetch mentor match' });
   }
 });
@@ -437,7 +438,7 @@ router.get('/trust-score', async (req: Request, res: Response) => {
 
     res.json({ data: trustScore });
   } catch (error) {
-    console.error('Error fetching trust score:', error);
+    logger.error('Error fetching trust score', { error });
     res.status(500).json({ error: 'Failed to fetch trust score' });
   }
 });
@@ -458,7 +459,7 @@ router.get('/trust-score/:userId', async (req: Request, res: Response) => {
 
     res.json({ data: trustScore });
   } catch (error) {
-    console.error('Error fetching user trust score:', error);
+    logger.error('Error fetching user trust score', { error });
     res.status(500).json({ error: 'Failed to fetch trust score' });
   }
 });
@@ -490,7 +491,7 @@ router.post('/report', async (req: Request, res: Response) => {
 
     res.json({ data: { id: report.id }, message: 'Report submitted successfully' });
   } catch (error) {
-    console.error('Error submitting report:', error);
+    logger.error('Error submitting report', { error });
     res.status(500).json({ error: 'Failed to submit report' });
   }
 });
@@ -523,7 +524,7 @@ router.get('/creator-analytics', async (req: Request, res: Response) => {
 
     res.json({ data: analytics });
   } catch (error) {
-    console.error('Error fetching creator analytics:', error);
+    logger.error('Error fetching creator analytics', { error });
     res.status(500).json({ error: 'Failed to fetch creator analytics' });
   }
 });
@@ -585,7 +586,7 @@ router.get('/creator-analytics/projections', async (req: Request, res: Response)
 
     res.json({ data: analytics });
   } catch (error) {
-    console.error('Error fetching projections:', error);
+    logger.error('Error fetching projections', { error });
     res.status(500).json({ error: 'Failed to fetch income projections' });
   }
 });
@@ -622,7 +623,7 @@ router.get('/feed-preferences', async (req: Request, res: Response) => {
 
     res.json({ data: prefs });
   } catch (error) {
-    console.error('Error fetching feed preferences:', error);
+    logger.error('Error fetching feed preferences', { error });
     res.status(500).json({ error: 'Failed to fetch feed preferences' });
   }
 });
@@ -677,7 +678,7 @@ router.patch('/feed-preferences', async (req: Request, res: Response) => {
 
     res.json({ data: prefs });
   } catch (error) {
-    console.error('Error updating feed preferences:', error);
+    logger.error('Error updating feed preferences', { error });
     res.status(500).json({ error: 'Failed to update feed preferences' });
   }
 });
@@ -718,7 +719,7 @@ router.post('/feed-preferences/search', async (req: Request, res: Response) => {
 
     res.json({ message: 'Search recorded' });
   } catch (error) {
-    console.error('Error recording search:', error);
+    logger.error('Error recording search', { error });
     res.status(500).json({ error: 'Failed to record search' });
   }
 });

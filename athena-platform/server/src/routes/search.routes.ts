@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
 import * as searchService from '../services/search.service';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -70,7 +71,7 @@ router.get('/', optionalAuth, async (req: Request, res: Response) => {
     const results = await searchService.search(options);
     res.json(results);
   } catch (error) {
-    console.error('Search error:', error);
+    logger.error('Search error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -90,7 +91,7 @@ router.get('/suggestions', async (req: Request, res: Response) => {
     const suggestions = await searchService.getSearchSuggestions(q);
     res.json({ suggestions });
   } catch (error) {
-    console.error('Get suggestions error:', error);
+    logger.error('Get suggestions error', { error });
     res.status(500).json({ message: 'Failed to get suggestions' });
   }
 });
@@ -104,7 +105,7 @@ router.get('/trending', async (req: Request, res: Response) => {
     const trending = await searchService.getTrendingSearches();
     res.json({ trending });
   } catch (error) {
-    console.error('Get trending error:', error);
+    logger.error('Get trending error', { error });
     res.status(500).json({ message: 'Failed to get trending searches' });
   }
 });
@@ -135,7 +136,7 @@ router.get('/users', optionalAuth, async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search users error:', error);
+    logger.error('Search users error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -165,7 +166,7 @@ router.get('/posts', optionalAuth, async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search posts error:', error);
+    logger.error('Search posts error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -208,7 +209,7 @@ router.get('/jobs', optionalAuth, async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search jobs error:', error);
+    logger.error('Search jobs error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -238,7 +239,7 @@ router.get('/courses', optionalAuth, async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search courses error:', error);
+    logger.error('Search courses error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -264,7 +265,7 @@ router.get('/videos', optionalAuth, async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search videos error:', error);
+    logger.error('Search videos error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -291,7 +292,7 @@ router.get('/mentors', optionalAuth, async (req: Request, res: Response) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search mentors error:', error);
+    logger.error('Search mentors error', { error });
     res.status(500).json({ message: 'Search failed' });
   }
 });

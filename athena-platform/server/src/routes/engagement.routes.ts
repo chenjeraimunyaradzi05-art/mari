@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, AuthRequest, optionalAuth } from '../middleware/auth';
 import * as engagementService from '../services/engagement.service';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -22,7 +23,7 @@ router.get('/achievements', authenticate, async (req: Request, res: Response) =>
     const achievements = await engagementService.getUserAchievements((req as AuthRequest).user!.id);
     res.json(achievements);
   } catch (error) {
-    console.error('Get achievements error:', error);
+    logger.error('Get achievements error', { error });
     res.status(500).json({ message: 'Failed to get achievements' });
   }
 });
@@ -48,7 +49,7 @@ router.get('/achievements/list', async (req: Request, res: Response) => {
       total: achievements.length,
     });
   } catch (error) {
-    console.error('Get achievements list error:', error);
+    logger.error('Get achievements list error', { error });
     res.status(500).json({ message: 'Failed to get achievements list' });
   }
 });
@@ -66,7 +67,7 @@ router.get('/xp', authenticate, async (req: Request, res: Response) => {
     const xpData = await engagementService.getUserXP((req as AuthRequest).user!.id);
     res.json(xpData);
   } catch (error) {
-    console.error('Get XP error:', error);
+    logger.error('Get XP error', { error });
     res.status(500).json({ message: 'Failed to get XP' });
   }
 });
@@ -81,7 +82,7 @@ router.get('/xp/history', authenticate, async (req: Request, res: Response) => {
     const history = await engagementService.getXPHistory((req as AuthRequest).user!.id, limit);
     res.json({ history });
   } catch (error) {
-    console.error('Get XP history error:', error);
+    logger.error('Get XP history error', { error });
     res.status(500).json({ message: 'Failed to get XP history' });
   }
 });
@@ -99,7 +100,7 @@ router.get('/streaks', authenticate, async (req: Request, res: Response) => {
     const streaks = await engagementService.getStreaks((req as AuthRequest).user!.id);
     res.json({ streaks });
   } catch (error) {
-    console.error('Get streaks error:', error);
+    logger.error('Get streaks error', { error });
     res.status(500).json({ message: 'Failed to get streaks' });
   }
 });
@@ -120,7 +121,7 @@ router.post('/streaks/check-in', authenticate, async (req: Request, res: Respons
 
     res.json(result);
   } catch (error) {
-    console.error('Check-in error:', error);
+    logger.error('Check-in error', { error });
     res.status(500).json({ message: 'Failed to check in' });
   }
 });
@@ -161,7 +162,7 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => 
       userRank,
     });
   } catch (error) {
-    console.error('Get leaderboard error:', error);
+    logger.error('Get leaderboard error', { error });
     res.status(500).json({ message: 'Failed to get leaderboard' });
   }
 });
@@ -178,7 +179,7 @@ router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response) 
     const leaderboard = await engagementService.getLeaderboard('xp', period, limit);
     res.json({ leaderboard, type: 'xp', period });
   } catch (error) {
-    console.error('Get XP leaderboard error:', error);
+    logger.error('Get XP leaderboard error', { error });
     res.status(500).json({ message: 'Failed to get leaderboard' });
   }
 });
@@ -195,7 +196,7 @@ router.get('/leaderboard/creators', optionalAuth, async (req: Request, res: Resp
     const leaderboard = await engagementService.getLeaderboard('followers', period, limit);
     res.json({ leaderboard, type: 'creators', period });
   } catch (error) {
-    console.error('Get creators leaderboard error:', error);
+    logger.error('Get creators leaderboard error', { error });
     res.status(500).json({ message: 'Failed to get leaderboard' });
   }
 });
@@ -222,7 +223,7 @@ router.get('/summary', authenticate, async (req: Request, res: Response) => {
       streaks,
     });
   } catch (error) {
-    console.error('Get engagement summary error:', error);
+    logger.error('Get engagement summary error', { error });
     res.status(500).json({ message: 'Failed to get engagement summary' });
   }
 });
