@@ -3,23 +3,23 @@
  * Handles business registration logic and ASIC integration
  */
 
+import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
-import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
-import Stripe from 'stripe';
 import { logger } from '../utils/logger';
+import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
 
-// Initialize Stripe for business registration payments
+// Initialize Stripe
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
   : null;
 
-// Registration fees by business type (in cents AUD)
+// Business registration fee in cents by type
 const REGISTRATION_FEES: Record<BusinessType, number> = {
-  SOLE_TRADER: 4700,      // $47 AUD - ABN registration
-  PARTNERSHIP: 9900,       // $99 AUD - Partnership + ABN
-  COMPANY: 57600,          // $576 AUD - ASIC company registration
-  TRUST: 19900,            // $199 AUD - Trust setup
+  SOLE_TRADER: 4900,    // $49 AUD
+  PARTNERSHIP: 9900,    // $99 AUD
+  COMPANY: 14900,       // $149 AUD
+  TRUST: 19900,         // $199 AUD
 };
 
 function asRecord(value: unknown): Record<string, any> {
@@ -158,11 +158,11 @@ export async function submitRegistration(userId: string, registrationId: string)
   }
 
   validateRegistrationForSubmission(registration);
-  
-  // Calculate registration fee based on business type
-  const feeAmount = REGISTRATION_FEES[registration.type] || 9900;
-  
+
   // Create Stripe payment intent for registration fee
+  const feeAmount = REGISTRATION_FEES[registration.type] || REGISTRATION_FEES.SOLE_TRADER;
+  let paymentIntentId: string | null = null;
+
   if (stripe) {
     try {
       const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -173,47 +173,35 @@ export async function submitRegistration(userId: string, registrationId: string)
       const paymentIntent = await stripe.paymentIntents.create({
         amount: feeAmount,
         currency: 'aud',
+        description: `Business Registration - ${registration.type} - ${registration.businessName}`,
         metadata: {
-          registrationId,
           userId,
+          registrationId,
           businessType: registration.type,
-          businessName: registration.businessName || 'Unnamed Business',
+          businessName: registration.businessName || '',
         },
-        description: `ATHENA Business Registration - ${registration.type}`,
         receipt_email: user.email,
       });
 
-      logger.info('Created payment intent for business registration', {
-        registrationId,
-        paymentIntentId: paymentIntent.id,
+      paymentIntentId = paymentIntent.id;
+      logger.info(`Payment intent created for registration ${registrationId}`, {
+        paymentIntentId,
         amount: feeAmount,
       });
-
-      // Update registration with payment intent ID (payment will be confirmed via webhook)
-      return prisma.businessRegistration.update({
-        where: { id: registrationId },
-        data: {
-          status: 'PENDING_PAYMENT',
-          data: {
-            ...(registration.data as object || {}),
-            paymentIntentId: paymentIntent.id,
-            paymentAmount: feeAmount,
-          },
-        },
-      });
     } catch (error) {
-      logger.error('Failed to create payment intent', { registrationId, error });
+      logger.error('Stripe payment intent creation failed', { error, registrationId });
       throw new ApiError(500, 'Failed to process payment. Please try again.');
     }
+  } else {
+    logger.warn('Stripe not configured, skipping payment for registration', { registrationId });
   }
 
-  // Fallback for development (no Stripe configured)
-  logger.warn('Stripe not configured, submitting without payment', { registrationId });
   return prisma.businessRegistration.update({
     where: { id: registrationId },
     data: {
       status: 'SUBMITTED',
       submittedAt: new Date(),
+      ...(paymentIntentId && { stripePaymentIntentId: paymentIntentId }),
     },
   });
 }
