@@ -110,46 +110,20 @@ export default function PostCard({ post }: PostCardProps) {
       {/* Media */}
       {Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0 && !mediaError && (
         <div className="mt-2">
-          {post.mediaUrls.length === 1 ? (
-            // Single media item
-            String(post.type).toUpperCase() === 'VIDEO' ? (
-              <video
-                src={post.mediaUrls[0]}
-                controls
-                playsInline
-                preload="metadata"
-                onError={() => setMediaError(true)}
-                className="w-full max-h-[520px] object-contain bg-black"
-              />
-            ) : (
-              <img
-                src={post.mediaUrls[0]}
-                alt="Post media"
-                onError={() => setMediaError(true)}
-                loading="lazy"
-                className="w-full h-auto object-cover max-h-[520px]"
-              />
-            )
+          {String(post.type).toUpperCase() === 'VIDEO' ? (
+            <video
+              src={post.mediaUrls[0]}
+              controls
+              onError={() => setMediaError(true)}
+              className="w-full max-h-[520px] object-contain bg-black"
+            />
           ) : (
-            // Multiple media items - grid layout
-            <div className={`grid gap-1 ${post.mediaUrls.length === 2 ? 'grid-cols-2' : 'grid-cols-2'}`}>
-              {post.mediaUrls.slice(0, 4).map((url: string, index: number) => (
-                <div key={index} className={`relative ${post.mediaUrls.length === 3 && index === 0 ? 'col-span-2' : ''}`}>
-                  <img
-                    src={url}
-                    alt={`Post media ${index + 1}`}
-                    onError={() => setMediaError(true)}
-                    loading="lazy"
-                    className="w-full h-48 object-cover"
-                  />
-                  {index === 3 && post.mediaUrls.length > 4 && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                      <span className="text-white text-xl font-bold">+{post.mediaUrls.length - 4}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <img
+              src={post.mediaUrls[0]}
+              alt="Post media"
+              onError={() => setMediaError(true)}
+              className="w-full h-auto object-cover max-h-[520px]"
+            />
           )}
         </div>
       )}
