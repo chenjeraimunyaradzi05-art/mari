@@ -272,26 +272,38 @@ router.post(
         },
       });
 
-      // Add skills if provided
+      // Add skills if provided - batch operations to avoid N+1 queries
       if (skills && skills.length > 0) {
-        for (const skillName of skills) {
-          let skill = await prisma.skill.findUnique({
-            where: { name: skillName.toLowerCase() },
-          });
-
-          if (!skill) {
-            skill = await prisma.skill.create({
-              data: { name: skillName.toLowerCase() },
-            });
-          }
-
-          await prisma.jobSkill.create({
-            data: {
-              jobId: job.id,
-              skillId: skill.id,
-            },
+        const normalizedSkills = skills.map((s: string) => s.toLowerCase());
+        
+        // Find existing skills in one query
+        const existingSkills = await prisma.skill.findMany({
+          where: { name: { in: normalizedSkills } },
+        });
+        const existingSkillNames = new Set(existingSkills.map(s => s.name));
+        
+        // Create missing skills in batch
+        const missingSkillNames = normalizedSkills.filter(name => !existingSkillNames.has(name));
+        if (missingSkillNames.length > 0) {
+          await prisma.skill.createMany({
+            data: missingSkillNames.map(name => ({ name })),
+            skipDuplicates: true,
           });
         }
+        
+        // Fetch all skills (including newly created) in one query
+        const allSkills = await prisma.skill.findMany({
+          where: { name: { in: normalizedSkills } },
+        });
+        
+        // Create job-skill associations in batch
+        await prisma.jobSkill.createMany({
+          data: allSkills.map(skill => ({
+            jobId: job.id,
+            skillId: skill.id,
+          })),
+          skipDuplicates: true,
+        });
       }
 
       // Index in OpenSearch
