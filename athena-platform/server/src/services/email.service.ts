@@ -18,11 +18,26 @@ interface EmailTemplate {
   text: string;
 }
 
+/**
+ * Escapes HTML special characters to prevent XSS in email templates
+ */
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 const DEFAULT_CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 // Email templates
 const templates = {
-  welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => ({
+  welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safeReferralCode = data.referralCode ? escapeHtml(data.referralCode) : '';
+    return {
     subject: 'Welcome to ATHENA - Your Journey Begins! 🚀',
     html: `
       <!DOCTYPE html>
@@ -38,7 +53,7 @@ const templates = {
           <p style="color: #666; margin: 5px 0;">The Life Operating System for Women</p>
         </div>
         
-        <h2 style="color: #1f2937;">Welcome, ${data.firstName}! 👋</h2>
+        <h2 style="color: #1f2937;">Welcome, ${safeFirstName}! 👋</h2>
         
         <p>We're thrilled to have you join ATHENA - where ambitious women connect, grow, and thrive together.</p>
         
@@ -56,9 +71,9 @@ const templates = {
           <li>🤖 Use AI tools to optimize your career</li>
         </ul>
         
-        ${data.referralCode ? `
+        ${safeReferralCode ? `
         <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 0; font-weight: 600;">Your Referral Code: <span style="color: #7c3aed; font-size: 18px;">${data.referralCode}</span></p>
+          <p style="margin: 0; font-weight: 600;">Your Referral Code: <span style="color: #7c3aed; font-size: 18px;">${safeReferralCode}</span></p>
           <p style="margin: 5px 0 0 0; font-size: 14px; color: #666;">Share with friends - you both get 100 credits when they sign up!</p>
         </div>
         ` : ''}
@@ -99,7 +114,8 @@ Questions? Reply to this email.
 
 © ${new Date().getFullYear()} ATHENA. All rights reserved.
     `,
-  }),
+  };
+  },
 
   referralSignup: (data: { referrerName: string; referredName: string; credits: number }): EmailTemplate => ({
     subject: `🎉 ${data.referredName} joined ATHENA with your referral!`,
