@@ -142,6 +142,30 @@ router.post(
 router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
+    
+    // Verify organization exists
+    const organization = await prisma.organization.findUnique({
+      where: { id },
+    });
+    
+    if (!organization) {
+      throw new ApiError(404, 'Organization not found');
+    }
+    
+    // Check if user is admin or organization owner/admin
+    const isSystemAdmin = req.user!.role === 'ADMIN';
+    const membership = await prisma.organizationMember.findUnique({
+      where: { 
+        organizationId_userId: { organizationId: id, userId: req.user!.id } 
+      },
+    });
+    
+    const isOrgOwnerOrAdmin = membership && ['OWNER', 'ADMIN'].includes(membership.role);
+    
+    if (!isSystemAdmin && !isOrgOwnerOrAdmin) {
+      throw new ApiError(403, 'Not authorized to update this organization');
+    }
+    
     const allowedFields = ['name', 'description', 'logo', 'banner', 'website', 'city', 'state', 'country', 'industry', 'size'];
 
     const updateData: Record<string, any> = {};
@@ -151,7 +175,7 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       }
     }
 
-    const organization = await prisma.organization.update({
+    const updatedOrganization = await prisma.organization.update({
       where: { id },
       data: updateData,
     });
@@ -159,7 +183,7 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       message: 'Organization updated',
-      data: organization,
+      data: updatedOrganization,
     });
   } catch (error) {
     next(error);
