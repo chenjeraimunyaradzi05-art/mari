@@ -130,7 +130,7 @@ router.post(
   authenticate,
   [
     body('receiverId').isUUID().withMessage('Valid receiver ID required'),
-    body('giftType').isString().withMessage('Gift type required'),
+    body('giftType').isString().notEmpty().isLength({ max: 50 }).withMessage('Gift type required'),
     body('message').optional().isString().isLength({ max: 200 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {

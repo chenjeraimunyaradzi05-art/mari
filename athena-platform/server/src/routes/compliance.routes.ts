@@ -6,6 +6,7 @@
 
 import { Router, Request, Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 import { 
   REGION_CONFIGS, 
   UK_PRICING, 
@@ -250,7 +251,8 @@ router.post('/report-content', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    logger.error('Failed to submit harmful content report', { error });
+    res.status(500).json({ success: false, error: 'Failed to submit report' });
   }
 });
 
@@ -275,7 +277,8 @@ router.get('/my-region', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    logger.error('Failed to get region info', { error });
+    res.status(500).json({ success: false, error: 'Failed to get region information' });
   }
 });
 
@@ -310,7 +313,8 @@ router.put('/region-preferences', async (req: AuthRequest, res: Response) => {
       data: updatedPreferences,
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    logger.error('Failed to update region preferences', { error });
+    res.status(500).json({ success: false, error: 'Failed to update preferences' });
   }
 });
 
