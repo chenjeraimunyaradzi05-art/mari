@@ -7,6 +7,7 @@ import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { aiService } from '../services/ai.service'; // Added import
 import { generateFeed, getVideoFeed, recordPostView } from '../services/feed.service';
 import { logger } from '../utils/logger';
+import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 
 const router = Router();
 
@@ -16,8 +17,7 @@ const router = Router();
 // ===========================================
 router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
 
     // Phase 1 community tabs: "for-you" (ranked) and "following" (only followed users)
     const tab = typeof req.query.tab === 'string' ? req.query.tab : 'for-you';

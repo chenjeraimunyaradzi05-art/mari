@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { parsePagination } from '../utils/pagination';
 
 const router = Router();
 
@@ -145,8 +146,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.get('/', async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
     const type = req.query.type as string;
     const search = req.query.search as string;
     const studyMode = req.query.studyMode as string;

@@ -3,6 +3,7 @@ import { EducationApplicationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { parsePagination } from '../utils/pagination';
 
 const router = Router();
 
@@ -55,8 +56,7 @@ const requireOrgAnalyticsAccess: RequestHandler<{ organizationId: string }> = as
 // ===========================================
 router.get('/providers', async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
     const search = (req.query.search as string) || '';
     const type = (req.query.type as string) || ''; // 'university' | 'tafe'
 

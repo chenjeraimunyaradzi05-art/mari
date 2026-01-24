@@ -1039,8 +1039,7 @@ router.delete('/:id/follow', authenticate, async (req: AuthRequest, res, next) =
 router.get('/:id/followers', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const followers = await prisma.follow.findMany({
       where: { followingId: id },
@@ -1084,8 +1083,7 @@ router.get('/:id/followers', async (req, res, next) => {
 router.get('/:id/following', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const following = await prisma.follow.findMany({
       where: { followerId: id },

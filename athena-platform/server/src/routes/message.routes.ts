@@ -5,6 +5,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { v4 as uuidv4 } from 'uuid';
 import { sendRealTimeMessage } from '../services/socket.service';
+import { parsePagination } from '../utils/pagination';
 
 const router = Router();
 
@@ -89,7 +90,7 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
   try {
     const { id } = req.params;
     const userId = req.user!.id;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const { limit } = parsePagination(req.query as { page?: string; limit?: string }, 100);
     const before = req.query.before as string;
 
     // Verify participation

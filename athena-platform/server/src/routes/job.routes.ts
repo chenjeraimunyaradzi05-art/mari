@@ -5,6 +5,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
+import { parsePagination } from '../utils/pagination';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRecommendedJobs, search as searchService } from '../services/search.service';
 import { notificationService } from '../services/notification.service';
@@ -16,8 +17,7 @@ const router = Router();
 // ===========================================
 router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
     const search = req.query.search as string;
     const type = req.query.type as string;
     const city = req.query.city as string;
