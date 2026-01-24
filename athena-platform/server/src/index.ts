@@ -186,8 +186,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Static uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Static uploads - mounted later after body parsing for logging
 
 // Request correlation ID
 app.use(requestIdMiddleware);

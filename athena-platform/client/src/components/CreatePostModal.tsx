@@ -49,76 +49,74 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
   const [showVisibilityMenu, setShowVisibilityMenu] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
-  const [mediaType, setMediaType] = useState<'TEXT' | 'IMAGE' | 'VIDEO'>('TEXT');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   const { mutate: createPost, isPending } = useCreatePost();
 
-  const handleSubmit = () => {
-    if (!content.trim() && mediaUrls.length === 0) return;
+  const handleSubmit = async () => {
+    if (!content.trim()) return;
+
+    let mediaUrls: string[] = [];
+    let type = postType;
+
+    // Upload attachments first
+    if (attachments.length > 0) {
+      setIsUploading(true);
+      try {
+        for (const file of attachments) {
+          const uploadType = file.type.startsWith('video/') ? 'video' : 'post';
+          const res = await mediaApi.upload(uploadType, file);
+          const url = res.data?.data?.url;
+          if (url) {
+            mediaUrls.push(url);
+            if (file.type.startsWith('video/')) {
+              type = 'VIDEO';
+            } else if (type !== 'VIDEO') {
+              type = 'IMAGE';
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to upload files:', error);
+        setIsUploading(false);
+        return;
+      }
+      setIsUploading(false);
+    }
 
     createPost(
-      { 
-        content, 
-        visibility, 
-        type: mediaUrls.length > 0 ? mediaType : postType,
-        mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
-        isPublic: visibility === 'PUBLIC',
-      },
+      { content, visibility, type, mediaUrls, isPublic: visibility === 'PUBLIC' },
       {
         onSuccess: () => {
           setContent('');
           setAttachments([]);
           setPreviewUrls([]);
-          setMediaUrls([]);
-          setMediaType('TEXT');
           onClose();
         },
       }
     );
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video') => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    const file = files[0];
-    setAttachments([file]);
+    setAttachments((prev) => [...prev, ...files]);
 
-    // Create preview URL
-    const previewUrl = URL.createObjectURL(file);
-    setPreviewUrls([previewUrl]);
-
-    // Upload file
-    try {
-      setIsUploading(true);
-      const uploadType = type === 'video' ? 'video' : 'post';
-      const res = await mediaApi.upload(uploadType, file);
-      const url = res.data?.data?.url as string | undefined;
-      if (url) {
-        setMediaUrls([url]);
-        setMediaType(type === 'video' ? 'VIDEO' : 'IMAGE');
+    // Create preview URLs for images and videos
+    files.forEach((file) => {
+      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        setPreviewUrls((prev) => [...prev, url]);
       }
-    } catch (error) {
-      console.error('Upload failed:', error);
-      // Remove preview on failure
-      setPreviewUrls([]);
-      setAttachments([]);
-    } finally {
-      setIsUploading(false);
-    }
+    });
   };
 
   const removeAttachment = (index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
     setPreviewUrls((prev) => prev.filter((_, i) => i !== index));
-    setMediaUrls((prev) => prev.filter((_, i) => i !== index));
-    if (mediaUrls.length <= 1) {
-      setMediaType('TEXT');
-    }
   };
 
   if (!isOpen) return null;
@@ -241,11 +239,11 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
             <div className="grid grid-cols-2 gap-2 mt-4">
               {previewUrls.map((url, index) => (
                 <div key={index} className="relative">
-                  {mediaType === 'VIDEO' ? (
+                  {attachments[index]?.type.startsWith('video/') ? (
                     <video
                       src={url}
                       className="w-full h-32 object-cover rounded-lg"
-                      controls={false}
+                      muted
                     />
                   ) : (
                     <img
@@ -257,15 +255,9 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
                   <button
                     onClick={() => removeAttachment(index)}
                     className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white hover:bg-black/70"
-                    disabled={isUploading}
                   >
                     <X className="w-4 h-4" />
                   </button>
-                  {isUploading && (
-                    <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                      <Loader2 className="w-6 h-6 animate-spin text-white" />
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -277,16 +269,14 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
           <div className="flex items-center space-x-1">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading || mediaUrls.length > 0}
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               title="Add image"
             >
               <Image className="w-5 h-5" />
             </button>
             <button
               onClick={() => videoInputRef.current?.click()}
-              disabled={isUploading || mediaUrls.length > 0}
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               title="Add video"
             >
               <Video className="w-5 h-5" />
@@ -320,14 +310,15 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            onChange={(e) => handleFileSelect(e, 'image')}
+            multiple
+            onChange={handleFileSelect}
             className="hidden"
           />
           <input
             ref={videoInputRef}
             type="file"
             accept="video/*"
-            onChange={(e) => handleFileSelect(e, 'video')}
+            onChange={handleFileSelect}
             className="hidden"
           />
         </div>
@@ -336,26 +327,16 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
         <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <span className="text-sm text-gray-500">
             {content.length}/2000 characters
-            {mediaUrls.length > 0 && (
-              <span className="ml-2 text-primary-600">
-                • {mediaType === 'VIDEO' ? 'Video' : 'Image'} attached
-              </span>
-            )}
           </span>
           <button
             onClick={handleSubmit}
-            disabled={(!content.trim() && mediaUrls.length === 0) || isPending || isUploading}
+            disabled={!content.trim() || isPending || isUploading}
             className="btn-primary flex items-center space-x-2 disabled:opacity-50"
           >
-            {isPending ? (
+            {isPending || isUploading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Posting...</span>
-              </>
-            ) : isUploading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Uploading...</span>
+                <span>{isUploading ? 'Uploading...' : 'Posting...'}</span>
               </>
             ) : (
               <>
