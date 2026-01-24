@@ -140,20 +140,21 @@ router.get('/validate/:code', async (req, res: Response, next: NextFunction) => 
 });
 
 // ============================================================================
-// TRACK REFERRAL (called during registration)
+// TRACK REFERRAL (called after registration)
 // ============================================================================
 
 /**
  * POST /referrals/track
  * Track a new referral when a user signs up with a code
- * Called internally after user registration
+ * Requires authentication - uses the authenticated user's ID
  */
-router.post('/track', async (req, res: Response, next: NextFunction) => {
+router.post('/track', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { referralCode, newUserId, source } = req.body;
+    const { referralCode, source } = req.body;
+    const newUserId = req.user!.id; // Use authenticated user's ID, not from body
 
-    if (!referralCode || !newUserId) {
-      return res.status(400).json({ error: 'referralCode and newUserId are required' });
+    if (!referralCode) {
+      return res.status(400).json({ error: 'referralCode is required' });
     }
 
     // Find referrer

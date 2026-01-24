@@ -499,7 +499,7 @@ export const referralApi = {
 
   validateCode: (code: string) => api.get(`/referrals/validate/${code}`),
 
-  trackReferral: (data: { referralCode: string; newUserId: string; source?: string }) =>
+  trackReferral: (data: { referralCode: string; source?: string }) =>
     api.post('/referrals/track', data),
 
   completeReferral: (referralId: string) => api.post(`/referrals/${referralId}/complete`),

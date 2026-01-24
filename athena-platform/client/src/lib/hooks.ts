@@ -1295,7 +1295,7 @@ export function useReferralShareLinks() {
 
 export function useTrackReferral() {
   return useMutation({
-    mutationFn: async (data: { referralCode: string; newUserId: string; source?: string }) => {
+    mutationFn: async (data: { referralCode: string; source?: string }) => {
       const { referralApi } = await import('./api');
       const response = await referralApi.trackReferral(data);
       return response.data;
