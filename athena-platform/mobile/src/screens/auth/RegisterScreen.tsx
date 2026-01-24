@@ -12,7 +12,6 @@ import {
   Platform,
   Alert,
   ScrollView,
-  Image,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
@@ -74,11 +73,7 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Image
-            source={require('../../../assets/logo.png')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
+          <Text style={styles.logo}>ATHENA</Text>
           <Text style={styles.title}>Create Account</Text>
         </View>
 
@@ -193,9 +188,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 30,
   },
-  logoImage: {
-    width: 100,
-    height: 100,
+  logo: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#6366f1',
+    letterSpacing: 3,
   },
   title: {
     fontSize: 24,

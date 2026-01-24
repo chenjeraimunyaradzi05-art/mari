@@ -288,38 +288,41 @@ app.post('/api/subscriptions/webhook', (req: Request, res: Response) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from uploads directory with proper CORS and MIME types
+// Serve static files from uploads directory with proper headers for media
 const uploadsPath = path.join(process.cwd(), 'uploads');
 logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
-  // Set CORS headers for media files
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Range');
-  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  
   logger.debug('Static file request', { method: req.method, path: req.path });
+  // Set CORS headers for media files
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Range, Accept-Encoding');
+  // Expose headers needed for video streaming
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+  // Enable range requests for video streaming
+  res.setHeader('Accept-Ranges', 'bytes');
+  // Cache control for media assets
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   next();
 }, express.static(uploadsPath, {
+  // Set correct MIME types
   setHeaders: (res, filePath) => {
-    // Set proper MIME types for video files
-    if (filePath.endsWith('.mp4')) {
-      res.setHeader('Content-Type', 'video/mp4');
-    } else if (filePath.endsWith('.webm')) {
-      res.setHeader('Content-Type', 'video/webm');
-    } else if (filePath.endsWith('.mov')) {
-      res.setHeader('Content-Type', 'video/quicktime');
-    } else if (filePath.endsWith('.webp')) {
-      res.setHeader('Content-Type', 'image/webp');
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.pdf': 'application/pdf',
+    };
+    if (mimeTypes[ext]) {
+      res.setHeader('Content-Type', mimeTypes[ext]);
     }
-    // Allow range requests for video streaming
-    res.setHeader('Accept-Ranges', 'bytes');
-  }
+  },
 }));
 
 // ===========================================

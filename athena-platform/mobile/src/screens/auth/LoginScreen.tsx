@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  Image,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
@@ -49,11 +48,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       style={styles.container}
     >
       <View style={styles.header}>
-        <Image
-          source={require('../../../assets/logo.png')}
-          style={styles.logoImage}
-          resizeMode="contain"
-        />
+        <Text style={styles.logo}>ATHENA</Text>
         <Text style={styles.tagline}>Your Career Journey Starts Here</Text>
       </View>
 
@@ -132,9 +127,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 40,
   },
-  logoImage: {
-    width: 120,
-    height: 120,
+  logo: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#6366f1',
+    letterSpacing: 4,
   },
   tagline: {
     fontSize: 16,

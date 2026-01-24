@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  Image,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../navigation/AppNavigator';
@@ -52,11 +51,7 @@ export function ForgotPasswordScreen({ navigation }: ForgotPasswordScreenProps) 
       style={styles.container}
     >
       <View style={styles.header}>
-        <Image
-          source={require('../../../assets/logo.png')}
-          style={styles.logoImage}
-          resizeMode="contain"
-        />
+        <Text style={styles.logo}>ATHENA</Text>
         <Text style={styles.title}>Forgot your password?</Text>
         <Text style={styles.subtitle}>Enter your email to receive reset instructions.</Text>
       </View>
@@ -99,9 +94,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 30,
   },
-  logoImage: {
-    width: 100,
-    height: 100,
+  logo: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#6366f1',
+    letterSpacing: 3,
   },
   title: {
     fontSize: 22,
