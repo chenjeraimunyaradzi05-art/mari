@@ -296,8 +296,17 @@ const uploadsPath = path.join(process.cwd(), 'uploads');
 logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
   logger.debug('Static file request', { method: req.method, path: req.path });
+  // Add CORS headers for media files
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  // Cache media files
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   next();
-}, express.static(uploadsPath));
+}, express.static(uploadsPath, {
+  maxAge: '1y',
+  etag: true,
+  lastModified: true,
+}));
 
 // ===========================================
 // ROUTES
