@@ -5,6 +5,69 @@ import { ApiError } from '../middleware/errorHandler';
 const toDecimal = (value: number) => new Prisma.Decimal(value);
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
 
+/**
+ * Verify user has access to an inventory item (through organization membership or ownership)
+ */
+async function verifyItemAccess(itemId: string, userId: string): Promise<void> {
+  const item = await prisma.inventoryItem.findUnique({
+    where: { id: itemId },
+    select: { organizationId: true },
+  });
+  if (!item) {
+    throw new ApiError(404, 'Item not found');
+  }
+  if (item.organizationId) {
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: item.organizationId, userId },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Access denied');
+    }
+  }
+}
+
+/**
+ * Verify user has access to an inventory location
+ */
+async function verifyLocationAccess(locationId: string, userId: string): Promise<void> {
+  const location = await prisma.inventoryLocation.findUnique({
+    where: { id: locationId },
+    select: { organizationId: true },
+  });
+  if (!location) {
+    throw new ApiError(404, 'Location not found');
+  }
+  if (location.organizationId) {
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: location.organizationId, userId },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Access denied');
+    }
+  }
+}
+
+/**
+ * Verify user has access to an inventory transaction
+ */
+async function verifyTransactionAccess(transactionId: string, userId: string): Promise<void> {
+  const transaction = await prisma.inventoryTransaction.findUnique({
+    where: { id: transactionId },
+    select: { item: { select: { organizationId: true } } },
+  });
+  if (!transaction) {
+    throw new ApiError(404, 'Transaction not found');
+  }
+  if (transaction.item.organizationId) {
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: transaction.item.organizationId, userId },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Access denied');
+    }
+  }
+}
+
 function normalizeQuantity(type: 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'TRANSFER' | 'RETURN', quantity: number) {
   const absQty = Math.abs(quantity);
   if (type === 'SALE' || type === 'TRANSFER') {
@@ -59,7 +122,7 @@ export async function createItem(data: {
   });
 }
 
-export async function updateItem(id: string, data: {
+export async function updateItem(id: string, userId: string, data: {
   sku?: string;
   name?: string;
   description?: string;
@@ -70,6 +133,7 @@ export async function updateItem(id: string, data: {
   price?: number;
   isActive?: boolean;
 }) {
+  await verifyItemAccess(id, userId);
   if (data.sku !== undefined && data.sku.trim().length === 0) {
     throw new ApiError(400, 'SKU cannot be empty');
   }
@@ -101,7 +165,8 @@ export async function updateItem(id: string, data: {
   });
 }
 
-export async function deleteItem(id: string) {
+export async function deleteItem(id: string, userId: string) {
+  await verifyItemAccess(id, userId);
   return prisma.inventoryItem.delete({
     where: { id },
   });
@@ -137,12 +202,13 @@ export async function createLocation(data: {
   });
 }
 
-export async function updateLocation(id: string, data: {
+export async function updateLocation(id: string, userId: string, data: {
   name?: string;
   code?: string;
   address?: string;
   isActive?: boolean;
 }) {
+  await verifyLocationAccess(id, userId);
   if (data.name !== undefined && data.name.trim().length === 0) {
     throw new ApiError(400, 'Location name cannot be empty');
   }
@@ -155,7 +221,8 @@ export async function updateLocation(id: string, data: {
   });
 }
 
-export async function deleteLocation(id: string) {
+export async function deleteLocation(id: string, userId: string) {
+  await verifyLocationAccess(id, userId);
   return prisma.inventoryLocation.delete({
     where: { id },
   });
@@ -221,7 +288,7 @@ export async function createTransaction(data: {
   });
 }
 
-export async function updateTransaction(id: string, data: {
+export async function updateTransaction(id: string, userId: string, data: {
   locationId?: string;
   type?: 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'TRANSFER' | 'RETURN';
   quantity?: number;
@@ -230,6 +297,7 @@ export async function updateTransaction(id: string, data: {
   reference?: string;
   occurredAt?: string | Date;
 }) {
+  await verifyTransactionAccess(id, userId);
   if (data.quantity !== undefined && Number(data.quantity) === 0) {
     throw new ApiError(400, 'Quantity must be non-zero');
   }
@@ -258,7 +326,8 @@ export async function updateTransaction(id: string, data: {
   });
 }
 
-export async function deleteTransaction(id: string) {
+export async function deleteTransaction(id: string, userId: string) {
+  await verifyTransactionAccess(id, userId);
   return prisma.inventoryTransaction.delete({
     where: { id },
   });

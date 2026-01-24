@@ -6,6 +6,64 @@ const toDecimal = (value: number) => new Prisma.Decimal(value);
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
 const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'] as const;
 
+/**
+ * Verify user has access to an accounting account
+ */
+async function verifyAccountAccess(accountId: string, userId: string): Promise<void> {
+  const account = await prisma.accountingAccount.findUnique({
+    where: { id: accountId },
+    select: { organizationId: true, userId: true },
+  });
+  if (!account) {
+    throw new ApiError(404, 'Account not found');
+  }
+  // Check if user owns the account directly
+  if (account.userId === userId) {
+    return;
+  }
+  // Check organization membership
+  if (account.organizationId) {
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: account.organizationId, userId },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Access denied');
+    }
+  } else {
+    // Personal account not owned by this user
+    throw new ApiError(403, 'Access denied');
+  }
+}
+
+/**
+ * Verify user has access to a journal entry
+ */
+async function verifyJournalAccess(journalId: string, userId: string): Promise<void> {
+  const journal = await prisma.journalEntry.findUnique({
+    where: { id: journalId },
+    select: { organizationId: true, userId: true },
+  });
+  if (!journal) {
+    throw new ApiError(404, 'Journal entry not found');
+  }
+  // Check if user owns the journal directly
+  if (journal.userId === userId) {
+    return;
+  }
+  // Check organization membership
+  if (journal.organizationId) {
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: journal.organizationId, userId },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Access denied');
+    }
+  } else {
+    // Personal journal not owned by this user
+    throw new ApiError(403, 'Access denied');
+  }
+}
+
 export interface JournalLineInput {
   accountId: string;
   debit?: number;
@@ -69,13 +127,14 @@ export async function createAccount(data: {
   });
 }
 
-export async function updateAccount(id: string, data: {
+export async function updateAccount(id: string, userId: string, data: {
   name?: string;
   code?: string;
   type?: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
   currency?: string;
   isActive?: boolean;
 }) {
+  await verifyAccountAccess(id, userId);
   if (data.name !== undefined && data.name.trim().length === 0) {
     throw new ApiError(400, 'Account name cannot be empty');
   }
@@ -94,7 +153,8 @@ export async function updateAccount(id: string, data: {
   });
 }
 
-export async function deleteAccount(id: string) {
+export async function deleteAccount(id: string, userId: string) {
+  await verifyAccountAccess(id, userId);
   return prisma.accountingAccount.delete({
     where: { id },
   });
@@ -179,7 +239,8 @@ export async function listJournalEntries(params: {
   });
 }
 
-export async function getJournalEntry(id: string) {
+export async function getJournalEntry(id: string, userId: string) {
+  await verifyJournalAccess(id, userId);
   const entry = await prisma.journalEntry.findUnique({
     where: { id },
     include: { lines: true },
@@ -188,7 +249,8 @@ export async function getJournalEntry(id: string) {
   return entry;
 }
 
-export async function postJournalEntry(id: string) {
+export async function postJournalEntry(id: string, userId: string) {
+  await verifyJournalAccess(id, userId);
   const entry = await prisma.journalEntry.findUnique({
     where: { id },
     include: { lines: true },
@@ -212,7 +274,8 @@ export async function postJournalEntry(id: string) {
   });
 }
 
-export async function voidJournalEntry(id: string) {
+export async function voidJournalEntry(id: string, userId: string) {
+  await verifyJournalAccess(id, userId);
   const entry = await prisma.journalEntry.findUnique({
     where: { id },
   });
@@ -224,11 +287,12 @@ export async function voidJournalEntry(id: string) {
   });
 }
 
-export async function updateJournalEntry(id: string, data: {
+export async function updateJournalEntry(id: string, userId: string, data: {
   description?: string;
   reference?: string;
   entryDate?: string | Date;
 }) {
+  await verifyJournalAccess(id, userId);
   const entry = await prisma.journalEntry.findUnique({ where: { id } });
   if (!entry) throw new ApiError(404, 'Journal entry not found');
   if (entry.status !== 'DRAFT') {

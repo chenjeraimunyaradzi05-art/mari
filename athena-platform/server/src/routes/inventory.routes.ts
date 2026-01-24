@@ -1,6 +1,7 @@
-import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth';
+import { Router, Response } from 'express';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { z } from 'zod';
 import {
   listItems,
   createItem,
@@ -19,8 +20,68 @@ import {
 
 const router = Router();
 
+// Validation schemas
+const createItemSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  sku: z.string().min(1).max(50),
+  name: z.string().min(1).max(200),
+  description: z.string().max(1000).optional(),
+  unit: z.string().max(20).optional(),
+  valuationMethod: z.enum(['FIFO', 'LIFO', 'AVERAGE']).optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  cost: z.number().min(0).optional(),
+  price: z.number().min(0).optional(),
+});
+
+const updateItemSchema = z.object({
+  sku: z.string().min(1).max(50).optional(),
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(1000).optional(),
+  unit: z.string().max(20).optional(),
+  valuationMethod: z.enum(['FIFO', 'LIFO', 'AVERAGE']).optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  cost: z.number().min(0).optional(),
+  price: z.number().min(0).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const createLocationSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  name: z.string().min(1).max(200),
+  code: z.string().min(1).max(50),
+  address: z.string().max(500).optional(),
+});
+
+const updateLocationSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  code: z.string().min(1).max(50).optional(),
+  address: z.string().max(500).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const createTransactionSchema = z.object({
+  itemId: z.string().uuid(),
+  locationId: z.string().uuid().optional(),
+  type: z.enum(['PURCHASE', 'SALE', 'ADJUSTMENT', 'TRANSFER', 'RETURN']),
+  quantity: z.number().refine(val => val !== 0, { message: 'Quantity must be non-zero' }),
+  unitCost: z.number().min(0).optional(),
+  totalCost: z.number().min(0).optional(),
+  reference: z.string().max(100).optional(),
+  occurredAt: z.string().datetime().optional(),
+});
+
+const updateTransactionSchema = z.object({
+  locationId: z.string().uuid().optional(),
+  type: z.enum(['PURCHASE', 'SALE', 'ADJUSTMENT', 'TRANSFER', 'RETURN']).optional(),
+  quantity: z.number().refine(val => val !== 0, { message: 'Quantity must be non-zero' }).optional(),
+  unitCost: z.number().min(0).optional(),
+  totalCost: z.number().min(0).optional(),
+  reference: z.string().max(100).optional(),
+  occurredAt: z.string().datetime().optional(),
+});
+
 // Items
-router.get('/items', authenticate, async (req: Request, res: Response) => {
+router.get('/items', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId } = req.query;
     const items = await listItems({ organizationId: organizationId as string | undefined });
@@ -31,19 +92,13 @@ router.get('/items', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/items', authenticate, async (req: Request, res: Response) => {
+router.post('/items', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const item = await createItem({
-      organizationId: req.body.organizationId,
-      sku: req.body.sku,
-      name: req.body.name,
-      description: req.body.description,
-      unit: req.body.unit,
-      valuationMethod: req.body.valuationMethod,
-      currency: req.body.currency,
-      cost: req.body.cost,
-      price: req.body.price,
-    });
+    const parsed = createItemSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const item = await createItem(parsed.data);
     res.status(201).json({ data: item });
   } catch (error: any) {
     logger.error('Failed to create inventory item', { error });
@@ -51,9 +106,13 @@ router.post('/items', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/items/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/items/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const item = await updateItem(req.params.id, req.body);
+    const parsed = updateItemSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const item = await updateItem(req.params.id, req.user!.id, parsed.data);
     res.json({ data: item });
   } catch (error: any) {
     logger.error('Failed to update inventory item', { error });
@@ -61,9 +120,9 @@ router.patch('/items/:id', authenticate, async (req: Request, res: Response) => 
   }
 });
 
-router.delete('/items/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/items/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    await deleteItem(req.params.id);
+    await deleteItem(req.params.id, req.user!.id);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete inventory item', { error });
@@ -72,7 +131,7 @@ router.delete('/items/:id', authenticate, async (req: Request, res: Response) =>
 });
 
 // Locations
-router.get('/locations', authenticate, async (req: Request, res: Response) => {
+router.get('/locations', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId } = req.query;
     const locations = await listLocations({ organizationId: organizationId as string | undefined });
@@ -83,14 +142,13 @@ router.get('/locations', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/locations', authenticate, async (req: Request, res: Response) => {
+router.post('/locations', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const location = await createLocation({
-      organizationId: req.body.organizationId,
-      name: req.body.name,
-      code: req.body.code,
-      address: req.body.address,
-    });
+    const parsed = createLocationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const location = await createLocation(parsed.data);
     res.status(201).json({ data: location });
   } catch (error: any) {
     logger.error('Failed to create inventory location', { error });
@@ -98,9 +156,13 @@ router.post('/locations', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/locations/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/locations/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const location = await updateLocation(req.params.id, req.body);
+    const parsed = updateLocationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const location = await updateLocation(req.params.id, req.user!.id, parsed.data);
     res.json({ data: location });
   } catch (error: any) {
     logger.error('Failed to update inventory location', { error });
@@ -108,9 +170,9 @@ router.patch('/locations/:id', authenticate, async (req: Request, res: Response)
   }
 });
 
-router.delete('/locations/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/locations/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    await deleteLocation(req.params.id);
+    await deleteLocation(req.params.id, req.user!.id);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete inventory location', { error });
@@ -119,7 +181,7 @@ router.delete('/locations/:id', authenticate, async (req: Request, res: Response
 });
 
 // Transactions
-router.get('/transactions', authenticate, async (req: Request, res: Response) => {
+router.get('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId, itemId } = req.query;
     const transactions = await listTransactions({
@@ -133,19 +195,15 @@ router.get('/transactions', authenticate, async (req: Request, res: Response) =>
   }
 });
 
-router.post('/transactions', authenticate, async (req: Request, res: Response) => {
+router.post('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string | undefined;
+    const parsed = createTransactionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
     const transaction = await createTransaction({
-      itemId: req.body.itemId,
-      locationId: req.body.locationId,
-      createdByUserId: userId,
-      type: req.body.type,
-      quantity: req.body.quantity,
-      unitCost: req.body.unitCost,
-      totalCost: req.body.totalCost,
-      reference: req.body.reference,
-      occurredAt: req.body.occurredAt,
+      ...parsed.data,
+      createdByUserId: req.user!.id,
     });
     res.status(201).json({ data: transaction });
   } catch (error: any) {
@@ -154,17 +212,13 @@ router.post('/transactions', authenticate, async (req: Request, res: Response) =
   }
 });
 
-router.patch('/transactions/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const transaction = await updateTransaction(req.params.id, {
-      locationId: req.body.locationId,
-      type: req.body.type,
-      quantity: req.body.quantity,
-      unitCost: req.body.unitCost,
-      totalCost: req.body.totalCost,
-      reference: req.body.reference,
-      occurredAt: req.body.occurredAt,
-    });
+    const parsed = updateTransactionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const transaction = await updateTransaction(req.params.id, req.user!.id, parsed.data);
     res.json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to update inventory transaction', { error });
@@ -172,9 +226,9 @@ router.patch('/transactions/:id', authenticate, async (req: Request, res: Respon
   }
 });
 
-router.delete('/transactions/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    await deleteTransaction(req.params.id);
+    await deleteTransaction(req.params.id, req.user!.id);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete inventory transaction', { error });
@@ -183,7 +237,7 @@ router.delete('/transactions/:id', authenticate, async (req: Request, res: Respo
 });
 
 // Stock levels
-router.get('/stock-levels', authenticate, async (req: Request, res: Response) => {
+router.get('/stock-levels', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId } = req.query;
     const levels = await getStockLevels({ organizationId: organizationId as string | undefined });

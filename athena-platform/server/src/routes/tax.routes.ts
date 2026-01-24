@@ -1,6 +1,7 @@
-import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth';
+import { Router, Response } from 'express';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { z } from 'zod';
 import {
   listTaxRates,
   createTaxRate,
@@ -15,8 +16,50 @@ import {
 
 const router = Router();
 
+// Validation schemas
+const createTaxRateSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  name: z.string().min(1).max(200),
+  type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING', 'OTHER']),
+  rate: z.number().min(0).max(100),
+  region: z.string().min(1).max(100).optional(),
+  effectiveFrom: z.string().datetime().optional(),
+  effectiveTo: z.string().datetime().optional(),
+});
+
+const updateTaxRateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING', 'OTHER']).optional(),
+  rate: z.number().min(0).max(100).optional(),
+  region: z.string().min(1).max(100).optional(),
+  effectiveFrom: z.string().datetime().optional(),
+  effectiveTo: z.string().datetime().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const createTaxReturnSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  totalSales: z.number().min(0),
+  totalTax: z.number().min(0),
+  reference: z.string().max(100).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const updateTaxReturnSchema = z.object({
+  periodStart: z.string().datetime().optional(),
+  periodEnd: z.string().datetime().optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  totalSales: z.number().min(0).optional(),
+  totalTax: z.number().min(0).optional(),
+  reference: z.string().max(100).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
 // Tax Rates
-router.get('/rates', authenticate, async (req: Request, res: Response) => {
+router.get('/rates', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId, region } = req.query;
     const rates = await listTaxRates({
@@ -30,17 +73,13 @@ router.get('/rates', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/rates', authenticate, async (req: Request, res: Response) => {
+router.post('/rates', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const rate = await createTaxRate({
-      organizationId: req.body.organizationId,
-      name: req.body.name,
-      type: req.body.type,
-      rate: req.body.rate,
-      region: req.body.region,
-      effectiveFrom: req.body.effectiveFrom,
-      effectiveTo: req.body.effectiveTo,
-    });
+    const parsed = createTaxRateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const rate = await createTaxRate(parsed.data);
     res.status(201).json({ data: rate });
   } catch (error: any) {
     logger.error('Failed to create tax rate', { error });
@@ -48,9 +87,13 @@ router.post('/rates', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/rates/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/rates/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const rate = await updateTaxRate(req.params.id, req.body);
+    const parsed = updateTaxRateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+    const rate = await updateTaxRate(req.params.id, parsed.data);
     res.json({ data: rate });
   } catch (error: any) {
     logger.error('Failed to update tax rate', { error });
@@ -58,7 +101,7 @@ router.patch('/rates/:id', authenticate, async (req: Request, res: Response) => 
   }
 });
 
-router.delete('/rates/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/rates/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     await deleteTaxRate(req.params.id);
     res.status(204).send();
@@ -69,13 +112,12 @@ router.delete('/rates/:id', authenticate, async (req: Request, res: Response) =>
 });
 
 // Tax Returns
-router.get('/returns', authenticate, async (req: Request, res: Response) => {
+router.get('/returns', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId } = req.query;
-    const userId = (req as any).user?.id as string | undefined;
     const returns = await listTaxReturns({
       organizationId: organizationId as string | undefined,
-      userId,
+      userId: req.user!.id,
     });
     res.json({ data: returns });
   } catch (error: any) {
@@ -84,19 +126,15 @@ router.get('/returns', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/returns', authenticate, async (req: Request, res: Response) => {
+router.post('/returns', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string | undefined;
+    const parsed = createTaxReturnSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
     const record = await createTaxReturn({
-      organizationId: req.body.organizationId,
-      userId,
-      periodStart: req.body.periodStart,
-      periodEnd: req.body.periodEnd,
-      currency: req.body.currency,
-      totalSales: req.body.totalSales,
-      totalTax: req.body.totalTax,
-      reference: req.body.reference,
-      metadata: req.body.metadata,
+      ...parsed.data,
+      userId: req.user!.id,
     });
     res.status(201).json({ data: record });
   } catch (error: any) {
@@ -105,22 +143,13 @@ router.post('/returns', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/returns/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/returns/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string;
-    if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
+    const parsed = updateTaxReturnSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
     }
-    const record = await updateTaxReturn(req.params.id, userId, {
-      periodStart: req.body.periodStart,
-      periodEnd: req.body.periodEnd,
-      currency: req.body.currency,
-      totalSales: req.body.totalSales,
-      totalTax: req.body.totalTax,
-      reference: req.body.reference,
-      metadata: req.body.metadata,
-    });
+    const record = await updateTaxReturn(req.params.id, req.user!.id, parsed.data);
     res.json({ data: record });
   } catch (error: any) {
     logger.error('Failed to update tax return', { error });
@@ -128,14 +157,9 @@ router.patch('/returns/:id', authenticate, async (req: Request, res: Response) =
   }
 });
 
-router.post('/returns/:id/submit', authenticate, async (req: Request, res: Response) => {
+router.post('/returns/:id/submit', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string;
-    if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-    const record = await submitTaxReturn(req.params.id, userId);
+    const record = await submitTaxReturn(req.params.id, req.user!.id);
     res.json({ data: record });
   } catch (error: any) {
     logger.error('Failed to submit tax return', { error });
@@ -143,14 +167,9 @@ router.post('/returns/:id/submit', authenticate, async (req: Request, res: Respo
   }
 });
 
-router.delete('/returns/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/returns/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string;
-    if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-    await deleteTaxReturn(req.params.id, userId);
+    await deleteTaxReturn(req.params.id, req.user!.id);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete tax return', { error });

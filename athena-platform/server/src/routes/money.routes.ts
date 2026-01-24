@@ -1,17 +1,41 @@
-import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth';
+import { Router, Response } from 'express';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { z } from 'zod';
 import { listMoneyTransactions, createMoneyTransaction, updateMoneyTransaction, deleteMoneyTransaction } from '../services/money.service';
 
 const router = Router();
 
-router.get('/transactions', authenticate, async (req: Request, res: Response) => {
+// Validation schemas
+const createMoneyTransactionSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  amount: z.number().positive(),
+  currency: z.string().regex(/^[A-Z]{3}$/).default('USD'),
+  type: z.enum(['PAYMENT', 'REFUND', 'TRANSFER', 'DEPOSIT', 'WITHDRAWAL', 'FEE', 'OTHER']),
+  status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).default('PENDING'),
+  provider: z.string().max(100).optional(),
+  reference: z.string().max(200).optional(),
+  description: z.string().max(500).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const updateMoneyTransactionSchema = z.object({
+  amount: z.number().positive().optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  type: z.enum(['PAYMENT', 'REFUND', 'TRANSFER', 'DEPOSIT', 'WITHDRAWAL', 'FEE', 'OTHER']).optional(),
+  status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
+  provider: z.string().max(100).optional(),
+  reference: z.string().max(200).optional(),
+  description: z.string().max(500).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+router.get('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { organizationId } = req.query;
-    const userId = (req as any).user?.id as string | undefined;
     const transactions = await listMoneyTransactions({
       organizationId: organizationId as string | undefined,
-      userId,
+      userId: req.user!.id,
     });
     res.json({ data: transactions });
   } catch (error: any) {
@@ -20,19 +44,15 @@ router.get('/transactions', authenticate, async (req: Request, res: Response) =>
   }
 });
 
-router.post('/transactions', authenticate, async (req: Request, res: Response) => {
+router.post('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string | undefined;
+    const parsed = createMoneyTransactionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
     const transaction = await createMoneyTransaction({
-      organizationId: req.body.organizationId,
-      userId,
-      amount: req.body.amount,
-      currency: req.body.currency,
-      type: req.body.type,
-      status: req.body.status,
-      provider: req.body.provider,
-      reference: req.body.reference,
-      metadata: req.body.metadata,
+      ...parsed.data,
+      userId: req.user!.id,
     });
     res.status(201).json({ data: transaction });
   } catch (error: any) {
@@ -41,14 +61,13 @@ router.post('/transactions', authenticate, async (req: Request, res: Response) =
   }
 });
 
-router.patch('/transactions/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string;
-    if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
+    const parsed = updateMoneyTransactionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
     }
-    const transaction = await updateMoneyTransaction(req.params.id, userId, req.body);
+    const transaction = await updateMoneyTransaction(req.params.id, req.user!.id, parsed.data);
     res.json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to update money transaction', { error });
@@ -56,14 +75,9 @@ router.patch('/transactions/:id', authenticate, async (req: Request, res: Respon
   }
 });
 
-router.delete('/transactions/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id as string;
-    if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-    await deleteMoneyTransaction(req.params.id, userId);
+    await deleteMoneyTransaction(req.params.id, req.user!.id);
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete money transaction', { error });
