@@ -249,7 +249,7 @@ export function CreatorUploadStudio() {
         formData.append('scheduledAt', uploadState.scheduleTime.toISOString());
       }
 
-      await api.post('/video/upload', formData, {
+      await api.post('/api/videos/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           const progress = progressEvent.total

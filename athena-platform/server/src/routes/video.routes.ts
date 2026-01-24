@@ -1,98 +1,16 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import multer from 'multer';
-import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
-import fs from 'fs';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
-import { logger } from '../utils/logger';
 
 const router = Router();
-
-// Configure multer for video uploads
-const videoUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
-  fileFilter: (_req, file, cb) => {
-    const allowedTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid video format. Use MP4, MOV, or WebM.'));
-    }
-  },
-});
 
 function parseLimit(value: unknown, fallback = 20, max = 50): number {
   const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
   if (Number.isNaN(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, max);
 }
-
-// ===========================================
-// VIDEO UPLOAD
-// ===========================================
-router.post('/upload', authenticate, videoUpload.single('video'), async (req: AuthRequest, res, next) => {
-  try {
-    const file = req.file;
-    if (!file) {
-      throw new ApiError(400, 'No video file provided');
-    }
-
-    // Parse metadata from form data
-    const title = req.body.title || 'Untitled Video';
-    const description = req.body.description || '';
-    const category = req.body.category || 'Other';
-    const visibility = req.body.visibility || 'public';
-    const hashtags = req.body.hashtags ? JSON.parse(req.body.hashtags) : [];
-    const trimStart = parseFloat(req.body.trimStart) || 0;
-    const trimEnd = parseFloat(req.body.trimEnd) || 0;
-
-    // Generate unique filename
-    const fileExtension = path.extname(file.originalname) || '.mp4';
-    const key = `videos/${req.user!.id}/${uuidv4()}${fileExtension}`;
-
-    // Save video file locally (or S3 in production)
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-    const filePath = path.join(uploadsDir, key);
-    const dir = path.dirname(filePath);
-
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    fs.writeFileSync(filePath, file.buffer);
-
-    const apiUrl = process.env.API_URL || 'http://localhost:5000';
-    const videoUrl = `${apiUrl}/uploads/${key}`;
-
-    // Create video record in database
-    const video = await prisma.video.create({
-      data: {
-        authorId: req.user!.id,
-        title,
-        description,
-        videoUrl,
-        type: 'REEL',
-        status: 'PUBLISHED',
-        hashtags,
-        publishedAt: new Date(),
-        duration: Math.round(trimEnd - trimStart),
-      },
-    });
-
-    logger.info('Video uploaded successfully', { videoId: video.id, userId: req.user!.id });
-
-    res.status(201).json({
-      success: true,
-      data: video,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
 
 // ===========================================
 // VIDEO FEED

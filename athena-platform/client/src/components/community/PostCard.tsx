@@ -114,42 +114,16 @@ export default function PostCard({ post }: PostCardProps) {
             <video
               src={post.mediaUrls[0]}
               controls
-              playsInline
-              preload="metadata"
               onError={() => setMediaError(true)}
               className="w-full max-h-[520px] object-contain bg-black"
-              poster={post.thumbnailUrl}
             />
-          ) : post.mediaUrls.length === 1 ? (
+          ) : (
             <img
               src={post.mediaUrls[0]}
               alt="Post media"
               onError={() => setMediaError(true)}
-              loading="lazy"
               className="w-full h-auto object-cover max-h-[520px]"
             />
-          ) : (
-            <div className={`grid gap-1 ${post.mediaUrls.length === 2 ? 'grid-cols-2' : post.mediaUrls.length === 3 ? 'grid-cols-2' : 'grid-cols-2'}`}>
-              {post.mediaUrls.slice(0, 4).map((url: string, index: number) => (
-                <div 
-                  key={index} 
-                  className={`relative ${post.mediaUrls.length === 3 && index === 0 ? 'row-span-2' : ''}`}
-                >
-                  <img
-                    src={url}
-                    alt={`Post media ${index + 1}`}
-                    onError={() => setMediaError(true)}
-                    loading="lazy"
-                    className="w-full h-full object-cover aspect-square"
-                  />
-                  {index === 3 && post.mediaUrls.length > 4 && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                      <span className="text-white text-2xl font-bold">+{post.mediaUrls.length - 4}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
           )}
         </div>
       )}

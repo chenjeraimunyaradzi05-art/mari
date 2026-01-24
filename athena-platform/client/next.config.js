@@ -27,14 +27,6 @@ const nextConfig = {
         hostname: 'localhost',
         port: '5000',
       },
-      {
-        protocol: 'https',
-        hostname: '*.railway.app',
-      },
-      {
-        protocol: 'https',
-        hostname: '*.up.railway.app',
-      },
     ],
   },
   async rewrites() {

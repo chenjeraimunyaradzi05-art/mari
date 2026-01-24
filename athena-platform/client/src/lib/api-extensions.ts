@@ -11,17 +11,6 @@ export const videoApi = {
   // Get single video
   getVideo: (id: string) => api.get(`/video/${id}`),
 
-  // Upload video with metadata
-  upload: (formData: FormData, onProgress?: (progress: number) => void) =>
-    api.post('/video/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          onProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
-        }
-      },
-    }),
-
   // Create new video post
   create: (data: {
     title: string;
