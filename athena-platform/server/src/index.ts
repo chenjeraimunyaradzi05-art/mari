@@ -1,6 +1,5 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import path from 'path';
-import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -187,8 +186,6 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Note: Static uploads middleware is defined later after body parsing
-
 // Request correlation ID
 app.use(requestIdMiddleware);
 
@@ -291,39 +288,38 @@ app.post('/api/subscriptions/webhook', (req: Request, res: Response) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from uploads directory
+// Serve static files from uploads directory with proper CORS and MIME types
 const uploadsPath = path.join(process.cwd(), 'uploads');
 logger.info('Mounting static uploads', { path: uploadsPath });
-
-// Create uploads directory if it doesn't exist
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath, { recursive: true });
-  logger.info('Created uploads directory', { path: uploadsPath });
-}
-
 app.use('/uploads', (req, res, next) => {
   // Set CORS headers for media files
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Range');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   
-  // Set cache headers for media files
-  const ext = path.extname(req.path).toLowerCase();
-  if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'].includes(ext)) {
-    res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year for images
-    res.setHeader('Content-Type', `image/${ext.slice(1) === 'jpg' ? 'jpeg' : ext.slice(1)}`);
-  } else if (['.mp4', '.webm', '.mov'].includes(ext)) {
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day for videos
-    res.setHeader('Accept-Ranges', 'bytes'); // Enable range requests for video seeking
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
   }
   
-  logger.debug('Static file request', { method: req.method, path: req.path, ext });
+  logger.debug('Static file request', { method: req.method, path: req.path });
   next();
 }, express.static(uploadsPath, {
-  maxAge: '1d',
-  etag: true,
-  lastModified: true,
-  fallthrough: false, // Return 404 for missing files instead of passing to next middleware
+  setHeaders: (res, filePath) => {
+    // Set proper MIME types for video files
+    if (filePath.endsWith('.mp4')) {
+      res.setHeader('Content-Type', 'video/mp4');
+    } else if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'video/webm');
+    } else if (filePath.endsWith('.mov')) {
+      res.setHeader('Content-Type', 'video/quicktime');
+    } else if (filePath.endsWith('.webp')) {
+      res.setHeader('Content-Type', 'image/webp');
+    }
+    // Allow range requests for video streaming
+    res.setHeader('Accept-Ranges', 'bytes');
+  }
 }));
 
 // ===========================================

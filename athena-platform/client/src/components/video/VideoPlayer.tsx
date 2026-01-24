@@ -139,26 +139,14 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         src={video.videoUrl}
-        poster={video.thumbnailUrl || '/logo.png'}
+        poster={video.thumbnailUrl}
         loop
         muted={isMuted}
         playsInline
-        preload="metadata"
-        crossOrigin="anonymous"
         className="h-full w-full object-cover"
         onTimeUpdate={handleTimeUpdate}
-        onError={(e) => {
-          console.error('Video load error:', video.videoUrl);
-          // Try to show poster on error
-          const videoEl = e.currentTarget;
-          videoEl.poster = '/logo.png';
-        }}
         aria-label={video.title}
-      >
-        <source src={video.videoUrl} type="video/mp4" />
-        <source src={video.videoUrl} type="video/webm" />
-        Your browser does not support the video tag.
-      </video>
+      />
 
       {/* Overlay gradient */}
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/60 pointer-events-none" />
