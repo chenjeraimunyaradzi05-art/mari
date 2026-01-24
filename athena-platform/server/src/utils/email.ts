@@ -1,13 +1,3 @@
-/**
- * Email Utilities for ATHENA Platform
- * 
- * This module provides convenience wrappers for authentication-related emails.
- * For additional email templates (referral, weekly digest, mentor booking, etc.),
- * use the consolidated email service at ../services/email.service.ts
- * 
- * @see ../services/email.service.ts for the full email service with all templates
- */
-
 import { logger } from './logger';
 
 interface EmailOptions {

@@ -1,20 +1,24 @@
 /**
  * Email Service for ATHENA Platform
  * Handles all transactional and marketing emails
+ * 
+ * NOTE: Core email sending is consolidated in ../utils/email.ts
+ * This module provides additional email templates and the emailService object
  */
 
-interface EmailOptions {
-  to: string;
-  subject: string;
-  html: string;
-  text?: string;
-}
+// Re-export core functions from utils/email for backward compatibility
+export { sendEmail, sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
+
+import { sendEmail as sendEmailCore } from '../utils/email';
+import { logger } from '../utils/logger';
 
 interface EmailTemplate {
   subject: string;
   html: string;
   text: string;
 }
+
+const DEFAULT_CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 // Email templates
 const templates = {
@@ -509,43 +513,7 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
 };
 
 /**
- * Send an email using the configured provider (SendGrid)
- */
-export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  const { to, subject, html, text } = options;
-
-  // In development, just log the email
-  if (process.env.NODE_ENV !== 'production' || !process.env.SENDGRID_API_KEY) {
-    console.log('📧 Email would be sent:');
-    console.log(`   To: ${to}`);
-    console.log(`   Subject: ${subject}`);
-    console.log('   (Email sending disabled in development)');
-    return true;
-  }
-
-  try {
-    // Dynamic import to avoid issues if package not installed
-    const sgMail = await import('@sendgrid/mail');
-    sgMail.default.setApiKey(process.env.SENDGRID_API_KEY);
-
-    await sgMail.default.send({
-      to,
-      from: process.env.SENDGRID_FROM_EMAIL || 'noreply@athena.com',
-      subject,
-      html,
-      text: text || subject,
-    });
-
-    console.log(`📧 Email sent successfully to: ${to}`);
-    return true;
-  } catch (error) {
-    console.error('Failed to send email:', error);
-    return false;
-  }
-}
-
-/**
- * Email service class
+ * Email service class - uses consolidated sendEmailCore from utils/email
  */
 export const emailService = {
   /**
@@ -556,7 +524,7 @@ export const emailService = {
     const html = options.html || `<p>${JSON.stringify(options.data)}</p>`;
     const text = options.text || JSON.stringify(options.data);
     
-    return sendEmail({
+    return sendEmailCore({
       to: options.to,
       subject: options.subject,
       html,
@@ -569,7 +537,7 @@ export const emailService = {
    */
   async sendWelcomeEmail(to: string, firstName: string, referralCode?: string): Promise<boolean> {
     const template = templates.welcome({ firstName, referralCode });
-    return sendEmail({
+    return sendEmailCore({
       to,
       subject: template.subject,
       html: template.html,
@@ -587,7 +555,7 @@ export const emailService = {
     credits: number
   ): Promise<boolean> {
     const template = templates.referralSignup({ referrerName, referredName, credits });
-    return sendEmail({
+    return sendEmailCore({
       to,
       subject: template.subject,
       html: template.html,
@@ -600,7 +568,7 @@ export const emailService = {
    */
   async sendReEngagementEmail(to: string, firstName: string, daysInactive: number): Promise<boolean> {
     const template = templates.reEngagement({ firstName, daysInactive });
-    return sendEmail({
+    return sendEmailCore({
       to,
       subject: template.subject,
       html: template.html,
@@ -617,7 +585,7 @@ export const emailService = {
     stats: { newJobs: number; newConnections: number; upcomingEvents: number }
   ): Promise<boolean> {
     const template = templates.weeklyDigest({ firstName, ...stats });
-    return sendEmail({
+    return sendEmailCore({
       to,
       subject: template.subject,
       html: template.html,
