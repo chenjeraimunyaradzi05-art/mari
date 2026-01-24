@@ -3,10 +3,10 @@
  * Handles business registration logic and ASIC integration
  */
 
-import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
+import Stripe from 'stripe';
 import { logger } from '../utils/logger';
 
 // Initialize Stripe
@@ -14,12 +14,12 @@ const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
   : null;
 
-// Formation fee in cents (e.g., $99 AUD)
-const FORMATION_FEE_CENTS: Record<BusinessType, number> = {
-  SOLE_TRADER: 4900,   // $49
-  PARTNERSHIP: 9900,   // $99
-  COMPANY: 14900,      // $149
-  TRUST: 19900,        // $199
+// Registration fees by business type (in cents)
+const REGISTRATION_FEES: Record<BusinessType, number> = {
+  SOLE_TRADER: 4900, // $49 AUD
+  PARTNERSHIP: 9900, // $99 AUD
+  COMPANY: 14900, // $149 AUD
+  TRUST: 19900, // $199 AUD
 };
 
 function asRecord(value: unknown): Record<string, any> {
@@ -159,56 +159,51 @@ export async function submitRegistration(userId: string, registrationId: string)
 
   validateRegistrationForSubmission(registration);
 
-  // Create Stripe Payment Intent for the formation fee
-  const feeAmount = FORMATION_FEE_CENTS[registration.type];
-  let paymentIntent: Stripe.PaymentIntent | null = null;
+  // Create Stripe payment intent for registration fee
+  const fee = REGISTRATION_FEES[registration.type];
+  let paymentIntentId: string | null = null;
 
-  if (stripe) {
+  if (stripe && fee > 0) {
     try {
       const user = await prisma.user.findUnique({ where: { id: userId } });
-      paymentIntent = await stripe.paymentIntents.create({
-        amount: feeAmount,
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: fee,
         currency: 'aud',
+        description: `Business registration: ${registration.businessName} (${registration.type})`,
         metadata: {
           registrationId,
           userId,
           businessType: registration.type,
         },
-        description: `Business Formation - ${registration.type}`,
         receipt_email: user?.email || undefined,
       });
-
-      logger.info('Created payment intent for formation', {
-        registrationId,
-        paymentIntentId: paymentIntent.id,
-        amount: feeAmount,
-      });
-    } catch (error: any) {
-      logger.error('Failed to create payment intent', { error: error.message, registrationId });
-      throw new ApiError(500, 'Failed to initialize payment. Please try again.');
+      paymentIntentId = paymentIntent.id;
+      logger.info('Created payment intent for registration', { registrationId, paymentIntentId, amount: fee });
+    } catch (error) {
+      logger.error('Failed to create payment intent', { error, registrationId });
+      throw new ApiError(500, 'Payment processing failed. Please try again.');
     }
   } else {
-    logger.warn('Stripe not configured, skipping payment for formation', { registrationId });
+    logger.info('Stripe not configured or zero fee, skipping payment', { registrationId, fee });
   }
 
-  const updated = await prisma.businessRegistration.update({
+  // Merge existing data with payment info
+  const existingData = asRecord(registration.data);
+  const updatedData = {
+    ...existingData,
+    paymentIntentId,
+    paymentAmount: fee,
+    paymentCurrency: 'aud',
+  };
+
+  return prisma.businessRegistration.update({
     where: { id: registrationId },
     data: {
       status: 'SUBMITTED',
       submittedAt: new Date(),
+      data: updatedData,
     },
   });
-
-  return {
-    ...updated,
-    payment: paymentIntent
-      ? {
-          clientSecret: paymentIntent.client_secret,
-          amount: feeAmount,
-          currency: 'aud',
-        }
-      : null,
-  };
 }
 
 export async function getUserRegistrations(userId: string) {

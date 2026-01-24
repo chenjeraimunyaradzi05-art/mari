@@ -509,23 +509,39 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
 };
 
 /**
- * Send an email using the configured provider
- * Currently logs to console; integrate with SendGrid/SES for production
+ * Send an email using the configured provider (SendGrid)
  */
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  // In production, integrate with SendGrid, AWS SES, or similar
-  // For now, log the email
-  console.log('📧 Email would be sent:');
-  console.log(`   To: ${options.to}`);
-  console.log(`   Subject: ${options.subject}`);
-  
-  // Simulate async email sending
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log('   ✅ Email sent successfully (simulated)');
-      resolve(true);
-    }, 100);
-  });
+  const { to, subject, html, text } = options;
+
+  // In development, just log the email
+  if (process.env.NODE_ENV !== 'production' || !process.env.SENDGRID_API_KEY) {
+    console.log('📧 Email would be sent:');
+    console.log(`   To: ${to}`);
+    console.log(`   Subject: ${subject}`);
+    console.log('   (Email sending disabled in development)');
+    return true;
+  }
+
+  try {
+    // Dynamic import to avoid issues if package not installed
+    const sgMail = await import('@sendgrid/mail');
+    sgMail.default.setApiKey(process.env.SENDGRID_API_KEY);
+
+    await sgMail.default.send({
+      to,
+      from: process.env.SENDGRID_FROM_EMAIL || 'noreply@athena.com',
+      subject,
+      html,
+      text: text || subject,
+    });
+
+    console.log(`📧 Email sent successfully to: ${to}`);
+    return true;
+  } catch (error) {
+    console.error('Failed to send email:', error);
+    return false;
+  }
 }
 
 /**
@@ -611,11 +627,3 @@ export const emailService = {
 };
 
 export default emailService;
-
-// Re-export auth-related email functions from utils/email for a single import point
-export {
-  sendEmail as sendTransactionalEmail,
-  sendVerificationEmail,
-  sendPasswordResetEmail,
-  sendWelcomeEmail as sendWelcomeVerificationEmail,
-} from '../utils/email';
