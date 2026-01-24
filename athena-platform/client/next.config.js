@@ -27,6 +27,18 @@ const nextConfig = {
         hostname: 'localhost',
         port: '5000',
       },
+      {
+        protocol: 'https',
+        hostname: '*.railway.app',
+      },
+      {
+        protocol: 'https',
+        hostname: 'athena-uploads.s3.amazonaws.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'athena-uploads.s3.ap-southeast-2.amazonaws.com',
+      },
     ],
   },
   async rewrites() {
