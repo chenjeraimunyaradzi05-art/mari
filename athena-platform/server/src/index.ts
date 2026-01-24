@@ -296,8 +296,28 @@ const uploadsPath = path.join(process.cwd(), 'uploads');
 logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
   logger.debug('Static file request', { method: req.method, path: req.path });
+  // Set CORS headers for media files
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  // Set caching for media files
+  res.setHeader('Cache-Control', 'public, max-age=31536000');
   next();
-}, express.static(uploadsPath));
+}, express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    // Set correct content types for video files
+    if (filePath.endsWith('.mp4')) {
+      res.setHeader('Content-Type', 'video/mp4');
+    } else if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'video/webm');
+    } else if (filePath.endsWith('.mov')) {
+      res.setHeader('Content-Type', 'video/quicktime');
+    } else if (filePath.endsWith('.webp')) {
+      res.setHeader('Content-Type', 'image/webp');
+    }
+    // Allow range requests for video streaming
+    res.setHeader('Accept-Ranges', 'bytes');
+  }
+}));
 
 // ===========================================
 // ROUTES
