@@ -61,6 +61,13 @@ export interface SearchResponse {
 // TEXT PROCESSING
 // ==========================================
 
+/**
+ * Escape special regex characters to prevent ReDoS attacks
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function normalizeQuery(query: string): string {
   return query
     .toLowerCase()
@@ -93,18 +100,21 @@ function calculateRelevanceScore(
   const lowerText = text.toLowerCase();
 
   for (const keyword of keywords) {
+    // Escape regex special characters to prevent ReDoS
+    const escapedKeyword = escapeRegex(keyword);
+    
     // Exact match bonus
     if (lowerText.includes(keyword)) {
       score += 10;
       
       // Word boundary match (more specific)
-      const wordBoundaryRegex = new RegExp(`\\b${keyword}\\b`, 'i');
+      const wordBoundaryRegex = new RegExp(`\\b${escapedKeyword}\\b`, 'i');
       if (wordBoundaryRegex.test(text)) {
         score += 5;
       }
       
       // Count occurrences (diminishing returns)
-      const occurrences = (lowerText.match(new RegExp(keyword, 'g')) || []).length;
+      const occurrences = (lowerText.match(new RegExp(escapedKeyword, 'g')) || []).length;
       score += Math.min(occurrences * 2, 10);
     }
   }
