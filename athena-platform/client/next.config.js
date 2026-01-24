@@ -36,8 +36,6 @@ const nextConfig = {
         hostname: '*.up.railway.app',
       },
     ],
-    // Allow unoptimized images for dynamic uploads
-    unoptimized: process.env.NODE_ENV === 'development',
   },
   async rewrites() {
     return [

@@ -109,16 +109,16 @@ export default function PostCard({ post }: PostCardProps) {
 
       {/* Media */}
       {Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0 && !mediaError && (
-        <div className="mt-2">
+        <div className="mt-2 bg-gray-100">
           {String(post.type).toUpperCase() === 'VIDEO' ? (
             <video
               src={post.mediaUrls[0]}
               controls
               playsInline
               preload="metadata"
-              crossOrigin="anonymous"
               onError={() => setMediaError(true)}
               className="w-full max-h-[520px] object-contain bg-black"
+              poster={post.thumbnailUrl}
             >
               <source src={post.mediaUrls[0]} type="video/mp4" />
               <source src={post.mediaUrls[0]} type="video/webm" />
@@ -129,7 +129,6 @@ export default function PostCard({ post }: PostCardProps) {
               src={post.mediaUrls[0]}
               alt="Post media"
               loading="lazy"
-              crossOrigin="anonymous"
               onError={() => setMediaError(true)}
               className="w-full h-auto object-cover max-h-[520px]"
             />

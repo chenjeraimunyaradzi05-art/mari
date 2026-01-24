@@ -126,9 +126,34 @@ export default function CreatePostWidget() {
                 </div>
               </div>
 
+              {/* Media Preview */}
               {mediaUrls.length > 0 && (
-                <div className="mt-3 text-xs text-gray-500">
-                  Attached: {postType === 'VIDEO' ? 'Video' : 'Image'}
+                <div className="mt-3 relative">
+                  {postType === 'VIDEO' ? (
+                    <video
+                      src={mediaUrls[0]}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="w-full max-h-48 rounded-lg object-contain bg-black"
+                    />
+                  ) : (
+                    <img
+                      src={mediaUrls[0]}
+                      alt="Upload preview"
+                      className="w-full max-h-48 rounded-lg object-cover"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMediaUrls([]);
+                      setPostType('TEXT');
+                    }}
+                    className="absolute top-2 right-2 p-1 bg-black/60 rounded-full text-white hover:bg-black/80"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
                 </div>
               )}
             </form>
