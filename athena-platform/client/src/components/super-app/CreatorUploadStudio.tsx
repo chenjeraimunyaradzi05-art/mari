@@ -368,7 +368,24 @@ export function CreatorUploadStudio() {
               className="w-full h-full object-contain"
               onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
               onEnded={() => setIsPlaying(false)}
+              onLoadedMetadata={(e) => {
+                // Ensure duration is set when metadata loads
+                const video = e.currentTarget;
+                if (video.duration && !isNaN(video.duration)) {
+                  setUploadState(prev => ({
+                    ...prev,
+                    duration: video.duration,
+                    trimEnd: prev.trimEnd || video.duration,
+                  }));
+                }
+              }}
+              onError={(e) => {
+                console.error('Video preview error:', e);
+                addToast('Error loading video preview', 'error');
+              }}
               muted={isMuted}
+              playsInline
+              preload="metadata"
             />
             
             {/* Video Controls */}

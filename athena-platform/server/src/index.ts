@@ -1,5 +1,6 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -186,8 +187,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Static uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Note: Static uploads middleware is defined later after body parsing
 
 // Request correlation ID
 app.use(requestIdMiddleware);
@@ -294,10 +294,37 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files from uploads directory
 const uploadsPath = path.join(process.cwd(), 'uploads');
 logger.info('Mounting static uploads', { path: uploadsPath });
+
+// Create uploads directory if it doesn't exist
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
+  logger.info('Created uploads directory', { path: uploadsPath });
+}
+
 app.use('/uploads', (req, res, next) => {
-  logger.debug('Static file request', { method: req.method, path: req.path });
+  // Set CORS headers for media files
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  
+  // Set cache headers for media files
+  const ext = path.extname(req.path).toLowerCase();
+  if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'].includes(ext)) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year for images
+    res.setHeader('Content-Type', `image/${ext.slice(1) === 'jpg' ? 'jpeg' : ext.slice(1)}`);
+  } else if (['.mp4', '.webm', '.mov'].includes(ext)) {
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day for videos
+    res.setHeader('Accept-Ranges', 'bytes'); // Enable range requests for video seeking
+  }
+  
+  logger.debug('Static file request', { method: req.method, path: req.path, ext });
   next();
-}, express.static(uploadsPath));
+}, express.static(uploadsPath, {
+  maxAge: '1d',
+  etag: true,
+  lastModified: true,
+  fallthrough: false, // Return 404 for missing files instead of passing to next middleware
+}));
 
 // ===========================================
 // ROUTES

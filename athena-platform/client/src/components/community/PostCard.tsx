@@ -114,15 +114,24 @@ export default function PostCard({ post }: PostCardProps) {
             <video
               src={post.mediaUrls[0]}
               controls
+              playsInline
+              preload="metadata"
               onError={() => setMediaError(true)}
               className="w-full max-h-[520px] object-contain bg-black"
-            />
+              crossOrigin="anonymous"
+            >
+              <source src={post.mediaUrls[0]} type="video/mp4" />
+              <source src={post.mediaUrls[0]} type="video/webm" />
+              Your browser does not support the video tag.
+            </video>
           ) : (
             <img
               src={post.mediaUrls[0]}
               alt="Post media"
+              loading="lazy"
               onError={() => setMediaError(true)}
               className="w-full h-auto object-cover max-h-[520px]"
+              crossOrigin="anonymous"
             />
           )}
         </div>
