@@ -217,8 +217,36 @@ const limiter = rateLimit({
   skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
 });
 
+// Strict rate limiter for authentication endpoints (brute-force protection)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per 15 minutes
+  message: 'Too many login attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    // Use both IP and email for rate limiting login attempts
+    const email = req.body?.email || '';
+    return `${req.ip}-${email}`;
+  },
+});
+
+// Stricter limiter for password reset (prevent email enumeration)
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // 5 password reset requests per hour
+  message: 'Too many password reset attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 if (rateLimitEnabled) {
   app.use('/api/', limiter);
+  // Apply stricter limits to auth endpoints
+  app.use('/api/auth/login', authLimiter);
+  app.use('/api/auth/register', authLimiter);
+  app.use('/api/auth/forgot-password', passwordResetLimiter);
+  app.use('/api/auth/reset-password', passwordResetLimiter);
 }
 
 // Stripe webhooks require the raw request body; mount before express.json.
@@ -265,9 +293,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from uploads directory
 const uploadsPath = path.join(process.cwd(), 'uploads');
-console.log('Mounting static uploads at /uploads from:', uploadsPath);
+logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
-  console.log(`Static file request: ${req.method} ${req.path}`);
+  logger.debug('Static file request', { method: req.method, path: req.path });
   next();
 }, express.static(uploadsPath));
 
