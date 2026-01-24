@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -23,6 +23,7 @@ import { useJob, useApplyToJob, useAuth } from '@/lib/hooks';
 import { formatCurrency, formatRelativeTime, formatDate, cn } from '@/lib/utils';
 import { Loading } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
+import { sanitizeHtml } from '@/lib/utils/sanitize';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -159,7 +160,7 @@ export default function JobDetailPage() {
             </h2>
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <div
-                dangerouslySetInnerHTML={{ __html: job.description }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(job.description || '') }}
                 className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap"
               />
             </div>
