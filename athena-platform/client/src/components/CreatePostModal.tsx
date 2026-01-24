@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   X,
   Image,
@@ -21,6 +21,7 @@ import { useCreatePost, useAuthStore } from '@/lib/hooks';
 import { mediaApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { RichTextEditor } from '@/components/ui/RichTextEditor';
+import toast from 'react-hot-toast';
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -55,6 +56,13 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
 
   const { mutate: createPost, isPending } = useCreatePost();
 
+  // Cleanup object URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [previewUrls]);
+
   const handleSubmit = async () => {
     if (!content.trim()) return;
 
@@ -80,6 +88,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
         }
       } catch (error) {
         console.error('Failed to upload files:', error);
+        toast.error('Failed to upload files. Please try again.');
         setIsUploading(false);
         return;
       }
@@ -115,6 +124,10 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
   };
 
   const removeAttachment = (index: number) => {
+    // Revoke the object URL to prevent memory leak
+    if (previewUrls[index]) {
+      URL.revokeObjectURL(previewUrls[index]);
+    }
     setAttachments((prev) => prev.filter((_, i) => i !== index));
     setPreviewUrls((prev) => prev.filter((_, i) => i !== index));
   };

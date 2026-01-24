@@ -117,13 +117,42 @@ export default function PostCard({ post }: PostCardProps) {
               onError={() => setMediaError(true)}
               className="w-full max-h-[520px] object-contain bg-black"
             />
-          ) : (
+          ) : post.mediaUrls.length === 1 ? (
             <img
               src={post.mediaUrls[0]}
               alt="Post media"
               onError={() => setMediaError(true)}
               className="w-full h-auto object-cover max-h-[520px]"
             />
+          ) : (
+            <div className={`grid gap-1 ${
+              post.mediaUrls.length === 2 ? 'grid-cols-2' :
+              post.mediaUrls.length === 3 ? 'grid-cols-2' :
+              'grid-cols-2'
+            }`}>
+              {post.mediaUrls.slice(0, 4).map((url: string, idx: number) => (
+                <div 
+                  key={idx} 
+                  className={`relative ${
+                    post.mediaUrls.length === 3 && idx === 0 ? 'row-span-2' : ''
+                  }`}
+                >
+                  <img
+                    src={url}
+                    alt={`Post media ${idx + 1}`}
+                    onError={() => setMediaError(true)}
+                    className="w-full h-full object-cover aspect-square"
+                  />
+                  {idx === 3 && post.mediaUrls.length > 4 && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                      <span className="text-white text-2xl font-semibold">
+                        +{post.mediaUrls.length - 4}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
