@@ -85,6 +85,9 @@ router.get('/:invoiceId/pdf', authenticate, async (req: AuthRequest, res, next) 
       { sendEmail: false }
     );
     
+    // Set security headers - prevent caching of sensitive financial data
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',

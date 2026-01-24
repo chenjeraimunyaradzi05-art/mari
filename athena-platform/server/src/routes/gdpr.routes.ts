@@ -182,6 +182,9 @@ router.get('/download/:requestId', async (req: AuthRequest, res: Response) => {
     // In production, this would stream from S3/storage
     const exportData = await gdprService.processExportRequest(requestId);
 
+    // Set security headers - prevent caching of sensitive data
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="athena-data-export-${requestId}.json"`);
     res.json(exportData);
