@@ -1,4 +1,19 @@
+/**
+ * Email Utilities Module
+ * 
+ * This module provides auth-related email functions (verification, password reset, welcome).
+ * For the full email service with all templates (referral, digest, booking, etc.),
+ * use the consolidated email.service.ts.
+ * 
+ * NOTE: This module is kept for backward compatibility with auth.routes.ts imports.
+ * New code should import from '../services/email.service' directly.
+ */
+
 import { logger } from './logger';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 interface EmailOptions {
   to: string;
@@ -22,9 +37,13 @@ interface WelcomeEmailData {
   loginUrl: string;
 }
 
+// ============================================================================
+// Utilities
+// ============================================================================
+
 const DEFAULT_CLIENT_URL = 'http://localhost:3000';
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -33,12 +52,12 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function getClientUrl(): string {
+export function getClientUrl(): string {
   const raw = (process.env.CLIENT_URL || DEFAULT_CLIENT_URL).trim();
   return raw.endsWith('/') ? raw.slice(0, -1) : raw;
 }
 
-function buildClientUrl(pathname: string, params?: Record<string, string>): string {
+export function buildClientUrl(pathname: string, params?: Record<string, string>): string {
   const base = getClientUrl();
   const url = new URL(pathname, base);
 
@@ -51,13 +70,16 @@ function buildClientUrl(pathname: string, params?: Record<string, string>): stri
   return url.toString();
 }
 
-// Email templates
+// ============================================================================
+// Email Templates (Auth-related)
+// ============================================================================
+
 const templates = {
   verification: (data: VerificationEmailData) => {
     const safeFirstName = escapeHtml(data.firstName);
-    return ({
-    subject: 'Verify your ATHENA account',
-    html: `
+    return {
+      subject: 'Verify your ATHENA account',
+      html: `
 <!DOCTYPE html>
 <html>
 <head>
@@ -96,16 +118,16 @@ const templates = {
   </table>
 </body>
 </html>
-    `,
-    text: `Welcome to ATHENA, ${data.firstName}! Please verify your email by visiting: ${data.verificationUrl}`,
-  });
+      `,
+      text: `Welcome to ATHENA, ${data.firstName}! Please verify your email by visiting: ${data.verificationUrl}`,
+    };
   },
 
   passwordReset: (data: PasswordResetEmailData) => {
     const safeFirstName = escapeHtml(data.firstName);
-    return ({
-    subject: 'Reset your ATHENA password',
-    html: `
+    return {
+      subject: 'Reset your ATHENA password',
+      html: `
 <!DOCTYPE html>
 <html>
 <head>
@@ -142,16 +164,16 @@ const templates = {
   </table>
 </body>
 </html>
-    `,
-    text: `Hi ${data.firstName}, reset your password by visiting: ${data.resetUrl}`,
-  });
+      `,
+      text: `Hi ${data.firstName}, reset your password by visiting: ${data.resetUrl}`,
+    };
   },
 
   welcome: (data: WelcomeEmailData) => {
     const safeFirstName = escapeHtml(data.firstName);
-    return ({
-    subject: 'Welcome to ATHENA! 🎉',
-    html: `
+    return {
+      subject: 'Welcome to ATHENA! 🎉',
+      html: `
 <!DOCTYPE html>
 <html>
 <head>
@@ -191,13 +213,19 @@ const templates = {
   </table>
 </body>
 </html>
-    `,
-    text: `Welcome to ATHENA, ${data.firstName}! Your account is verified. Visit ${data.loginUrl} to get started.`,
-  });
+      `,
+      text: `Welcome to ATHENA, ${data.firstName}! Your account is verified. Visit ${data.loginUrl} to get started.`,
+    };
   },
 };
 
-// Send email via SendGrid (or log in development)
+// ============================================================================
+// Core Send Function
+// ============================================================================
+
+/**
+ * Send email via SendGrid (or log in development)
+ */
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   const { to, subject, html, text } = options;
 
@@ -230,14 +258,16 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   }
 }
 
-// Convenience functions
+// ============================================================================
+// Auth Email Functions
+// ============================================================================
+
 export async function sendVerificationEmail(
   email: string,
   firstName: string,
   token: string
 ): Promise<boolean> {
   const verificationUrl = buildClientUrl('/verify-email', { token });
-  
   const template = templates.verification({ firstName, verificationUrl });
   return sendEmail({ to: email, ...template });
 }
@@ -248,7 +278,6 @@ export async function sendPasswordResetEmail(
   token: string
 ): Promise<boolean> {
   const resetUrl = buildClientUrl('/reset-password', { token });
-  
   const template = templates.passwordReset({ firstName, resetUrl });
   return sendEmail({ to: email, ...template });
 }
@@ -258,7 +287,12 @@ export async function sendWelcomeEmail(
   firstName: string
 ): Promise<boolean> {
   const loginUrl = buildClientUrl('/login');
-  
   const template = templates.welcome({ firstName, loginUrl });
   return sendEmail({ to: email, ...template });
 }
+
+// ============================================================================
+// Re-export email service for convenience
+// ============================================================================
+
+export { emailService } from '../services/email.service';
