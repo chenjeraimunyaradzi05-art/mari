@@ -3,23 +3,23 @@
  * Handles business registration logic and ASIC integration
  */
 
-import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
-import { logger } from '../utils/logger';
 import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
+import Stripe from 'stripe';
+import { logger } from '../utils/logger';
 
-// Initialize Stripe
+// Initialize Stripe (optional – gracefully handles missing key)
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
   : null;
 
-// Business registration fee in cents by type
+// Fee structure for business registration (in cents AUD)
 const REGISTRATION_FEES: Record<BusinessType, number> = {
-  SOLE_TRADER: 4900,    // $49 AUD
-  PARTNERSHIP: 9900,    // $99 AUD
-  COMPANY: 14900,       // $149 AUD
-  TRUST: 19900,         // $199 AUD
+  SOLE_TRADER: 3600,    // $36 AUD
+  PARTNERSHIP: 5000,    // $50 AUD
+  COMPANY: 53800,       // $538 AUD (ASIC fee)
+  TRUST: 6500,          // $65 AUD
 };
 
 function asRecord(value: unknown): Record<string, any> {
@@ -159,51 +159,59 @@ export async function submitRegistration(userId: string, registrationId: string)
 
   validateRegistrationForSubmission(registration);
 
-  // Create Stripe payment intent for registration fee
-  const feeAmount = REGISTRATION_FEES[registration.type] || REGISTRATION_FEES.SOLE_TRADER;
-  let paymentIntentId: string | null = null;
+  // Create Stripe PaymentIntent for the registration fee
+  const feeAmount = REGISTRATION_FEES[registration.type] ?? REGISTRATION_FEES.SOLE_TRADER;
+  let stripePaymentIntentId: string | undefined;
+  let clientSecret: string | undefined;
 
   if (stripe) {
     try {
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (!user) {
-        throw new ApiError(404, 'User not found');
-      }
-
       const paymentIntent = await stripe.paymentIntents.create({
         amount: feeAmount,
         currency: 'aud',
-        description: `Business Registration - ${registration.type} - ${registration.businessName}`,
+        description: `${registration.type} registration: ${registration.businessName}`,
         metadata: {
-          userId,
           registrationId,
+          userId,
           businessType: registration.type,
-          businessName: registration.businessName || '',
         },
-        receipt_email: user.email,
+        automatic_payment_methods: { enabled: true },
       });
-
-      paymentIntentId = paymentIntent.id;
-      logger.info(`Payment intent created for registration ${registrationId}`, {
-        paymentIntentId,
+      stripePaymentIntentId = paymentIntent.id;
+      clientSecret = paymentIntent.client_secret ?? undefined;
+      logger.info('Created payment intent for business registration', {
+        registrationId,
+        paymentIntentId: stripePaymentIntentId,
         amount: feeAmount,
       });
-    } catch (error) {
-      logger.error('Stripe payment intent creation failed', { error, registrationId });
-      throw new ApiError(500, 'Failed to process payment. Please try again.');
+    } catch (err) {
+      logger.error('Failed to create Stripe PaymentIntent', { registrationId, error: err });
+      throw new ApiError(500, 'Payment processing unavailable. Please try again later.');
     }
   } else {
-    logger.warn('Stripe not configured, skipping payment for registration', { registrationId });
+    // Stripe not configured – allow submission without payment (dev/test)
+    logger.warn('Stripe not configured; skipping payment for registration', { registrationId });
   }
 
-  return prisma.businessRegistration.update({
+  const updated = await prisma.businessRegistration.update({
     where: { id: registrationId },
     data: {
       status: 'SUBMITTED',
       submittedAt: new Date(),
-      ...(paymentIntentId && { stripePaymentIntentId: paymentIntentId }),
+      // Store payment info in the JSON data blob
+      data: {
+        ...(registration.data as object),
+        payment: stripePaymentIntentId
+          ? { stripePaymentIntentId, feeAmount, currency: 'aud' }
+          : undefined,
+      },
     },
   });
+
+  return {
+    registration: updated,
+    ...(clientSecret && { clientSecret }),
+  };
 }
 
 export async function getUserRegistrations(userId: string) {
