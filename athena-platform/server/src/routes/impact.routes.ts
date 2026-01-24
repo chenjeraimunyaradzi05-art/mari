@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -21,7 +22,7 @@ router.get('/metrics', authenticate, async (req: AuthRequest, res: Response) => 
 
     res.json({ success: true, data: metrics });
   } catch (error) {
-    console.error('Error fetching impact metrics:', error);
+    logger.error('Error fetching impact metrics', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch impact metrics' });
   }
 });
@@ -50,7 +51,7 @@ router.post('/metrics', authenticate, async (req: AuthRequest, res: Response) =>
 
     res.status(201).json({ success: true, data: metric });
   } catch (error) {
-    console.error('Error recording impact metric:', error);
+    logger.error('Error recording impact metric', { error });
     res.status(500).json({ success: false, error: 'Failed to record impact metric' });
   }
 });
@@ -73,7 +74,7 @@ router.get('/reports', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: reports });
   } catch (error) {
-    console.error('Error fetching impact reports:', error);
+    logger.error('Error fetching impact reports', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch impact reports' });
   }
 });
@@ -93,7 +94,7 @@ router.get('/reports/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: report });
   } catch (error) {
-    console.error('Error fetching impact report:', error);
+    logger.error('Error fetching impact report', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch impact report' });
   }
 });
@@ -139,7 +140,7 @@ router.get('/summary', authenticate, async (req: AuthRequest, res: Response) => 
       },
     });
   } catch (error) {
-    console.error('Error fetching impact summary:', error);
+    logger.error('Error fetching impact summary', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch impact summary' });
   }
 });
@@ -165,7 +166,7 @@ router.get('/partners', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: partners });
   } catch (error) {
-    console.error('Error fetching impact partners:', error);
+    logger.error('Error fetching impact partners', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch impact partners' });
   }
 });
@@ -185,7 +186,7 @@ router.get('/partners/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: partner });
   } catch (error) {
-    console.error('Error fetching impact partner:', error);
+    logger.error('Error fetching impact partner', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch impact partner' });
   }
 });
@@ -211,7 +212,7 @@ router.get('/dv-services', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: services });
   } catch (error) {
-    console.error('Error fetching DV services:', error);
+    logger.error('Error fetching DV services', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch DV services' });
   }
 });
@@ -231,7 +232,7 @@ router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response)
 
     res.json({ success: true, data: safetyPlan });
   } catch (error) {
-    console.error('Error fetching safety plan:', error);
+    logger.error('Error fetching safety plan', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch safety plan' });
   }
 });
@@ -277,7 +278,7 @@ router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response
 
     res.json({ success: true, data: safetyPlan });
   } catch (error) {
-    console.error('Error saving safety plan:', error);
+    logger.error('Error saving safety plan', { error });
     res.status(500).json({ success: false, error: 'Failed to save safety plan' });
   }
 });
@@ -297,7 +298,7 @@ router.get('/accessibility', authenticate, async (req: AuthRequest, res: Respons
 
     res.json({ success: true, data: profile });
   } catch (error) {
-    console.error('Error fetching accessibility profile:', error);
+    logger.error('Error fetching accessibility profile', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch accessibility profile' });
   }
 });
@@ -356,7 +357,7 @@ router.post('/accessibility', authenticate, async (req: AuthRequest, res: Respon
 
     res.json({ success: true, data: profile });
   } catch (error) {
-    console.error('Error saving accessibility profile:', error);
+    logger.error('Error saving accessibility profile', { error });
     res.status(500).json({ success: false, error: 'Failed to save accessibility profile' });
   }
 });
@@ -383,7 +384,7 @@ router.get('/disability-friendly-employers', async (req: Request, res: Response)
 
     res.json({ success: true, data: employers });
   } catch (error) {
-    console.error('Error fetching disability-friendly employers:', error);
+    logger.error('Error fetching disability-friendly employers', { error });
     res.status(500).json({ success: false, error: 'Failed to fetch employers' });
   }
 });

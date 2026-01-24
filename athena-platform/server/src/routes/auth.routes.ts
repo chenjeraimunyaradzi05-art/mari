@@ -7,6 +7,7 @@ import { generateAccessToken, generateRefreshToken, verifyToken } from '../utils
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
+import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 
@@ -162,7 +163,7 @@ router.post(
       }
 
       // Send verification email (async, don't block response)
-      sendVerificationEmail(email, firstName, verificationToken).catch(console.error);
+      sendVerificationEmail(email, firstName, verificationToken).catch((err) => logger.error('Failed to send verification email', { error: err }));
 
       // Generate tokens
       const tokenPayload = {

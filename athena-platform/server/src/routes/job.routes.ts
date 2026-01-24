@@ -3,6 +3,7 @@ import { body, query, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
+import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRecommendedJobs, search as searchService } from '../services/search.service';
@@ -47,7 +48,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
       } catch (error) {
         // Fallback will happen in the 'else' logic usually, but here we just proceed with null jobIds
         // effectively falling back to Prisma below if we structure it right.
-        console.error('Search service failed', error);
+        logger.error('Search service failed', { error });
       }
     }
 
