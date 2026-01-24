@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/audit';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -261,7 +262,7 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
       updateData.isSuspended = isSuspended;
       if (isSuspended && suspensionReason) {
         // Store suspension reason in metadata or log
-        console.log(`User ${id} suspended. Reason: ${suspensionReason}`);
+        logger.info('User suspended', { userId: id, reason: suspensionReason, adminId: req.user?.id });
       }
     }
 
@@ -488,7 +489,7 @@ router.patch('/content/posts/:id', async (req: AuthRequest, res: Response, next:
       });
     }
 
-    console.log(`Admin moderation: Post ${id} - ${action}. Reason: ${reason || 'None provided'}`);
+    logger.info('Admin moderation action', { postId: id, action, reason: reason || 'None provided', adminId: req.user?.id });
 
     res.json(result);
   } catch (error) {
