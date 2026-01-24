@@ -6,20 +6,19 @@
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
-import { logger } from '../utils/logger';
 import Stripe from 'stripe';
+import { logger } from '../utils/logger';
 
-// Initialize Stripe for formation payments
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
-  : null;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+  apiVersion: '2024-12-18.acacia',
+});
 
-// Registration fee per business type in cents (AUD)
+// Business registration fees by type (in cents)
 const REGISTRATION_FEES: Record<BusinessType, number> = {
-  SOLE_TRADER: 4900,   // $49 AUD
+  SOLE_TRADER: 4700,   // $47 AUD
   PARTNERSHIP: 9900,   // $99 AUD
-  COMPANY: 49900,      // $499 AUD
-  TRUST: 29900,        // $299 AUD
+  COMPANY: 59500,      // $595 AUD
+  TRUST: 19900,        // $199 AUD
 };
 
 function asRecord(value: unknown): Record<string, any> {
@@ -159,44 +158,46 @@ export async function submitRegistration(userId: string, registrationId: string)
 
   validateRegistrationForSubmission(registration);
 
-  // Create Stripe Payment Intent for registration fee
-  const feeAmount = REGISTRATION_FEES[registration.type];
+  // Create Stripe payment intent for registration fee
+  const fee = REGISTRATION_FEES[registration.type];
   let paymentIntentId: string | null = null;
 
-  if (stripe) {
-    try {
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: feeAmount,
-        currency: 'aud',
-        description: `Business Registration: ${registration.businessName} (${registration.type})`,
-        metadata: {
-          registrationId,
-          userId,
-          businessType: registration.type,
-          businessName: registration.businessName || '',
-        },
-        capture_method: 'automatic',
-      });
-      paymentIntentId = paymentIntent.id;
-      logger.info('Created payment intent for business registration', {
+  try {
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: fee,
+      currency: 'aud',
+      metadata: {
         registrationId,
-        paymentIntentId,
-        amount: feeAmount,
-      });
-    } catch (error) {
-      logger.error('Failed to create payment intent for registration', { error, registrationId });
-      throw new ApiError(500, 'Failed to process payment for registration');
-    }
-  } else {
-    // Development mode - skip payment
-    logger.info('Stripe not configured, skipping payment for registration', { registrationId });
+        userId,
+        businessType: registration.type,
+        businessName: registration.businessName || '',
+      },
+      description: `Business Registration - ${registration.type}`,
+    });
+    paymentIntentId = paymentIntent.id;
+    logger.info('Payment intent created for business registration', {
+      registrationId,
+      paymentIntentId,
+      amount: fee,
+    });
+  } catch (stripeError) {
+    logger.error('Failed to create payment intent for registration', {
+      registrationId,
+      error: stripeError,
+    });
+    throw new ApiError(500, 'Failed to process payment. Please try again.');
   }
 
   return prisma.businessRegistration.update({
     where: { id: registrationId },
     data: {
-      status: 'SUBMITTED',
+      status: 'PENDING_PAYMENT',
       submittedAt: new Date(),
+      data: {
+        ...(registration.data as object || {}),
+        paymentIntentId,
+        registrationFee: fee,
+      },
     },
   });
 }
@@ -222,6 +223,48 @@ export async function getRegistration(userId: string, registrationId: string) {
   }
 
   return registration;
+}
+
+/**
+ * Get the registration fee for a business type
+ */
+export function getRegistrationFee(type: BusinessType): number {
+  return REGISTRATION_FEES[type];
+}
+
+/**
+ * Confirm payment and update registration status to SUBMITTED
+ * Called by Stripe webhook when payment succeeds
+ */
+export async function confirmPayment(registrationId: string, paymentIntentId: string) {
+  const registration = await prisma.businessRegistration.findUnique({
+    where: { id: registrationId },
+  });
+
+  if (!registration) {
+    throw new ApiError(404, 'Registration not found');
+  }
+
+  const data = asRecord(registration.data);
+  if (data.paymentIntentId !== paymentIntentId) {
+    throw new ApiError(400, 'Payment intent mismatch');
+  }
+
+  logger.info('Payment confirmed for business registration', {
+    registrationId,
+    paymentIntentId,
+  });
+
+  return prisma.businessRegistration.update({
+    where: { id: registrationId },
+    data: {
+      status: 'SUBMITTED',
+      data: {
+        ...data,
+        paymentConfirmedAt: new Date().toISOString(),
+      },
+    },
+  });
 }
 
 // Admin function

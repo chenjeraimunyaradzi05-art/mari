@@ -1,13 +1,16 @@
 /**
  * Email Service for ATHENA Platform
- * Handles all transactional and marketing emails
- * 
- * NOTE: Core email functions (sendEmail, sendVerificationEmail, sendPasswordResetEmail, 
- * sendWelcomeEmail) are consolidated in utils/email.ts and re-exported here for convenience.
- * This file extends with additional marketing/engagement templates.
+ * Consolidates all transactional and marketing emails
+ *
+ * Core email sending is delegated to ../utils/email.ts which handles:
+ * - SendGrid integration
+ * - HTML escaping and URL building
+ * - Verification, password reset, and welcome emails
+ *
+ * This module adds marketing/engagement templates and a higher-level service API.
  */
 
-// Re-export core email functions from utils/email.ts
+// Re-export core email functions for convenience
 export {
   sendEmail,
   sendVerificationEmail,
@@ -15,12 +18,7 @@ export {
   sendWelcomeEmail,
 } from '../utils/email';
 
-interface EmailOptions {
-  to: string;
-  subject: string;
-  html: string;
-  text?: string;
-}
+import { sendEmail as coreSendEmail } from '../utils/email';
 
 interface EmailTemplate {
   subject: string;
@@ -28,9 +26,22 @@ interface EmailTemplate {
   text: string;
 }
 
-// Email templates
+const DEFAULT_CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Marketing and engagement email templates
 const templates = {
-  welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => ({
+  welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return {
     subject: 'Welcome to ATHENA - Your Journey Begins! 🚀',
     html: `
       <!DOCTYPE html>
@@ -46,7 +57,7 @@ const templates = {
           <p style="color: #666; margin: 5px 0;">The Life Operating System for Women</p>
         </div>
         
-        <h2 style="color: #1f2937;">Welcome, ${data.firstName}! 👋</h2>
+        <h2 style="color: #1f2937;">Welcome, ${safeFirstName}! 👋</h2>
         
         <p>We're thrilled to have you join ATHENA - where ambitious women connect, grow, and thrive together.</p>
         
@@ -107,10 +118,14 @@ Questions? Reply to this email.
 
 © ${new Date().getFullYear()} ATHENA. All rights reserved.
     `,
-  }),
+  };
+  },
 
-  referralSignup: (data: { referrerName: string; referredName: string; credits: number }): EmailTemplate => ({
-    subject: `🎉 ${data.referredName} joined ATHENA with your referral!`,
+  referralSignup: (data: { referrerName: string; referredName: string; credits: number }): EmailTemplate => {
+    const safeReferrerName = escapeHtml(data.referrerName);
+    const safeReferredName = escapeHtml(data.referredName);
+    return {
+    subject: `🎉 ${safeReferredName} joined ATHENA with your referral!`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -125,11 +140,11 @@ Questions? Reply to this email.
         
         <div style="text-align: center; padding: 20px;">
           <div style="font-size: 60px; margin-bottom: 10px;">🎉</div>
-          <h2 style="color: #1f2937; margin: 0;">Great news, ${data.referrerName}!</h2>
+          <h2 style="color: #1f2937; margin: 0;">Great news, ${safeReferrerName}!</h2>
         </div>
         
         <p style="text-align: center; font-size: 18px;">
-          <strong>${data.referredName}</strong> just signed up using your referral link!
+          <strong>${safeReferredName}</strong> just signed up using your referral link!
         </p>
         
         <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 20px; border-radius: 12px; color: white; text-align: center; margin: 20px 0;">
@@ -164,10 +179,13 @@ View your referrals: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashbo
 
 © ${new Date().getFullYear()} ATHENA.
     `,
-  }),
+  };
+  },
 
-  reEngagement: (data: { firstName: string; daysInactive: number }): EmailTemplate => ({
-    subject: `We miss you, ${data.firstName}! 💜`,
+  reEngagement: (data: { firstName: string; daysInactive: number }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return {
+    subject: `We miss you, ${safeFirstName}! 💜`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -180,7 +198,7 @@ View your referrals: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashbo
           <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
         </div>
         
-        <h2 style="color: #1f2937;">Hey ${data.firstName},</h2>
+        <h2 style="color: #1f2937;">Hey ${safeFirstName},</h2>
         
         <p>It's been ${data.daysInactive} days since we last saw you on ATHENA. A lot has been happening while you were away!</p>
         
@@ -225,14 +243,17 @@ Return to ATHENA: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 
 Don't want these emails? Manage preferences: ${process.env.CLIENT_URL}/settings/notifications
     `,
-  }),
+  };
+  },
 
   weeklyDigest: (data: { 
     firstName: string; 
     newJobs: number; 
     newConnections: number;
     upcomingEvents: number;
-  }): EmailTemplate => ({
+  }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return {
     subject: `Your ATHENA Weekly Update 📊`,
     html: `
       <!DOCTYPE html>
@@ -247,7 +268,7 @@ Don't want these emails? Manage preferences: ${process.env.CLIENT_URL}/settings/
           <p style="color: #666; margin: 5px 0;">Your Weekly Update</p>
         </div>
         
-        <h2 style="color: #1f2937;">Hi ${data.firstName}! 👋</h2>
+        <h2 style="color: #1f2937;">Hi ${safeFirstName}! 👋</h2>
         
         <p>Here's what happened on ATHENA this week:</p>
         
@@ -293,10 +314,13 @@ Explore now: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
 © ${new Date().getFullYear()} ATHENA
     `,
-  }),
+  };
+  },
 
   // Phase 2: Additional transactional email templates
-  passwordReset: (data: { firstName: string; resetLink: string; expiresIn: string }): EmailTemplate => ({
+  passwordReset: (data: { firstName: string; resetLink: string; expiresIn: string }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return {
     subject: 'Reset Your ATHENA Password',
     html: `
       <!DOCTYPE html>
@@ -307,7 +331,7 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
           <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
         </div>
         <h2 style="color: #1f2937;">Password Reset Request</h2>
-        <p>Hi ${data.firstName},</p>
+        <p>Hi ${safeFirstName},</p>
         <p>We received a request to reset your password. Click the button below to create a new password:</p>
         <div style="text-align: center; margin: 30px 0;">
           <a href="${data.resetLink}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Reset Password</a>
@@ -319,7 +343,8 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
       </html>
     `,
     text: `Hi ${data.firstName},\n\nWe received a request to reset your password.\n\nReset your password: ${data.resetLink}\n\nThis link expires in ${data.expiresIn}.\n\n© ${new Date().getFullYear()} ATHENA`,
-  }),
+  };
+  },
 
   mentorBookingConfirmed: (data: { 
     menteeName: string; 
@@ -328,8 +353,11 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     duration: string;
     sessionLink: string;
     topics: string[];
-  }): EmailTemplate => ({
-    subject: `✅ Mentor Session Confirmed with ${data.mentorName}`,
+  }): EmailTemplate => {
+    const safeMenteeName = escapeHtml(data.menteeName);
+    const safeMentorName = escapeHtml(data.mentorName);
+    return {
+    subject: `✅ Mentor Session Confirmed with ${safeMentorName}`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -342,12 +370,12 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
           <div style="font-size: 60px; margin-bottom: 10px;">✅</div>
           <h2 style="color: #1f2937; margin: 0;">Session Confirmed!</h2>
         </div>
-        <p>Hi ${data.menteeName},</p>
-        <p>Your mentor session with <strong>${data.mentorName}</strong> has been confirmed.</p>
+        <p>Hi ${safeMenteeName},</p>
+        <p>Your mentor session with <strong>${safeMentorName}</strong> has been confirmed.</p>
         <div style="background: #f3f4f6; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <p style="margin: 5px 0;"><strong>📅 Date & Time:</strong> ${data.dateTime}</p>
-          <p style="margin: 5px 0;"><strong>⏱️ Duration:</strong> ${data.duration}</p>
-          ${data.topics.length > 0 ? `<p style="margin: 5px 0;"><strong>📋 Topics:</strong> ${data.topics.join(', ')}</p>` : ''}
+          <p style="margin: 5px 0;"><strong>📅 Date & Time:</strong> ${escapeHtml(data.dateTime)}</p>
+          <p style="margin: 5px 0;"><strong>⏱️ Duration:</strong> ${escapeHtml(data.duration)}</p>
+          ${data.topics.length > 0 ? `<p style="margin: 5px 0;"><strong>📋 Topics:</strong> ${data.topics.map(t => escapeHtml(t)).join(', ')}</p>` : ''}
         </div>
         <div style="text-align: center; margin: 30px 0;">
           <a href="${data.sessionLink}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">View Session Details</a>
@@ -359,7 +387,8 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
       </html>
     `,
     text: `Hi ${data.menteeName},\n\nYour session with ${data.mentorName} is confirmed!\n\nDate & Time: ${data.dateTime}\nDuration: ${data.duration}\n${data.topics.length > 0 ? `Topics: ${data.topics.join(', ')}\n` : ''}\nView details: ${data.sessionLink}`,
-  }),
+  };
+  },
 
   applicationUpdate: (data: {
     firstName: string;
@@ -369,6 +398,9 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     message?: string;
     actionLink: string;
   }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safeJobTitle = escapeHtml(data.jobTitle);
+    const safeCompanyName = escapeHtml(data.companyName);
     const statusMessages = {
       REVIEWED: { emoji: '👀', text: 'Your application has been reviewed' },
       SHORTLISTED: { emoji: '⭐', text: 'Congratulations! You\'ve been shortlisted' },
@@ -379,7 +411,7 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     const statusInfo = statusMessages[data.status];
     
     return {
-      subject: `${statusInfo.emoji} ${data.jobTitle} at ${data.companyName} - Application Update`,
+      subject: `${statusInfo.emoji} ${safeJobTitle} at ${safeCompanyName} - Application Update`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -389,9 +421,9 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
             <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
           </div>
           <h2 style="color: #1f2937;">${statusInfo.text}</h2>
-          <p>Hi ${data.firstName},</p>
-          <p>There's an update on your application for <strong>${data.jobTitle}</strong> at <strong>${data.companyName}</strong>.</p>
-          ${data.message ? `<div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;"><p style="margin: 0;">${data.message}</p></div>` : ''}
+          <p>Hi ${safeFirstName},</p>
+          <p>There's an update on your application for <strong>${safeJobTitle}</strong> at <strong>${safeCompanyName}</strong>.</p>
+          ${data.message ? `<div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;"><p style="margin: 0;">${escapeHtml(data.message)}</p></div>` : ''}
           <div style="text-align: center; margin: 30px 0;">
             <a href="${data.actionLink}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">View Application</a>
           </div>
@@ -412,8 +444,11 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     transactionId: string;
     date: string;
     receiptUrl?: string;
-  }): EmailTemplate => ({
-    subject: `Payment Receipt - ${data.amount} ${data.currency}`,
+  }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safeDescription = escapeHtml(data.description);
+    return {
+    subject: `Payment Receipt - ${escapeHtml(data.amount)} ${escapeHtml(data.currency)}`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -423,14 +458,14 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
           <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
         </div>
         <h2 style="color: #1f2937;">Payment Receipt</h2>
-        <p>Hi ${data.firstName},</p>
+        <p>Hi ${safeFirstName},</p>
         <p>Thank you for your payment. Here are the details:</p>
         <div style="background: #f3f4f6; padding: 20px; border-radius: 12px; margin: 20px 0;">
           <table style="width: 100%; border-collapse: collapse;">
-            <tr><td style="padding: 8px 0; color: #666;">Amount</td><td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.amount} ${data.currency}</td></tr>
-            <tr><td style="padding: 8px 0; color: #666;">Description</td><td style="padding: 8px 0; text-align: right;">${data.description}</td></tr>
-            <tr><td style="padding: 8px 0; color: #666;">Transaction ID</td><td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 12px;">${data.transactionId}</td></tr>
-            <tr><td style="padding: 8px 0; color: #666;">Date</td><td style="padding: 8px 0; text-align: right;">${data.date}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Amount</td><td style="padding: 8px 0; text-align: right; font-weight: bold;">${escapeHtml(data.amount)} ${escapeHtml(data.currency)}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Description</td><td style="padding: 8px 0; text-align: right;">${safeDescription}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Transaction ID</td><td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 12px;">${escapeHtml(data.transactionId)}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Date</td><td style="padding: 8px 0; text-align: right;">${escapeHtml(data.date)}</td></tr>
           </table>
         </div>
         ${data.receiptUrl ? `<div style="text-align: center; margin: 30px 0;"><a href="${data.receiptUrl}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Download Receipt</a></div>` : ''}
@@ -440,7 +475,8 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
       </html>
     `,
     text: `Hi ${data.firstName},\n\nPayment Receipt\n\nAmount: ${data.amount} ${data.currency}\nDescription: ${data.description}\nTransaction ID: ${data.transactionId}\nDate: ${data.date}\n\n© ${new Date().getFullYear()} ATHENA`,
-  }),
+  };
+  },
 
   sessionReminder: (data: {
     firstName: string;
@@ -448,8 +484,11 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     dateTime: string;
     minutesUntil: number;
     sessionLink: string;
-  }): EmailTemplate => ({
-    subject: `⏰ Reminder: Session with ${data.partnerName} in ${data.minutesUntil} minutes`,
+  }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safePartnerName = escapeHtml(data.partnerName);
+    return {
+    subject: `⏰ Reminder: Session with ${safePartnerName} in ${data.minutesUntil} minutes`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -462,10 +501,10 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
           <div style="font-size: 60px; margin-bottom: 10px;">⏰</div>
           <h2 style="color: #1f2937; margin: 0;">Your session starts soon!</h2>
         </div>
-        <p>Hi ${data.firstName},</p>
-        <p>Your session with <strong>${data.partnerName}</strong> starts in <strong>${data.minutesUntil} minutes</strong>.</p>
+        <p>Hi ${safeFirstName},</p>
+        <p>Your session with <strong>${safePartnerName}</strong> starts in <strong>${data.minutesUntil} minutes</strong>.</p>
         <div style="background: #f3f4f6; padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center;">
-          <p style="margin: 0; font-size: 18px;"><strong>${data.dateTime}</strong></p>
+          <p style="margin: 0; font-size: 18px;"><strong>${escapeHtml(data.dateTime)}</strong></p>
         </div>
         <div style="text-align: center; margin: 30px 0;">
           <a href="${data.sessionLink}" style="display: inline-block; background: #10b981; color: white; padding: 14px 40px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">Join Session Now</a>
@@ -476,7 +515,8 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
       </html>
     `,
     text: `Hi ${data.firstName},\n\nYour session with ${data.partnerName} starts in ${data.minutesUntil} minutes!\n\n${data.dateTime}\n\nJoin now: ${data.sessionLink}`,
-  }),
+  };
+  },
 
   courseCompleted: (data: {
     firstName: string;
@@ -484,8 +524,12 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     instructorName: string;
     certificateUrl?: string;
     completionDate: string;
-  }): EmailTemplate => ({
-    subject: `🎓 Congratulations! You completed "${data.courseName}"`,
+  }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safeCourseName = escapeHtml(data.courseName);
+    const safeInstructorName = escapeHtml(data.instructorName);
+    return {
+    subject: `🎓 Congratulations! You completed "${safeCourseName}"`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -498,12 +542,12 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
           <div style="font-size: 60px; margin-bottom: 10px;">🎓</div>
           <h2 style="margin: 0;">Course Completed!</h2>
         </div>
-        <p>Congratulations, ${data.firstName}!</p>
-        <p>You've successfully completed <strong>"${data.courseName}"</strong> by ${data.instructorName}.</p>
+        <p>Congratulations, ${safeFirstName}!</p>
+        <p>You've successfully completed <strong>"${safeCourseName}"</strong> by ${safeInstructorName}.</p>
         <div style="background: #f3f4f6; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <p style="margin: 5px 0;"><strong>📚 Course:</strong> ${data.courseName}</p>
-          <p style="margin: 5px 0;"><strong>👩‍🏫 Instructor:</strong> ${data.instructorName}</p>
-          <p style="margin: 5px 0;"><strong>📅 Completed:</strong> ${data.completionDate}</p>
+          <p style="margin: 5px 0;"><strong>📚 Course:</strong> ${safeCourseName}</p>
+          <p style="margin: 5px 0;"><strong>👩‍🏫 Instructor:</strong> ${safeInstructorName}</p>
+          <p style="margin: 5px 0;"><strong>📅 Completed:</strong> ${escapeHtml(data.completionDate)}</p>
         </div>
         ${data.certificateUrl ? `
         <div style="text-align: center; margin: 30px 0;">
@@ -517,17 +561,23 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
       </html>
     `,
     text: `Congratulations, ${data.firstName}!\n\nYou've completed "${data.courseName}" by ${data.instructorName}.\n\nCompleted: ${data.completionDate}\n\n${data.certificateUrl ? `View certificate: ${data.certificateUrl}` : ''}`,
-  }),
+  };
+  },
 };
 
-// Import for internal use in this module (marketing templates)
-import { sendEmail as coreSendEmail } from '../utils/email';
+interface EmailOptions {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}
 
 /**
- * Internal send function for marketing templates
- * Uses the consolidated sendEmail from utils/email.ts
+ * Send an email using the core email sender from utils/email.ts
+ * This provides a local interface for marketing/engagement emails
+ * while delegating to the consolidated SendGrid integration
  */
-async function sendMarketingEmail(options: EmailOptions): Promise<boolean> {
+async function sendEmailLocal(options: EmailOptions): Promise<boolean> {
   return coreSendEmail(options);
 }
 
@@ -539,11 +589,10 @@ export const emailService = {
    * Generic send email method for custom emails
    */
   async sendEmail(options: { to: string; subject: string; template?: string; data?: Record<string, any>; html?: string; text?: string }): Promise<boolean> {
-    // In production, would use template engine to render template with data
     const html = options.html || `<p>${JSON.stringify(options.data)}</p>`;
     const text = options.text || JSON.stringify(options.data);
     
-    return sendMarketingEmail({
+    return sendEmailLocal({
       to: options.to,
       subject: options.subject,
       html,
@@ -556,7 +605,7 @@ export const emailService = {
    */
   async sendWelcomeEmail(to: string, firstName: string, referralCode?: string): Promise<boolean> {
     const template = templates.welcome({ firstName, referralCode });
-    return sendMarketingEmail({
+    return sendEmailLocal({
       to,
       subject: template.subject,
       html: template.html,
@@ -574,7 +623,7 @@ export const emailService = {
     credits: number
   ): Promise<boolean> {
     const template = templates.referralSignup({ referrerName, referredName, credits });
-    return sendMarketingEmail({
+    return sendEmailLocal({
       to,
       subject: template.subject,
       html: template.html,
@@ -587,7 +636,7 @@ export const emailService = {
    */
   async sendReEngagementEmail(to: string, firstName: string, daysInactive: number): Promise<boolean> {
     const template = templates.reEngagement({ firstName, daysInactive });
-    return sendMarketingEmail({
+    return sendEmailLocal({
       to,
       subject: template.subject,
       html: template.html,
@@ -604,7 +653,7 @@ export const emailService = {
     stats: { newJobs: number; newConnections: number; upcomingEvents: number }
   ): Promise<boolean> {
     const template = templates.weeklyDigest({ firstName, ...stats });
-    return sendMarketingEmail({
+    return sendEmailLocal({
       to,
       subject: template.subject,
       html: template.html,
