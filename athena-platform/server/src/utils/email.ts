@@ -22,9 +22,40 @@ interface WelcomeEmailData {
   loginUrl: string;
 }
 
+const DEFAULT_CLIENT_URL = 'http://localhost:3000';
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getClientUrl(): string {
+  const raw = (process.env.CLIENT_URL || DEFAULT_CLIENT_URL).trim();
+  return raw.endsWith('/') ? raw.slice(0, -1) : raw;
+}
+
+function buildClientUrl(pathname: string, params?: Record<string, string>): string {
+  const base = getClientUrl();
+  const url = new URL(pathname, base);
+
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+}
+
 // Email templates
 const templates = {
-  verification: (data: VerificationEmailData) => ({
+  verification: (data: VerificationEmailData) => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return ({
     subject: 'Verify your ATHENA account',
     html: `
 <!DOCTYPE html>
@@ -44,7 +75,7 @@ const templates = {
     </tr>
     <tr>
       <td style="background: white; padding: 40px 30px; border-radius: 0 0 12px 12px;">
-        <h2 style="color: #1f2937; margin: 0 0 16px 0;">Welcome, ${data.firstName}! 👋</h2>
+        <h2 style="color: #1f2937; margin: 0 0 16px 0;">Welcome, ${safeFirstName}! 👋</h2>
         <p style="color: #4b5563; line-height: 1.6; margin: 0 0 24px 0;">
           Thank you for joining ATHENA! Please verify your email address to get started on your journey to success.
         </p>
@@ -67,9 +98,12 @@ const templates = {
 </html>
     `,
     text: `Welcome to ATHENA, ${data.firstName}! Please verify your email by visiting: ${data.verificationUrl}`,
-  }),
+  });
+  },
 
-  passwordReset: (data: PasswordResetEmailData) => ({
+  passwordReset: (data: PasswordResetEmailData) => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return ({
     subject: 'Reset your ATHENA password',
     html: `
 <!DOCTYPE html>
@@ -89,7 +123,7 @@ const templates = {
       <td style="background: white; padding: 40px 30px; border-radius: 0 0 12px 12px;">
         <h2 style="color: #1f2937; margin: 0 0 16px 0;">Password Reset Request</h2>
         <p style="color: #4b5563; line-height: 1.6; margin: 0 0 24px 0;">
-          Hi ${data.firstName}, we received a request to reset your password. Click the button below to create a new password.
+          Hi ${safeFirstName}, we received a request to reset your password. Click the button below to create a new password.
         </p>
         <div style="text-align: center; margin: 32px 0;">
           <a href="${data.resetUrl}" style="display: inline-block; background: linear-gradient(135deg, #7c3aed 0%, #db2777 100%); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600;">
@@ -110,9 +144,12 @@ const templates = {
 </html>
     `,
     text: `Hi ${data.firstName}, reset your password by visiting: ${data.resetUrl}`,
-  }),
+  });
+  },
 
-  welcome: (data: WelcomeEmailData) => ({
+  welcome: (data: WelcomeEmailData) => {
+    const safeFirstName = escapeHtml(data.firstName);
+    return ({
     subject: 'Welcome to ATHENA! 🎉',
     html: `
 <!DOCTYPE html>
@@ -130,7 +167,7 @@ const templates = {
     </tr>
     <tr>
       <td style="background: white; padding: 40px 30px; border-radius: 0 0 12px 12px;">
-        <h2 style="color: #1f2937; margin: 0 0 16px 0;">Your journey starts now, ${data.firstName}!</h2>
+        <h2 style="color: #1f2937; margin: 0 0 16px 0;">Your journey starts now, ${safeFirstName}!</h2>
         <p style="color: #4b5563; line-height: 1.6; margin: 0 0 24px 0;">
           Your email has been verified and your account is ready. Here's what you can do:
         </p>
@@ -156,7 +193,8 @@ const templates = {
 </html>
     `,
     text: `Welcome to ATHENA, ${data.firstName}! Your account is verified. Visit ${data.loginUrl} to get started.`,
-  }),
+  });
+  },
 };
 
 // Send email via SendGrid (or log in development)
@@ -198,8 +236,7 @@ export async function sendVerificationEmail(
   firstName: string,
   token: string
 ): Promise<boolean> {
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-  const verificationUrl = `${clientUrl}/verify-email?token=${token}`;
+  const verificationUrl = buildClientUrl('/verify-email', { token });
   
   const template = templates.verification({ firstName, verificationUrl });
   return sendEmail({ to: email, ...template });
@@ -210,8 +247,7 @@ export async function sendPasswordResetEmail(
   firstName: string,
   token: string
 ): Promise<boolean> {
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-  const resetUrl = `${clientUrl}/reset-password?token=${token}`;
+  const resetUrl = buildClientUrl('/reset-password', { token });
   
   const template = templates.passwordReset({ firstName, resetUrl });
   return sendEmail({ to: email, ...template });
@@ -221,8 +257,7 @@ export async function sendWelcomeEmail(
   email: string,
   firstName: string
 ): Promise<boolean> {
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-  const loginUrl = `${clientUrl}/login`;
+  const loginUrl = buildClientUrl('/login');
   
   const template = templates.welcome({ firstName, loginUrl });
   return sendEmail({ to: email, ...template });
