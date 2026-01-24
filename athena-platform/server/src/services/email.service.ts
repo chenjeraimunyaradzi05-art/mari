@@ -1,22 +1,19 @@
 /**
  * Email Service for ATHENA Platform
  * Handles all transactional and marketing emails
- *
- * NOTE: This module now delegates core email sending to ../utils/email.ts
- * to avoid duplication. Use that module for auth-related transactional emails
- * (verification, password reset, welcome). This service adds higher-level
- * templates (referrals, digests, booking confirmations, etc.).
+ * 
+ * NOTE: Core auth email functions (sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail)
+ * are defined in ../utils/email.ts and re-exported here for convenience.
+ * This service adds additional marketing and transactional templates.
  */
 
-import {
-  sendEmail as coreSendEmail,
+// Re-export core email functions from utils/email.ts for unified API
+export {
+  sendEmail as sendEmailCore,
   sendVerificationEmail,
   sendPasswordResetEmail,
-  sendWelcomeEmail as coreWelcomeEmail,
+  sendWelcomeEmail as sendWelcomeEmailBasic,
 } from '../utils/email';
-
-// Re-export core email utilities for consumers that import from this service
-export { sendVerificationEmail, sendPasswordResetEmail };
 
 interface EmailOptions {
   to: string;
@@ -524,11 +521,23 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
 };
 
 /**
- * Send an email using the core email utility (production-ready with SendGrid).
- * Delegates to ../utils/email.ts to avoid duplication.
+ * Send an email using the configured provider
+ * Currently logs to console; integrate with SendGrid/SES for production
  */
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  return coreSendEmail(options);
+  // In production, integrate with SendGrid, AWS SES, or similar
+  // For now, log the email
+  console.log('📧 Email would be sent:');
+  console.log(`   To: ${options.to}`);
+  console.log(`   Subject: ${options.subject}`);
+  
+  // Simulate async email sending
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      console.log('   ✅ Email sent successfully (simulated)');
+      resolve(true);
+    }, 100);
+  });
 }
 
 /**
@@ -543,7 +552,7 @@ export const emailService = {
     const html = options.html || `<p>${JSON.stringify(options.data)}</p>`;
     const text = options.text || JSON.stringify(options.data);
     
-    return coreSendEmail({
+    return sendEmail({
       to: options.to,
       subject: options.subject,
       html,

@@ -169,6 +169,79 @@ class PaymentService {
       };
   }
 
+  /**
+   * Create a one-time payment intent for business registration
+   */
+  async createPaymentIntentForRegistration(
+    userId: string,
+    registrationId: string,
+    amount: number,
+    description: string
+  ): Promise<{ clientSecret: string; paymentIntentId: string }> {
+    if (!this.isEnabled || !this.stripe) {
+      // Return simulated payment intent for dev/test
+      return {
+        clientSecret: `pi_simulated_${Date.now()}_secret`,
+        paymentIntentId: `pi_simulated_${Date.now()}`,
+      };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { subscription: true },
+    });
+
+    if (!user) throw new Error('User not found');
+
+    let customerId = user.subscription?.stripeCustomerId;
+    if (!customerId) {
+      customerId = await this.createCustomer(user);
+    }
+
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.create({
+        amount,
+        currency: 'aud',
+        customer: customerId,
+        description,
+        metadata: {
+          userId,
+          registrationId,
+          type: 'business_registration',
+        },
+      });
+
+      return {
+        clientSecret: paymentIntent.client_secret || '',
+        paymentIntentId: paymentIntent.id,
+      };
+    } catch (error) {
+      console.error('Error creating payment intent:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify a payment intent was successful
+   */
+  async verifyPaymentIntent(paymentIntentId: string, expectedAmount: number): Promise<boolean> {
+    if (!this.isEnabled || !this.stripe) {
+      // In dev mode, accept simulated payment intents
+      return paymentIntentId.startsWith('pi_simulated_');
+    }
+
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+      return (
+        paymentIntent.status === 'succeeded' &&
+        paymentIntent.amount === expectedAmount
+      );
+    } catch (error) {
+      console.error('Error verifying payment intent:', error);
+      return false;
+    }
+  }
+
   // Webhook handler would go here (requires raw body parsing in express)
 }
 
