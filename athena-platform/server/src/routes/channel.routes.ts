@@ -76,9 +76,9 @@ router.post(
   '/',
   authenticate,
   [
-    body('name').isString().notEmpty(),
+    body('name').isString().notEmpty().isLength({ max: 100 }).withMessage('Channel name max 100 characters'),
     body('type').isIn(['EMPLOYER_BROADCAST', 'MENTOR_BROADCAST', 'COMMUNITY_CHANNEL', 'EDUCATION_CHANNEL', 'CREATOR_CHANNEL']),
-    body('description').optional().isString(),
+    body('description').optional().isString().isLength({ max: 2000 }).withMessage('Description max 2000 characters'),
     body('isPublic').optional().isBoolean(),
     body('allowReplies').optional().isBoolean(),
     body('avatarUrl').optional().isString(),

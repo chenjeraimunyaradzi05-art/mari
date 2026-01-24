@@ -272,7 +272,7 @@ router.get('/:id/comments', optionalAuth, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/comments',
   authenticate,
-  [body('content').isString().notEmpty(), body('parentId').optional().isString()],
+  [body('content').isString().notEmpty().isLength({ max: 2000 }).withMessage('Comment max 2000 characters'), body('parentId').optional().isString()],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);

@@ -15,7 +15,7 @@ router.post(
   authenticate,
   [
     body('type').isIn(['CONTENT_MODERATION', 'ACCOUNT_SUSPENSION', 'VERIFICATION_DECISION', 'OTHER']),
-    body('reason').isString().notEmpty(),
+    body('reason').isString().notEmpty().isLength({ max: 5000 }).withMessage('Reason must be less than 5000 characters'),
     body('metadata').optional(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {

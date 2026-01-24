@@ -124,9 +124,9 @@ router.post(
   authenticate,
   requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'),
   [
-    body('title').isString().notEmpty(),
-    body('description').isString().notEmpty(),
-    body('framework').isString().notEmpty(),
+    body('title').isString().notEmpty().isLength({ max: 200 }).withMessage('Title max 200 characters'),
+    body('description').isString().notEmpty().isLength({ max: 10000 }).withMessage('Description max 10000 characters'),
+    body('framework').isString().notEmpty().isLength({ max: 100 }).withMessage('Framework max 100 characters'),
     body('level').isIn(['CERTIFICATE_I', 'CERTIFICATE_II', 'CERTIFICATE_III', 'CERTIFICATE_IV', 'DIPLOMA', 'ADVANCED_DIPLOMA']),
     body('durationMonths').isInt({ min: 1 }),
     body('wageMin').optional().isInt({ min: 0 }),
