@@ -47,7 +47,7 @@ router.post('/items', authenticate, async (req: Request, res: Response) => {
     res.status(201).json({ data: item });
   } catch (error: any) {
     logger.error('Failed to create inventory item', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create inventory item' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create inventory item' });
   }
 });
 
@@ -57,7 +57,7 @@ router.patch('/items/:id', authenticate, async (req: Request, res: Response) => 
     res.json({ data: item });
   } catch (error: any) {
     logger.error('Failed to update inventory item', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update inventory item' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update inventory item' });
   }
 });
 
@@ -67,7 +67,7 @@ router.delete('/items/:id', authenticate, async (req: Request, res: Response) =>
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete inventory item', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete inventory item' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete inventory item' });
   }
 });
 
@@ -94,7 +94,7 @@ router.post('/locations', authenticate, async (req: Request, res: Response) => {
     res.status(201).json({ data: location });
   } catch (error: any) {
     logger.error('Failed to create inventory location', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create inventory location' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create inventory location' });
   }
 });
 
@@ -104,7 +104,7 @@ router.patch('/locations/:id', authenticate, async (req: Request, res: Response)
     res.json({ data: location });
   } catch (error: any) {
     logger.error('Failed to update inventory location', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update inventory location' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update inventory location' });
   }
 });
 
@@ -114,7 +114,7 @@ router.delete('/locations/:id', authenticate, async (req: Request, res: Response
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete inventory location', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete inventory location' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete inventory location' });
   }
 });
 
@@ -150,7 +150,7 @@ router.post('/transactions', authenticate, async (req: Request, res: Response) =
     res.status(201).json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to create inventory transaction', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create inventory transaction' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create inventory transaction' });
   }
 });
 
@@ -168,7 +168,7 @@ router.patch('/transactions/:id', authenticate, async (req: Request, res: Respon
     res.json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to update inventory transaction', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update inventory transaction' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update inventory transaction' });
   }
 });
 
@@ -178,7 +178,7 @@ router.delete('/transactions/:id', authenticate, async (req: Request, res: Respo
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete inventory transaction', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete inventory transaction' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete inventory transaction' });
   }
 });
 

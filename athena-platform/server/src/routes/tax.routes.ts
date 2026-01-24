@@ -44,7 +44,7 @@ router.post('/rates', authenticate, async (req: Request, res: Response) => {
     res.status(201).json({ data: rate });
   } catch (error: any) {
     logger.error('Failed to create tax rate', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create tax rate' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create tax rate' });
   }
 });
 
@@ -54,7 +54,7 @@ router.patch('/rates/:id', authenticate, async (req: Request, res: Response) => 
     res.json({ data: rate });
   } catch (error: any) {
     logger.error('Failed to update tax rate', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update tax rate' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update tax rate' });
   }
 });
 
@@ -64,7 +64,7 @@ router.delete('/rates/:id', authenticate, async (req: Request, res: Response) =>
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete tax rate', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete tax rate' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete tax rate' });
   }
 });
 
@@ -101,7 +101,7 @@ router.post('/returns', authenticate, async (req: Request, res: Response) => {
     res.status(201).json({ data: record });
   } catch (error: any) {
     logger.error('Failed to create tax return', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create tax return' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create tax return' });
   }
 });
 
@@ -124,7 +124,7 @@ router.patch('/returns/:id', authenticate, async (req: Request, res: Response) =
     res.json({ data: record });
   } catch (error: any) {
     logger.error('Failed to update tax return', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update tax return' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update tax return' });
   }
 });
 
@@ -139,7 +139,7 @@ router.post('/returns/:id/submit', authenticate, async (req: Request, res: Respo
     res.json({ data: record });
   } catch (error: any) {
     logger.error('Failed to submit tax return', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to submit tax return' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to submit tax return' });
   }
 });
 
@@ -154,7 +154,7 @@ router.delete('/returns/:id', authenticate, async (req: Request, res: Response) 
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete tax return', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete tax return' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete tax return' });
   }
 });
 

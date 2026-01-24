@@ -188,7 +188,7 @@ router.post('/book', authenticate, async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error('Failed to book session', { error });
-    res.status(400).json({ error: error.message || 'Failed to book session' });
+    res.status(400).json({ error: 'Failed to book session' });
   }
 });
 
@@ -224,7 +224,7 @@ router.post('/respond/:sessionId', authenticate, async (req: Request, res: Respo
     });
   } catch (error: any) {
     logger.error('Failed to respond to booking', { error });
-    res.status(400).json({ error: error.message || 'Failed to respond' });
+    res.status(400).json({ error: 'Failed to respond to booking' });
   }
 });
 
@@ -251,7 +251,7 @@ router.post('/cancel/:sessionId', authenticate, async (req: Request, res: Respon
     });
   } catch (error: any) {
     logger.error('Failed to cancel session', { error });
-    res.status(400).json({ error: error.message || 'Failed to cancel' });
+    res.status(400).json({ error: 'Failed to cancel session' });
   }
 });
 
@@ -282,7 +282,7 @@ router.post('/complete/:sessionId', authenticate, async (req: Request, res: Resp
     });
   } catch (error: any) {
     logger.error('Failed to complete session', { error });
-    res.status(400).json({ error: error.message || 'Failed to complete' });
+    res.status(400).json({ error: 'Failed to complete session' });
   }
 });
 
@@ -317,7 +317,7 @@ router.post('/rate/:sessionId', authenticate, async (req: Request, res: Response
     });
   } catch (error: any) {
     logger.error('Failed to rate session', { error });
-    res.status(400).json({ error: error.message || 'Failed to rate session' });
+    res.status(400).json({ error: 'Failed to rate session' });
   }
 });
 

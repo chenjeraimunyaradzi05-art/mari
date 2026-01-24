@@ -28,7 +28,7 @@ router.get('/dsar', async (req: AuthRequest, res: Response) => {
     const requests = await gdprService.getDSARRequests(userId);
     res.json({ success: true, data: requests });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to retrieve DSAR requests' });
   }
 });
 
@@ -60,7 +60,7 @@ router.post('/dsar/export', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to process data export request' });
   }
 });
 
@@ -96,7 +96,7 @@ router.post('/dsar/delete', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to process deletion request' });
   }
 });
 
@@ -130,7 +130,7 @@ router.post('/dsar/rectify', async (req: AuthRequest, res: Response) => {
       data: { requestId: dsar.id },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to process rectification request' });
   }
 });
 
@@ -155,7 +155,7 @@ router.post('/dsar/restrict', async (req: AuthRequest, res: Response) => {
       data: { requestId: dsar.id },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to process restriction request' });
   }
 });
 
@@ -189,7 +189,7 @@ router.get('/download/:requestId', async (req: AuthRequest, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="athena-data-export-${requestId}.json"`);
     res.json(exportData);
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to download export data' });
   }
 });
 
@@ -214,7 +214,7 @@ router.get('/consents', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, data: consentState });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to retrieve consents' });
   }
 });
 
@@ -244,7 +244,7 @@ router.put('/consents', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, message: 'Consents updated successfully' });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to update consents' });
   }
 });
 
@@ -275,7 +275,7 @@ router.post('/consents/:type', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, data: consent });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to update consent' });
   }
 });
 
@@ -317,7 +317,7 @@ router.get('/cookies/:visitorId', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to retrieve cookie preferences' });
   }
 });
 
@@ -354,7 +354,7 @@ router.post('/cookies', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, data: consent });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to record cookie consent' });
   }
 });
 

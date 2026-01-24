@@ -37,7 +37,7 @@ router.post('/transactions', authenticate, async (req: Request, res: Response) =
     res.status(201).json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to create money transaction', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create money transaction' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create money transaction' });
   }
 });
 
@@ -52,7 +52,7 @@ router.patch('/transactions/:id', authenticate, async (req: Request, res: Respon
     res.json({ data: transaction });
   } catch (error: any) {
     logger.error('Failed to update money transaction', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update money transaction' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update money transaction' });
   }
 });
 
@@ -67,7 +67,7 @@ router.delete('/transactions/:id', authenticate, async (req: Request, res: Respo
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete money transaction', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete money transaction' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete money transaction' });
   }
 });
 

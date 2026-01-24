@@ -47,7 +47,7 @@ router.post('/accounts', authenticate, async (req: Request, res: Response) => {
     res.status(201).json({ data: account });
   } catch (error: any) {
     logger.error('Failed to create account', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create account' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create account' });
   }
 });
 
@@ -57,7 +57,7 @@ router.patch('/accounts/:id', authenticate, async (req: Request, res: Response) 
     res.json({ data: account });
   } catch (error: any) {
     logger.error('Failed to update account', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update account' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update account' });
   }
 });
 
@@ -67,7 +67,7 @@ router.delete('/accounts/:id', authenticate, async (req: Request, res: Response)
     res.status(204).send();
   } catch (error: any) {
     logger.error('Failed to delete account', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete account' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to delete account' });
   }
 });
 
@@ -103,7 +103,7 @@ router.post('/journals', authenticate, async (req: Request, res: Response) => {
     res.status(201).json({ data: entry });
   } catch (error: any) {
     logger.error('Failed to create journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create journal entry' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to create journal entry' });
   }
 });
 
@@ -113,7 +113,7 @@ router.get('/journals/:id', authenticate, async (req: Request, res: Response) =>
     res.json({ data: entry });
   } catch (error: any) {
     logger.error('Failed to get journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get journal entry' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to get journal entry' });
   }
 });
 
@@ -127,7 +127,7 @@ router.patch('/journals/:id', authenticate, async (req: Request, res: Response) 
     res.json({ data: entry });
   } catch (error: any) {
     logger.error('Failed to update journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update journal entry' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to update journal entry' });
   }
 });
 
@@ -137,7 +137,7 @@ router.post('/journals/:id/post', authenticate, async (req: Request, res: Respon
     res.json({ data: entry });
   } catch (error: any) {
     logger.error('Failed to post journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to post journal entry' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to post journal entry' });
   }
 });
 
@@ -147,7 +147,7 @@ router.post('/journals/:id/void', authenticate, async (req: Request, res: Respon
     res.json({ data: entry });
   } catch (error: any) {
     logger.error('Failed to void journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to void journal entry' });
+    res.status(error.statusCode || 500).json({ error: 'Failed to void journal entry' });
   }
 });
 
