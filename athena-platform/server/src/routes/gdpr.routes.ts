@@ -8,6 +8,7 @@ import { Router, Response } from 'express';
 import { gdprService } from '../services/gdpr.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { DSARType, ConsentType } from '@prisma/client';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.get('/dsar', async (req: AuthRequest, res: Response) => {
     const requests = await gdprService.getDSARRequests(userId);
     res.json({ success: true, data: requests });
   } catch (error: any) {
+    logger.error('Failed to retrieve DSAR requests', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to retrieve DSAR requests' });
   }
 });
@@ -60,6 +62,7 @@ router.post('/dsar/export', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    logger.error('Failed to process data export request', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to process data export request' });
   }
 });
@@ -96,6 +99,7 @@ router.post('/dsar/delete', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    logger.error('Failed to process deletion request', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to process deletion request' });
   }
 });
@@ -130,6 +134,7 @@ router.post('/dsar/rectify', async (req: AuthRequest, res: Response) => {
       data: { requestId: dsar.id },
     });
   } catch (error: any) {
+    logger.error('Failed to process rectification request', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to process rectification request' });
   }
 });
@@ -155,6 +160,7 @@ router.post('/dsar/restrict', async (req: AuthRequest, res: Response) => {
       data: { requestId: dsar.id },
     });
   } catch (error: any) {
+    logger.error('Failed to process restriction request', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to process restriction request' });
   }
 });
@@ -189,6 +195,7 @@ router.get('/download/:requestId', async (req: AuthRequest, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="athena-data-export-${requestId}.json"`);
     res.json(exportData);
   } catch (error: any) {
+    logger.error('Failed to download export data', { error, userId: req.user?.id, requestId: req.params.requestId });
     res.status(500).json({ success: false, error: 'Failed to download export data' });
   }
 });
@@ -214,6 +221,7 @@ router.get('/consents', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, data: consentState });
   } catch (error: any) {
+    logger.error('Failed to retrieve consents', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to retrieve consents' });
   }
 });
@@ -244,6 +252,7 @@ router.put('/consents', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, message: 'Consents updated successfully' });
   } catch (error: any) {
+    logger.error('Failed to update consents', { error, userId: req.user?.id });
     res.status(500).json({ success: false, error: 'Failed to update consents' });
   }
 });
@@ -275,6 +284,7 @@ router.post('/consents/:type', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, data: consent });
   } catch (error: any) {
+    logger.error('Failed to update consent', { error, userId: req.user?.id, consentType: req.params.type });
     res.status(500).json({ success: false, error: 'Failed to update consent' });
   }
 });
@@ -317,6 +327,7 @@ router.get('/cookies/:visitorId', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    logger.error('Failed to retrieve cookie preferences', { error, visitorId: req.params.visitorId });
     res.status(500).json({ success: false, error: 'Failed to retrieve cookie preferences' });
   }
 });
@@ -354,6 +365,7 @@ router.post('/cookies', async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, data: consent });
   } catch (error: any) {
+    logger.error('Failed to record cookie consent', { error, visitorId: req.body.visitorId });
     res.status(500).json({ success: false, error: 'Failed to record cookie consent' });
   }
 });

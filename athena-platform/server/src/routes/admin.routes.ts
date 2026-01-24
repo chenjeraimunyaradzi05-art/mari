@@ -205,17 +205,40 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
 
     const user = await prisma.user.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        avatar: true,
+        headline: true,
+        role: true,
+        persona: true,
+        emailVerified: true,
+        isSuspended: true,
+        createdAt: true,
+        updatedAt: true,
+        lastActiveAt: true,
         profile: true,
         subscription: true,
         posts: {
           take: 5,
           orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            content: true,
+            type: true,
+            createdAt: true,
+          },
         },
         applications: {
           take: 5,
           orderBy: { appliedAt: 'desc' },
-          include: {
+          select: {
+            id: true,
+            status: true,
+            appliedAt: true,
             job: {
               select: { id: true, title: true },
             },
