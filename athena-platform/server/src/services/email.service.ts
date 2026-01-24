@@ -2,17 +2,17 @@
  * Email Service for ATHENA Platform
  * Handles all transactional and marketing emails
  * 
- * NOTE: Core auth email functions (sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail)
- * are defined in ../utils/email.ts and re-exported here for convenience.
- * This service adds additional marketing and transactional templates.
+ * NOTE: Core email functions (sendEmail, sendVerificationEmail, sendPasswordResetEmail, 
+ * sendWelcomeEmail) are consolidated in utils/email.ts and re-exported here for convenience.
+ * This file extends with additional marketing/engagement templates.
  */
 
-// Re-export core email functions from utils/email.ts for unified API
+// Re-export core email functions from utils/email.ts
 export {
-  sendEmail as sendEmailCore,
+  sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
-  sendWelcomeEmail as sendWelcomeEmailBasic,
+  sendWelcomeEmail,
 } from '../utils/email';
 
 interface EmailOptions {
@@ -520,28 +520,19 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
   }),
 };
 
+// Import for internal use in this module (marketing templates)
+import { sendEmail as coreSendEmail } from '../utils/email';
+
 /**
- * Send an email using the configured provider
- * Currently logs to console; integrate with SendGrid/SES for production
+ * Internal send function for marketing templates
+ * Uses the consolidated sendEmail from utils/email.ts
  */
-export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  // In production, integrate with SendGrid, AWS SES, or similar
-  // For now, log the email
-  console.log('📧 Email would be sent:');
-  console.log(`   To: ${options.to}`);
-  console.log(`   Subject: ${options.subject}`);
-  
-  // Simulate async email sending
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log('   ✅ Email sent successfully (simulated)');
-      resolve(true);
-    }, 100);
-  });
+async function sendMarketingEmail(options: EmailOptions): Promise<boolean> {
+  return coreSendEmail(options);
 }
 
 /**
- * Email service class
+ * Email service class for marketing and engagement emails
  */
 export const emailService = {
   /**
@@ -552,7 +543,7 @@ export const emailService = {
     const html = options.html || `<p>${JSON.stringify(options.data)}</p>`;
     const text = options.text || JSON.stringify(options.data);
     
-    return sendEmail({
+    return sendMarketingEmail({
       to: options.to,
       subject: options.subject,
       html,
@@ -561,11 +552,11 @@ export const emailService = {
   },
   
   /**
-   * Send welcome email to new user
+   * Send welcome email to new user (marketing version with referral code)
    */
   async sendWelcomeEmail(to: string, firstName: string, referralCode?: string): Promise<boolean> {
     const template = templates.welcome({ firstName, referralCode });
-    return sendEmail({
+    return sendMarketingEmail({
       to,
       subject: template.subject,
       html: template.html,
@@ -583,7 +574,7 @@ export const emailService = {
     credits: number
   ): Promise<boolean> {
     const template = templates.referralSignup({ referrerName, referredName, credits });
-    return sendEmail({
+    return sendMarketingEmail({
       to,
       subject: template.subject,
       html: template.html,
@@ -596,7 +587,7 @@ export const emailService = {
    */
   async sendReEngagementEmail(to: string, firstName: string, daysInactive: number): Promise<boolean> {
     const template = templates.reEngagement({ firstName, daysInactive });
-    return sendEmail({
+    return sendMarketingEmail({
       to,
       subject: template.subject,
       html: template.html,
@@ -613,7 +604,7 @@ export const emailService = {
     stats: { newJobs: number; newConnections: number; upcomingEvents: number }
   ): Promise<boolean> {
     const template = templates.weeklyDigest({ firstName, ...stats });
-    return sendEmail({
+    return sendMarketingEmail({
       to,
       subject: template.subject,
       html: template.html,
