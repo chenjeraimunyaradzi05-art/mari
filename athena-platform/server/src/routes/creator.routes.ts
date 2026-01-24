@@ -330,7 +330,7 @@ router.post(
 router.post(
   '/balance/purchase/confirm',
   authenticate,
-  [body('paymentIntentId').isString().notEmpty().withMessage('paymentIntentId is required')],
+  [body('paymentIntentId').isString().notEmpty().isLength({ max: 256 }).withMessage('paymentIntentId is required')],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);

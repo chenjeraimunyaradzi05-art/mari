@@ -326,7 +326,7 @@ router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/messages',
   authenticate,
-  [body('content').isString().notEmpty(), body('mediaUrls').optional()],
+  [body('content').isString().notEmpty().isLength({ max: 5000 }), body('mediaUrls').optional()],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);

@@ -75,8 +75,8 @@ router.post(
   '/services',
   authenticate,
   [
-    body('title').isString().notEmpty(),
-    body('description').isString().notEmpty(),
+    body('title').isString().notEmpty().isLength({ max: 200 }),
+    body('description').isString().notEmpty().isLength({ max: 5000 }),
     body('category').isIn(['PROFESSIONAL', 'CREATIVE', 'TECHNICAL', 'COACHING', 'TEACHING']),
     body('hourlyRate').isInt({ min: 1 }),
     body('minimumHours').optional().isFloat({ min: 0.5 }),

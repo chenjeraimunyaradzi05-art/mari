@@ -58,7 +58,7 @@ router.delete('/key', authenticate, async (req: AuthRequest, res, next) => {
  * POST /api/livestream/key/validate
  */
 router.post('/key/validate', [
-  body('key').isString().notEmpty(),
+  body('key').isString().notEmpty().isLength({ max: 256 }),
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -172,7 +172,7 @@ router.get('/wallet', authenticate, async (req: AuthRequest, res, next) => {
  */
 router.post('/wallet/purchase', authenticate, [
   body('amount').isInt({ min: 100 }),
-  body('paymentIntentId').isString().notEmpty(),
+  body('paymentIntentId').isString().notEmpty().isLength({ max: 256 }),
 ], async (req: AuthRequest, res, next) => {
   try {
     const errors = validationResult(req);
@@ -214,7 +214,7 @@ router.get('/gifts', (req, res) => {
  */
 router.post('/:streamId/gift', authenticate, [
   param('streamId').isString().notEmpty(),
-  body('giftType').isString().notEmpty(),
+  body('giftType').isString().notEmpty().isLength({ max: 50 }),
 ], async (req: AuthRequest, res, next) => {
   try {
     const errors = validationResult(req);
