@@ -10,6 +10,7 @@
 import { prisma } from '../utils/prisma';
 import { DSARStatus, DSARType } from '@prisma/client';
 import { createHash } from 'crypto';
+import { logger } from '../utils/logger';
 
 // ==========================================
 // CONFIGURATION
@@ -26,7 +27,7 @@ const DELETION_GRACE_PERIOD_DAYS = 30;
  * Process pending data export requests
  */
 export async function processExportRequests(): Promise<{ processed: number; failed: number }> {
-  console.log('[GDPR] Starting export job');
+  logger.info('[GDPR] Starting export job');
   
   const pendingRequests = await prisma.dSARRequest.findMany({
     where: {
@@ -44,7 +45,7 @@ export async function processExportRequests(): Promise<{ processed: number; fail
       await processExportRequest(request.id);
       processed++;
     } catch (error) {
-      console.error('[GDPR] Export request failed', { error, requestId: request.id });
+      logger.error('[GDPR] Export request failed', { error, requestId: request.id });
       failed++;
       
       // Mark as failed using processingNotes field
@@ -58,7 +59,7 @@ export async function processExportRequests(): Promise<{ processed: number; fail
     }
   }
   
-  console.log(`[GDPR] Export job completed: ${processed} processed, ${failed} failed`);
+  logger.info(`[GDPR] Export job completed: ${processed} processed, ${failed} failed`);
   return { processed, failed };
 }
 
@@ -103,7 +104,7 @@ async function processExportRequest(requestId: string): Promise<void> {
     },
   });
 
-  console.log(`[GDPR] Export completed for request ${requestId}`);
+  logger.info(`[GDPR] Export completed for request ${requestId}`);
 }
 
 /**
@@ -167,7 +168,7 @@ async function gatherUserData(userId: string): Promise<object> {
  * Process pending deletion requests
  */
 export async function processDeletionRequests(): Promise<{ processed: number; failed: number }> {
-  console.log('[GDPR] Starting deletion job');
+  logger.info('[GDPR] Starting deletion job');
   
   const pendingRequests = await prisma.dSARRequest.findMany({
     where: {
@@ -186,12 +187,12 @@ export async function processDeletionRequests(): Promise<{ processed: number; fa
       await processDeletionRequest(request.id);
       processed++;
     } catch (error) {
-      console.error('[GDPR] Deletion request failed', { error, requestId: request.id });
+      logger.error('[GDPR] Deletion request failed', { error, requestId: request.id });
       failed++;
     }
   }
   
-  console.log(`[GDPR] Deletion job completed: ${processed} processed, ${failed} failed`);
+  logger.info(`[GDPR] Deletion job completed: ${processed} processed, ${failed} failed`);
   return { processed, failed };
 }
 
@@ -272,7 +273,7 @@ async function processDeletionRequest(requestId: string): Promise<void> {
     },
   });
 
-  console.log(`[GDPR] Deletion completed for request ${requestId}`);
+  logger.info(`[GDPR] Deletion completed for request ${requestId}`);
 }
 
 // ==========================================
@@ -283,7 +284,7 @@ async function processDeletionRequest(requestId: string): Promise<void> {
  * Clean up expired exports
  */
 export async function cleanupExpiredExports(): Promise<number> {
-  console.log('[GDPR] Starting export cleanup');
+  logger.info('[GDPR] Starting export cleanup');
   
   const expiredRequests = await prisma.dSARRequest.findMany({
     where: {
@@ -304,7 +305,7 @@ export async function cleanupExpiredExports(): Promise<number> {
     });
   }
 
-  console.log(`[GDPR] Cleaned up ${expiredRequests.length} expired exports`);
+  logger.info(`[GDPR] Cleaned up ${expiredRequests.length} expired exports`);
   return expiredRequests.length;
 }
 

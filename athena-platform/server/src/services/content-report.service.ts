@@ -6,6 +6,7 @@
 
 import { PrismaClient } from '@prisma/client';
 import { sendEmail } from '../utils/email';
+import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
 
@@ -110,7 +111,7 @@ export async function submitContentReport(report: ContentReportInput): Promise<R
       priority,
     };
   } catch (error) {
-    console.error('Failed to submit content report:', error);
+    logger.error('Failed to submit content report:', error);
     throw new Error('Failed to submit report');
   }
 }
@@ -337,33 +338,33 @@ async function escalateToAuthorities(
     },
   });
 
-  console.log(`[CRITICAL] Report ${ticketId} escalated to authorities for ${report.reason}`);
+  logger.info(`[CRITICAL] Report ${ticketId} escalated to authorities for ${report.reason}`);
 }
 
 // Placeholder functions for content moderation actions
 async function removeContent(contentType: string, contentId: string): Promise<void> {
   // Implementation depends on content type
-  console.log(`Removing ${contentType} with ID ${contentId}`);
+  logger.info(`Removing ${contentType} with ID ${contentId}`);
 }
 
 async function warnUser(contentId: string, contentType: string): Promise<void> {
   // Get user from content and send warning
-  console.log(`Warning user for ${contentType} ${contentId}`);
+  logger.info(`Warning user for ${contentType} ${contentId}`);
 }
 
 async function suspendUser(contentId: string, contentType: string): Promise<void> {
   // Get user and apply suspension
-  console.log(`Suspending user for ${contentType} ${contentId}`);
+  logger.info(`Suspending user for ${contentType} ${contentId}`);
 }
 
 async function banUser(contentId: string, contentType: string): Promise<void> {
   // Get user and apply permanent ban
-  console.log(`Banning user for ${contentType} ${contentId}`);
+  logger.info(`Banning user for ${contentType} ${contentId}`);
 }
 
 async function escalateReport(ticketId: string, report: any): Promise<void> {
   // Escalate to senior moderation team
-  console.log(`Escalating report ${ticketId}`);
+  logger.info(`Escalating report ${ticketId}`);
 }
 
 export default {

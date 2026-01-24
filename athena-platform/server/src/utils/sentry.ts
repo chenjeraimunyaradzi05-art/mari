@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/node';
+import { logger } from './logger';
 
 /**
  * Initialize Sentry error tracking for production
@@ -7,7 +8,7 @@ export function initSentry(): void {
   const dsn = process.env.SENTRY_DSN;
   
   if (!dsn || process.env.NODE_ENV !== 'production') {
-    console.log('Sentry: Skipping initialization (not in production or DSN not set)');
+    logger.info('Sentry: Skipping initialization (not in production or DSN not set)');
     return;
   }
 
@@ -52,7 +53,7 @@ export function initSentry(): void {
     ],
   });
 
-  console.log('Sentry: Initialized successfully');
+  logger.info('Sentry: Initialized successfully');
 }
 
 /**

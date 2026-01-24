@@ -1,5 +1,6 @@
 import Stripe from 'stripe';
 import { User, PrismaClient, Subscription } from '@prisma/client';
+import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
 
@@ -16,7 +17,7 @@ class PaymentService {
       });
       this.isEnabled = true;
     } else {
-      console.warn('STRIPE_SECRET_KEY not found. Payment features will be simulated or disabled.');
+      logger.warn('STRIPE_SECRET_KEY not found. Payment features will be simulated or disabled.');
     }
   }
 
@@ -53,7 +54,7 @@ class PaymentService {
 
       return customer.id;
     } catch (error) {
-      console.error('Error creating Stripe customer:', error);
+      logger.error('Error creating Stripe customer:', error);
       throw error;
     }
   }
@@ -96,7 +97,7 @@ class PaymentService {
 
       return { url: session.url };
     } catch (error) {
-      console.error('Error creating checkout session:', error);
+      logger.error('Error creating checkout session:', error);
       throw error;
     }
   }
@@ -120,7 +121,7 @@ class PaymentService {
          });
          return { url: session.url };
      } catch (error) {
-         console.error('Error creating portal session:', error);
+         logger.error('Error creating portal session:', error);
          throw error;
      }
   }
