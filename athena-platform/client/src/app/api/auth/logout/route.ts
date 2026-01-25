@@ -1,11 +1,26 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST() {
-  const res = NextResponse.json({ success: true });
-  
-  // Clear auth cookies
-  res.cookies.delete('accessToken');
-  res.cookies.delete('refreshToken');
-  
-  return res;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
+export async function POST(request: NextRequest) {
+  try {
+    const authHeader = request.headers.get('authorization');
+
+    const response = await fetch(`${API_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
+    });
+
+    const data = await response.json();
+    return NextResponse.json(data, { status: response.status });
+  } catch (error) {
+    console.error('Auth logout error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to logout' },
+      { status: 500 }
+    );
+  }
 }

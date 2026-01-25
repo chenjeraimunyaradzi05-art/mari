@@ -5,7 +5,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
+
     const response = await fetch(`${API_URL}/api/auth/register`, {
       method: 'POST',
       headers: {
@@ -17,10 +17,10 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Register API error:', error);
+    console.error('Auth register error:', error);
     return NextResponse.json(
-      { error: 'Registration service unavailable' },
-      { status: 503 }
+      { success: false, error: 'Failed to register' },
+      { status: 500 }
     );
   }
 }
