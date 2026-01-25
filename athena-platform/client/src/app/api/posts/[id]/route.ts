@@ -8,8 +8,9 @@ export async function GET(
 ) {
   try {
     const authHeader = request.headers.get('authorization');
-
+    
     const response = await fetch(`${API_URL}/api/posts/${params.id}`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         ...(authHeader ? { Authorization: authHeader } : {}),
@@ -17,39 +18,12 @@ export async function GET(
     });
 
     const data = await response.json();
+    
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Post API error:', error);
+    console.error('Post detail API error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch post' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const authHeader = request.headers.get('authorization');
-    const body = await request.json();
-
-    const response = await fetch(`${API_URL}/api/posts/${params.id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authHeader ? { Authorization: authHeader } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
-  } catch (error) {
-    console.error('Post API error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update post' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -61,7 +35,7 @@ export async function DELETE(
 ) {
   try {
     const authHeader = request.headers.get('authorization');
-
+    
     const response = await fetch(`${API_URL}/api/posts/${params.id}`, {
       method: 'DELETE',
       headers: {
@@ -71,11 +45,12 @@ export async function DELETE(
     });
 
     const data = await response.json();
+    
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Post API error:', error);
+    console.error('Post delete API error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to delete post' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }

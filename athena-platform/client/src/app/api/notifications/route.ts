@@ -5,8 +5,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-
-    const response = await fetch(`${API_URL}/api/notifications`, {
+    const { searchParams } = new URL(request.url);
+    const queryString = searchParams.toString();
+    
+    const response = await fetch(`${API_URL}/api/notifications${queryString ? `?${queryString}` : ''}`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         ...(authHeader ? { Authorization: authHeader } : {}),
@@ -14,11 +17,12 @@ export async function GET(request: NextRequest) {
     });
 
     const data = await response.json();
+    
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Notifications API error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch notifications' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -28,7 +32,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
     const body = await request.json();
-
+    
     const response = await fetch(`${API_URL}/api/notifications/mark-read`, {
       method: 'PATCH',
       headers: {
@@ -39,11 +43,12 @@ export async function PATCH(request: NextRequest) {
     });
 
     const data = await response.json();
+    
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Notifications API error:', error);
+    console.error('Notifications mark-read API error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to mark notifications' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }

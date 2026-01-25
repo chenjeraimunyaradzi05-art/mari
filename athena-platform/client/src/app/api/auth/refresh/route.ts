@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const response = await fetch(`${API_URL}/api/auth/login`, {
+    const response = await fetch(`${API_URL}/api/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Login API error:', error);
+    console.error('Refresh token API error:', error);
     return NextResponse.json(
       { success: false, message: 'Internal server error' },
       { status: 500 }

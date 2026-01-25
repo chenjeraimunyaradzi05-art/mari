@@ -5,15 +5,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-    const searchParams = request.nextUrl.searchParams;
-    const page = searchParams.get('page') || '1';
-    const limit = searchParams.get('limit') || '20';
-    const upcoming = searchParams.get('upcoming') || 'true';
-
-    let url = `${API_URL}/api/events?page=${page}&limit=${limit}`;
-    if (upcoming) url += `&upcoming=${upcoming}`;
-
-    const response = await fetch(url, {
+    const { searchParams } = new URL(request.url);
+    const queryString = searchParams.toString();
+    
+    const response = await fetch(`${API_URL}/api/events${queryString ? `?${queryString}` : ''}`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         ...(authHeader ? { Authorization: authHeader } : {}),
@@ -21,11 +17,12 @@ export async function GET(request: NextRequest) {
     });
 
     const data = await response.json();
+    
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error('Events API error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch events' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -35,7 +32,7 @@ export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
     const body = await request.json();
-
+    
     const response = await fetch(`${API_URL}/api/events`, {
       method: 'POST',
       headers: {
@@ -46,11 +43,12 @@ export async function POST(request: NextRequest) {
     });
 
     const data = await response.json();
+    
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Events API error:', error);
+    console.error('Events create API error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to create event' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }
