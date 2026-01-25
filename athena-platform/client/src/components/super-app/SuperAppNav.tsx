@@ -8,6 +8,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useUIStore, type AppMode } from '@/lib/stores/ui.store';
@@ -120,14 +121,17 @@ export function SuperAppNav({ className }: SuperAppNavProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
-          {!isCollapsed && (
-            <Link href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                <span className="text-white font-bold text-lg">A</span>
-              </div>
-              <span className="font-semibold text-lg">Athena</span>
-            </Link>
-          )}
+          <Link href="/" className={cn('flex items-center gap-2', isCollapsed && 'mr-auto')}
+          >
+            <Image
+              src="/logo.svg"
+              alt="ATHENA"
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-lg"
+            />
+            {!isCollapsed && <span className="font-semibold text-lg">Athena</span>}
+          </Link>
           <Button
             variant="ghost"
             size="icon"

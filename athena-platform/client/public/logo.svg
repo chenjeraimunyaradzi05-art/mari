@@ -1,0 +1,11 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="athenaGradient" x1="14" y1="10" x2="106" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#EC4899"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="100" height="100" rx="24" fill="url(#athenaGradient)"/>
+  <path d="M60 32L83 88H72.5L67.5 76H52.5L47.5 88H37L60 32ZM55.5 66H64.5L60 54L55.5 66Z" fill="white"/>
+</svg>

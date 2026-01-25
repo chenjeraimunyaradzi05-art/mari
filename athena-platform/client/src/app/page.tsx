@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { 
   ArrowRight, 
   Briefcase, 
@@ -100,7 +101,13 @@ export default function HomePage() {
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-athena-gradient rounded-lg" />
+                <Image
+                  src="/logo.svg"
+                  alt="ATHENA"
+                  width={32}
+                  height={32}
+                  className="w-8 h-8 rounded-lg"
+                />
                 <span className="text-xl font-bold gradient-text">ATHENA</span>
               </div>
               <div className="hidden md:flex relative">

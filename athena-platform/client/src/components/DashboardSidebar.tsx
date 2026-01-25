@@ -186,13 +186,13 @@ export default function DashboardSidebar() {
 
         {/* Logo (Mobile only) */}
         <div className="lg:hidden flex items-center space-x-2 p-4 border-b border-gray-200 dark:border-gray-700">
-          <Image
-            src="/logo.png"
-            alt="ATHENA"
-            width={32}
-            height={32}
-            className="w-8 h-8 object-contain rounded-lg"
-          />
+            <Image
+              src="/logo.svg"
+              alt="ATHENA"
+              width={36}
+              height={36}
+              className="h-9 w-9 rounded-lg"
+            />
           {!sidebarCollapsed && (
             <span className="text-xl font-bold bg-gradient-to-r from-primary-500 to-purple-500 bg-clip-text text-transparent">
               ATHENA
