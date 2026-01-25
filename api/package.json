@@ -1,0 +1,19 @@
+{
+  "name": "athena-api",
+  "version": "1.0.0",
+  "description": "ATHENA Platform API Server - Proxy to athena-platform/server",
+  "private": true,
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "postinstall": "cd ../athena-platform/server && npm install",
+    "build": "cd ../athena-platform/server && npx prisma generate && npm run build",
+    "start": "cd ../athena-platform/server && npm start",
+    "dev": "cd ../athena-platform/server && npm run dev",
+    "db:migrate": "cd ../athena-platform/server && npx prisma migrate deploy",
+    "db:seed": "cd ../athena-platform/server && npm run db:seed",
+    "db:push": "cd ../athena-platform/server && npx prisma db push"
+  },
+  "dependencies": {}
+}

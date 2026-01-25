@@ -6,10 +6,25 @@
   "engines": {
     "node": "20.x"
   },
+  "workspaces": [
+    "api",
+    "web",
+    "athena-platform/server",
+    "athena-platform/client",
+    "athena-platform/shared",
+    "athena-platform/mobile"
+  ],
   "scripts": {
     "postinstall": "cd athena-platform/server && npm install",
     "build": "cd athena-platform/server && npx prisma generate && npm run build",
+    "build:api": "cd api && npm run build",
+    "build:web": "cd web && npm run build",
     "start": "cd athena-platform/server && npm start",
-    "db:seed": "cd athena-platform/server && npm run db:seed"
+    "start:api": "cd api && npm start",
+    "start:web": "cd web && npm start",
+    "dev:api": "cd athena-platform/server && npm run dev",
+    "dev:web": "cd athena-platform/client && npm run dev",
+    "db:seed": "cd athena-platform/server && npm run db:seed",
+    "db:migrate": "cd athena-platform/server && npx prisma migrate deploy"
   }
 }
