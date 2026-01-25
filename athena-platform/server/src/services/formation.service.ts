@@ -13,6 +13,11 @@ import { logger } from '../utils/logger';
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
   : null;
+const isProduction =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RAILWAY_ENVIRONMENT === 'production';
+const allowStripeSimulation = process.env.ALLOW_STRIPE_SIMULATION === 'true';
 
 // Formation fee amounts in cents by business type
 const FORMATION_FEES: Record<BusinessType, number> = {
@@ -185,6 +190,10 @@ export async function submitRegistration(userId: string, registrationId: string)
       throw new ApiError(500, 'Payment processing failed. Please try again.');
     }
   } else {
+    if (isProduction && !allowStripeSimulation) {
+      logger.error('Stripe not configured in production for formation payments', { registrationId });
+      throw new ApiError(500, 'Payment processing is unavailable. Please contact support.');
+    }
     // Development mode without Stripe
     paymentIntentId = `mock_pi_${registrationId}`;
     logger.info('Mock formation payment (Stripe not configured)', { registrationId, amount: feeAmount });

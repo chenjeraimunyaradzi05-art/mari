@@ -10,6 +10,11 @@ import { logger } from '../utils/logger';
 // Initialize OpenAI client (optional - will skip AI features if not configured)
 const apiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 const openai = apiKey ? new OpenAI({ apiKey }) : null;
+const isProduction =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RAILWAY_ENVIRONMENT === 'production';
+const allowSimulation = process.env.AI_ALLOW_SIMULATION === 'true';
 
 export interface ConciergeContext {
   userId: string;
@@ -71,6 +76,12 @@ export async function chat(
 
   try {
     if (!openai || !openai.apiKey) {
+      if (isProduction && !allowSimulation) {
+        return {
+          message: 'The AI concierge is temporarily unavailable. Please try again later or contact support for help.',
+          quickReplies: ['Contact support', 'Try again later'],
+        };
+      }
       return getSimulatedResponse(message, userContext);
     }
 
@@ -101,6 +112,12 @@ export async function chat(
     };
   } catch (error) {
     logger.error('Concierge chat error:', error);
+    if (isProduction && !allowSimulation) {
+      return {
+        message: 'The AI concierge is temporarily unavailable. Please try again later or contact support for help.',
+        quickReplies: ['Contact support', 'Try again later'],
+      };
+    }
     return getSimulatedResponse(message, userContext);
   }
 }

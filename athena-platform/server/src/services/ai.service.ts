@@ -3,8 +3,16 @@ import { logger } from '../utils/logger';
 
 class AiService {
   private openai: OpenAI | null = null;
+  private isProduction: boolean;
+  private allowSimulation: boolean;
 
   constructor() {
+    this.isProduction =
+      process.env.NODE_ENV === 'production' ||
+      process.env.VERCEL_ENV === 'production' ||
+      process.env.RAILWAY_ENVIRONMENT === 'production';
+    this.allowSimulation = process.env.AI_ALLOW_SIMULATION === 'true';
+
     // Prefer the specific AI_ vars if available, fallback to generic OPENAI_API_KEY
     const apiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
     
@@ -14,12 +22,26 @@ class AiService {
         organization: process.env.AI_OPENAI_ORG, 
       });
     } else {
-      logger.warn('AI_OPENAI_API_KEY not found. AI features will be simulated.');
+      logger.warn('AI_OPENAI_API_KEY not found. AI features will be simulated when allowed.');
+      if (this.isProduction && !this.allowSimulation) {
+        logger.error('AI service not configured in production. Set AI_OPENAI_API_KEY or OPENAI_API_KEY.');
+      }
     }
+  }
+
+  private shouldSimulate(): boolean {
+    return !this.openai && (!this.isProduction || this.allowSimulation);
+  }
+
+  private ensureOpenAI(feature: string): void {
+    if (this.openai) return;
+    if (this.shouldSimulate()) return;
+    throw new Error(`AI service not configured for ${feature}. Configure AI_OPENAI_API_KEY or OPENAI_API_KEY.`);
   }
 
   async optimizeResume(resumeText: string, jobDescription?: string): Promise<any> {
     if (!this.openai) {
+      this.ensureOpenAI('resume optimization');
       return this.getSimulatedResumeResponse();
     }
 
@@ -64,7 +86,8 @@ class AiService {
   }
 
   async generateCareerPath(profileData: any, goal?: string): Promise<any> {
-    if (!this.openai) {
+     if (!this.openai) {
+       this.ensureOpenAI('career path generation');
        return this.getSimulatedCareerPathResponse();
     }
     
@@ -125,14 +148,25 @@ class AiService {
   }
 
   async enrichSocialContent(content: string, mediaUrls?: string[]): Promise<any> {
-    if (!this.openai || process.env.AI_SOCIAL_CONTENT_ENABLED !== 'true') {
-        const fallbackScore = parseInt(process.env.AI_SOCIAL_FALLBACK_SCORE || '40', 10);
-        return {
-            qualityScore: fallbackScore,
-            tags: [],
-            sentiment: 'neutral',
-            isSafe: true
-        };
+    if (process.env.AI_SOCIAL_CONTENT_ENABLED !== 'true') {
+      const fallbackScore = parseInt(process.env.AI_SOCIAL_FALLBACK_SCORE || '40', 10);
+      return {
+        qualityScore: fallbackScore,
+        tags: [],
+        sentiment: 'neutral',
+        isSafe: true
+      };
+    }
+
+    if (!this.openai) {
+      this.ensureOpenAI('social content enrichment');
+      const fallbackScore = parseInt(process.env.AI_SOCIAL_FALLBACK_SCORE || '40', 10);
+      return {
+        qualityScore: fallbackScore,
+        tags: [],
+        sentiment: 'neutral',
+        isSafe: true
+      };
     }
 
     try {
@@ -175,6 +209,7 @@ class AiService {
 
   async generateInterviewQuestions(jobDescription: string, type: 'behavioral' | 'technical' | 'mixed' = 'mixed'): Promise<any> {
     if (!this.openai) {
+      this.ensureOpenAI('interview question generation');
         return {
             questions: [
                 "Tell me about a time you faced a challenge.",
@@ -215,7 +250,10 @@ class AiService {
   }
 
   async generateContent(topic: string, contentType: string = 'post', platform: string = 'LinkedIn'): Promise<string> {
-     if (!this.openai) return "Simulated content generation response.";
+     if (!this.openai) {
+       this.ensureOpenAI('content generation');
+       return "Simulated content generation response.";
+     }
 
      try {
        const systemPrompt = `You are a professional content creator specializing in empowering women in their careers and brief businesses. Create engaging, authentic content.`;
@@ -233,7 +271,10 @@ class AiService {
   }
 
   async validateBusinessIdea(idea: string, targetMarket?: string, problemSolved?: string): Promise<string> {
-    if (!this.openai) return "Simulated idea validation response.";
+    if (!this.openai) {
+      this.ensureOpenAI('idea validation');
+      return "Simulated idea validation response.";
+    }
 
     try {
       const systemPrompt = "You are a startup advisor. Validate this business idea.";
@@ -251,7 +292,10 @@ class AiService {
   }
 
   async chat(message: string, history: any[] = []): Promise<string> {
-     if (!this.openai) return "I am ATHENA (Simulated). How can I help?";
+     if (!this.openai) {
+       this.ensureOpenAI('chat');
+       return "I am ATHENA (Simulated). How can I help?";
+     }
      
      try {
          const systemPrompt = "You are ATHENA, an AI career assistant designed to empower women in their professional journeys. Be supportive but professional.";
@@ -277,6 +321,7 @@ class AiService {
 
   async evaluateJobMatch(userProfile: string, jobDescription: string): Promise<any> {
     if (!this.openai) {
+      this.ensureOpenAI('job match evaluation');
         return {
             score: 75,
             analysis: "Simulated match analysis: Good skill overlap.",
