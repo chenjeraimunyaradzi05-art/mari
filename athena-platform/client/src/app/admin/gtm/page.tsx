@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import { ArrowLeft, Megaphone, ArrowRight } from 'lucide-react';
+import { ChevronLeft, Target, Megaphone, Users, TrendingUp } from 'lucide-react';
 
-const gtmItems = [
-  { title: 'Launch Checklist', description: 'Track upcoming releases and rollouts.', href: '/admin/marketing/campaigns' },
-  { title: 'Conversion Funnel', description: 'Monitor activation and retention.', href: '/admin/marketing/funnel' },
-  { title: 'Partner Pipeline', description: 'Coordinate ecosystem partnerships.', href: '/admin/marketing/partnerships' },
+const gtmAreas = [
+  { title: 'Marketing Hub', description: 'Campaigns, funnel health, and growth ops.', href: '/admin/marketing', icon: Megaphone },
+  { title: 'Leads & Demand', description: 'Monitor lead sources and conversion flow.', href: '/admin/marketing/leads', icon: Users },
+  { title: 'Partnerships', description: 'Track partnership pipeline and co-marketing.', href: '/admin/marketing/partnerships', icon: TrendingUp },
 ];
 
 export default function AdminGtmPage() {
@@ -14,38 +14,52 @@ export default function AdminGtmPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
             <Link href="/admin" className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft className="h-5 w-5" />
+              <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Go-to-Market</h1>
-              <p className="text-gray-600 dark:text-gray-400">Launch readiness, growth loops, and activation tracking.</p>
+              <p className="text-gray-600 dark:text-gray-400">Launch planning, growth levers, and market ops</p>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid gap-4 md:grid-cols-2">
-          {gtmItems.map((item) => (
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {gtmAreas.map((area) => (
             <Link
-              key={item.title}
-              href={item.href}
+              key={area.title}
+              href={area.href}
               className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
             >
               <div className="flex items-start gap-4">
-                <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg">
-                  <Megaphone className="h-6 w-6 text-purple-600" />
+                <div className="bg-primary-50 dark:bg-primary-900/20 p-3 rounded-lg">
+                  <area.icon className="h-6 w-6 text-primary-600" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">{item.title}</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{item.description}</p>
-                  <span className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-purple-600">
-                    Open <ArrowRight className="h-4 w-4" />
-                  </span>
+                  <h3 className="font-semibold text-gray-900 dark:text-white">{area.title}</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{area.description}</p>
                 </div>
               </div>
             </Link>
           ))}
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+              <Target className="h-5 w-5 text-primary-600" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Launch checklist</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Keep GTM milestones tracked and accountable.</p>
+            </div>
+          </div>
+          <ul className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
+            <li>• Confirm value proposition and persona alignment</li>
+            <li>• Lock launch channels and content calendar</li>
+            <li>• Verify onboarding funnel metrics and activation rate</li>
+          </ul>
         </div>
       </main>
     </div>

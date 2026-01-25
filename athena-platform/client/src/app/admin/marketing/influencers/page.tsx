@@ -1,18 +1,18 @@
 import Link from 'next/link';
-import { ArrowLeft, Sparkles } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 
 export default function AdminMarketingInfluencersPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <header className="bg-white dark:bg-gray-800 shadow">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
             <Link href="/admin/marketing" className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft className="h-5 w-5" />
+              <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Influencers</h1>
-              <p className="text-gray-600 dark:text-gray-400">Manage ambassadors and creator partnerships.</p>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Influencer Ops</h1>
+              <p className="text-gray-600 dark:text-gray-400">Creator partnerships and performance tracking</p>
             </div>
           </div>
         </div>
@@ -20,12 +20,8 @@ export default function AdminMarketingInfluencersPage() {
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <div className="flex items-center gap-3 text-pink-600">
-            <Sparkles className="h-5 w-5" />
-            <span className="text-sm font-semibold uppercase tracking-wide">Creator Program</span>
-          </div>
-          <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-            Track outreach status, deliverables, and performance.
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Add creator partnerships to track engagement, reach, and ROI.
           </p>
         </div>
       </main>

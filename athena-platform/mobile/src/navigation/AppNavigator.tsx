@@ -19,6 +19,9 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { ProfileEditScreen } from '../screens/ProfileEditScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
+import { ApplicationsScreen } from '../screens/ApplicationsScreen';
+import { SavedJobsScreen } from '../screens/SavedJobsScreen';
+import { HelpSupportScreen } from '../screens/HelpSupportScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
@@ -29,9 +32,6 @@ import { VideoFeedScreen } from '../screens/VideoFeedScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ApprenticeshipsScreen } from '../screens/ApprenticeshipsScreen';
 import { SkillsMarketplaceScreen } from '../screens/SkillsMarketplaceScreen';
-import { ApplicationsScreen } from '../screens/ApplicationsScreen';
-import { SavedJobsScreen } from '../screens/SavedJobsScreen';
-import { HelpSupportScreen } from '../screens/HelpSupportScreen';
 
 // Types
 export type RootStackParamList = {
