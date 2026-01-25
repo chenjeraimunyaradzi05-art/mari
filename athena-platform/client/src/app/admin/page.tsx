@@ -16,6 +16,8 @@ import {
   CheckCircle,
   XCircle,
   Calendar,
+  Megaphone,
+  Target,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -91,6 +93,8 @@ export default function AdminDashboardPage() {
     { href: '/admin/jobs', label: 'Job Management', icon: Briefcase, description: 'Approve, feature, or remove job listings' },
     { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard, description: 'Manage user subscriptions' },
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3, description: 'Platform metrics and insights' },
+    { href: '/admin/marketing', label: 'Marketing', icon: Megaphone, description: 'Campaigns, funnel, and growth programs' },
+    { href: '/admin/gtm', label: 'Go-to-Market', icon: Target, description: 'Launch readiness and activation tracking' },
     { href: '/admin/settings', label: 'Settings', icon: Settings, description: 'Platform configuration' },
   ];
 

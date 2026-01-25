@@ -29,6 +29,9 @@ import { VideoFeedScreen } from '../screens/VideoFeedScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ApprenticeshipsScreen } from '../screens/ApprenticeshipsScreen';
 import { SkillsMarketplaceScreen } from '../screens/SkillsMarketplaceScreen';
+import { ApplicationsScreen } from '../screens/ApplicationsScreen';
+import { SavedJobsScreen } from '../screens/SavedJobsScreen';
+import { HelpSupportScreen } from '../screens/HelpSupportScreen';
 
 // Types
 export type RootStackParamList = {
@@ -41,6 +44,9 @@ export type RootStackParamList = {
   SkillsMarketplace: undefined;
   Settings: undefined;
   ProfileEdit: undefined;
+  Applications: undefined;
+  SavedJobs: undefined;
+  HelpSupport: undefined;
 };
 
 export type AuthStackParamList = {
@@ -175,6 +181,21 @@ export function AppNavigator() {
             name="ProfileEdit"
             component={ProfileEditScreen}
             options={{ headerShown: true, title: 'Edit Profile' }}
+          />
+          <RootStack.Screen
+            name="Applications"
+            component={ApplicationsScreen}
+            options={{ headerShown: true, title: 'My Applications' }}
+          />
+          <RootStack.Screen
+            name="SavedJobs"
+            component={SavedJobsScreen}
+            options={{ headerShown: true, title: 'Saved Jobs' }}
+          />
+          <RootStack.Screen
+            name="HelpSupport"
+            component={HelpSupportScreen}
+            options={{ headerShown: true, title: 'Help & Support' }}
           />
         </>
       ) : (

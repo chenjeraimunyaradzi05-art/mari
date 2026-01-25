@@ -28,11 +28,11 @@ export function ProfileScreen() {
   };
 
   const menuItems = [
-    { icon: 'document-text-outline', label: 'My Applications', onPress: () => {} },
-    { icon: 'bookmark-outline', label: 'Saved Jobs', onPress: () => {} },
+    { icon: 'document-text-outline', label: 'My Applications', onPress: () => navigation.navigate('Applications') },
+    { icon: 'bookmark-outline', label: 'Saved Jobs', onPress: () => navigation.navigate('SavedJobs') },
     { icon: 'notifications-outline', label: 'Notifications', onPress: () => navigation.navigate('Notifications') },
     { icon: 'settings-outline', label: 'Settings', onPress: () => navigation.navigate('Settings') },
-    { icon: 'help-circle-outline', label: 'Help & Support', onPress: () => {} },
+    { icon: 'help-circle-outline', label: 'Help & Support', onPress: () => navigation.navigate('HelpSupport') },
   ];
 
   return (
