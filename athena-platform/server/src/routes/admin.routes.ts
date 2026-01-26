@@ -219,7 +219,6 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
         isSuspended: true,
         createdAt: true,
         updatedAt: true,
-        lastActiveAt: true,
         profile: true,
         subscription: true,
         posts: {
