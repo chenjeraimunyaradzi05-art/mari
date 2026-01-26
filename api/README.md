@@ -1,18 +1,22 @@
 # ATHENA API
 
-This folder provides deployment configuration for the ATHENA API server.
+This folder is a deployment stub. **Do not use this as Railway's root directory.**
+
+## Railway Deployment
+
+For Railway deployment, set the **Root Directory** to:
+```
+athena-platform/server
+```
 
 The actual source code is located in `../athena-platform/server/`.
 
-## Deployment
-
-For platforms that expect an `api` folder at root:
+## Local Development
 
 ```bash
-cd api
+cd athena-platform/server
 npm install
-npm run build
-npm start
+npm run dev
 ```
 
 ## Environment Variables

@@ -1,0 +1,14 @@
+# Nixpacks configuration for ATHENA API Server
+# Railway Root Directory: athena-platform/server
+
+[phases.setup]
+nixPkgs = ["nodejs-20_x", "python3", "gcc", "gnumake", "openssl"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npx prisma generate", "npm run build"]
+
+[start]
+cmd = "node dist/index.js"

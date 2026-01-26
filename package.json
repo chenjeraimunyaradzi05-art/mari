@@ -6,20 +6,11 @@
   "engines": {
     "node": "20.x"
   },
-  "workspaces": [
-    "api",
-    "web",
-    "athena-platform/server",
-    "athena-platform/client",
-    "athena-platform/shared",
-    "athena-platform/mobile"
-  ],
   "scripts": {
-    "postinstall": "cd athena-platform/server && npm install",
-    "build": "cd athena-platform/server && npx prisma generate && npm run build",
+    "build": "node scripts/railway-build.js",
     "build:api": "cd api && npm run build",
     "build:web": "cd web && npm run build",
-    "start": "cd athena-platform/server && npm start",
+    "start": "node scripts/railway-start.js",
     "start:api": "cd api && npm start",
     "start:web": "cd web && npm start",
     "dev:api": "cd athena-platform/server && npm run dev",

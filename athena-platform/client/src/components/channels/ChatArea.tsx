@@ -157,7 +157,7 @@ export function ChatArea({
   const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
 
   return (
-    <div className="flex-1 flex flex-col bg-white dark:bg-gray-950 h-full">
+    <div className="flex-1 flex flex-col bg-white dark:bg-gray-950 h-full" data-testid="chat-area">
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -383,6 +383,7 @@ export function ChatArea({
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={`Message #${channelName}`}
             className="flex-1 bg-transparent outline-none text-gray-900 dark:text-white placeholder-gray-500"
+            data-testid="message-input"
           />
           <button type="button" className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
             <AtSign className="w-5 h-5" />

@@ -17,7 +17,10 @@ import {
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { videoApi, VideoPost } from '../services/api-extensions';
+import { RootStackParamList } from '../navigation/AppNavigator';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const VIDEO_HEIGHT = SCREEN_HEIGHT - 80; // Account for tab bar
@@ -162,6 +165,7 @@ function VideoItem({ video, isActive, onLike, onComment, onShare }: VideoItemPro
 }
 
 export function VideoFeedScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [videos, setVideos] = useState<VideoPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -243,8 +247,8 @@ export function VideoFeedScreen() {
   };
 
   const handleComment = (videoId: string) => {
-    // TODO: Navigate to comments screen or open comments modal
-    console.log('Open comments for:', videoId);
+    const video = videos.find((item) => item.id === videoId);
+    navigation.navigate('VideoComments', { videoId, title: video?.title });
   };
 
   const handleShare = async (video: VideoPost) => {

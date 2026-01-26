@@ -58,16 +58,27 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Create a Channel" size="md">
-      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+      <form onSubmit={handleSubmit} className="p-6 space-y-4" data-testid="create-channel-modal">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Channels are where your community communicates. They're best when organized around a topic.
         </p>
 
         {/* Channel type */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label htmlFor="channel-type" className="text-sm font-medium text-gray-700 dark:text-gray-300">
             Channel Type
           </label>
+          <select
+            id="channel-type"
+            name="channel-type"
+            value={type}
+            onChange={(e) => setType(e.target.value as 'public' | 'private')}
+            className="sr-only"
+            data-testid="channel-type-select"
+          >
+            <option value="public">Public</option>
+            <option value="private">Private</option>
+          </select>
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
@@ -106,7 +117,7 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
 
         {/* Channel name */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label htmlFor="channel-name" className="text-sm font-medium text-gray-700 dark:text-gray-300">
             Channel Name
           </label>
           <div className="relative">
@@ -114,6 +125,8 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
               {type === 'public' ? '#' : '🔒'}
             </span>
             <Input
+              id="channel-name"
+              name="channel-name"
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
@@ -128,10 +141,12 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
 
         {/* Description */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label htmlFor="channel-description" className="text-sm font-medium text-gray-700 dark:text-gray-300">
             Description <span className="text-gray-400">(optional)</span>
           </label>
           <textarea
+            id="channel-description"
+            name="channel-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What's this channel about?"

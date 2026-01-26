@@ -121,6 +121,7 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
   return (
     <div 
       ref={containerRef}
+      data-testid="video-feed"
       onScroll={handleScroll}
       onKeyDown={(e) => {
         if (e.key === 'ArrowDown') {
@@ -151,7 +152,14 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
         </div>
       )}
       {feed.map((video, index) => (
-        <div key={video.id} className="h-full w-full snap-start relative" role="listitem">
+        <div
+          key={video.id}
+          className="h-full w-full snap-start relative"
+          role="listitem"
+          data-testid="video-player"
+          data-video-id={video.id}
+          data-active={index === currentIndex}
+        >
           <VideoPlayer 
             video={{
                 id: video.id,

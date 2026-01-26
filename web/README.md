@@ -1,18 +1,22 @@
 # ATHENA Web Client
 
-This folder provides deployment configuration for the ATHENA web client.
+This folder is a deployment stub. **Do not use this as Railway's root directory.**
+
+## Railway Deployment
+
+For Railway deployment, set the **Root Directory** to:
+```
+athena-platform/client
+```
 
 The actual source code is located in `../athena-platform/client/`.
 
-## Deployment
-
-For platforms that expect a `web` folder at root:
+## Local Development
 
 ```bash
-cd web
-npm install
-npm run build
-npm start
+cd athena-platform/client
+npm install --legacy-peer-deps
+npm run dev
 ```
 
 ## Environment Variables

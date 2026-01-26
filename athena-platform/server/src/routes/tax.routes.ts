@@ -20,7 +20,7 @@ const router = Router();
 const createTaxRateSchema = z.object({
   organizationId: z.string().uuid().optional(),
   name: z.string().min(1).max(200),
-  type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING', 'OTHER']),
+  type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING']),
   rate: z.number().min(0).max(100),
   region: z.string().min(1).max(100).optional(),
   effectiveFrom: z.string().datetime().optional(),
@@ -29,7 +29,7 @@ const createTaxRateSchema = z.object({
 
 const updateTaxRateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING', 'OTHER']).optional(),
+  type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING']).optional(),
   rate: z.number().min(0).max(100).optional(),
   region: z.string().min(1).max(100).optional(),
   effectiveFrom: z.string().datetime().optional(),

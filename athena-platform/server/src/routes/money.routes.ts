@@ -11,22 +11,17 @@ const createMoneyTransactionSchema = z.object({
   organizationId: z.string().uuid().optional(),
   amount: z.number().positive(),
   currency: z.string().regex(/^[A-Z]{3}$/).default('USD'),
-  type: z.enum(['PAYMENT', 'REFUND', 'TRANSFER', 'DEPOSIT', 'WITHDRAWAL', 'FEE', 'OTHER']),
-  status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).default('PENDING'),
+  type: z.enum(['PAYMENT', 'REFUND', 'PAYOUT', 'TRANSFER', 'ADJUSTMENT']),
+  status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELED']).default('PENDING'),
   provider: z.string().max(100).optional(),
   reference: z.string().max(200).optional(),
-  description: z.string().max(500).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 
 const updateMoneyTransactionSchema = z.object({
-  amount: z.number().positive().optional(),
-  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
-  type: z.enum(['PAYMENT', 'REFUND', 'TRANSFER', 'DEPOSIT', 'WITHDRAWAL', 'FEE', 'OTHER']).optional(),
-  status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
+  status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELED']).optional(),
   provider: z.string().max(100).optional(),
   reference: z.string().max(200).optional(),
-  description: z.string().max(500).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 

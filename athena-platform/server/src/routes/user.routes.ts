@@ -6,6 +6,7 @@ import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRegionConfig, normalizeRegion } from '../utils/region';
 import { logger } from '../utils/logger';
+import { parsePagination } from '../utils/pagination';
 
 const router = Router();
 

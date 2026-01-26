@@ -91,12 +91,15 @@ export function ChannelSidebar({
   };
 
   return (
-    <div className="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full">
+    <div
+      className="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full"
+      data-testid="channel-sidebar"
+    >
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-gray-900 dark:text-white">Community</h2>
-          <Button variant="ghost" size="icon" onClick={onCreateChannel}>
+          <Button variant="ghost" size="icon" onClick={onCreateChannel} data-testid="create-channel-button">
             <Plus className="w-4 h-4" />
           </Button>
         </div>
@@ -107,6 +110,7 @@ export function ChannelSidebar({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 h-8 text-sm"
+            data-testid="channel-search"
           />
         </div>
       </div>
@@ -205,6 +209,7 @@ function ChannelItem({ channel, isActive, onClick, icon }: ChannelItemProps) {
           ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
           : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
       )}
+      data-testid="channel-item"
     >
       <span className="flex-shrink-0">{icon}</span>
       <span className="flex-1 truncate text-left">{channel.name}</span>

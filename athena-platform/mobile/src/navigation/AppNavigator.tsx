@@ -29,6 +29,7 @@ import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen';
 
 // Super App Screens
 import { VideoFeedScreen } from '../screens/VideoFeedScreen';
+import { VideoCommentsScreen } from '../screens/VideoCommentsScreen';
 import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ApprenticeshipsScreen } from '../screens/ApprenticeshipsScreen';
 import { SkillsMarketplaceScreen } from '../screens/SkillsMarketplaceScreen';
@@ -39,6 +40,7 @@ export type RootStackParamList = {
   Main: undefined;
   JobDetail: { jobId: string };
   ChatDetail: { conversationId: string; participantName: string };
+  VideoComments: { videoId: string; title?: string };
   Notifications: undefined;
   Apprenticeships: undefined;
   SkillsMarketplace: undefined;
@@ -161,6 +163,11 @@ export function AppNavigator() {
             name="ChatDetail"
             component={ChatDetailScreen}
             options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="VideoComments"
+            component={VideoCommentsScreen}
+            options={{ headerShown: true, title: 'Comments' }}
           />
           <RootStack.Screen
             name="Apprenticeships"

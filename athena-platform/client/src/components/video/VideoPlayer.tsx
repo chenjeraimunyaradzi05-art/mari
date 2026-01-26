@@ -202,6 +202,8 @@ export function VideoPlayer({
           }}
           className="flex flex-col items-center"
           aria-label={video.isLiked ? 'Unlike' : 'Like'}
+          data-testid="video-like-button"
+          data-liked={video.isLiked}
         >
           <div className={cn(
             "p-2 rounded-full",
@@ -220,6 +222,7 @@ export function VideoPlayer({
           }}
           className="flex flex-col items-center"
           aria-label="Open comments"
+          data-testid="video-comment-button"
         >
           <div className="p-2 text-white">
             <MessageCircle className="w-7 h-7" />
@@ -252,6 +255,7 @@ export function VideoPlayer({
           }}
           className="flex flex-col items-center"
           aria-label="Share video"
+          data-testid="video-share-button"
         >
           <div className="p-2 text-white">
             <Share2 className="w-7 h-7" />
