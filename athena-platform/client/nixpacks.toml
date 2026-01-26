@@ -2,7 +2,7 @@
 # Railway Root Directory: athena-platform/client
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs"]
 
 [phases.install]
 cmds = ["npm install --legacy-peer-deps"]

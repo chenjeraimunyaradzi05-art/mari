@@ -9,6 +9,7 @@ out/
 build/
 dist/
 *.tsbuildinfo
+.nixpacks/
 
 # Environment files
 .env

@@ -2,7 +2,7 @@
 # Uses Railway-aware scripts to build/start the correct service.
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake", "openssl"]
+nixPkgs = ["nodejs", "python3", "gcc", "gnumake", "openssl"]
 
 [phases.install]
 cmds = ["npm install"]
