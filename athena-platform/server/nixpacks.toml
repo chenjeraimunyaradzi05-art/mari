@@ -10,5 +10,6 @@ cmds = ["npm install"]
 [phases.build]
 cmds = ["npx prisma generate", "npm run build"]
 
+# Database is only accessible at runtime, so migrate runs at start
 [start]
 cmd = "npx prisma migrate deploy && node dist/index.js"
