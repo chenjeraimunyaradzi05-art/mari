@@ -1,0 +1,22 @@
+# Railway Monorepo Configuration
+# This file defines multiple services from a single repository
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Service definitions - Railway will create these as separate services
+# To use: In Railway Dashboard, create services and set their root directories
+
+# API Service Configuration
+# Root Directory: athena-platform/server
+# Start Command: node dist/index.js
+
+# Web Service Configuration  
+# Root Directory: athena-platform/client
+# Start Command: npm start
+
+# Database: Use Railway's PostgreSQL template

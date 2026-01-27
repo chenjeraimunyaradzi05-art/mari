@@ -68,6 +68,12 @@ ENV/
 *.aab
 *.ipa
 .expo/
+google-service-account.json
+*.keystore
+*.jks
 
 # Local Netlify folder
 .netlify
+
+# Railway
+.railway/

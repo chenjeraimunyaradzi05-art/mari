@@ -1,14 +1,13 @@
-# Nixpacks configuration for ATHENA Platform (repo root)
-# Uses Railway-aware scripts to build/start the correct service.
+# DO NOT DEPLOY FROM ROOT
+# This is a monorepo - deploy from subdirectories instead:
+# - API: athena-platform/server
+# - Web: athena-platform/client
 
 [phases.setup]
-nixPkgs = ["nodejs", "python3", "gcc", "gnumake", "openssl"]
-
-[phases.install]
-cmds = ["npm install"]
+nixPkgs = ["nodejs_20"]
 
 [phases.build]
-cmds = ["npm run build"]
+cmds = ["echo 'ERROR: Do not deploy from root. Use athena-platform/server or athena-platform/client' && exit 1"]
 
 [start]
-cmd = "npm run start"
+cmd = "exit 1"
