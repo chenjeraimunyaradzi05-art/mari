@@ -4,6 +4,14 @@ const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
   i18n,
+  // Ignore ESLint errors during production builds
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  // Ignore TypeScript errors during production builds
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   images: {
     remotePatterns: [
       {

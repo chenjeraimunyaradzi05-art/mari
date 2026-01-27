@@ -66,7 +66,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
   const handleSubmit = async () => {
     if (!content.trim()) return;
 
-    let mediaUrls: string[] = [];
+    const mediaUrls: string[] = [];
     let type = postType;
 
     // Upload attachments first
