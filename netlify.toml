@@ -7,12 +7,18 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
 
-# Enable Next.js runtime
+# Enable Next.js runtime - REQUIRED for Next.js 14 on Netlify
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Handle Next.js routing - API calls go through Next.js rewrites
-# Set NEXT_PUBLIC_API_URL in Netlify environment variables
+# Fallback for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  conditions = {Role = ["admin"]}
+
+# Next.js handles all routing via the serverless function
 [[redirects]]
   from = "/*"
   to = "/.netlify/functions/___netlify-handler"
