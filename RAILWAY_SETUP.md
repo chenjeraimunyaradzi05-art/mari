@@ -33,7 +33,7 @@ Railway is currently building from the root directory, which is wrong. You need 
 6. After created, go to service **Settings** → rename to `athena-api`
 7. Add these **Environment Variables**:
    ```
-   DATABASE_URL = ${{Postgres.DATABASE_URL}}
+   DATABASE_URL = postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
    JWT_SECRET = (generate a 32+ character random string)
    NODE_ENV = production
    PORT = 3001
@@ -92,9 +92,9 @@ Your Railway Project
 ## Environment Variables Reference
 
 ### API Service (athena-api)
-| Variable | Required | Example |
-|----------|----------|---------|
-| `DATABASE_URL` | Yes | `${{Postgres.DATABASE_URL}}` |
+| Variable | Required | Value |
+|----------|----------|-------|
+| `DATABASE_URL` | Yes | `postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}` |
 | `JWT_SECRET` | Yes | `your-32-char-secret-key` |
 | `NODE_ENV` | Yes | `production` |
 | `PORT` | No | `3001` |

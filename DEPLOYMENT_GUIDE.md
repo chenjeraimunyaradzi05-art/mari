@@ -41,7 +41,7 @@
 3. **Set Root Directory**: `athena-platform/server`
 4. Add environment variables:
    ```
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   DATABASE_URL=postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
    JWT_SECRET=generate-a-32-char-random-string
    NODE_ENV=production
    ```
@@ -112,7 +112,8 @@ Automated deployment workflows are in `.github/workflows/`:
 
 ### API Server (Required)
 ```env
-DATABASE_URL=postgresql://user:pass@host:5432/db
+# Railway syntax (use in Railway dashboard):
+DATABASE_URL=postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
 JWT_SECRET=your-32-character-secret-key-here
 NODE_ENV=production
 PORT=3001
