@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Globe, Users, Building, Briefcase, GraduationCap, Handshake, ArrowRight, CheckCircle, Sparkles } from 'lucide-react';
+import { Globe, Users, Building, Briefcase, GraduationCap, Users2, ArrowRight, CheckCircle, Sparkles } from 'lucide-react';
 
 export default function EcosystemPage() {
   const partners = [
@@ -168,7 +168,7 @@ export default function EcosystemPage() {
       {/* CTA */}
       <section className="container mx-auto px-4 py-16">
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-3xl p-8 md:p-12 text-white text-center">
-          <Handshake className="w-16 h-16 mx-auto mb-6 opacity-80" />
+          <Users2 className="w-16 h-16 mx-auto mb-6 opacity-80" />
           <h2 className="text-3xl font-bold mb-4">Join the Ecosystem</h2>
           <p className="text-purple-100 mb-8 max-w-2xl mx-auto">
             Partner with ATHENA to shape the future of career development and unlock new growth opportunities.
