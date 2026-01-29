@@ -9,6 +9,8 @@ import { sendEmail } from './email.service';
 import { logger } from '../utils/logger';
 import { prisma } from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
+import { i18nService, SupportedLocale } from './i18n.service';
+import { getLocaleForUser } from '../utils/region';
 
 export type NotificationChannel = 'in-app' | 'email' | 'push' | 'sms';
 
@@ -19,6 +21,8 @@ export interface DispatchOptions {
   message?: string;
   link?: string;
   data?: any;
+  i18nKey?: string;
+  i18nParams?: Record<string, string | number>;
   channels?: NotificationChannel[];
   priority?: 'low' | 'normal' | 'high' | 'critical';
   emailTemplate?: {
@@ -53,14 +57,14 @@ export class NotificationService {
    * Dispatch a notification to multiple channels
    */
   async notify(options: DispatchOptions) {
-    const { userId, type, title, message, link, data, channels = ['in-app'] } = options;
+    const { userId, type, title, message, link, data, channels = ['in-app'], i18nKey, i18nParams } = options;
 
     logger.info(`Dispatching notification [${type}] to user ${userId} via ${channels.join(', ')}`);
 
     // Fetch user preferences early
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true, firstName: true, notificationPreferences: true }
+      select: { email: true, firstName: true, notificationPreferences: true, preferredLocale: true, region: true }
     });
 
     if (!user) {
@@ -68,6 +72,8 @@ export class NotificationService {
         return;
     }
 
+    const locale = getLocaleForUser(user) as SupportedLocale;
+    const resolvedMessage = message || (i18nKey ? i18nService.tSync(i18nKey, i18nParams, locale) : undefined);
     const promises = [];
 
     // 1. In-App Notification (Socket + DB)
@@ -82,7 +88,11 @@ export class NotificationService {
               userId,
               type,
               title,
-              message,
+              message: resolvedMessage,
+              data: {
+                ...(data || {}),
+                ...(i18nKey ? { i18nKey, i18nParams } : {}),
+              },
               link,
             }).catch(err => logger.error('In-app notification failed', { error: err }))
           );
@@ -90,10 +100,13 @@ export class NotificationService {
     }
 
     // 2. Email Notification
-    if (channels.includes('email') && user.email) {
+     if (channels.includes('email') && user.email) {
        if (this.shouldSend(user.notificationPreferences, 'email', type)) {
            promises.push(
-             this.sendEmailSafely(user.email, options)
+           this.sendEmailSafely(user.email, {
+            ...options,
+            message: resolvedMessage,
+           })
           );
        }
     }
@@ -102,7 +115,10 @@ export class NotificationService {
     if (channels.includes('push')) {
         if (this.shouldSend(user.notificationPreferences, 'push', type)) {
             promises.push(
-              this.sendPushNotification(userId, options)
+              this.sendPushNotification(userId, {
+                ...options,
+                message: resolvedMessage,
+              })
                 .catch(err => logger.error('Push notification failed', { error: err }))
             );
         }

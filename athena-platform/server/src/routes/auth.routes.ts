@@ -32,6 +32,15 @@ router.post(
       .withMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number'),
     body('firstName').notEmpty().trim(),
     body('lastName').notEmpty().trim(),
+    body('womanSelfAttested')
+      .isBoolean()
+      .custom((value) => value === true)
+      .withMessage('You must confirm you are a woman to join ATHENA'),
+    body('inviteCode')
+      .optional({ checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ min: 4, max: 32 }),
     body('persona')
       .optional({ checkFalsy: true })
       .customSanitizer((v) => (typeof v === 'string' ? v.trim().toUpperCase() : v))
@@ -52,7 +61,11 @@ router.post(
         typeof rawPersona === 'string' && rawPersona.trim()
           ? (rawPersona.trim().toUpperCase() as Persona)
           : Persona.EARLY_CAREER;
-      const { email, password, firstName, lastName, referralCode } = req.body;
+      const { email, password, firstName, lastName, referralCode, womanSelfAttested, inviteCode } = req.body;
+
+      if (!womanSelfAttested) {
+        throw new ApiError(400, 'Women-only access requires self-attestation');
+      }
 
       // Check if user exists
       const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -92,6 +105,27 @@ router.post(
         }
       }
 
+      let inviteRecord: { id: string; usesCount: number; maxUses: number | null; isActive: boolean } | null = null;
+      if (inviteCode) {
+        const normalizedCode = String(inviteCode).trim().toUpperCase();
+        inviteRecord = await prisma.inviteCode.findFirst({
+          where: {
+            code: normalizedCode,
+            isActive: true,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          },
+          select: { id: true, usesCount: true, maxUses: true, isActive: true },
+        });
+
+        if (!inviteRecord) {
+          throw new ApiError(400, 'Invalid or expired invite code');
+        }
+
+        if (inviteRecord.maxUses !== null && inviteRecord.usesCount >= inviteRecord.maxUses) {
+          throw new ApiError(400, 'Invite code has reached its usage limit');
+        }
+      }
+
       // Create user
       const user = await prisma.user.create({
         data: {
@@ -101,6 +135,8 @@ router.post(
           lastName,
           displayName: `${firstName} ${lastName}`,
           persona,
+          womanSelfAttested: true,
+          inviteCodeId: inviteRecord?.id ?? undefined,
           referralCode: newUserReferralCode,
           profile: {
             create: {},
@@ -122,6 +158,20 @@ router.post(
           referralCode: true,
         },
       });
+
+      if (inviteRecord) {
+        const nextUses = inviteRecord.usesCount + 1;
+        await prisma.inviteCode.update({
+          where: { id: inviteRecord.id },
+          data: {
+            usesCount: { increment: 1 },
+            lastUsedAt: new Date(),
+            ...(inviteRecord.maxUses !== null
+              ? { isActive: nextUses < inviteRecord.maxUses }
+              : {}),
+          },
+        });
+      }
 
       // Store verification token
       await prisma.verificationToken.create({
@@ -410,6 +460,9 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
         headline: true,
         role: true,
         persona: true,
+        womanSelfAttested: true,
+        womanVerificationStatus: true,
+        womanVerifiedAt: true,
         city: true,
         state: true,
         country: true,

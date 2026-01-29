@@ -1,25 +1,21 @@
 [build]
   base = "athena-platform/client"
   command = "npm install --legacy-peer-deps && npm run build"
-  publish = ".next"
+  # publish = ".next" # Let Next.js plugin handle the publish directory
 
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
+  # Set NEXT_PUBLIC_API_URL in Netlify Dashboard Environment Variables
+  # Example: NEXT_PUBLIC_API_URL = "https://athena-api-production.up.railway.app"
 
 # Enable Next.js runtime - REQUIRED for Next.js 14 on Netlify
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Fallback for SPA routing
+# Redirect API calls to backend (configure API URL in Netlify env vars)
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
+  from = "/api/*"
+  to = "${NEXT_PUBLIC_API_URL}/api/:splat"
   status = 200
-  conditions = {Role = ["admin"]}
-
-# Next.js handles all routing via the serverless function
-[[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/___netlify-handler"
-  status = 200
+  force = true

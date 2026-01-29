@@ -3,8 +3,15 @@ import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/audit';
 import { logger } from '../utils/logger';
+import crypto from 'crypto';
 
 const router = Router();
+
+const generateInviteCode = (prefix?: string) => {
+  const base = crypto.randomBytes(5).toString('hex').toUpperCase();
+  const normalizedPrefix = prefix ? prefix.trim().toUpperCase() : '';
+  return normalizedPrefix ? `${normalizedPrefix}-${base}` : base;
+};
 
 // All admin routes require authentication and ADMIN role
 router.use(authenticate);
@@ -1040,6 +1047,218 @@ router.post('/subscriptions/grant', async (req: AuthRequest, res: Response, next
     });
 
     res.json(subscription);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// WOMEN-ONLY GATE MANAGEMENT
+// ============================================================================
+
+/**
+ * GET /admin/invite-codes
+ * List invite codes
+ */
+router.get('/invite-codes', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const {
+      page = '1',
+      limit = '20',
+      active,
+    } = req.query;
+
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const where: any = {};
+    if (active === 'true') where.isActive = true;
+    if (active === 'false') where.isActive = false;
+
+    const [inviteCodes, total] = await Promise.all([
+      prisma.inviteCode.findMany({
+        where,
+        include: {
+          createdBy: { select: { id: true, email: true, firstName: true, lastName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+      prisma.inviteCode.count({ where }),
+    ]);
+
+    res.json({
+      inviteCodes,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/invite-codes
+ * Create invite codes
+ */
+router.post('/invite-codes', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { count = 1, maxUses, expiresAt, prefix } = req.body;
+    const createCount = Math.min(Math.max(parseInt(String(count), 10) || 1, 1), 100);
+
+    const codes = Array.from({ length: createCount }).map(() => ({
+      code: generateInviteCode(prefix),
+      maxUses: maxUses === undefined || maxUses === null ? null : Number(maxUses),
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      createdById: req.user?.id ?? null,
+    }));
+
+    const created = await prisma.inviteCode.createMany({ data: codes, skipDuplicates: true });
+    const createdRecords = await prisma.inviteCode.findMany({
+      where: { code: { in: codes.map((c) => c.code) } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    await logAudit({
+      action: 'ADMIN_USER_UPDATE',
+      actorUserId: req.user?.id ?? null,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: { createdInviteCodes: created.count },
+    });
+
+    res.json({ created: created.count, inviteCodes: createdRecords });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/invite-codes/:id
+ * Update invite code (activate/deactivate)
+ */
+router.patch('/invite-codes/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ error: 'isActive must be boolean' });
+    }
+
+    const inviteCode = await prisma.inviteCode.update({
+      where: { id },
+      data: { isActive },
+    });
+
+    await logAudit({
+      action: 'ADMIN_USER_UPDATE',
+      actorUserId: req.user?.id ?? null,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: { inviteCodeId: id, isActive },
+    });
+
+    res.json(inviteCode);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/woman-verifications
+ * List women verification requests
+ */
+router.get('/woman-verifications', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { status = 'PENDING', page = '1', limit = '20' } = req.query;
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const where: any = {
+      womanVerificationStatus: status,
+    };
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          womanSelfAttested: true,
+          womanVerificationStatus: true,
+          womanVerifiedAt: true,
+          createdAt: true,
+          subscription: { select: { tier: true, status: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+      prisma.user.count({ where }),
+    ]);
+
+    res.json({
+      users,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/woman-verifications/:userId
+ * Approve or reject women verification
+ */
+router.patch('/woman-verifications/:userId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params;
+    const { status } = req.body;
+
+    if (!['VERIFIED', 'REJECTED'].includes(status)) {
+      return res.status(400).json({ error: 'status must be VERIFIED or REJECTED' });
+    }
+
+    const updateData: any = {
+      womanVerificationStatus: status,
+      womanVerifiedAt: status === 'VERIFIED' ? new Date() : null,
+    };
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        womanVerificationStatus: true,
+        womanVerifiedAt: true,
+      },
+    });
+
+    await logAudit({
+      action: status === 'VERIFIED' ? 'ADMIN_VERIFICATION_APPROVE' : 'ADMIN_VERIFICATION_REJECT',
+      actorUserId: req.user?.id ?? null,
+      targetUserId: userId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: { verificationType: 'WOMAN_ONLY', status },
+    });
+
+    res.json(user);
   } catch (error) {
     next(error);
   }

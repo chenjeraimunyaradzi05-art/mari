@@ -168,6 +168,24 @@ export function useUpdateProfile() {
   });
 }
 
+export function useWomanVerificationRequest() {
+  const { updateUser } = useAuthStore();
+
+  return useMutation({
+    mutationFn: userApi.requestWomanVerification,
+    onSuccess: (response) => {
+      const status = response.data?.status;
+      if (status) {
+        updateUser({ womanVerificationStatus: status });
+      }
+      toast.success('Verification request submitted');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to request verification');
+    },
+  });
+}
+
 // ============================================
 // SKILLS HOOKS
 // ============================================

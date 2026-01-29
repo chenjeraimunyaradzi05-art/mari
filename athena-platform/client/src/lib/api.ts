@@ -75,6 +75,8 @@ export const authApi = {
     firstName: string;
     lastName: string;
     persona?: string;
+    womanSelfAttested: boolean;
+    inviteCode?: string;
   }) => api.post('/auth/register', data),
 
   login: (data: { email: string; password: string }) =>
@@ -147,6 +149,7 @@ export const userApi = {
   // Privacy / DSAR
   exportMyData: () => api.get('/users/me/export'),
   deleteAccount: () => api.delete('/users/me', { data: { confirm: true } }),
+  requestWomanVerification: () => api.post('/users/me/woman-verification'),
 };
 
 // ============================================

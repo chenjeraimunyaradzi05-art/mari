@@ -16,6 +16,13 @@ export type SupportedLocale =
   | 'es' | 'es-MX'
   | 'de' | 'fr' | 'pt' | 'zh' | 'ja' | 'ko' | 'hi';
 
+export const SUPPORTED_LOCALES: SupportedLocale[] = [
+  'en', 'en-US', 'en-GB', 'en-AU', 'en-AE', 'en-EG', 'en-PH', 'en-SA', 'en-SG', 'en-ZA',
+  'ar', 'ar-AE', 'ar-EG', 'ar-SA',
+  'es', 'es-MX',
+  'de', 'fr', 'pt', 'zh', 'ja', 'ko', 'hi',
+];
+
 type I18nParams = Record<string, string | number>;
 
 // ==========================================
@@ -112,6 +119,9 @@ export const NOTIFICATION_KEYS = {
   GROUP_NEW_POST: 'notifications.groups.newPost',
   GROUP_ROLE_CHANGED: 'notifications.groups.roleChanged',
   GROUP_EVENT_REMINDER: 'notifications.groups.eventReminder',
+
+  // Messages
+  MESSAGE_RECEIVED: 'notifications.messages.newMessage',
   
   // Payments
   PAYMENT_SUCCESSFUL: 'notifications.payments.successful',
@@ -230,6 +240,9 @@ const DEFAULT_TRANSLATIONS: Record<string, string> = {
   'notifications.courses.assignmentDue': 'Assignment due soon: {{assignmentTitle}}',
   'notifications.courses.certificateEarned': 'Congratulations! You earned a certificate for {{courseTitle}}',
   'notifications.courses.newContent': 'New content added to {{courseTitle}}',
+
+  // Notifications - Messages
+  'notifications.messages.newMessage': '{{name}} sent you a message',
   
   // Email subjects
   'emails.subjects.welcome': 'Welcome to Athena!',

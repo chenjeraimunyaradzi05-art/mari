@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
+import { ERROR_KEYS, i18nService, SupportedLocale } from '../services/i18n.service';
 
 export interface AppError extends Error {
   statusCode?: number;
   isOperational?: boolean;
+  i18nKey?: string;
+  i18nParams?: Record<string, unknown>;
 }
 
 export const errorHandler = (
@@ -13,7 +16,11 @@ export const errorHandler = (
   _next: NextFunction
 ) => {
   const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  const locale = ((req as any).locale as SupportedLocale) || 'en';
+  const rawMessage = err.message || 'Internal Server Error';
+  const inferredKey = rawMessage.startsWith('errors.') ? rawMessage : undefined;
+  const i18nKey = err.i18nKey || inferredKey || ERROR_KEYS.SERVER_INTERNAL_ERROR;
+  const message = i18nService.tSync(i18nKey, err.i18nParams as Record<string, string | number> | undefined, locale);
   const requestId = (req as any).requestId as string | undefined;
 
   logger.error(message, {
@@ -27,8 +34,13 @@ export const errorHandler = (
   res.status(statusCode).json({
     success: false,
     message,
+    i18nKey,
+    ...(err.i18nParams && { i18nParams: err.i18nParams }),
     ...(requestId && { requestId }),
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+    ...(process.env.NODE_ENV === 'development' && {
+      stack: err.stack,
+      debugMessage: rawMessage,
+    }),
   });
 };
 
@@ -36,12 +48,22 @@ export class ApiError extends Error {
   statusCode: number;
   isOperational: boolean;
   details?: Record<string, unknown>;
+  i18nKey?: string;
+  i18nParams?: Record<string, unknown>;
 
-  constructor(statusCode: number, message: string, details?: Record<string, unknown>) {
+  constructor(
+    statusCode: number,
+    message: string,
+    details?: Record<string, unknown>,
+    i18nKey?: string,
+    i18nParams?: Record<string, unknown>
+  ) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = true;
     this.details = details;
+    this.i18nKey = i18nKey;
+    this.i18nParams = i18nParams;
     Error.captureStackTrace(this, this.constructor);
   }
 }

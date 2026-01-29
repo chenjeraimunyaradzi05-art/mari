@@ -15,7 +15,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { useAuth, useUpdateProfile, useMySkills, useAddSkill, useRemoveSkill } from '@/lib/hooks';
+import { useAuth, useUpdateProfile, useMySkills, useAddSkill, useRemoveSkill, useWomanVerificationRequest } from '@/lib/hooks';
 import { getInitials, PERSONA_LABELS } from '@/lib/utils';
 
 type ProfileFormData = {
@@ -34,6 +34,7 @@ type ProfileFormData = {
 export default function ProfileSettingsPage() {
   const { user } = useAuth();
   const updateProfile = useUpdateProfile();
+  const womanVerificationRequest = useWomanVerificationRequest();
   const { data: mySkills } = useMySkills();
   const addSkillMutation = useAddSkill();
   const removeSkillMutation = useRemoveSkill();
@@ -137,6 +138,41 @@ export default function ProfileSettingsPage() {
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        {/* Women-only Verification */}
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            Women-only Verification
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Paid subscribers can request verification to receive a trusted badge.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Status:{' '}
+              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">
+                {user?.womanVerificationStatus || 'UNVERIFIED'}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => womanVerificationRequest.mutate()}
+              disabled={
+                womanVerificationRequest.isPending ||
+                user?.womanVerificationStatus === 'PENDING' ||
+                user?.womanVerificationStatus === 'VERIFIED'
+              }
+              className="btn-outline px-4 py-2"
+            >
+              {user?.womanVerificationStatus === 'VERIFIED'
+                ? 'Verified'
+                : user?.womanVerificationStatus === 'PENDING'
+                ? 'Pending Review'
+                : womanVerificationRequest.isPending
+                ? 'Submitting...'
+                : 'Request Verification'}
+            </button>
+          </div>
+        </div>
         {/* Avatar Section */}
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">

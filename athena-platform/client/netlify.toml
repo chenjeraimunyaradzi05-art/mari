@@ -1,6 +1,6 @@
 [build]
   command = "npm install --legacy-peer-deps && npm run build"
-  publish = ".next"
+  # publish = ".next" # Let Next.js plugin handle the publish directory
 
 [build.environment]
   NODE_VERSION = "20"
@@ -18,9 +18,3 @@
   to = "${NEXT_PUBLIC_API_URL}/api/:splat"
   status = 200
   force = true
-
-# Next.js handles its own routing - this is a fallback
-[[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/___netlify-handler"
-  status = 200

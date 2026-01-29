@@ -1,7 +1,12 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { Bold, Italic, Underline, List } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Underline from '@tiptap/extension-underline';
+import Link from '@tiptap/extension-link';
+import Placeholder from '@tiptap/extension-placeholder';
+import { Bold, Italic, Underline as UnderlineIcon, List } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface RichTextEditorProps {
@@ -11,62 +16,98 @@ interface RichTextEditorProps {
   className?: string;
 }
 
-const commands: { icon: React.ElementType; command: string; label: string }[] = [
-  { icon: Bold, command: 'bold', label: 'Bold' },
-  { icon: Italic, command: 'italic', label: 'Italic' },
-  { icon: Underline, command: 'underline', label: 'Underline' },
-  { icon: List, command: 'insertUnorderedList', label: 'Bullet list' },
-];
-
 export function RichTextEditor({ value, onChange, placeholder, className }: RichTextEditorProps) {
-  const editorRef = useRef<HTMLDivElement>(null);
+  const extensions = useMemo(
+    () => [
+      StarterKit,
+      Underline,
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+        linkOnPaste: true,
+      }),
+      Placeholder.configure({
+        placeholder: placeholder || 'Write something...'
+      }),
+    ],
+    [placeholder]
+  );
+
+  const editor = useEditor({
+    extensions,
+    content: value || '',
+    onUpdate: ({ editor }) => {
+      onChange(editor.getHTML());
+    },
+    editorProps: {
+      attributes: {
+        class:
+          'min-h-[160px] px-4 py-3 text-sm text-gray-800 dark:text-gray-200 focus:outline-none prose prose-sm dark:prose-invert max-w-none',
+      },
+    },
+  });
 
   useEffect(() => {
-    if (editorRef.current && editorRef.current.innerHTML !== value) {
-      editorRef.current.innerHTML = value;
+    if (!editor) return;
+    const current = editor.getHTML();
+    if ((value || '') !== current) {
+      editor.commands.setContent(value || '', false);
     }
-  }, [value]);
-
-  const runCommand = (command: string) => {
-    document.execCommand(command, false);
-    if (editorRef.current) {
-      onChange(editorRef.current.innerHTML);
-    }
-  };
+  }, [value, editor]);
 
   return (
     <div className={cn('rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900', className)}>
       <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-3 py-2">
-        {commands.map((item) => (
-          <button
-            key={item.command}
-            type="button"
-            onClick={() => runCommand(item.command)}
-            className="p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800"
-            aria-label={item.label}
-          >
-            <item.icon className="w-4 h-4" />
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleBold().run()}
+          className={cn(
+            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
+            editor?.isActive('bold') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+          )}
+          aria-label="Bold"
+          disabled={!editor}
+        >
+          <Bold className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleItalic().run()}
+          className={cn(
+            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
+            editor?.isActive('italic') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+          )}
+          aria-label="Italic"
+          disabled={!editor}
+        >
+          <Italic className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleUnderline().run()}
+          className={cn(
+            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
+            editor?.isActive('underline') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+          )}
+          aria-label="Underline"
+          disabled={!editor}
+        >
+          <UnderlineIcon className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleBulletList().run()}
+          className={cn(
+            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
+            editor?.isActive('bulletList') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+          )}
+          aria-label="Bullet list"
+          disabled={!editor}
+        >
+          <List className="w-4 h-4" />
+        </button>
       </div>
-      <div
-        ref={editorRef}
-        contentEditable
-        className="min-h-[160px] px-4 py-3 text-sm text-gray-800 dark:text-gray-200 focus:outline-none"
-        onInput={() => {
-          if (editorRef.current) {
-            onChange(editorRef.current.innerHTML);
-          }
-        }}
-        data-placeholder={placeholder}
-        suppressContentEditableWarning
-      />
-      <style jsx>{`
-        [contenteditable][data-placeholder]:empty:before {
-          content: attr(data-placeholder);
-          color: #9ca3af;
-        }
-      `}</style>
+      <EditorContent editor={editor} />
     </div>
   );
 }

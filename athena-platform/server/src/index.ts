@@ -85,6 +85,7 @@ import complianceRoutes from './routes/compliance.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { requestIdMiddleware } from './middleware/requestId';
 import { responseTimeMiddleware } from './middleware/responseTime';
+import { localeMiddleware } from './middleware/locale';
 // import { createOpenSearchMiddleware } from './middleware/opensearch-sync'; // Disabled - needs OpenSearch
 import { createRateLimiter } from './middleware/rateLimiter';
 import { logger } from './utils/logger';
@@ -193,6 +194,9 @@ app.use(requestIdMiddleware);
 
 // Response time tracking + Prometheus metrics
 app.use(responseTimeMiddleware);
+
+// Locale detection for i18n
+app.use(localeMiddleware);
 
 // Request logging with correlation ID
 app.use((req: Request, _res: Response, next: NextFunction) => {

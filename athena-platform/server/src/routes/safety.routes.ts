@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { evaluateSafetyScore } from '../services/moderation.service';
+import { handleUserBlock, handleUserReport } from '../services/safety-score.service';
 import { recordSafetyReport, recordUserBlock } from '../services/trust.service';
 import { prisma } from '../utils/prisma';
 import { readSafetyStore, writeSafetyStore } from '../utils/safety-store';
@@ -115,6 +116,7 @@ router.post(
 
       if (reportedUserId) {
         await recordSafetyReport(req.user!.id, reportedUserId);
+        await handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType);
         await prisma.contentReport.create({
           data: {
             reporterId: req.user!.id,
@@ -193,6 +195,7 @@ router.post(
       await writeSafetyStore(store);
 
       await recordUserBlock(blockedUserId);
+      await handleUserBlock(blockedUserId, req.user!.id);
 
       res.status(201).json({ success: true, data: block });
     } catch (error) {

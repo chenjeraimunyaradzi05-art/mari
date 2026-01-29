@@ -7,6 +7,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { getRedisClient } from '../utils/cache';
 import { logger } from '../utils/logger';
+import { ERROR_KEYS, i18nService, SupportedLocale } from '../services/i18n.service';
 import { AuthRequest } from './auth';
 
 // ===========================================
@@ -163,9 +164,13 @@ export function createRateLimiter(config: Partial<RateLimitConfig> = {}) {
         return finalConfig.handler(req, res);
       }
 
+      const locale = ((req as any).locale as SupportedLocale) || 'en';
+      const i18nKey = ERROR_KEYS.RATE_LIMIT_EXCEEDED;
+
       return res.status(429).json({
         error: 'Too Many Requests',
-        message: 'Rate limit exceeded. Please try again later.',
+        message: i18nService.tSync(i18nKey, undefined, locale),
+        i18nKey,
         retryAfter: Math.ceil((resetAt - Date.now()) / 1000),
       });
     }

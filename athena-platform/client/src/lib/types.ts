@@ -14,6 +14,9 @@ export interface User {
   headline?: string;
   role: UserRole;
   persona: Persona;
+  womanSelfAttested?: boolean;
+  womanVerificationStatus?: WomanVerificationStatus;
+  womanVerifiedAt?: string;
   city?: string;
   state?: string;
   country: string;
@@ -39,6 +42,8 @@ export interface User {
   referralCode?: string;
   referralCredits?: number;
 }
+
+export type WomanVerificationStatus = 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 
 export type UserRole =
   | 'USER'

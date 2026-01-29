@@ -85,6 +85,7 @@ export default function AdminDashboardPage() {
 
   const adminLinks = [
     { href: '/admin/users', label: 'User Management', icon: Users, description: 'Manage users, roles, and suspensions' },
+    { href: '/admin/women-gate', label: 'Women-only Gate', icon: Shield, description: 'Invite codes and verification approvals' },
     { href: '/admin/content', label: 'Content Moderation', icon: Shield, description: 'Review reported posts and comments' },
     { href: '/admin/groups', label: 'Group Moderation', icon: Users, description: 'Feature, pin, or hide groups' },
     { href: '/admin/events', label: 'Event Moderation', icon: Calendar, description: 'Feature, pin, or hide events' },

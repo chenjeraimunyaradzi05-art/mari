@@ -3,15 +3,6 @@
  * API endpoints for group chat management with role validation
  * Phase 2: Backend Logic & Integrations
  * 
- * TODO: This file needs a comprehensive review and update to align with
- * the current service method signatures. The routes have been stubbed out
- * temporarily to allow the build to pass. Issues to address:
- * - Update to use AuthRequest typing
- * - Align with chatStorageService.getMessages signature (single query arg)
- * - Align with groupChatService.muteMember signature (3-4 args)
- * - Add unmuteMember to groupChatService export
- * - Add pinMessage to chatStorageService export
- * - Update message type to exclude 'MEDIA' (use 'IMAGE' or 'FILE')
  */
 
 import { Router, Response, NextFunction } from 'express';
@@ -37,7 +28,7 @@ router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res
     }
     
     // Validate permission
-    const canSend = await validatePermission(groupId, req.user!.id, 'SEND_MESSAGE');
+    const canSend = await validatePermission(groupId, req.user!.id, 'send_messages');
     if (!canSend) {
       throw new ApiError(403, 'You are not allowed to send messages in this group');
     }
@@ -72,7 +63,7 @@ router.get('/:groupId/chat/messages', authenticate, async (req: AuthRequest, res
     const { cursor, limit = '50', before, after } = req.query;
     
     // Validate membership
-    const canRead = await validatePermission(groupId, req.user!.id, 'SEND_MESSAGE');
+    const canRead = await validatePermission(groupId, req.user!.id, 'send_messages');
     if (!canRead) {
       throw new ApiError(403, 'You are not a member of this group');
     }
@@ -109,8 +100,8 @@ router.post('/:groupId/members', authenticate, async (req: AuthRequest, res: Res
     
     const member = await groupChatService.addMember(
       groupId,
-      userId,
       req.user!.id,
+      userId,
       role
     );
     
@@ -186,8 +177,8 @@ router.post('/:groupId/members/:userId/mute', authenticate, async (req: AuthRequ
     
     await groupChatService.muteMember(
       groupId,
-      userId,
       req.user!.id,
+      userId,
       duration || 24 * 60 // Default 24 hours
     );
     
@@ -204,17 +195,12 @@ router.post('/:groupId/members/:userId/mute', authenticate, async (req: AuthRequ
  * @route POST /api/groups/:groupId/members/:userId/unmute
  * @desc Unmute a member
  * @access Private (Admin/Moderator)
- * TODO: Add unmuteMember to groupChatService
  */
 router.post('/:groupId/members/:userId/unmute', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, userId } = req.params;
-    
-    // TODO: Implement unmuteMember in service
-    // await groupChatService.unmuteMember(groupId, userId, req.user!.id);
-    
-    // For now, just unmute by setting mutedUntil to null
-    await groupChatService.muteMember(groupId, userId, req.user!.id, 0);
+
+    await groupChatService.unmuteMember(groupId, req.user!.id, userId);
     
     res.json({
       success: true,
@@ -270,22 +256,21 @@ router.delete('/:groupId/chat/messages/:messageId', authenticate, async (req: Au
  * @route PATCH /api/groups/:groupId/chat/messages/:messageId/pin
  * @desc Pin a message
  * @access Private (Admin/Moderator)
- * TODO: Add pinMessage to chatStorageService
  */
 router.patch('/:groupId/chat/messages/:messageId/pin', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, messageId } = req.params;
     
-    const canPin = await validatePermission(groupId, req.user!.id, 'PIN_MESSAGE');
+    const canPin = await validatePermission(groupId, req.user!.id, 'pin_messages');
     if (!canPin) {
       throw new ApiError(403, 'You are not allowed to pin messages');
     }
-    
-    // TODO: Implement pinMessage in chatStorageService
-    // For now, just return success - feature to be implemented
+
+    await chatStorageService.pinMessage(messageId, req.user!.id, true);
+
     res.json({
       success: true,
-      message: 'Message pinned (feature pending)',
+      message: 'Message pinned',
     });
   } catch (error) {
     next(error);

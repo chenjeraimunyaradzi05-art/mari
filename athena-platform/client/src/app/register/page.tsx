@@ -22,6 +22,10 @@ const registerSchema = z
         /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
         'Password must contain at least one uppercase letter, one lowercase letter, and one number'
       ),
+    womanSelfAttested: z
+      .boolean()
+      .refine((value) => value === true, 'You must confirm you are a woman to join'),
+    inviteCode: z.string().optional(),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -60,8 +64,12 @@ export default function RegisterPage() {
 
   const onSubmit = (data: RegisterForm) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { confirmPassword, ...registerData } = data;
-    registerUser(registerData);
+    const { confirmPassword, inviteCode, ...registerData } = data;
+    const normalizedInviteCode = inviteCode?.trim();
+    registerUser({
+      ...registerData,
+      ...(normalizedInviteCode ? { inviteCode: normalizedInviteCode } : {}),
+    });
   };
 
   return (
@@ -195,6 +203,35 @@ export default function RegisterPage() {
                 </p>
               )}
             </div>
+
+            <div>
+              <label htmlFor="inviteCode" className="label">
+                Invite Code (optional)
+              </label>
+              <input
+                {...register('inviteCode')}
+                type="text"
+                id="inviteCode"
+                className="input"
+                placeholder="Enter invite code"
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="flex items-start gap-3">
+              <input
+                {...register('womanSelfAttested')}
+                type="checkbox"
+                id="womanSelfAttested"
+                className="mt-1 h-4 w-4"
+              />
+              <label htmlFor="womanSelfAttested" className="text-sm text-gray-700 dark:text-gray-300">
+                I confirm that I am a woman (self-attestation)
+              </label>
+            </div>
+            {errors.womanSelfAttested && (
+              <p className="mt-1 text-sm text-red-600">{errors.womanSelfAttested.message}</p>
+            )}
 
             <button
               type="submit"

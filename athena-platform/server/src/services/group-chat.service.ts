@@ -437,6 +437,33 @@ export async function muteMember(
 }
 
 /**
+ * Unmute a member
+ */
+export async function unmuteMember(
+  groupId: string,
+  actorId: string,
+  userId: string
+): Promise<void> {
+  try {
+    await enforcePermission(groupId, actorId, 'mute_members');
+
+    await prisma.groupMember.update({
+      where: { groupId_userId: { groupId, userId } },
+      data: {
+        isMuted: false,
+        mutedUntil: null,
+      },
+    });
+
+    logger.info('Member unmuted', { groupId, userId });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    logger.error('Failed to unmute member', { error, groupId, userId });
+    throw error;
+  }
+}
+
+/**
  * Ban a member
  */
 export async function banMember(
@@ -572,6 +599,7 @@ export const groupChatService = {
   removeMember,
   updateMemberRole,
   muteMember,
+  unmuteMember,
   banMember,
   getGroupMembers,
   canSendMessage,

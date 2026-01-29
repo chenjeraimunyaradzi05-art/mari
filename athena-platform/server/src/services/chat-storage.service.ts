@@ -404,6 +404,48 @@ export async function searchMessages(
   }
 }
 
+// ==========================================
+// PINNING
+// ==========================================
+
+/**
+ * Pin a message (stores pin info in metadata)
+ */
+export async function pinMessage(
+  messageId: string,
+  pinnedByUserId: string,
+  isPinned: boolean = true
+): Promise<any> {
+  try {
+    const existing = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { metadata: true },
+    });
+
+    if (!existing) {
+      throw new Error('Message not found');
+    }
+
+    const metadata = (existing.metadata || {}) as Record<string, any>;
+    const updated = await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        metadata: {
+          ...metadata,
+          pinned: isPinned,
+          pinnedBy: pinnedByUserId,
+          pinnedAt: isPinned ? new Date().toISOString() : null,
+        },
+      },
+    });
+
+    return updated;
+  } catch (error) {
+    logger.error('Failed to pin message', { error, messageId });
+    throw error;
+  }
+}
+
 export const chatStorageService = {
   storeMessage,
   getMessages,
@@ -413,4 +455,5 @@ export const chatStorageService = {
   archiveOldMessages,
   getConversationStats,
   searchMessages,
+  pinMessage,
 };

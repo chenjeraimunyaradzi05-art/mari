@@ -11,6 +11,8 @@ import { observeTranslations, translateDocument } from '@/i18n/domTranslator';
 import { I18nextProvider } from 'react-i18next';
 import { initializeI18n, setI18nLocale } from '@/i18n/next-i18n';
 import { GDPRProvider } from '@/lib/contexts/GDPRContext';
+import { PWAInstallPrompt } from '@/components/super-app/PWAInstallPrompt';
+import { SkipLinks, AnnouncementProvider, KeyboardShortcutsProvider } from '@/lib/accessibility';
 
 function AuthInitializer({ children }: { children: React.ReactNode }) {
   const { setLoading, isLoading } = useAuthStore();
@@ -79,6 +81,18 @@ function LocaleSync({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ServiceWorkerRegister() {
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Silent fail for unsupported environments
+      });
+    }
+  }, []);
+
+  return null;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -98,11 +112,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
         <GDPRProvider>
-          <ThemeSync>
-            <LocaleSync>
-              <AuthInitializer>{children}</AuthInitializer>
-            </LocaleSync>
-          </ThemeSync>
+          <KeyboardShortcutsProvider>
+            <AnnouncementProvider>
+              <ThemeSync>
+                <LocaleSync>
+                  <SkipLinks />
+                  <AuthInitializer>
+                    {children}
+                    <PWAInstallPrompt />
+                    <ServiceWorkerRegister />
+                  </AuthInitializer>
+                </LocaleSync>
+              </ThemeSync>
+            </AnnouncementProvider>
+          </KeyboardShortcutsProvider>
           <CookieConsentBanner />
         </GDPRProvider>
         <ReactQueryDevtools initialIsOpen={false} />

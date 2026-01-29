@@ -7,6 +7,8 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
 import { prisma } from '../utils/prisma';
+import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
+import { getLocaleForUser } from '../utils/region';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -136,8 +138,9 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         await createNotification(io, {
           userId: receiverId,
           type: 'MESSAGE',
-          title: 'New message',
-          message: `${message.sender.firstName} sent you a message`,
+          title: 'Athena',
+          i18nKey: NOTIFICATION_KEYS.MESSAGE_RECEIVED,
+          i18nParams: { name: message.sender.firstName },
           link: `/dashboard/messages?user=${userId}`,
         });
 
@@ -233,6 +236,9 @@ interface NotificationData {
   title: string;
   message?: string;
   link?: string;
+  data?: Record<string, unknown>;
+  i18nKey?: string;
+  i18nParams?: Record<string, string | number>;
 }
 
 export async function sendRealTimeMessage(receiverId: string, message: any) {
@@ -257,13 +263,27 @@ export async function sendRealTimeMessage(receiverId: string, message: any) {
 
 export async function createNotification(io: SocketIOServer, data: NotificationData) {
   try {
+    const user = await prisma.user.findUnique({
+      where: { id: data.userId },
+      select: { preferredLocale: true, region: true },
+    });
+
+    const locale = getLocaleForUser(user) as SupportedLocale;
+    const resolvedMessage = data.message || (data.i18nKey
+      ? i18nService.tSync(data.i18nKey, data.i18nParams, locale)
+      : undefined);
+
     const notification = await prisma.notification.create({
       data: {
         userId: data.userId,
         type: data.type as any,
         title: data.title,
-        message: data.message,
+        message: resolvedMessage,
         link: data.link,
+        data: {
+          ...(data.data || {}),
+          ...(data.i18nKey ? { i18nKey: data.i18nKey, i18nParams: data.i18nParams } : {}),
+        },
       },
     });
 
@@ -289,7 +309,8 @@ export async function emitJobApplicationUpdate(io: SocketIOServer, userId: strin
     userId,
     type: 'APPLICATION_UPDATE',
     title: 'Application Update',
-    message: `Your application status changed to ${application.status}`,
+    i18nKey: NOTIFICATION_KEYS.JOB_APPLICATION_VIEWED,
+    i18nParams: { jobTitle: application.jobTitle || 'your application' },
     link: `/dashboard/applications/${application.id}`,
   });
 }
@@ -301,7 +322,8 @@ export async function emitNewJobMatch(io: SocketIOServer, userId: string, job: a
     userId,
     type: 'JOB_MATCH',
     title: 'New Job Match!',
-    message: `${job.title} at ${job.organization?.name || 'a company'} matches your profile`,
+    i18nKey: NOTIFICATION_KEYS.JOB_MATCH_FOUND,
+    i18nParams: { jobTitle: job.title, company: job.organization?.name || 'a company' },
     link: `/dashboard/jobs/${job.id}`,
   });
 }

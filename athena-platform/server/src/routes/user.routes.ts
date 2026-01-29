@@ -18,6 +18,50 @@ const CONSENT_FIELDS = [
   'consentDoNotSell',
 ] as const;
 
+// ===========================================
+// WOMEN-ONLY VERIFICATION REQUEST
+// ===========================================
+router.post('/me/woman-verification', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        womanSelfAttested: true,
+        womanVerificationStatus: true,
+        subscription: { select: { tier: true, status: true } },
+      },
+    });
+
+    if (!user) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    if (!user.womanSelfAttested) {
+      throw new ApiError(403, 'Women-only verification requires self-attestation');
+    }
+
+    if (!user.subscription || user.subscription.status !== 'ACTIVE' || user.subscription.tier === 'FREE') {
+      throw new ApiError(402, 'Paid subscription required for women verification');
+    }
+
+    if (user.womanVerificationStatus === 'VERIFIED') {
+      return res.json({ success: true, status: 'VERIFIED' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { womanVerificationStatus: 'PENDING' },
+      select: { id: true, womanVerificationStatus: true },
+    });
+
+    res.json({ success: true, status: updated.womanVerificationStatus });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Helper to sync user data to OpenSearch
 const syncUserToIndex = async (userId: string) => {
   try {
@@ -514,6 +558,9 @@ router.patch(
           headline: true,
           role: true,
           persona: true,
+          womanSelfAttested: true,
+          womanVerificationStatus: true,
+          womanVerifiedAt: true,
           city: true,
           state: true,
           country: true,

@@ -200,6 +200,13 @@ enum VerificationBadgeType {
   CREATOR
 }
 
+enum WomanVerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 enum AccountingAccountType {
   ASSET
   LIABILITY
@@ -551,6 +558,12 @@ model User {
   consentCookies        Boolean        @default(false)
   consentDoNotSell      Boolean        @default(false)
   consentUpdatedAt      DateTime?
+
+  // Women-only gate & verification
+  womanSelfAttested     Boolean        @default(false)
+  womanVerificationStatus WomanVerificationStatus @default(UNVERIFIED)
+  womanVerifiedAt       DateTime?
+  inviteCodeId          String?
   
   // Professional Info
   currentJobTitle   String?
@@ -619,6 +632,10 @@ model User {
   appealsReviewed   Appeal[]           @relation("AppealReviewer")
   sessions          Session[]
   verificationTokens VerificationToken[]
+
+  // Invitations
+  inviteCode        InviteCode?      @relation("InviteCodeUsers", fields: [inviteCodeId], references: [id])
+  inviteCodesCreated InviteCode[]    @relation("InviteCodesCreated")
   
   // Referrals
   referralCode      String?           @unique
@@ -721,6 +738,28 @@ model User {
   @@index([email])
   @@index([persona])
   @@index([country, state, city])
+}
+
+model InviteCode {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  isActive    Boolean  @default(true)
+  maxUses     Int?
+  usesCount   Int      @default(0)
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+
+  createdById String?
+  createdBy   User?    @relation("InviteCodesCreated", fields: [createdById], references: [id])
+
+  users       User[]   @relation("InviteCodeUsers")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([expiresAt])
 }
 
 model Profile {
