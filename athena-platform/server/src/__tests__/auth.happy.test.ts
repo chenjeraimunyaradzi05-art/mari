@@ -128,6 +128,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
         password: 'Password123',
         firstName: 'Test',
         lastName: 'User',
+        womanSelfAttested: true,
       })
       .expect(201);
 
@@ -179,6 +180,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
         firstName: 'Empty',
         lastName: 'Persona',
         persona: '',
+        womanSelfAttested: true,
       })
       .expect(201);
 

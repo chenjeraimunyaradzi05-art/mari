@@ -152,11 +152,43 @@ const allowedOrigins = Array.from(new Set([
   ...fallbackOrigins,
 ]));
 
+// CORS origin checker function - handles localhost flexibly for development
+const isCorsOriginAllowed = (origin: string | undefined): boolean => {
+  if (!origin) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    return true;
+  }
+
+  // Check exact match first
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  // In development, allow any localhost variant
+  if (process.env.NODE_ENV !== 'production') {
+    // Allow any localhost with any port
+    if (origin.match(/^https?:\/\/localhost(:\d+)?$/i) || 
+        origin.match(/^https?:\/\/127\.0\.0\.1(:\d+)?$/i)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 // Initialize Socket.IO
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (isCorsOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        logger.warn('CORS rejected origin', { origin, allowedOrigins });
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
@@ -168,14 +200,12 @@ const io = new SocketIOServer(httpServer, {
 // CORS must come before other middleware that might respond to requests
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+    if (isCorsOriginAllowed(origin)) {
       return callback(null, true);
     }
     // Log rejected origins for debugging
     logger.warn('CORS rejected origin', { origin, allowedOrigins });
-    callback(null, false);
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

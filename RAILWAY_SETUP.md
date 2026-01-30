@@ -36,7 +36,7 @@ Railway is currently building from the root directory, which is wrong. You need 
    DATABASE_URL = postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
    JWT_SECRET = (generate a 32+ character random string)
    NODE_ENV = production
-   PORT = 3001
+   PORT = 5000
    ```
 
 ### Step 4: Add the Web Service

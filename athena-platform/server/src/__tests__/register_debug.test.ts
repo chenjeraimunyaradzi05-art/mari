@@ -22,7 +22,8 @@ describe('Registration Debug', () => {
                 password: 'Password123!',
                 firstName: 'Test',
                 lastName: 'User',
-                persona: 'EARLY_CAREER'
+                persona: 'EARLY_CAREER',
+                womanSelfAttested: true,
             });
         
         if (res.status !== 201) {
