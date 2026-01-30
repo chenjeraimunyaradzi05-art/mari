@@ -1,42 +1,29 @@
+import tokenStore from './tokenStore';
+
 export function getAccessToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('accessToken');
+  return tokenStore.getInMemoryAccessToken();
 }
 
+// We no longer expose refresh token to JS (HttpOnly cookie only)
 export function getRefreshToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('refreshToken');
+  return null;
 }
 
-export function setAccessTokenCookie(token: string | null) {
-  if (typeof document === 'undefined') return;
-
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-
-  if (!token) {
-    document.cookie = `accessToken=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
-    return;
-  }
-
-  const oneWeekSeconds = 60 * 60 * 24 * 7;
-  document.cookie = `accessToken=${encodeURIComponent(token)}; Path=/; Max-Age=${oneWeekSeconds}; SameSite=Lax${secure}`;
+export function setAccessTokenCookie(_token: string | null) {
+  // kept as a no-op to avoid surprises; access token is in-memory only now
 }
 
 export function setTokens(accessToken: string, _refreshToken: string | null) {
-  if (typeof window === 'undefined') return;
-  // We only persist access token client-side; refresh tokens are stored HttpOnly in cookies
-  localStorage.setItem('accessToken', accessToken);
-  setAccessTokenCookie(accessToken);
+  // Store access token in memory only. Refresh tokens remain HttpOnly cookies.
+  tokenStore.setInMemoryAccessToken(accessToken);
 }
 
 export function clearTokens() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem('accessToken');
-  setAccessTokenCookie(null);
+  tokenStore.clearInMemoryAccessToken();
 }
 
 export function bootstrapAuthFromStorage() {
-  const token = getAccessToken();
-  if (token) setAccessTokenCookie(token);
-  return token;
+  // Migration shim: no client-side persisted token.
+  // Real bootstrap should call `/auth/refresh` to obtain a fresh access token.
+  return null;
 }

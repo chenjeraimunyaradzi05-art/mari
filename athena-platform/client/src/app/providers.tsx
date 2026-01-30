@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '@/lib/store';
-import { bootstrapAuthFromStorage } from '@/lib/auth';
+import { authApi } from '@/lib/api';
+import { setTokens } from '@/lib/auth';
 import { getPreferredLocale } from '@/lib/utils';
 import CookieConsentBanner from '@/components/CookieConsentBanner';
 import { observeTranslations, translateDocument } from '@/i18n/domTranslator';
@@ -18,12 +19,27 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   const { setLoading, isLoading } = useAuthStore();
 
   useEffect(() => {
-    // Check for existing auth on mount
-    const token = bootstrapAuthFromStorage();
-    if (!token) {
-      setLoading(false);
-    }
-    // Auth will be validated by the useAuth hook in layout
+    // Try silent refresh via HttpOnly cookie on mount.
+    let mounted = true;
+    (async () => {
+      try {
+        const response = await authApi.refresh();
+        const { accessToken, user } = response.data.data;
+        if (!mounted) return;
+        setTokens(accessToken, null);
+        // Populate store user directly to avoid immediate me() call
+        // useAuth hook will still validate if needed
+        (window as any).__INITIAL_USER = user;
+      } catch (e) {
+        // no-op: not authenticated
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, [setLoading]);
 
   return <>{children}</>;

@@ -55,7 +55,16 @@ export function useAuth() {
   // Check auth on mount
   useEffect(() => {
     const checkAuth = async () => {
+      // If server-side bootstrap placed an initial user, use it
+      const initialUser = (window as any).__INITIAL_USER as any | undefined;
       const token = getAccessToken();
+
+      if (initialUser && !user) {
+        setUser(initialUser);
+        setLoading(false);
+        return;
+      }
+
       if (token && !user) {
         try {
           const response = await authApi.me();
@@ -64,9 +73,10 @@ export function useAuth() {
           logout();
         }
       }
+
       setLoading(false);
     };
-    
+
     checkAuth();
   }, []);
 
