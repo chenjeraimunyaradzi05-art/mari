@@ -226,6 +226,16 @@ router.post(
       const accessToken = generateAccessToken(tokenPayload);
       const refreshToken = generateRefreshToken(tokenPayload);
 
+      // Set refresh token in an HttpOnly secure cookie
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+        path: '/',
+      };
+      res.cookie('refreshToken', refreshToken, cookieOptions);
+
       // Store session
       await prisma.session.create({
         data: {
@@ -244,7 +254,7 @@ router.post(
         data: {
           user,
           accessToken,
-          refreshToken,
+          // refreshToken intentionally not returned in body for secure flows
         },
       });
     } catch (error) {
@@ -316,6 +326,15 @@ router.post(
 
       const accessToken = generateAccessToken(tokenPayload);
       const refreshToken = generateRefreshToken(tokenPayload);
+      // Set refresh token in an HttpOnly secure cookie
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/',
+      };
+      res.cookie('refreshToken', refreshToken, cookieOptions);
 
       // Store session
       await prisma.session.create({
@@ -332,13 +351,22 @@ router.post(
       // Remove passwordHash from response
       const { passwordHash: _, ...userWithoutPassword } = user;
 
+      // Set refresh token cookie for subsequent refresh calls
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/',
+      });
+
       res.json({
         success: true,
         message: 'Login successful',
         data: {
           user: userWithoutPassword,
           accessToken,
-          refreshToken,
+          // refreshToken intentionally not returned in body for secure flows
         },
       });
     } catch (error) {
@@ -352,7 +380,8 @@ router.post(
 // ===========================================
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { refreshToken } = req.body;
+    // Prefer cookie-based refresh token (HttpOnly). Fallback to request body.
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
     if (!refreshToken) {
       throw new ApiError(400, 'Refresh token required');
@@ -404,11 +433,20 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       },
     });
 
+    // Rotate refresh token cookie
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
     res.json({
       success: true,
       data: {
         accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
+        // refreshToken intentionally not returned in body for secure flows
       },
     });
   } catch (error) {

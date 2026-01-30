@@ -22,17 +22,16 @@ export function setAccessTokenCookie(token: string | null) {
   document.cookie = `accessToken=${encodeURIComponent(token)}; Path=/; Max-Age=${oneWeekSeconds}; SameSite=Lax${secure}`;
 }
 
-export function setTokens(accessToken: string, refreshToken: string) {
+export function setTokens(accessToken: string, _refreshToken: string | null) {
   if (typeof window === 'undefined') return;
+  // We only persist access token client-side; refresh tokens are stored HttpOnly in cookies
   localStorage.setItem('accessToken', accessToken);
-  localStorage.setItem('refreshToken', refreshToken);
   setAccessTokenCookie(accessToken);
 }
 
 export function clearTokens() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
   setAccessTokenCookie(null);
 }
 

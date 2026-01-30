@@ -37,19 +37,16 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = getRefreshToken();
-        
-        if (!refreshToken) {
-          throw new Error('No refresh token');
-        }
+        // Call refresh endpoint using HttpOnly cookie (server sets/rotates cookie)
+        const response = await axios.post(
+          `${API_BASE_URL}/auth/refresh`,
+          {},
+          { withCredentials: true }
+        );
 
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-          refreshToken,
-        });
+        const { accessToken } = response.data.data;
 
-        const { accessToken, refreshToken: newRefreshToken } = response.data.data;
-
-        setTokens(accessToken, newRefreshToken);
+        setTokens(accessToken, null);
 
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
@@ -92,8 +89,7 @@ export const authApi = {
   resetPassword: (data: { token: string; password: string }) =>
     api.post('/auth/reset-password', data),
 
-  refresh: (refreshToken: string) =>
-    api.post('/auth/refresh', { refreshToken }),
+  refresh: () => api.post('/auth/refresh'),
 };
 
 // ============================================

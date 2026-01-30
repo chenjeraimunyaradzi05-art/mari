@@ -10,15 +10,15 @@ import dotenv from 'dotenv';
 // Load environment variables FIRST
 dotenv.config();
 
-// Validate environment variables before anything else
+// We will load secrets (AWS Secrets Manager) at startup and then validate env
 import { validateEnvironmentOrExit } from './utils/env';
-validateEnvironmentOrExit();
+import { loadSecretsIfConfigured } from './utils/secrets';
 
-// Initialize Sentry for error monitoring (must be early)
+// Initialize Sentry import (initialization will run after secrets loaded)
 import { initSentry, Sentry } from './utils/sentry';
-initSentry();
 
-import { prisma } from './utils/prisma';
+import { prisma, connectWithRetry } from './utils/prisma';
+import cookieParser from 'cookie-parser';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -211,6 +211,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
 }));
+
+// Cookie parser (for refresh token cookie handling)
+app.use(cookieParser());
 
 // Security headers (after CORS)
 app.use(helmet({
@@ -511,12 +514,36 @@ export { app, httpServer };
 // ===========================================
 
 if (require.main === module) {
-  const PORT = process.env.PORT || 5000;
+  (async () => {
+    // Startup sequence: load secrets, validate env, init Sentry, ensure DB
+    try {
+      await loadSecretsIfConfigured();
+    } catch (err) {
+      logger.warn('Failed loading external secrets, continuing with process.env');
+    }
 
-  httpServer.listen(PORT, () => {
-    logger.info(`🚀 ATHENA Server running on port ${PORT}`);
-    logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  });
+    validateEnvironmentOrExit();
+
+    // Initialize Sentry now that secrets/DSN may be available
+    initSentry();
+
+    // Ensure DB connection with retry/backoff
+    try {
+      await connectWithRetry(6, 500);
+      logger.info('Database connected');
+    } catch (err) {
+      logger.error('Failed to connect to database after retries', { err });
+      // In production, exit. In dev, continue so tests can mock prisma.
+      if (process.env.NODE_ENV === 'production') process.exit(1);
+    }
+
+    const PORT = process.env.PORT || 5000;
+
+    httpServer.listen(PORT, () => {
+      logger.info(`🚀 ATHENA Server running on port ${PORT}`);
+      logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  })();
 
   // ===========================================
   // GRACEFUL SHUTDOWN
