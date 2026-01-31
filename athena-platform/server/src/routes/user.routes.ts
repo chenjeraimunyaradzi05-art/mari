@@ -19,6 +19,70 @@ const CONSENT_FIELDS = [
 ] as const;
 
 // ===========================================
+// GET CURRENT USER (ME)
+// ===========================================
+router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        avatar: true,
+        bio: true,
+        headline: true,
+        role: true,
+        persona: true,
+        womanSelfAttested: true,
+        womanVerificationStatus: true,
+        city: true,
+        state: true,
+        country: true,
+        currentJobTitle: true,
+        currentCompany: true,
+        yearsExperience: true,
+        isPublic: true,
+        createdAt: true,
+        profile: {
+          select: {
+            aboutMe: true,
+            linkedinUrl: true,
+            websiteUrl: true,
+            openToWork: true,
+          },
+        },
+        skills: {
+          include: {
+            skill: true,
+          },
+        },
+        _count: {
+          select: {
+            followers: true,
+            following: true,
+            posts: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    res.json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // WOMEN-ONLY VERIFICATION REQUEST
 // ===========================================
 router.post('/me/woman-verification', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
