@@ -1,8 +1,12 @@
 import axios from 'axios';
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './auth';
 
-const API_ORIGIN = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-const API_BASE_URL = `${API_ORIGIN.replace(/\/$/, '')}/api`;
+// Direct backend origin — used for WebSocket connections and SSR calls
+export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+
+// REST API base URL — use relative path so requests go through the proxy
+// (Netlify redirects in prod, Next.js rewrites in dev) avoiding CORS issues.
+const API_BASE_URL = '/api';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

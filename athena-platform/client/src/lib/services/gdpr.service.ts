@@ -4,7 +4,7 @@
  * Phase 4: UK/EU Market Launch
  */
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_BASE = '';
 
 // Types
 export type DSARType = 'EXPORT' | 'DELETION' | 'RECTIFICATION' | 'RESTRICTION' | 'PORTABILITY';

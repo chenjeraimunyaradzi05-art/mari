@@ -165,9 +165,14 @@ const isCorsOriginAllowed = (origin: string | undefined): boolean => {
     return true;
   }
 
+  // Allow known deployment platform subdomains (Netlify, Railway)
+  if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
+      /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
+    return true;
+  }
+
   // In development, allow any localhost variant
   if (process.env.NODE_ENV !== 'production') {
-    // Allow any localhost with any port
     if (origin.match(/^https?:\/\/localhost(:\d+)?$/i) || 
         origin.match(/^https?:\/\/127\.0\.0\.1(:\d+)?$/i)) {
       return true;
@@ -342,6 +347,17 @@ app.use('/uploads', (req, res, next) => {
 // ===========================================
 // ROUTES
 // ===========================================
+
+// Root endpoint — API info
+app.get('/', (_req: Request, res: Response) => {
+  res.status(200).json({
+    name: 'ATHENA API',
+    status: 'running',
+    version: process.env.npm_package_version || '1.0.0',
+    health: '/health',
+    docs: '/api',
+  });
+});
 
 // Health check
 app.get('/health', (_req: Request, res: Response) => {

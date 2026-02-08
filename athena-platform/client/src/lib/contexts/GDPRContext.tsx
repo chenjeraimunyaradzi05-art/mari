@@ -49,7 +49,7 @@ const GDPRContext = createContext<GDPRContextType | undefined>(undefined);
 
 const COOKIE_CONSENT_KEY = 'athena_cookie_consent';
 const PRIVACY_MODE_KEY = 'athena_privacy_mode';
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_BASE = '';
 
 // EU/EEA country codes
 const EU_COUNTRIES = [

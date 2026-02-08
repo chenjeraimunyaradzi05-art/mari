@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { useChatStore } from './stores/chat.store';
 import { useNotificationStore } from './stores/notification.store';
+import { API_ORIGIN } from './api';
 
 class SocketClient {
   private socket: Socket | null = null;
@@ -18,8 +19,7 @@ class SocketClient {
   public connect(token: string) {
     if (this.socket?.connected) return;
 
-    const apiOrigin = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
-    this.socket = io(apiOrigin, {
+    this.socket = io(API_ORIGIN, {
       auth: { token },
       autoConnect: true,
       reconnection: true,
