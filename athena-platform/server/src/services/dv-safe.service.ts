@@ -7,7 +7,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { randomBytes } from 'crypto';
+import { randomBytes, scryptSync, createCipheriv, createDecipheriv } from 'crypto';
 
 export interface SafetySettings {
   userId: string;
@@ -465,14 +465,41 @@ export interface DVResource {
 
 // Helper functions
 
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+const IV_LENGTH = 12; // 96-bit IV recommended for GCM
+const AUTH_TAG_LENGTH = 16;
+
+function getDVEncryptionKey(): Buffer {
+  const keyHex = process.env.DV_ENCRYPTION_KEY;
+  if (!keyHex || keyHex.length < 64) {
+    // Fallback for dev only - production MUST set DV_ENCRYPTION_KEY (64 hex chars = 32 bytes)
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: DV_ENCRYPTION_KEY must be set in production (64 hex characters)');
+    }
+    return scryptSync('dev-only-insecure-key', 'athena-dv-salt', 32);
+  }
+  return Buffer.from(keyHex, 'hex');
+}
+
 function encryptMessage(content: string): string {
-  // In production, use proper encryption (AES-256-GCM)
-  // For now, base64 encode as placeholder
-  return Buffer.from(content).toString('base64');
+  const key = getDVEncryptionKey();
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
+  const encrypted = Buffer.concat([cipher.update(content, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  // Format: base64(iv + authTag + ciphertext)
+  return Buffer.concat([iv, authTag, encrypted]).toString('base64');
 }
 
 function decryptMessage(encrypted: string): string {
-  return Buffer.from(encrypted, 'base64').toString('utf8');
+  const key = getDVEncryptionKey();
+  const data = Buffer.from(encrypted, 'base64');
+  const iv = data.subarray(0, IV_LENGTH);
+  const authTag = data.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
+  const ciphertext = data.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
+  const decipher = createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
+  decipher.setAuthTag(authTag);
+  return decipher.update(ciphertext) + decipher.final('utf8');
 }
 
 export default {

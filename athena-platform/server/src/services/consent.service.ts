@@ -4,9 +4,8 @@
  * Phase 4: UK/EU Market Launch
  */
 
-import { PrismaClient, ConsentType, ConsentStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { ConsentType, ConsentStatus } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 
 // Consent type groupings for UI
 export const CONSENT_GROUPS = {

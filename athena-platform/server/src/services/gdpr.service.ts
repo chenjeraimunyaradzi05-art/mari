@@ -4,10 +4,9 @@
  * Phase 4: UK/EU Market Launch
  */
 
-import { PrismaClient, DSARType, DSARStatus, DataCategory, ConsentType, ConsentStatus } from '@prisma/client';
+import { DSARType, DSARStatus, DataCategory, ConsentType, ConsentStatus } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { createHash, randomBytes } from 'crypto';
-
-const prisma = new PrismaClient();
 
 // ============================================
 // DSAR (Data Subject Access Request) Management

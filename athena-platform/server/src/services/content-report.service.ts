@@ -4,11 +4,9 @@
  * Phase 4: UK/EU Market Launch
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
-
-const prisma = new PrismaClient();
 
 export type ContentType = 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
 export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';

@@ -5,66 +5,78 @@
  * 
  * Shared Redis client for caching, sessions,
  * rate limiting, and presence tracking.
+ * 
+ * All connections use lazyConnect so the app
+ * starts even when Redis is unavailable.
  */
 
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 import { logger } from './logger';
 
 // Parse Redis URL or use defaults
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// Create Redis client
-export const redis = new Redis(redisUrl, {
-  maxRetriesPerRequest: 3,
-  retryStrategy(times) {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  },
-  reconnectOnError(err) {
-    const targetError = 'READONLY';
-    if (err.message.includes(targetError)) {
-      return true;
-    }
+// Track whether Redis is available
+let redisAvailable = true;
+
+function createClient(name: string, opts: Partial<RedisOptions> = {}): Redis {
+  const client = new Redis(redisUrl, {
+    maxRetriesPerRequest: 3,
+    retryStrategy(times) {
+      if (times > 10) {
+        redisAvailable = false;
+        logger.warn(`Redis ${name}: giving up after ${times} retries`);
+        return null; // stop retrying
+      }
+      return Math.min(times * 100, 3000);
+    },
+    reconnectOnError(err) {
+      return err.message.includes('READONLY');
+    },
+    enableReadyCheck: true,
+    lazyConnect: true,
+    ...opts,
+  });
+
+  client.on('connect', () => {
+    redisAvailable = true;
+    logger.info(`Redis ${name} connected`);
+  });
+  client.on('ready', () => logger.info(`Redis ${name} ready`));
+  client.on('error', (err) => logger.error(`Redis ${name} error`, { error: err.message }));
+  client.on('close', () => logger.warn(`Redis ${name} connection closed`));
+
+  return client;
+}
+
+// Main client (lazy)
+export const redis = createClient('main');
+
+// Pub/Sub connections (lazy, unlimited retries per request for blocking ops)
+export const redisSub = createClient('sub', { maxRetriesPerRequest: null });
+export const redisPub = createClient('pub', { maxRetriesPerRequest: null });
+
+/** Check if Redis is believed to be available */
+export function isRedisAvailable(): boolean {
+  return redisAvailable && redis.status === 'ready';
+}
+
+/**
+ * Ensure the main Redis client is connected.
+ * Returns true if connected, false if Redis is unavailable.
+ */
+export async function ensureRedisConnected(): Promise<boolean> {
+  if (redis.status === 'ready') return true;
+  if (redis.status === 'connecting' || redis.status === 'connect') return true;
+  try {
+    await redis.connect();
+    return true;
+  } catch {
+    redisAvailable = false;
+    logger.warn('Redis is unavailable, caching/pubsub features disabled');
     return false;
-  },
-  enableReadyCheck: true,
-  lazyConnect: false,
-});
-
-// Create a separate connection for subscriptions
-export const redisSub = new Redis(redisUrl, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true,
-  lazyConnect: false,
-});
-
-// Create a separate connection for publishing
-export const redisPub = new Redis(redisUrl, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true,
-  lazyConnect: false,
-});
-
-// Event handlers
-redis.on('connect', () => {
-  logger.info('Redis client connected');
-});
-
-redis.on('ready', () => {
-  logger.info('Redis client ready');
-});
-
-redis.on('error', (err) => {
-  logger.error('Redis client error', err);
-});
-
-redis.on('close', () => {
-  logger.warn('Redis client connection closed');
-});
-
-redis.on('reconnecting', () => {
-  logger.info('Redis client reconnecting...');
-});
+  }
+}
 
 // ===========================================
 // CACHE HELPERS

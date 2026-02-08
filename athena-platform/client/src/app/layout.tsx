@@ -3,7 +3,6 @@ import { Inter, Playfair_Display } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
-import CookieBanner from '@/components/privacy/CookieBanner';
 
 const inter = Inter({ 
   subsets: ['latin'],
@@ -63,7 +62,6 @@ export default function RootLayout({
       <body className="min-h-screen antialiased">
         <Providers>
           {children}
-          <CookieBanner />
           <Toaster
             position="top-right"
             toastOptions={{

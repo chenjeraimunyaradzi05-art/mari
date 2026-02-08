@@ -799,10 +799,13 @@ model Session {
   userAgent    String?
   ipAddress    String?
   expiresAt    DateTime
+  revokedAt    DateTime? // Set when session is revoked/invalidated
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   
   @@index([userId])
   @@index([token])
+  @@index([revokedAt])
 }
 
 model VerificationToken {

@@ -28,6 +28,7 @@ import { sendEmail } from '../utils/email';
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
+  lazyConnect: true,
 });
 
 // Cast to any to avoid version mismatch between ioredis and bullmq's bundled ioredis

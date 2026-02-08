@@ -231,6 +231,21 @@ export async function checkRateLimit(
   }
 }
 
+// ==========================================
+// RE-EXPORT ADVANCED REDIS FEATURES
+// ==========================================
+// Distributed locks, pub/sub connections, and availability checks
+// are in redis.ts - re-export them here for convenience.
+export {
+  acquireLock,
+  withLock,
+  isRedisAvailable,
+  ensureRedisConnected,
+  redis as rawRedisClient,
+  redisPub,
+  redisSub,
+} from './redis';
+
 export async function getRateLimitStatus(
   key: string,
   maxRequests: number,

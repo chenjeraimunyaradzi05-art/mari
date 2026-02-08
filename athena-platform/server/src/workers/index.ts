@@ -17,7 +17,9 @@ import { prisma } from '../utils/prisma';
 import Redis from 'ioredis';
 
 // Create Redis client for worker process
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  lazyConnect: true,
+});
 
 // Track shutdown state
 let isShuttingDown = false;

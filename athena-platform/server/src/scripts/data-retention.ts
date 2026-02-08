@@ -4,10 +4,10 @@
  * Phase 4: GDPR Compliance - Automated Purge Jobs
  */
 
-import { PrismaClient, DataCategory, LegalBasis } from '@prisma/client';
+import { DataCategory, LegalBasis } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { queueAnalyticsEvent } from '../utils/queue';
-
-const prisma = new PrismaClient();
+import { logger } from '../utils/logger';
 
 // Default retention periods (in days)
 const DEFAULT_RETENTION_PERIODS: Record<string, number> = {
@@ -47,7 +47,7 @@ export class DataRetentionService {
     const results: PurgeResult[] = [];
     const errors: string[] = [];
 
-    console.log('[DataRetention] Starting purge jobs...');
+    logger.info('[DataRetention] Starting purge jobs...');
 
     // Check for legal holds first
     const activeHolds = await prisma.legalHold.findMany({
@@ -80,7 +80,7 @@ export class DataRetentionService {
         results.push(result);
       } catch (error: any) {
         errors.push(error.message);
-        console.error('[DataRetention] Job failed:', error);
+        logger.error('[DataRetention] Job failed', { error });
       }
     }
 
@@ -96,7 +96,7 @@ export class DataRetentionService {
       errors,
     });
 
-    console.log(`[DataRetention] Completed. Purged ${totalPurged} records.`);
+    logger.info(`[DataRetention] Completed. Purged ${totalPurged} records.`);
 
     return {
       startedAt,
@@ -472,11 +472,11 @@ export const dataRetentionService = new DataRetentionService();
 if (require.main === module) {
   dataRetentionService.runAllPurgeJobs()
     .then((summary) => {
-      console.log('Purge job completed:', JSON.stringify(summary, null, 2));
+      logger.info('Purge job completed', { summary });
       process.exit(0);
     })
     .catch((error) => {
-      console.error('Purge job failed:', error);
+      logger.error('Purge job failed', { error });
       process.exit(1);
     });
 }

@@ -1,8 +1,7 @@
 import Stripe from 'stripe';
-import { User, PrismaClient, Subscription } from '@prisma/client';
+import { User, Subscription } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
-
-const prisma = new PrismaClient();
 
 type UserWithSubscription = User & { subscription: Subscription | null };
 

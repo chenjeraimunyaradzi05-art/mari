@@ -5,6 +5,8 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { prisma } from '../utils/prisma';
+import { logger } from '../utils/logger';
 
 // EU/EEA country codes
 const GDPR_REGIONS = [
@@ -79,7 +81,7 @@ export function gdprRegionMiddleware(req: GDPRRequest, res: Response, next: Next
     next();
   } catch (error) {
     // Don't block request on GDPR middleware error
-    console.error('GDPR middleware error:', error);
+    logger.error('GDPR middleware error', { error });
     next();
   }
 }
@@ -104,9 +106,6 @@ export function requireConsent(consentType: string) {
     }
 
     try {
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
-
       const consent = await prisma.consentRecord.findFirst({
         where: {
           userId,
@@ -119,8 +118,6 @@ export function requireConsent(consentType: string) {
         },
       });
 
-      await prisma.$disconnect();
-
       if (!consent) {
         return res.status(403).json({
           success: false,
@@ -132,7 +129,7 @@ export function requireConsent(consentType: string) {
 
       next();
     } catch (error) {
-      console.error('Consent check error:', error);
+      logger.error('Consent check error', { error });
       // Allow request to proceed on error (fail open for better UX)
       next();
     }
@@ -169,9 +166,6 @@ export function auditDataAccess(dataCategory: string) {
     res.on('finish', async () => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
         try {
-          const { PrismaClient } = await import('@prisma/client');
-          const prisma = new PrismaClient();
-
           await prisma.auditLog.create({
             data: {
               actorUserId: userId || null,
@@ -187,10 +181,8 @@ export function auditDataAccess(dataCategory: string) {
               },
             },
           });
-
-          await prisma.$disconnect();
         } catch (error) {
-          console.error('Audit log error:', error);
+          logger.error('Audit log error', { error });
         }
       }
     });

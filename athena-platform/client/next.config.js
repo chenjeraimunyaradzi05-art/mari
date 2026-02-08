@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
-const { i18n } = require('./next-i18next.config');
 const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
-  i18n,
   // Ignore ESLint errors during production builds
   eslint: {
     ignoreDuringBuilds: true,

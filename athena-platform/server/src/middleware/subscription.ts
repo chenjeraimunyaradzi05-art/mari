@@ -6,6 +6,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
+import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { SubscriptionTier } from '@prisma/client';
 import { evaluateFeatureFlag, getFeatureFlagByKey } from '../services/feature-flags.service';
@@ -321,7 +322,7 @@ export function requireSubscription(requiredPermission: string) {
         // Log usage for this request (will be committed after successful response)
         res.on('finish', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            logUsage(userId, requiredPermission).catch(console.error);
+            logUsage(userId, requiredPermission).catch((err) => logger.error('Usage log error', { error: err }));
           }
         });
         

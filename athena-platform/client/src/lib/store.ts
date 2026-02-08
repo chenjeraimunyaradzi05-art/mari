@@ -89,8 +89,6 @@ export const useAuthStore = create<AuthState>()(
       name: 'athena-auth',
       partialize: (state) => ({
         user: state.user,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),
     }
@@ -115,12 +113,15 @@ export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
       isSidebarOpen: true,
-      get sidebarOpen() { return get().isSidebarOpen; },
+      sidebarOpen: true,
       sidebarCollapsed: false,
       isMobileMenuOpen: false,
       theme: 'system',
 
-      toggleSidebar: () => set({ isSidebarOpen: !get().isSidebarOpen }),
+      toggleSidebar: () => {
+        const next = !get().isSidebarOpen;
+        set({ isSidebarOpen: next, sidebarOpen: next });
+      },
       toggleSidebarCollapsed: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       toggleMobileMenu: () => set({ isMobileMenuOpen: !get().isMobileMenuOpen }),
       setTheme: (theme) => set({ theme }),

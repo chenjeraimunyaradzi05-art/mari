@@ -15,6 +15,7 @@ import { logger } from './logger';
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null, // Required for BullMQ
   enableReadyCheck: false,
+  lazyConnect: true,
 });
 
 redisConnection.on('error', (err) => {

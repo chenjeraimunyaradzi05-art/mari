@@ -19,6 +19,7 @@ import { initSentry, Sentry } from './utils/sentry';
 
 import { prisma, connectWithRetry } from './utils/prisma';
 import cookieParser from 'cookie-parser';
+import { securityHeaders } from './middleware/securityHeaders';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -214,6 +215,9 @@ app.use(cors({
 
 // Cookie parser (for refresh token cookie handling)
 app.use(cookieParser());
+
+// Custom security headers (before helmet for ordering)
+app.use(securityHeaders);
 
 // Security headers (after CORS)
 app.use(helmet({
@@ -458,7 +462,7 @@ app.use('/api/housing', housingRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/impact', impactRoutes);
 app.use('/api/community-support', communitySupportRoutes);
-app.use('/api/ai', aiAlgorithmsRoutes);
+app.use('/api/ai-algorithms', aiAlgorithmsRoutes);
 app.use('/api/feature-flags', featureFlagsRoutes);
 app.use('/api/connect', connectRoutes);
 app.use('/api/invoices', invoiceRoutes);

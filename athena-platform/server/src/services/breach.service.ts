@@ -4,10 +4,9 @@
  * Phase 4: UK/EU Market Launch - GDPR Article 33/34 Compliance
  */
 
-import { PrismaClient, BreachSeverity, BreachStatus, DataCategory } from '@prisma/client';
+import { BreachSeverity, BreachStatus, DataCategory } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { sendEmail } from './email.service';
-
-const prisma = new PrismaClient();
 
 interface BreachReport {
   title: string;
