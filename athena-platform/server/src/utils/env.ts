@@ -113,18 +113,21 @@ export function validateEnvironmentOrExit(): void {
     logger.warn('Environment warning', { warning });
   }
 
-  // If there are errors, log them and exit in production
+  // If there are errors, log them but DO NOT exit.
+  // The server must start so the health endpoint responds and we can diagnose.
   if (!result.valid) {
     for (const error of result.errors) {
       logger.error('Environment validation failed', { error });
     }
 
-    if (process.env.NODE_ENV === 'production') {
-      logger.error('FATAL: Cannot start server with invalid configuration');
-      process.exit(1);
-    } else {
-      logger.warn('Running with invalid configuration (dev mode only)');
+    // Provide a random JWT_SECRET fallback so auth middleware doesn't crash
+    if (!process.env.JWT_SECRET) {
+      const fallback = require('crypto').randomBytes(32).toString('hex');
+      process.env.JWT_SECRET = fallback;
+      logger.error('JWT_SECRET is NOT set! Using a random fallback — auth tokens will NOT persist across restarts. Set JWT_SECRET in Railway env vars.');
     }
+
+    logger.error('Server starting with INVALID configuration — some features will not work. Fix env vars above.');
   } else {
     logger.info('Environment validation passed');
   }

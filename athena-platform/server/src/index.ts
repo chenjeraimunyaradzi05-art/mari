@@ -535,6 +535,10 @@ export { app, httpServer };
 
 if (require.main === module) {
   (async () => {
+    // Early log so Railway shows something immediately
+    console.log('[ATHENA] Starting server process...');
+    console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
+
     // Startup sequence: load secrets, validate env, init Sentry, ensure DB
     try {
       await loadSecretsIfConfigured();
@@ -553,8 +557,8 @@ if (require.main === module) {
       logger.info('Database connected');
     } catch (err) {
       logger.error('Failed to connect to database after retries', { err });
-      // In production, exit. In dev, continue so tests can mock prisma.
-      if (process.env.NODE_ENV === 'production') process.exit(1);
+      // Don't exit — let the server start so /health and /readyz can report status.
+      // /readyz will return 503 if DB is unreachable.
     }
 
     const PORT = process.env.PORT || 5000;
