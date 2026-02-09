@@ -52,8 +52,10 @@ FROM node:20-alpine AS production
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Install only runtime system deps
-RUN apk add --no-cache curl && rm -rf /var/cache/apk/*
+# Install runtime system deps
+# libstdc++ and libgcc are needed by native modules (sharp, bcrypt, etc.)
+# that were compiled in the deps stage against these shared libraries.
+RUN apk add --no-cache curl libstdc++ libgcc && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
@@ -81,4 +83,4 @@ EXPOSE 5000
 # Do NOT add a Docker HEALTHCHECK — it conflicts with Railway's dynamic PORT.
 
 # Run Prisma migrations then start via crash-safe wrapper
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/start.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && echo '[DOCKER] Migrations done. Starting node...' && ls -la dist/start.js && exec node dist/start.js"]
