@@ -77,9 +77,8 @@ USER athena
 
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
+# Railway provides its own healthcheck via railway.json (healthcheckPath: /health)
+# Do NOT add a Docker HEALTHCHECK — it conflicts with Railway's dynamic PORT.
 
-# Run Prisma migrations then start server
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+# Run Prisma migrations then start via crash-safe wrapper
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/start.js"]

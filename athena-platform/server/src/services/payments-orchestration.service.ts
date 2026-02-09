@@ -8,7 +8,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 
 // Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
   apiVersion: '2023-10-16',
 });
 
