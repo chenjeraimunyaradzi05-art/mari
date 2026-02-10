@@ -15,8 +15,13 @@ export async function POST(request: NextRequest) {
     });
 
     const data = await response.json();
-    
-    return NextResponse.json(data, { status: response.status });
+
+    const res = NextResponse.json(data, { status: response.status });
+    const setCookie = response.headers.getSetCookie?.() ?? [];
+    for (const cookie of setCookie) {
+      res.headers.append('Set-Cookie', cookie);
+    }
+    return res;
   } catch (error) {
     console.error('Register API error:', error);
     return NextResponse.json(

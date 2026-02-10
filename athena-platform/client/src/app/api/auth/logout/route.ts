@@ -5,18 +5,25 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-    
+    const cookieHeader = request.headers.get('cookie');
+
     const response = await fetch(`${API_URL}/api/auth/logout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(authHeader ? { Authorization: authHeader } : {}),
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
     });
 
     const data = await response.json();
-    
-    return NextResponse.json(data, { status: response.status });
+
+    const res = NextResponse.json(data, { status: response.status });
+    const setCookie = response.headers.getSetCookie?.() ?? [];
+    for (const cookie of setCookie) {
+      res.headers.append('Set-Cookie', cookie);
+    }
+    return res;
   } catch (error) {
     console.error('Logout API error:', error);
     return NextResponse.json(

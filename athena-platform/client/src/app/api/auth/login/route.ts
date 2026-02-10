@@ -5,7 +5,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
+
     const response = await fetch(`${API_URL}/api/auth/login`, {
       method: 'POST',
       headers: {
@@ -15,8 +15,14 @@ export async function POST(request: NextRequest) {
     });
 
     const data = await response.json();
-    
-    return NextResponse.json(data, { status: response.status });
+
+    // Forward Set-Cookie from backend so the browser receives the refresh token cookie
+    const res = NextResponse.json(data, { status: response.status });
+    const setCookie = response.headers.getSetCookie?.() ?? [];
+    for (const cookie of setCookie) {
+      res.headers.append('Set-Cookie', cookie);
+    }
+    return res;
   } catch (error) {
     console.error('Login API error:', error);
     return NextResponse.json(
