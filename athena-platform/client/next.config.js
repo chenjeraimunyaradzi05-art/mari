@@ -36,16 +36,21 @@ const nextConfig = {
     ],
   },
   async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/:path*`,
-      },
-      {
-        source: '/uploads/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/uploads/:path*`,
-      },
-    ];
+    // Use beforeFiles so these rewrites run BEFORE Next.js API routes.
+    // This ensures /api/* always proxies to the backend instead of being
+    // intercepted by stub route files in app/api/.
+    return {
+      beforeFiles: [
+        {
+          source: '/api/:path*',
+          destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/:path*`,
+        },
+        {
+          source: '/uploads/:path*',
+          destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/uploads/:path*`,
+        },
+      ],
+    };
   },
 };
 

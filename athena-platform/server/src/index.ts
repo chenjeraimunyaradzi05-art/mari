@@ -81,6 +81,8 @@ import feedRoutes from './routes/feed.routes';
 import groupChatRoutes from './routes/group-chat.routes';
 import gdprRoutes from './routes/gdpr.routes';
 import complianceRoutes from './routes/compliance.routes';
+// livestream routes require schema additions (StreamKey, LiveStream models) — not yet ready
+// import livestreamRoutes from './routes/livestream.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -487,6 +489,7 @@ app.use('/api/feed', feedRoutes);
 app.use('/api/groups', groupChatRoutes); // Group chat specific routes
 app.use('/api/gdpr', gdprRoutes);
 app.use('/api/compliance', complianceRoutes);
+// app.use('/api/livestream', livestreamRoutes); // Needs schema additions first
 
 // Health routes (comprehensive health checks)
 app.use('/health', healthRoutes);
@@ -533,41 +536,43 @@ export { app, httpServer };
 // SERVER START
 // ===========================================
 
-if (require.main === module) {
-  (async () => {
-    // Early log so Railway shows something immediately
-    console.log('[ATHENA] Starting server process...');
-    console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
+/**
+ * Main startup function — exported so start.ts (crash-safe wrapper) can call it.
+ * Also called directly when this file is the entry point (require.main === module).
+ */
+export async function startServer() {
+  // Early log so Railway shows something immediately
+  console.log('[ATHENA] Starting server process...');
+  console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
 
-    // Startup sequence: load secrets, validate env, init Sentry, ensure DB
-    try {
-      await loadSecretsIfConfigured();
-    } catch (err) {
-      logger.warn('Failed loading external secrets, continuing with process.env');
-    }
+  // Startup sequence: load secrets, validate env, init Sentry, ensure DB
+  try {
+    await loadSecretsIfConfigured();
+  } catch (err) {
+    logger.warn('Failed loading external secrets, continuing with process.env');
+  }
 
-    validateEnvironmentOrExit();
+  validateEnvironmentOrExit();
 
-    // Initialize Sentry now that secrets/DSN may be available
-    initSentry();
+  // Initialize Sentry now that secrets/DSN may be available
+  initSentry();
 
-    // Ensure DB connection with retry/backoff
-    try {
-      await connectWithRetry(6, 500);
-      logger.info('Database connected');
-    } catch (err) {
-      logger.error('Failed to connect to database after retries', { err });
-      // Don't exit — let the server start so /health and /readyz can report status.
-      // /readyz will return 503 if DB is unreachable.
-    }
+  // Ensure DB connection with retry/backoff
+  try {
+    await connectWithRetry(6, 500);
+    logger.info('Database connected');
+  } catch (err) {
+    logger.error('Failed to connect to database after retries', { err });
+    // Don't exit — let the server start so /health and /readyz can report status.
+    // /readyz will return 503 if DB is unreachable.
+  }
 
-    const PORT = process.env.PORT || 5000;
+  const PORT = process.env.PORT || 5000;
 
-    httpServer.listen(PORT, () => {
-      logger.info(`🚀 ATHENA Server running on port ${PORT}`);
-      logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
-  })();
+  httpServer.listen(PORT, () => {
+    logger.info(`🚀 ATHENA Server running on port ${PORT}`);
+    logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
 
   // ===========================================
   // GRACEFUL SHUTDOWN
@@ -631,17 +636,22 @@ if (require.main === module) {
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-  
+
   // Capture unhandled errors with Sentry
   process.on('uncaughtException', (error) => {
     logger.error('Uncaught Exception:', error);
     Sentry.captureException(error);
   });
-  
+
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled Rejection:', reason);
     Sentry.captureException(reason as Error);
   });
+}
+
+// Auto-start when run directly (e.g. `node dist/index.js`)
+if (require.main === module) {
+  startServer();
 }
 
 export default app;

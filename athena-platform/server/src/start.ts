@@ -25,8 +25,19 @@ process.on('unhandledRejection', (reason) => {
 
 try {
   console.log('[ATHENA] Loading index module...');
-  require('./index');
+  const indexModule = require('./index');
   console.log('[ATHENA] index module loaded successfully');
+
+  // index.ts exports startServer() — call it to actually boot the server.
+  // (require.main !== module inside index.ts, so it won't auto-start)
+  if (typeof indexModule.startServer === 'function') {
+    console.log('[ATHENA] Calling startServer()...');
+    indexModule.startServer().catch((err: Error) => {
+      console.error('[ATHENA] startServer() rejected:', err);
+    });
+  } else {
+    console.error('[ATHENA] WARNING: index module has no startServer export!');
+  }
 } catch (err) {
   console.error('[ATHENA] FATAL — index.js crashed during load:');
   console.error(err);

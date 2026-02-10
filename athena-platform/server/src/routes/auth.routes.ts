@@ -327,15 +327,6 @@ router.post(
 
       const accessToken = generateAccessToken(tokenPayload);
       const refreshToken = generateRefreshToken(tokenPayload);
-      // Set refresh token in an HttpOnly secure cookie
-      const cookieOptions = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax' as const,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: '/',
-      };
-      res.cookie('refreshToken', refreshToken, cookieOptions);
 
       // Create session using session service
       await sessionService.createSession(
@@ -349,7 +340,7 @@ router.post(
       // Remove passwordHash from response
       const { passwordHash: _, ...userWithoutPassword } = user;
 
-      // Set refresh token cookie for subsequent refresh calls
+      // Set refresh token in an HttpOnly secure cookie
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
