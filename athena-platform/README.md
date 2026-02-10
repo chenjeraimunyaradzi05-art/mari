@@ -129,7 +129,7 @@ npm run build
 
 # E2E tests (requires running app)
 cd client
-npm run test:e2e
+npm run e2e
 ```
 
 **Test Coverage:**
@@ -155,13 +155,13 @@ npm run test:e2e
 1. Connect your GitHub repository
 2. Set build command: `npm run build`
 3. Set start command: `npm start`
-4. Add environment variables from `.env.production.template`
+4. Add environment variables from `.env.example`
 
 ### Frontend (Netlify/Vercel)
 1. Connect your GitHub repository
 2. Set build command: `npm run build`
 3. Set publish directory: `.next`
-4. Add environment variables from `.env.production.template`
+4. Add environment variables from `.env.local.example`
 
 See [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) for complete deployment guide.
 
@@ -172,8 +172,8 @@ See [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) for complete deployment guide.
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /health` | Basic health check |
-| `GET /health/live` | Kubernetes liveness probe |
-| `GET /health/ready` | Kubernetes readiness probe |
+| `GET /livez` | Kubernetes liveness probe |
+| `GET /readyz` | Kubernetes readiness probe |
 | `GET /metrics` | Prometheus metrics |
 
 ---
