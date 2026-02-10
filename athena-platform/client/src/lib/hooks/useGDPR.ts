@@ -421,7 +421,7 @@ export function useDSAR() {
 /**
  * Hook for detecting user's region
  */
-export function useRegion() {
+export function useGDPRRegion() {
   const [region, setRegion] = useState<string | null>(null);
   const [isGDPRRegion, setIsGDPRRegion] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -465,7 +465,7 @@ const gdprHooks = {
   useConsent,
   useCookieConsent,
   useDSAR,
-  useRegion,
+  useGDPRRegion,
 };
 
 export default gdprHooks;
