@@ -23,9 +23,11 @@
 # ===========================================
 # API PROXY — forwards /api/* to Railway backend
 # ===========================================
+# NOTE: Netlify does NOT interpolate env vars in netlify.toml redirect "to" fields.
+# If the Railway URL changes, update these three redirects.
 [[redirects]]
   from = "/api/*"
-  to = "${NEXT_PUBLIC_API_URL}/api/:splat"
+  to = "https://mari-production-5c60.up.railway.app/api/:splat"
   status = 200
   force = true
   [redirects.headers]
@@ -34,14 +36,14 @@
 # Proxy uploads to backend
 [[redirects]]
   from = "/uploads/*"
-  to = "${NEXT_PUBLIC_API_URL}/uploads/:splat"
+  to = "https://mari-production-5c60.up.railway.app/uploads/:splat"
   status = 200
   force = true
 
 # Proxy Socket.IO to backend (long-polling fallback)
 [[redirects]]
   from = "/socket.io/*"
-  to = "${NEXT_PUBLIC_API_URL}/socket.io/:splat"
+  to = "https://mari-production-5c60.up.railway.app/socket.io/:splat"
   status = 200
   force = true
 

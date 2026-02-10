@@ -1,0 +1,6 @@
+# Proxy API, uploads, and Socket.IO to Railway backend.
+# These rules MUST appear before @netlify/plugin-nextjs generated rules.
+# The ! suffix = force (apply even if a function exists at the path).
+/api/*       https://mari-production-5c60.up.railway.app/api/:splat       200!
+/uploads/*   https://mari-production-5c60.up.railway.app/uploads/:splat   200!
+/socket.io/* https://mari-production-5c60.up.railway.app/socket.io/:splat 200!

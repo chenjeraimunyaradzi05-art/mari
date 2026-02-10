@@ -56,6 +56,10 @@ const nextConfig = {
     ],
   },
   async rewrites() {
+    // On Netlify, the public/_redirects file handles API proxying.
+    // Only use Next.js rewrites for local development.
+    if (process.env.NETLIFY) return [];
+
     // Use beforeFiles so these rewrites run BEFORE Next.js API routes.
     // This ensures /api/* always proxies to the backend instead of being
     // intercepted by stub route files in app/api/.
