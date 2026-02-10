@@ -3,6 +3,12 @@ import type { NextRequest } from 'next/server';
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
 const registry = require('../i18n.registry.js');
 
+// Backend URL for API proxying.
+// On Netlify the env var is set in the dashboard; locally it defaults to localhost.
+const BACKEND_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'https://mari-production-5c60.up.railway.app'
+).replace(/\/$/, '');
+
 // Routes that require authentication
 const protectedRoutes = [
   '/dashboard',
@@ -28,6 +34,18 @@ const publicRoutes = [
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // ── API Proxy ────────────────────────────────────────────────────
+  // Rewrite /api/* and /uploads/* to the Railway backend.
+  // Running in middleware (Edge Function on Netlify) ensures this
+  // executes before any redirect rules or serverless functions.
+  if (pathname.startsWith('/api') || pathname.startsWith('/uploads')) {
+    const destination = new URL(`${BACKEND_URL}${pathname}`);
+    request.nextUrl.searchParams.forEach((value, key) => {
+      destination.searchParams.set(key, value);
+    });
+    return NextResponse.rewrite(destination);
+  }
 
   const maintenanceMode = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
   if (maintenanceMode && !pathname.startsWith('/maintenance')) {
@@ -96,8 +114,7 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public folder
-     * - API routes
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public).*)',
   ],
 };
