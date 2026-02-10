@@ -37,10 +37,10 @@ export const errorHandler = (
     i18nKey,
     ...(err.i18nParams && { i18nParams: err.i18nParams }),
     ...(requestId && { requestId }),
-    ...(process.env.NODE_ENV === 'development' && {
-      stack: err.stack,
-      debugMessage: rawMessage,
-    }),
+    // Temporarily include debug info in all environments for deployment debugging.
+    // TODO: Remove after resolving auth 500 errors — revert to development-only.
+    debugMessage: rawMessage,
+    debugStack: (err.stack || '').split('\n').slice(0, 5).join('\n'),
   });
 };
 
