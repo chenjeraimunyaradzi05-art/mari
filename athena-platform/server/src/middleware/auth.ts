@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
-import { UnauthorizedError, InternalServerError } from './errorHandler';
+import { UnauthorizedError } from './errorHandler';
 
 // Resolve JWT_SECRET lazily — env.ts may inject a fallback after import time.
 function getJwtSecret(): string {

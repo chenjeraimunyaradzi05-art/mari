@@ -60,8 +60,9 @@ export function middleware(request: NextRequest) {
     }
   }
   
-  // Check if user has auth token (stored in cookies for SSR)
-  const token = request.cookies.get('accessToken')?.value;
+  // Check if user has a session — the backend sets refreshToken as an HttpOnly cookie.
+  // Access tokens are in-memory only, so we check for the refresh cookie instead.
+  const token = request.cookies.get('refreshToken')?.value;
   const isAuthenticated = !!token;
 
   // Check if the route is protected
