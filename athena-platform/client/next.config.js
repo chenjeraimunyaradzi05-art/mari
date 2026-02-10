@@ -2,6 +2,8 @@
 const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
+  // Enable standalone output for Docker deployments
+  output: 'standalone',
   // Ignore ESLint errors during production builds
   eslint: {
     ignoreDuringBuilds: true,
