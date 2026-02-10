@@ -51,6 +51,7 @@ FROM node:20-alpine AS production
 
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 
 # Install runtime system deps
 # libstdc++ and libgcc are needed by native modules (sharp, bcrypt, etc.)
@@ -83,4 +84,4 @@ EXPOSE 5000
 # Do NOT add a Docker HEALTHCHECK — it conflicts with Railway's dynamic PORT.
 
 # Run Prisma migrations then start via crash-safe wrapper
-CMD ["sh", "-c", "npx prisma migrate deploy && echo '[DOCKER] Migrations done. Starting node...' && ls -la dist/start.js && exec node dist/start.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && echo '[DOCKER] Migrations done. Starting node...' && exec node dist/start.js"]
