@@ -331,4 +331,127 @@ router.get('/version', (req: Request, res: Response) => {
   });
 });
 
+// ===========================================
+// AUTH DIAGNOSTICS (temporary — remove after debugging)
+// ===========================================
+
+/**
+ * @route GET /health/auth-diag
+ * @description Tests every DB operation used in the auth registration flow
+ */
+router.get('/auth-diag', async (req: Request, res: Response) => {
+  const results: Record<string, { ok: boolean; ms: number; error?: string }> = {};
+
+  // 1. User table query
+  let t = Date.now();
+  try {
+    await prisma.user.findUnique({ where: { email: '__diag_test__' } });
+    results['1_user_query'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['1_user_query'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 2. Bcrypt hash
+  t = Date.now();
+  try {
+    const bcrypt = require('bcryptjs');
+    await bcrypt.hash('testpassword', 4);
+    results['2_bcrypt'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['2_bcrypt'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 3. JWT sign
+  t = Date.now();
+  try {
+    const jwt = require('jsonwebtoken');
+    const secret = process.env.JWT_SECRET || 'diag-fallback';
+    jwt.sign({ test: true }, secret, { expiresIn: '1m' });
+    results['3_jwt_sign'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['3_jwt_sign'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 4. InviteCode table
+  t = Date.now();
+  try {
+    await prisma.inviteCode.findFirst({ where: { code: '__diag__' } });
+    results['4_invitecode_table'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['4_invitecode_table'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 5. Session table
+  t = Date.now();
+  try {
+    await prisma.session.findFirst({ where: { token: '__diag__' } });
+    results['5_session_table'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['5_session_table'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 6. VerificationToken table
+  t = Date.now();
+  try {
+    await prisma.verificationToken.findFirst({ where: { token: '__diag__' } });
+    results['6_verification_token'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['6_verification_token'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 7. Profile table (used in nested create)
+  t = Date.now();
+  try {
+    await prisma.profile.findFirst({ where: { userId: '__diag__' } });
+    results['7_profile_table'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['7_profile_table'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 8. Subscription table (used in nested create)
+  t = Date.now();
+  try {
+    await prisma.subscription.findFirst({ where: { userId: '__diag__' } });
+    results['8_subscription_table'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['8_subscription_table'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 9. Referral table
+  t = Date.now();
+  try {
+    await prisma.referral.findFirst({ where: { referrerId: '__diag__' } });
+    results['9_referral_table'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['9_referral_table'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 10. Notification table
+  t = Date.now();
+  try {
+    await prisma.notification.findFirst({ where: { userId: '__diag__' } });
+    results['10_notification_table'] = { ok: true, ms: Date.now() - t };
+  } catch (e: any) {
+    results['10_notification_table'] = { ok: false, ms: Date.now() - t, error: e.message };
+  }
+
+  // 11. Check env vars
+  results['11_env_jwt_secret'] = {
+    ok: !!process.env.JWT_SECRET,
+    ms: 0,
+    error: process.env.JWT_SECRET ? undefined : 'JWT_SECRET not set',
+  };
+  results['12_env_database_url'] = {
+    ok: !!process.env.DATABASE_URL,
+    ms: 0,
+    error: process.env.DATABASE_URL ? undefined : 'DATABASE_URL not set',
+  };
+
+  const allOk = Object.values(results).every((r) => r.ok);
+  res.status(allOk ? 200 : 500).json({
+    status: allOk ? 'all_pass' : 'has_failures',
+    results,
+  });
+});
+
 export default router;
