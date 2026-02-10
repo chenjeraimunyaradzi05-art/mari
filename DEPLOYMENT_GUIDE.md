@@ -55,7 +55,7 @@
 3. Set base directory: `athena-platform/client`
 4. Add environment variables:
    ```
-   NEXT_PUBLIC_API_URL=https://your-railway-api.up.railway.app
+   NEXT_PUBLIC_API_URL=https://mari-production-5c60.up.railway.app
    ```
 
 #### Option B: Railway
@@ -103,7 +103,7 @@ Automated deployment workflows are in `.github/workflows/`:
 | Service | Platform | Directory | URL Example |
 |---------|----------|-----------|-------------|
 | PostgreSQL | Railway | - | Internal reference |
-| API Server | Railway | `athena-platform/server` | `https://athena-api.up.railway.app` |
+| API Server | Railway | `athena-platform/server` | `https://mari-production-5c60.up.railway.app` |
 | Web Client | Netlify/Railway | `athena-platform/client` | `https://athena.netlify.app` |
 | iOS App | App Store | `athena-platform/mobile` | App Store link |
 | Android App | Google Play | `athena-platform/mobile` | Play Store link |
@@ -132,7 +132,7 @@ SENTRY_DSN=https://...
 
 ### Web Client (Required)
 ```env
-NEXT_PUBLIC_API_URL=https://your-api-url.up.railway.app
+NEXT_PUBLIC_API_URL=https://mari-production-5c60.up.railway.app
 NODE_ENV=production
 ```
 

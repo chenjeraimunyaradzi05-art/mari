@@ -8,11 +8,11 @@
 │  (Next.js SSR)   │ /api  │  + PostgreSQL  + Redis       │
 │  Port: 443       │ proxy │  Port: dynamic (Railway)     │
 └──────────────────┘       └──────────────────────────────┘
-athena-empress.netlify.app  <your-app>.up.railway.app
+athena-empress.netlify.app  mari-production-5c60.up.railway.app
 ```
 
 - **Frontend (Netlify):** Next.js 14 App Router → `https://athena-empress.netlify.app`
-- **Backend (Railway):** Express + Prisma + Socket.IO → `https://<your-app>.up.railway.app`
+- **Backend (Railway):** Express + Prisma + Socket.IO → `https://mari-production-5c60.up.railway.app`
 - **Database:** PostgreSQL 16 (Railway add-on)
 - **Cache/Queue:** Redis 7 (Railway add-on)
 
@@ -43,7 +43,7 @@ Set these in **Railway → Service → Variables:**
 | `FRONTEND_URL` | Same as CLIENT_URL | `https://athena-empress.netlify.app` |
 | `ALLOWED_ORIGINS` | CORS origins (comma-separated) | `https://athena-empress.netlify.app` |
 | `TRUST_PROXY` | Behind Railway load balancer | `true` |
-| `APP_URL` | This service's public URL | `https://<your-app>.up.railway.app` |
+| `APP_URL` | This service's public URL | `https://mari-production-5c60.up.railway.app` |
 
 > **Full template:** See `server/.env.railway` for all variables with descriptions.
 
@@ -69,18 +69,18 @@ Set these in **Railway → Service → Variables:**
 
 Railway auto-deploys from GitHub on every push to `main`. The pipeline:
 
-1. **Build** (`railway.json`): `npm ci && npx prisma generate && npm run build`
-2. **Start**: `npx prisma migrate deploy && node dist/start.js`
+1. **Build**: Dockerfile multi-stage (deps → builder → production)
+2. **Start**: `node dist/start.js` (migrations run inside `start.ts` via `execSync`)
 3. **Health check**: `GET /health` (300s timeout)
 4. **Restart policy**: on failure, up to 10 retries
 
 ### 1.5 Verify
 
 ```bash
-curl https://<your-app>.up.railway.app/health
+curl https://mari-production-5c60.up.railway.app/health
 # ✅ {"status":"healthy","timestamp":"...","version":"1.0.0"}
 
-curl https://<your-app>.up.railway.app/readyz
+curl https://mari-production-5c60.up.railway.app/readyz
 # ✅ {"status":"ready","database":"connected"}
 ```
 
@@ -101,7 +101,7 @@ Set in **Netlify Dashboard → Site Settings → Environment Variables:**
 
 | Variable | Value |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Your Railway backend URL, e.g. `https://<your-app>.up.railway.app` |
+| `NEXT_PUBLIC_API_URL` | `https://mari-production-5c60.up.railway.app` |
 | `NEXT_PUBLIC_APP_URL` | This site's URL, e.g. `https://athena-empress.netlify.app` |
 
 > **⚠️ Critical:** Without `NEXT_PUBLIC_API_URL`, all API calls return 503. The `netlify.toml` proxies `/api/*`, `/uploads/*`, and `/socket.io/*` to this URL.
@@ -139,11 +139,11 @@ Netlify auto-deploys on every push to `main`.
 - [ ] `JWT_SECRET` set (32+ chars, generated with `openssl rand -hex 32`)
 - [ ] `CLIENT_URL` / `FRONTEND_URL` / `ALLOWED_ORIGINS` set to Netlify URL
 - [ ] `TRUST_PROXY=true` set
-- [ ] `APP_URL` set to this Railway service's public URL
+- [ ] `APP_URL` set to `https://mari-production-5c60.up.railway.app`
 - [ ] Deploy succeeds and `/health` returns 200
 
 ### Netlify (Frontend)
-- [ ] `NEXT_PUBLIC_API_URL` set to Railway URL
+- [ ] `NEXT_PUBLIC_API_URL` set to `https://mari-production-5c60.up.railway.app`
 - [ ] `NEXT_PUBLIC_APP_URL` set to this Netlify site's URL
 - [ ] Deploy succeeds and site loads
 
@@ -154,7 +154,7 @@ Netlify auto-deploys on every push to `main`.
 - [ ] API proxy works (`/api/health` returns Railway health response)
 
 ### Optional Services
-- [ ] Stripe webhook: `https://<railway>/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.*`, `invoice.*`)
+- [ ] Stripe webhook: `https://mari-production-5c60.up.railway.app/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.*`, `invoice.*`)
 - [ ] SendGrid sender verified
 - [ ] S3 bucket created + IAM credentials set
 - [ ] Sentry DSN set (both Railway + Netlify)
@@ -176,7 +176,7 @@ Netlify auto-deploys on every push to `main`.
 ## 5. Database
 
 ### Migrations (automatic)
-Migrations run automatically on every deploy via `npx prisma migrate deploy` in the Railway start command.
+Migrations run automatically on every deploy via `execSync` inside `start.ts` before the server boots.
 
 ### Seed Data (manual, optional)
 ```bash

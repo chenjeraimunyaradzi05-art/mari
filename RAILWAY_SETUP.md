@@ -48,7 +48,7 @@ Railway is currently building from the root directory, which is wrong. You need 
 6. After created, go to service **Settings** → rename to `athena-web`
 7. Add these **Environment Variables**:
    ```
-   NEXT_PUBLIC_API_URL = (your athena-api URL, e.g., https://athena-api-production-xxxx.up.railway.app)
+   NEXT_PUBLIC_API_URL = https://mari-production-5c60.up.railway.app
    NODE_ENV = production
    ```
 
@@ -105,7 +105,7 @@ Your Railway Project
 ### Web Service (athena-web)
 | Variable | Required | Example |
 |----------|----------|---------|
-| `NEXT_PUBLIC_API_URL` | Yes | `https://athena-api-xxx.up.railway.app` |
+| `NEXT_PUBLIC_API_URL` | Yes | `https://mari-production-5c60.up.railway.app` |
 | `NODE_ENV` | Yes | `production` |
 | `NEXTAUTH_SECRET` | No | `random-string` |
 

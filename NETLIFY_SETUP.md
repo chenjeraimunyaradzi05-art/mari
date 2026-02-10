@@ -28,7 +28,7 @@ When configuring the site:
 Go to Site Settings → Environment Variables and add:
 
 ```
-NEXT_PUBLIC_API_URL=https://your-railway-api-url.up.railway.app
+NEXT_PUBLIC_API_URL=https://mari-production-5c60.up.railway.app
 NODE_ENV=production
 NEXTAUTH_SECRET=your-nextauth-secret-here
 NEXTAUTH_URL=https://your-netlify-site.netlify.app
@@ -129,7 +129,7 @@ netlify deploy --prod
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Yes | Railway API URL |
+| `NEXT_PUBLIC_API_URL` | Yes | `https://mari-production-5c60.up.railway.app` |
 | `NODE_ENV` | Yes | Set to `production` |
 | `NEXTAUTH_SECRET` | Yes | Random string for NextAuth |
 | `NEXTAUTH_URL` | Yes | Your Netlify site URL |
