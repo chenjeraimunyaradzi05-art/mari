@@ -83,5 +83,5 @@ EXPOSE 5000
 # Railway provides its own healthcheck via railway.json (healthcheckPath: /health)
 # Do NOT add a Docker HEALTHCHECK — it conflicts with Railway's dynamic PORT.
 
-# Run Prisma migrations then start via crash-safe wrapper
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && echo '[DOCKER] Migrations done. Starting node...' && exec node dist/start.js"]
+# Start via crash-safe wrapper (migrations run inside start.js)
+CMD ["node", "dist/start.js"]

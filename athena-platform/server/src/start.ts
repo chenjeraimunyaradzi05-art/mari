@@ -6,12 +6,34 @@
  * our startup code (dotenv, console.log, etc.) ever runs.
  *
  * This wrapper catches those crashes and logs them visibly.
+ *
+ * It also runs Prisma migrations before starting the server, eliminating
+ * the need for shell-level command chaining (which can fail silently on
+ * some container runtimes like Railway).
  */
+
+const { execSync } = require('child_process');
 
 // Immediately log so Railway always sees output
 console.log('[ATHENA] start.ts — bootstrapping server...');
 console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
 console.log(`[ATHENA] node ${process.version}, pid ${process.pid}`);
+
+// ── Run Prisma migrations ──────────────────────────────────────────────
+// This replaces the shell `prisma migrate deploy && node dist/start.js`
+// pattern, which can silently fail on Railway's container runtime.
+try {
+  console.log('[ATHENA] Running prisma migrate deploy...');
+  execSync('node_modules/.bin/prisma migrate deploy', {
+    stdio: 'inherit',
+    timeout: 60_000, // 60 s safety net
+  });
+  console.log('[ATHENA] Prisma migrations complete.');
+} catch (migrationErr: any) {
+  // Log but do NOT exit — the server should still start so /health can
+  // report status and we can diagnose via Railway logs.
+  console.error('[ATHENA] Prisma migration failed (server will still start):', migrationErr.message);
+}
 
 // Catch anything that blows up during require/import
 process.on('uncaughtException', (err) => {

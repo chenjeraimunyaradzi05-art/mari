@@ -5,7 +5,7 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "node_modules/.bin/prisma migrate deploy && node dist/start.js",
+    "startCommand": "node dist/start.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "sleepApplication": false,
