@@ -55,6 +55,7 @@
     "zustand": "^4.4.7"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.8",
     "@playwright/test": "^1.57.0",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/typography": "^0.5.19",
@@ -76,5 +77,8 @@
     "start-server-and-test": "^2.0.13",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

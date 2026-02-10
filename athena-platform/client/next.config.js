@@ -2,8 +2,9 @@
 const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
-  // Enable standalone output for Docker deployments
-  output: 'standalone',
+  // Enable standalone output for Docker/Railway deployments only.
+  // Netlify's @netlify/plugin-nextjs manages output automatically.
+  ...(process.env.NETLIFY ? {} : { output: 'standalone' }),
   // Ignore ESLint errors during production builds
   eslint: {
     ignoreDuringBuilds: true,

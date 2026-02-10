@@ -1,19 +1,28 @@
+# ===========================================
+# ATHENA CLIENT — NETLIFY CONFIGURATION
+# ===========================================
+# Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
+
 [build]
-  command = "npm install --legacy-peer-deps && npm run build"
+  command = "npm ci --legacy-peer-deps && npm run build"
   # publish directory is handled automatically by @netlify/plugin-nextjs
 
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
-  # REQUIRED: Set NEXT_PUBLIC_API_URL in Netlify Dashboard → Site Settings → Environment Variables
-  # Example: NEXT_PUBLIC_API_URL = "https://athena-api-production.up.railway.app"
+  NEXT_TELEMETRY_DISABLED = "1"
+  # -------------------------------------------------------
+  # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
+  #   NEXT_PUBLIC_API_URL = "https://<your-railway-app>.up.railway.app"
+  # -------------------------------------------------------
 
-# Enable Next.js runtime
+# Enable Next.js runtime (handles SSR, ISR, API routes, middleware)
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Proxy API calls to Railway backend
-# Requires NEXT_PUBLIC_API_URL env var set in Netlify Dashboard
+# ===========================================
+# API PROXY — forwards /api/* to Railway backend
+# ===========================================
 [[redirects]]
   from = "/api/*"
   to = "${NEXT_PUBLIC_API_URL}/api/:splat"
@@ -29,7 +38,16 @@
   status = 200
   force = true
 
-# Security headers
+# Proxy Socket.IO to backend (long-polling fallback)
+[[redirects]]
+  from = "/socket.io/*"
+  to = "${NEXT_PUBLIC_API_URL}/socket.io/:splat"
+  status = 200
+  force = true
+
+# ===========================================
+# SECURITY HEADERS
+# ===========================================
 [[headers]]
   for = "/*"
   [headers.values]
@@ -37,11 +55,40 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-XSS-Protection = "1; mode=block"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(self)"
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
+    X-DNS-Prefetch-Control = "on"
 
-# Cache static assets
+# ===========================================
+# CACHING
+# ===========================================
+
+# Immutable Next.js static chunks (JS/CSS with content hash)
 [[headers]]
   for = "/_next/static/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# Static assets in /public (images, fonts, icons)
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+# Service worker must never be cached
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Manifest
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+    Content-Type = "application/manifest+json"
