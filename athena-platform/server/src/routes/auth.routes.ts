@@ -87,11 +87,16 @@ router.post(
       
       let newUserReferralCode = generateReferralCode();
       let codeAttempts = 0;
+      let codeIsUnique = false;
       while (codeAttempts < 10) {
         const existingCode = await prisma.user.findUnique({ where: { referralCode: newUserReferralCode } });
-        if (!existingCode) break;
+        if (!existingCode) { codeIsUnique = true; break; }
         newUserReferralCode = generateReferralCode();
         codeAttempts++;
+      }
+      if (!codeIsUnique) {
+        logger.error('Failed to generate unique referral code after 10 attempts');
+        throw new ApiError(500, 'Unable to complete registration. Please try again.');
       }
 
       // Validate referral code if provided
@@ -577,8 +582,10 @@ router.post(
           },
         });
 
-        // Send password reset email
-        await sendPasswordResetEmail(email, user.firstName, resetToken);
+        // Send password reset email (fire-and-forget to avoid blocking response)
+        sendPasswordResetEmail(email, user.firstName, resetToken).catch((err) =>
+          logger.error('Failed to send password reset email', { error: err })
+        );
       }
 
       res.json({
@@ -732,8 +739,10 @@ router.get('/verify-email', async (req: Request, res: Response, next: NextFuncti
       ]);
     }
 
-    // Send welcome email
-    await sendWelcomeEmail(verificationToken.user.email, verificationToken.user.firstName);
+    // Send welcome email (fire-and-forget to avoid blocking response)
+    sendWelcomeEmail(verificationToken.user.email, verificationToken.user.firstName).catch((err) =>
+      logger.error('Failed to send welcome email', { error: err })
+    );
 
     res.json({
       success: true,

@@ -31,16 +31,23 @@ export const errorHandler = (
     stack: err.stack,
   });
 
+  // Show debug info in development, or for 500s in production (helps diagnose deploy issues).
+  // Non-500 errors (4xx) in production only show the i18n message.
+  const showDebug =
+    process.env.NODE_ENV !== 'production' ||
+    statusCode >= 500 ||
+    req.headers['x-debug-auth'] === process.env.DEBUG_SECRET;
+
   res.status(statusCode).json({
     success: false,
     message,
     i18nKey,
     ...(err.i18nParams && { i18nParams: err.i18nParams }),
     ...(requestId && { requestId }),
-    // Temporarily include debug info in all environments for deployment debugging.
-    // TODO: Remove after resolving auth 500 errors — revert to development-only.
-    debugMessage: rawMessage,
-    debugStack: (err.stack || '').split('\n').slice(0, 5).join('\n'),
+    ...(showDebug && {
+      debugMessage: rawMessage,
+      debugStack: (err.stack || '').split('\n').slice(0, 5).join('\n'),
+    }),
   });
 };
 

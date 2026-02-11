@@ -18,6 +18,7 @@ import { loadSecretsIfConfigured } from './utils/secrets';
 import { initSentry, Sentry } from './utils/sentry';
 
 import { prisma, connectWithRetry } from './utils/prisma';
+import { sessionService } from './services/session.service';
 import cookieParser from 'cookie-parser';
 import { securityHeaders } from './middleware/securityHeaders';
 
@@ -572,6 +573,16 @@ export async function startServer() {
   httpServer.listen(PORT, () => {
     logger.info(`🚀 ATHENA Server running on port ${PORT}`);
     logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+
+    // Periodic session cleanup — remove expired sessions every 6 hours
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    setInterval(() => {
+      sessionService.cleanupExpiredSessions().catch((err) => {
+        logger.error('Session cleanup failed', { error: err });
+      });
+    }, SIX_HOURS);
+    // Run once at startup too
+    sessionService.cleanupExpiredSessions().catch(() => {});
   });
 
   // ===========================================

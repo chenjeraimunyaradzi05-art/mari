@@ -78,6 +78,7 @@ export const authApi = {
     persona?: string;
     womanSelfAttested: boolean;
     inviteCode?: string;
+    referralCode?: string;
   }) => api.post('/auth/register', data),
 
   login: (data: { email: string; password: string }) =>

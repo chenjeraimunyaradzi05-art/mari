@@ -39,7 +39,15 @@ export function middleware(request: NextRequest) {
   // Rewrite /api/* and /uploads/* to the Railway backend.
   // Running in middleware (Edge Function on Netlify) ensures this
   // executes before any redirect rules or serverless functions.
-  if (pathname.startsWith('/api') || pathname.startsWith('/uploads')) {
+  //
+  // EXCEPTION: /api/auth/* routes are NOT rewritten here.
+  // Auth routes set HttpOnly cookies (refreshToken) and
+  // NextResponse.rewrite() to external URLs on Netlify Edge may not
+  // reliably forward Set-Cookie headers. Instead, auth requests fall
+  // through to the Next.js API route handlers in app/api/auth/ which
+  // explicitly forward cookies via response.headers.getSetCookie().
+  const isAuthRoute = pathname.startsWith('/api/auth');
+  if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
     const destination = new URL(`${BACKEND_URL}${pathname}`);
     request.nextUrl.searchParams.forEach((value, key) => {
       destination.searchParams.set(key, value);
