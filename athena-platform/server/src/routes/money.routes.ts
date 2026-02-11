@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
@@ -25,7 +25,7 @@ const updateMoneyTransactionSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-router.get('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/transactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const transactions = await listMoneyTransactions({
@@ -33,13 +33,12 @@ router.get('/transactions', authenticate, async (req: AuthRequest, res: Response
       userId: req.user!.id,
     });
     res.json({ data: transactions });
-  } catch (error: any) {
-    logger.error('Failed to list money transactions', { error });
-    res.status(500).json({ error: 'Failed to list money transactions' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/transactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createMoneyTransactionSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -50,13 +49,12 @@ router.post('/transactions', authenticate, async (req: AuthRequest, res: Respons
       userId: req.user!.id,
     });
     res.status(201).json({ data: transaction });
-  } catch (error: any) {
-    logger.error('Failed to create money transaction', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create money transaction' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateMoneyTransactionSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -64,19 +62,17 @@ router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Re
     }
     const transaction = await updateMoneyTransaction(req.params.id, req.user!.id, parsed.data);
     res.json({ data: transaction });
-  } catch (error: any) {
-    logger.error('Failed to update money transaction', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update money transaction' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteMoneyTransaction(req.params.id, req.user!.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete money transaction', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete money transaction' });
+  } catch (error) {
+    next(error);
   }
 });
 

@@ -11,7 +11,7 @@
  * - getRegionalPricing
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import paymentsService, { Currency } from '../services/payments-orchestration.service';
@@ -29,16 +29,15 @@ const SUPPORTED_CURRENCIES: Currency[] = [
  * @desc Get available payment methods for user's region
  * @access Private
  */
-router.get('/methods', authenticate, async (req: Request, res: Response) => {
+router.get('/methods', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region } = req.query;
     const regionCode = (region as string) || 'US';
 
     const methods = paymentsService.getAvailablePaymentMethods(regionCode);
     res.json({ methods });
-  } catch (error: any) {
-    logger.error('Failed to get payment methods', { error });
-    res.status(500).json({ error: 'Failed to get payment methods' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -47,7 +46,7 @@ router.get('/methods', authenticate, async (req: Request, res: Response) => {
  * @desc Get the best payment provider for a region
  * @access Private
  */
-router.get('/best-provider', authenticate, async (req: Request, res: Response) => {
+router.get('/best-provider', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region, paymentType } = req.query;
     const regionCode = (region as string) || 'US';
@@ -58,9 +57,8 @@ router.get('/best-provider', authenticate, async (req: Request, res: Response) =
     );
 
     res.json({ provider });
-  } catch (error: any) {
-    logger.error('Failed to get best provider', { error });
-    res.status(500).json({ error: 'Failed to get best provider' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -69,16 +67,15 @@ router.get('/best-provider', authenticate, async (req: Request, res: Response) =
  * @desc Get regional pricing for products
  * @access Public
  */
-router.get('/pricing', async (req: Request, res: Response) => {
+router.get('/pricing', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region } = req.query;
     const regionCode = (region as string) || 'US';
 
     const pricing = paymentsService.getRegionalPricing(regionCode);
     res.json(pricing);
-  } catch (error: any) {
-    logger.error('Failed to get pricing', { error });
-    res.status(500).json({ error: 'Failed to get pricing' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -87,7 +84,7 @@ router.get('/pricing', async (req: Request, res: Response) => {
  * @desc Process a payment
  * @access Private
  */
-router.post('/process', authenticate, async (req: Request, res: Response) => {
+router.post('/process', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
     const { 
@@ -127,9 +124,8 @@ router.post('/process', authenticate, async (req: Request, res: Response) => {
     } else {
       res.status(400).json(result);
     }
-  } catch (error: any) {
-    logger.error('Payment processing failed', { error });
-    res.status(500).json({ error: 'Payment processing failed' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -138,7 +134,7 @@ router.post('/process', authenticate, async (req: Request, res: Response) => {
  * @desc Process a creator payout
  * @access Private (Creator only)
  */
-router.post('/payout', authenticate, requireRole('CREATOR'), async (req: Request, res: Response) => {
+router.post('/payout', authenticate, requireRole('CREATOR'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
     const { 
@@ -182,9 +178,8 @@ router.post('/payout', authenticate, requireRole('CREATOR'), async (req: Request
     } else {
       res.status(400).json(result);
     }
-  } catch (error: any) {
-    logger.error('Payout processing failed', { error });
-    res.status(500).json({ error: 'Payout processing failed' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -193,7 +188,7 @@ router.post('/payout', authenticate, requireRole('CREATOR'), async (req: Request
  * @desc Convert currency
  * @access Private
  */
-router.post('/convert', authenticate, async (req: Request, res: Response) => {
+router.post('/convert', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { amount, from, to } = req.body;
 
@@ -217,9 +212,8 @@ router.post('/convert', authenticate, async (req: Request, res: Response) => {
     );
 
     res.json(result);
-  } catch (error: any) {
-    logger.error('Currency conversion failed', { error });
-    res.status(500).json({ error: 'Currency conversion failed' });
+  } catch (error) {
+    next(error);
   }
 });
 

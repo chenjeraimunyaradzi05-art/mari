@@ -5,7 +5,7 @@
  * Matches the existing salary-equity.service.ts function signatures
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
 import salaryEquityService from '../services/salary-equity.service';
 import { logger } from '../utils/logger';
@@ -17,7 +17,7 @@ const router = Router();
  * @desc Get salary benchmark for a role
  * @access Private
  */
-router.get('/benchmark', authenticate, async (req: Request, res: Response) => {
+router.get('/benchmark', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { role, location, experience, industry } = req.query;
 
@@ -38,9 +38,8 @@ router.get('/benchmark', authenticate, async (req: Request, res: Response) => {
     );
 
     res.json(benchmark);
-  } catch (error: any) {
-    logger.error('Failed to get salary benchmark', { error });
-    res.status(500).json({ error: 'Failed to get benchmark' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -49,7 +48,7 @@ router.get('/benchmark', authenticate, async (req: Request, res: Response) => {
  * @desc Get salary range for a role (requires level)
  * @access Private
  */
-router.get('/range', authenticate, async (req: Request, res: Response) => {
+router.get('/range', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { role, location, level } = req.query;
 
@@ -69,9 +68,8 @@ router.get('/range', authenticate, async (req: Request, res: Response) => {
     }
 
     res.json(range);
-  } catch (error: any) {
-    logger.error('Failed to get salary range', { error });
-    res.status(500).json({ error: 'Failed to get range' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -80,7 +78,7 @@ router.get('/range', authenticate, async (req: Request, res: Response) => {
  * @desc Analyze pay gap for current salary
  * @access Private
  */
-router.post('/analyze-gap', authenticate, async (req: Request, res: Response) => {
+router.post('/analyze-gap', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { currentSalary, role, location } = req.body;
 
@@ -98,9 +96,8 @@ router.post('/analyze-gap', authenticate, async (req: Request, res: Response) =>
     );
 
     res.json(analysis);
-  } catch (error: any) {
-    logger.error('Failed to analyze pay gap', { error });
-    res.status(500).json({ error: 'Failed to analyze pay gap' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -111,7 +108,7 @@ router.post('/analyze-gap', authenticate, async (req: Request, res: Response) =>
  * 
  * Scenario must be one of: 'new_job', 'raise', 'promotion', 'counter_offer'
  */
-router.post('/negotiation-script', authenticate, async (req: Request, res: Response) => {
+router.post('/negotiation-script', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { 
       currentSalary, 
@@ -151,9 +148,8 @@ router.post('/negotiation-script', authenticate, async (req: Request, res: Respo
     );
 
     res.json(script);
-  } catch (error: any) {
-    logger.error('Failed to generate negotiation script', { error });
-    res.status(500).json({ error: 'Failed to generate script' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -162,7 +158,7 @@ router.post('/negotiation-script', authenticate, async (req: Request, res: Respo
  * @desc Submit anonymous salary data
  * @access Private
  */
-router.post('/submit', authenticate, async (req: Request, res: Response) => {
+router.post('/submit', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
     const { 
@@ -207,9 +203,8 @@ router.post('/submit', authenticate, async (req: Request, res: Response) => {
     } else {
       res.status(500).json({ error: 'Failed to submit data' });
     }
-  } catch (error: any) {
-    logger.error('Failed to submit salary data', { error });
-    res.status(500).json({ error: 'Failed to submit data' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -218,7 +213,7 @@ router.post('/submit', authenticate, async (req: Request, res: Response) => {
  * @desc Get company transparency score
  * @access Private
  */
-router.get('/company/:companyName/transparency', authenticate, async (req: Request, res: Response) => {
+router.get('/company/:companyName/transparency', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyName } = req.params;
 
@@ -226,9 +221,8 @@ router.get('/company/:companyName/transparency', authenticate, async (req: Reque
     const score = salaryEquityService.getCompanyTransparencyScore(decodeURIComponent(companyName));
 
     res.json(score);
-  } catch (error: any) {
-    logger.error('Failed to get company transparency score', { error });
-    res.status(500).json({ error: 'Failed to get transparency score' });
+  } catch (error) {
+    next(error);
   }
 });
 

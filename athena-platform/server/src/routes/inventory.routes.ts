@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
@@ -81,18 +81,17 @@ const updateTransactionSchema = z.object({
 });
 
 // Items
-router.get('/items', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/items', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const items = await listItems({ organizationId: organizationId as string | undefined });
     res.json({ data: items });
-  } catch (error: any) {
-    logger.error('Failed to list inventory items', { error });
-    res.status(500).json({ error: 'Failed to list inventory items' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/items', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/items', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createItemSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -100,13 +99,12 @@ router.post('/items', authenticate, async (req: AuthRequest, res: Response) => {
     }
     const item = await createItem(parsed.data);
     res.status(201).json({ data: item });
-  } catch (error: any) {
-    logger.error('Failed to create inventory item', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create inventory item' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/items/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/items/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateItemSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -114,35 +112,32 @@ router.patch('/items/:id', authenticate, async (req: AuthRequest, res: Response)
     }
     const item = await updateItem(req.params.id, req.user!.id, parsed.data);
     res.json({ data: item });
-  } catch (error: any) {
-    logger.error('Failed to update inventory item', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update inventory item' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/items/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/items/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteItem(req.params.id, req.user!.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete inventory item', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete inventory item' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Locations
-router.get('/locations', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/locations', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const locations = await listLocations({ organizationId: organizationId as string | undefined });
     res.json({ data: locations });
-  } catch (error: any) {
-    logger.error('Failed to list inventory locations', { error });
-    res.status(500).json({ error: 'Failed to list inventory locations' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/locations', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/locations', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createLocationSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -150,13 +145,12 @@ router.post('/locations', authenticate, async (req: AuthRequest, res: Response) 
     }
     const location = await createLocation(parsed.data);
     res.status(201).json({ data: location });
-  } catch (error: any) {
-    logger.error('Failed to create inventory location', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create inventory location' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/locations/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/locations/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateLocationSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -164,24 +158,22 @@ router.patch('/locations/:id', authenticate, async (req: AuthRequest, res: Respo
     }
     const location = await updateLocation(req.params.id, req.user!.id, parsed.data);
     res.json({ data: location });
-  } catch (error: any) {
-    logger.error('Failed to update inventory location', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update inventory location' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/locations/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/locations/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteLocation(req.params.id, req.user!.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete inventory location', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete inventory location' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Transactions
-router.get('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/transactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId, itemId } = req.query;
     const transactions = await listTransactions({
@@ -189,13 +181,12 @@ router.get('/transactions', authenticate, async (req: AuthRequest, res: Response
       itemId: itemId as string | undefined,
     });
     res.json({ data: transactions });
-  } catch (error: any) {
-    logger.error('Failed to list inventory transactions', { error });
-    res.status(500).json({ error: 'Failed to list inventory transactions' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/transactions', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/transactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createTransactionSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -206,13 +197,12 @@ router.post('/transactions', authenticate, async (req: AuthRequest, res: Respons
       createdByUserId: req.user!.id,
     });
     res.status(201).json({ data: transaction });
-  } catch (error: any) {
-    logger.error('Failed to create inventory transaction', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create inventory transaction' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateTransactionSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -220,31 +210,28 @@ router.patch('/transactions/:id', authenticate, async (req: AuthRequest, res: Re
     }
     const transaction = await updateTransaction(req.params.id, req.user!.id, parsed.data);
     res.json({ data: transaction });
-  } catch (error: any) {
-    logger.error('Failed to update inventory transaction', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update inventory transaction' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteTransaction(req.params.id, req.user!.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete inventory transaction', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete inventory transaction' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Stock levels
-router.get('/stock-levels', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/stock-levels', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const levels = await getStockLevels({ organizationId: organizationId as string | undefined });
     res.json({ data: levels });
-  } catch (error: any) {
-    logger.error('Failed to get stock levels', { error });
-    res.status(500).json({ error: 'Failed to get stock levels' });
+  } catch (error) {
+    next(error);
   }
 });
 

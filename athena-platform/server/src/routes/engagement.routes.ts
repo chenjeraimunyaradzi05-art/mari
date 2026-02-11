@@ -3,7 +3,7 @@
  * Gamification, achievements, XP, and leaderboards
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest, optionalAuth } from '../middleware/auth';
 import * as engagementService from '../services/engagement.service';
 import { logger } from '../utils/logger';
@@ -18,13 +18,12 @@ const router = Router();
  * GET /api/engagement/achievements
  * Get all achievements with user's progress
  */
-router.get('/achievements', authenticate, async (req: Request, res: Response) => {
+router.get('/achievements', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const achievements = await engagementService.getUserAchievements((req as AuthRequest).user!.id);
     res.json(achievements);
   } catch (error) {
-    logger.error('Get achievements error', { error });
-    res.status(500).json({ message: 'Failed to get achievements' });
+    next(error);
   }
 });
 
@@ -32,7 +31,7 @@ router.get('/achievements', authenticate, async (req: Request, res: Response) =>
  * GET /api/engagement/achievements/list
  * Get list of all available achievements
  */
-router.get('/achievements/list', async (req: Request, res: Response) => {
+router.get('/achievements/list', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const achievements = Object.values(engagementService.ACHIEVEMENTS);
     
@@ -49,8 +48,7 @@ router.get('/achievements/list', async (req: Request, res: Response) => {
       total: achievements.length,
     });
   } catch (error) {
-    logger.error('Get achievements list error', { error });
-    res.status(500).json({ message: 'Failed to get achievements list' });
+    next(error);
   }
 });
 
@@ -62,13 +60,12 @@ router.get('/achievements/list', async (req: Request, res: Response) => {
  * GET /api/engagement/xp
  * Get current user's XP and level
  */
-router.get('/xp', authenticate, async (req: Request, res: Response) => {
+router.get('/xp', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const xpData = await engagementService.getUserXP((req as AuthRequest).user!.id);
     res.json(xpData);
   } catch (error) {
-    logger.error('Get XP error', { error });
-    res.status(500).json({ message: 'Failed to get XP' });
+    next(error);
   }
 });
 
@@ -76,14 +73,13 @@ router.get('/xp', authenticate, async (req: Request, res: Response) => {
  * GET /api/engagement/xp/history
  * Get XP transaction history
  */
-router.get('/xp/history', authenticate, async (req: Request, res: Response) => {
+router.get('/xp/history', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const history = await engagementService.getXPHistory((req as AuthRequest).user!.id, limit);
     res.json({ history });
   } catch (error) {
-    logger.error('Get XP history error', { error });
-    res.status(500).json({ message: 'Failed to get XP history' });
+    next(error);
   }
 });
 
@@ -95,13 +91,12 @@ router.get('/xp/history', authenticate, async (req: Request, res: Response) => {
  * GET /api/engagement/streaks
  * Get user's current streaks
  */
-router.get('/streaks', authenticate, async (req: Request, res: Response) => {
+router.get('/streaks', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const streaks = await engagementService.getStreaks((req as AuthRequest).user!.id);
     res.json({ streaks });
   } catch (error) {
-    logger.error('Get streaks error', { error });
-    res.status(500).json({ message: 'Failed to get streaks' });
+    next(error);
   }
 });
 
@@ -109,7 +104,7 @@ router.get('/streaks', authenticate, async (req: Request, res: Response) => {
  * POST /api/engagement/streaks/check-in
  * Record a login check-in for streak tracking
  */
-router.post('/streaks/check-in', authenticate, async (req: Request, res: Response) => {
+router.post('/streaks/check-in', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await engagementService.updateStreak((req as AuthRequest).user!.id, 'login');
     
@@ -121,8 +116,7 @@ router.post('/streaks/check-in', authenticate, async (req: Request, res: Respons
 
     res.json(result);
   } catch (error) {
-    logger.error('Check-in error', { error });
-    res.status(500).json({ message: 'Failed to check in' });
+    next(error);
   }
 });
 
@@ -134,7 +128,7 @@ router.post('/streaks/check-in', authenticate, async (req: Request, res: Respons
  * GET /api/engagement/leaderboard
  * Get leaderboard by type
  */
-router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => {
+router.get('/leaderboard', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const type = (req.query.type as 'xp' | 'followers' | 'posts' | 'streak') || 'xp';
     const period = (req.query.period as 'daily' | 'weekly' | 'monthly' | 'alltime') || 'weekly';
@@ -162,8 +156,7 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => 
       userRank,
     });
   } catch (error) {
-    logger.error('Get leaderboard error', { error });
-    res.status(500).json({ message: 'Failed to get leaderboard' });
+    next(error);
   }
 });
 
@@ -171,7 +164,7 @@ router.get('/leaderboard', optionalAuth, async (req: Request, res: Response) => 
  * GET /api/engagement/leaderboard/xp
  * Get XP leaderboard
  */
-router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response) => {
+router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const period = (req.query.period as 'daily' | 'weekly' | 'monthly' | 'alltime') || 'alltime';
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
@@ -179,8 +172,7 @@ router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response) 
     const leaderboard = await engagementService.getLeaderboard('xp', period, limit);
     res.json({ leaderboard, type: 'xp', period });
   } catch (error) {
-    logger.error('Get XP leaderboard error', { error });
-    res.status(500).json({ message: 'Failed to get leaderboard' });
+    next(error);
   }
 });
 
@@ -188,7 +180,7 @@ router.get('/leaderboard/xp', optionalAuth, async (req: Request, res: Response) 
  * GET /api/engagement/leaderboard/creators
  * Get top creators leaderboard
  */
-router.get('/leaderboard/creators', optionalAuth, async (req: Request, res: Response) => {
+router.get('/leaderboard/creators', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const period = (req.query.period as 'daily' | 'weekly' | 'monthly' | 'alltime') || 'weekly';
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
@@ -196,8 +188,7 @@ router.get('/leaderboard/creators', optionalAuth, async (req: Request, res: Resp
     const leaderboard = await engagementService.getLeaderboard('followers', period, limit);
     res.json({ leaderboard, type: 'creators', period });
   } catch (error) {
-    logger.error('Get creators leaderboard error', { error });
-    res.status(500).json({ message: 'Failed to get leaderboard' });
+    next(error);
   }
 });
 
@@ -209,7 +200,7 @@ router.get('/leaderboard/creators', optionalAuth, async (req: Request, res: Resp
  * GET /api/engagement/summary
  * Get complete engagement summary for current user
  */
-router.get('/summary', authenticate, async (req: Request, res: Response) => {
+router.get('/summary', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const [achievements, xp, streaks] = await Promise.all([
       engagementService.getUserAchievements((req as AuthRequest).user!.id),
@@ -223,8 +214,7 @@ router.get('/summary', authenticate, async (req: Request, res: Response) => {
       streaks,
     });
   } catch (error) {
-    logger.error('Get engagement summary error', { error });
-    res.status(500).json({ message: 'Failed to get engagement summary' });
+    next(error);
   }
 });
 

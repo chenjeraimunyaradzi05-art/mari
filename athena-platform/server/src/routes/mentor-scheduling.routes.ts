@@ -16,7 +16,7 @@
  * - rateSession(sessionId, menteeId, rating, feedback?)
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
 import mentorSchedulingService from '../services/mentor-scheduling.service';
 import { logger } from '../utils/logger';
@@ -28,7 +28,7 @@ const router = Router();
  * @desc Get available mentors with optional filters
  * @access Private
  */
-router.get('/mentors', authenticate, async (req: Request, res: Response) => {
+router.get('/mentors', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { specialization, maxHourlyRate, minRating } = req.query;
 
@@ -39,9 +39,8 @@ router.get('/mentors', authenticate, async (req: Request, res: Response) => {
     });
 
     res.json({ mentors });
-  } catch (error: any) {
-    logger.error('Failed to get available mentors', { error });
-    res.status(500).json({ error: 'Failed to get mentors' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -50,7 +49,7 @@ router.get('/mentors', authenticate, async (req: Request, res: Response) => {
  * @desc Get mentor's availability settings
  * @access Private
  */
-router.get('/availability/:mentorProfileId', authenticate, async (req: Request, res: Response) => {
+router.get('/availability/:mentorProfileId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { mentorProfileId } = req.params;
     const availability = await mentorSchedulingService.getMentorAvailability(mentorProfileId);
@@ -60,9 +59,8 @@ router.get('/availability/:mentorProfileId', authenticate, async (req: Request, 
     }
 
     res.json(availability);
-  } catch (error: any) {
-    logger.error('Failed to get mentor availability', { error });
-    res.status(500).json({ error: 'Failed to get availability' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -71,7 +69,7 @@ router.get('/availability/:mentorProfileId', authenticate, async (req: Request, 
  * @desc Update mentor's availability (on/off)
  * @access Private (Mentor)
  */
-router.put('/availability/:mentorProfileId', authenticate, async (req: Request, res: Response) => {
+router.put('/availability/:mentorProfileId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { mentorProfileId } = req.params;
     const { isAvailable } = req.body;
@@ -93,9 +91,8 @@ router.put('/availability/:mentorProfileId', authenticate, async (req: Request, 
       message: 'Availability updated',
       availability,
     });
-  } catch (error: any) {
-    logger.error('Failed to update availability', { error });
-    res.status(500).json({ error: 'Failed to update availability' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -104,7 +101,7 @@ router.put('/availability/:mentorProfileId', authenticate, async (req: Request, 
  * @desc Get sessions for a mentor
  * @access Private (Mentor)
  */
-router.get('/sessions/mentor/:mentorProfileId', authenticate, async (req: Request, res: Response) => {
+router.get('/sessions/mentor/:mentorProfileId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { mentorProfileId } = req.params;
     const { status } = req.query;
@@ -115,9 +112,8 @@ router.get('/sessions/mentor/:mentorProfileId', authenticate, async (req: Reques
     );
 
     res.json({ sessions });
-  } catch (error: any) {
-    logger.error('Failed to get mentor sessions', { error });
-    res.status(500).json({ error: 'Failed to get sessions' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -126,7 +122,7 @@ router.get('/sessions/mentor/:mentorProfileId', authenticate, async (req: Reques
  * @desc Get current user's sessions as mentee
  * @access Private
  */
-router.get('/sessions/mentee', authenticate, async (req: Request, res: Response) => {
+router.get('/sessions/mentee', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const menteeId = (req as any).user.id;
     const { status } = req.query;
@@ -137,9 +133,8 @@ router.get('/sessions/mentee', authenticate, async (req: Request, res: Response)
     );
 
     res.json({ sessions });
-  } catch (error: any) {
-    logger.error('Failed to get mentee sessions', { error });
-    res.status(500).json({ error: 'Failed to get sessions' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -148,7 +143,7 @@ router.get('/sessions/mentee', authenticate, async (req: Request, res: Response)
  * @desc Book a mentoring session
  * @access Private
  */
-router.post('/book', authenticate, async (req: Request, res: Response) => {
+router.post('/book', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const menteeId = (req as any).user.id;
     const { 
@@ -186,9 +181,8 @@ router.post('/book', authenticate, async (req: Request, res: Response) => {
       message: 'Session booked successfully',
       booking,
     });
-  } catch (error: any) {
-    logger.error('Failed to book session', { error });
-    res.status(400).json({ error: 'Failed to book session' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -197,7 +191,7 @@ router.post('/book', authenticate, async (req: Request, res: Response) => {
  * @desc Confirm or reject a booking (Mentor)
  * @access Private (Mentor)
  */
-router.post('/respond/:sessionId', authenticate, async (req: Request, res: Response) => {
+router.post('/respond/:sessionId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const mentorUserId = (req as any).user.id;
     const { sessionId } = req.params;
@@ -222,9 +216,8 @@ router.post('/respond/:sessionId', authenticate, async (req: Request, res: Respo
       message: accept ? 'Session confirmed' : 'Session declined',
       booking: result,
     });
-  } catch (error: any) {
-    logger.error('Failed to respond to booking', { error });
-    res.status(400).json({ error: 'Failed to respond to booking' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -233,7 +226,7 @@ router.post('/respond/:sessionId', authenticate, async (req: Request, res: Respo
  * @desc Cancel a booking
  * @access Private
  */
-router.post('/cancel/:sessionId', authenticate, async (req: Request, res: Response) => {
+router.post('/cancel/:sessionId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
     const { sessionId } = req.params;
@@ -249,9 +242,8 @@ router.post('/cancel/:sessionId', authenticate, async (req: Request, res: Respon
       message: 'Session cancelled',
       booking: result,
     });
-  } catch (error: any) {
-    logger.error('Failed to cancel session', { error });
-    res.status(400).json({ error: 'Failed to cancel session' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -260,7 +252,7 @@ router.post('/cancel/:sessionId', authenticate, async (req: Request, res: Respon
  * @desc Mark a session as complete (Mentor)
  * @access Private (Mentor)
  */
-router.post('/complete/:sessionId', authenticate, async (req: Request, res: Response) => {
+router.post('/complete/:sessionId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const mentorUserId = (req as any).user.id;
     const { sessionId } = req.params;
@@ -280,9 +272,8 @@ router.post('/complete/:sessionId', authenticate, async (req: Request, res: Resp
       message: 'Session completed',
       booking: result,
     });
-  } catch (error: any) {
-    logger.error('Failed to complete session', { error });
-    res.status(400).json({ error: 'Failed to complete session' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -291,7 +282,7 @@ router.post('/complete/:sessionId', authenticate, async (req: Request, res: Resp
  * @desc Rate a completed session (Mentee)
  * @access Private (Mentee)
  */
-router.post('/rate/:sessionId', authenticate, async (req: Request, res: Response) => {
+router.post('/rate/:sessionId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const menteeId = (req as any).user.id;
     const { sessionId } = req.params;
@@ -315,9 +306,8 @@ router.post('/rate/:sessionId', authenticate, async (req: Request, res: Response
     res.json({
       message: 'Thank you for your feedback!',
     });
-  } catch (error: any) {
-    logger.error('Failed to rate session', { error });
-    res.status(400).json({ error: 'Failed to rate session' });
+  } catch (error) {
+    next(error);
   }
 });
 

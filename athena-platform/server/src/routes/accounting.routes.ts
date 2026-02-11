@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
@@ -58,7 +58,7 @@ const updateJournalSchema = z.object({
 });
 
 // Accounts
-router.get('/accounts', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/accounts', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const accounts = await listAccounts({
@@ -66,13 +66,12 @@ router.get('/accounts', authenticate, async (req: AuthRequest, res: Response) =>
       userId: req.user!.id,
     });
     res.json({ data: accounts });
-  } catch (error: any) {
-    logger.error('Failed to list accounts', { error });
-    res.status(500).json({ error: 'Failed to list accounts' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/accounts', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/accounts', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createAccountSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -83,13 +82,12 @@ router.post('/accounts', authenticate, async (req: AuthRequest, res: Response) =
       userId: req.user!.id,
     });
     res.status(201).json({ data: account });
-  } catch (error: any) {
-    logger.error('Failed to create account', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create account' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/accounts/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/accounts/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateAccountSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -97,24 +95,22 @@ router.patch('/accounts/:id', authenticate, async (req: AuthRequest, res: Respon
     }
     const account = await updateAccount(req.params.id, req.user!.id, parsed.data);
     res.json({ data: account });
-  } catch (error: any) {
-    logger.error('Failed to update account', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update account' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/accounts/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/accounts/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteAccount(req.params.id, req.user!.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete account', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete account' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Journal Entries
-router.get('/journals', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/journals', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId, status } = req.query;
     const entries = await listJournalEntries({
@@ -123,13 +119,12 @@ router.get('/journals', authenticate, async (req: AuthRequest, res: Response) =>
       status: status as any,
     });
     res.json({ data: entries });
-  } catch (error: any) {
-    logger.error('Failed to list journal entries', { error });
-    res.status(500).json({ error: 'Failed to list journal entries' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/journals', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/journals', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createJournalSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -140,23 +135,21 @@ router.post('/journals', authenticate, async (req: AuthRequest, res: Response) =
       userId: req.user!.id,
     });
     res.status(201).json({ data: entry });
-  } catch (error: any) {
-    logger.error('Failed to create journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create journal entry' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.get('/journals/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/journals/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const entry = await getJournalEntry(req.params.id, req.user!.id);
     res.json({ data: entry });
-  } catch (error: any) {
-    logger.error('Failed to get journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to get journal entry' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/journals/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/journals/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateJournalSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -164,34 +157,31 @@ router.patch('/journals/:id', authenticate, async (req: AuthRequest, res: Respon
     }
     const entry = await updateJournalEntry(req.params.id, req.user!.id, parsed.data);
     res.json({ data: entry });
-  } catch (error: any) {
-    logger.error('Failed to update journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update journal entry' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/journals/:id/post', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/journals/:id/post', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const entry = await postJournalEntry(req.params.id, req.user!.id);
     res.json({ data: entry });
-  } catch (error: any) {
-    logger.error('Failed to post journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to post journal entry' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/journals/:id/void', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/journals/:id/void', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const entry = await voidJournalEntry(req.params.id, req.user!.id);
     res.json({ data: entry });
-  } catch (error: any) {
-    logger.error('Failed to void journal entry', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to void journal entry' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Reports
-router.get('/reports/trial-balance', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/reports/trial-balance', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const report = await getTrialBalance({
@@ -199,9 +189,8 @@ router.get('/reports/trial-balance', authenticate, async (req: AuthRequest, res:
       userId: req.user!.id,
     });
     res.json({ data: report });
-  } catch (error: any) {
-    logger.error('Failed to get trial balance', { error });
-    res.status(500).json({ error: 'Failed to get trial balance' });
+  } catch (error) {
+    next(error);
   }
 });
 

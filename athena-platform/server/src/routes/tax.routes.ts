@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
@@ -59,7 +59,7 @@ const updateTaxReturnSchema = z.object({
 });
 
 // Tax Rates
-router.get('/rates', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/rates', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId, region } = req.query;
     const rates = await listTaxRates({
@@ -67,13 +67,12 @@ router.get('/rates', authenticate, async (req: AuthRequest, res: Response) => {
       region: region as string | undefined,
     });
     res.json({ data: rates });
-  } catch (error: any) {
-    logger.error('Failed to list tax rates', { error });
-    res.status(500).json({ error: 'Failed to list tax rates' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/rates', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/rates', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createTaxRateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -81,13 +80,12 @@ router.post('/rates', authenticate, async (req: AuthRequest, res: Response) => {
     }
     const rate = await createTaxRate(parsed.data);
     res.status(201).json({ data: rate });
-  } catch (error: any) {
-    logger.error('Failed to create tax rate', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create tax rate' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/rates/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/rates/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateTaxRateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -95,24 +93,22 @@ router.patch('/rates/:id', authenticate, async (req: AuthRequest, res: Response)
     }
     const rate = await updateTaxRate(req.params.id, parsed.data);
     res.json({ data: rate });
-  } catch (error: any) {
-    logger.error('Failed to update tax rate', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update tax rate' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/rates/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/rates/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteTaxRate(req.params.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete tax rate', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete tax rate' });
+  } catch (error) {
+    next(error);
   }
 });
 
 // Tax Returns
-router.get('/returns', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/returns', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;
     const returns = await listTaxReturns({
@@ -120,13 +116,12 @@ router.get('/returns', authenticate, async (req: AuthRequest, res: Response) => 
       userId: req.user!.id,
     });
     res.json({ data: returns });
-  } catch (error: any) {
-    logger.error('Failed to list tax returns', { error });
-    res.status(500).json({ error: 'Failed to list tax returns' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/returns', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/returns', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createTaxReturnSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -137,13 +132,12 @@ router.post('/returns', authenticate, async (req: AuthRequest, res: Response) =>
       userId: req.user!.id,
     });
     res.status(201).json({ data: record });
-  } catch (error: any) {
-    logger.error('Failed to create tax return', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to create tax return' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.patch('/returns/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.patch('/returns/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateTaxReturnSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -151,29 +145,26 @@ router.patch('/returns/:id', authenticate, async (req: AuthRequest, res: Respons
     }
     const record = await updateTaxReturn(req.params.id, req.user!.id, parsed.data);
     res.json({ data: record });
-  } catch (error: any) {
-    logger.error('Failed to update tax return', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to update tax return' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.post('/returns/:id/submit', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/returns/:id/submit', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const record = await submitTaxReturn(req.params.id, req.user!.id);
     res.json({ data: record });
-  } catch (error: any) {
-    logger.error('Failed to submit tax return', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to submit tax return' });
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete('/returns/:id', authenticate, async (req: AuthRequest, res: Response) => {
+router.delete('/returns/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteTaxReturn(req.params.id, req.user!.id);
     res.status(204).send();
-  } catch (error: any) {
-    logger.error('Failed to delete tax return', { error });
-    res.status(error.statusCode || 500).json({ error: 'Failed to delete tax return' });
+  } catch (error) {
+    next(error);
   }
 });
 

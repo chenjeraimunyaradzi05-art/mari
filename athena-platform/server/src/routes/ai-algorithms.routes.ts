@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
@@ -13,7 +13,7 @@ router.use(authenticate);
 // =============================================
 
 // Get user's career predictions
-router.get('/career-compass', async (req: Request, res: Response) => {
+router.get('/career-compass', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -30,13 +30,12 @@ router.get('/career-compass', async (req: Request, res: Response) => {
 
     res.json({ data: prediction });
   } catch (error) {
-    logger.error('Error fetching career prediction', { error });
-    res.status(500).json({ error: 'Failed to fetch career prediction' });
+    next(error);
   }
 });
 
 // Generate new career prediction
-router.post('/career-compass/generate', async (req: Request, res: Response) => {
+router.post('/career-compass/generate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -72,8 +71,7 @@ router.post('/career-compass/generate', async (req: Request, res: Response) => {
 
     res.json({ data: prediction });
   } catch (error) {
-    logger.error('Error generating career prediction', { error });
-    res.status(500).json({ error: 'Failed to generate career prediction' });
+    next(error);
   }
 });
 
@@ -82,7 +80,7 @@ router.post('/career-compass/generate', async (req: Request, res: Response) => {
 // =============================================
 
 // Get matched opportunities
-router.get('/opportunity-scan', async (req: Request, res: Response) => {
+router.get('/opportunity-scan', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -107,13 +105,12 @@ router.get('/opportunity-scan', async (req: Request, res: Response) => {
 
     res.json({ data: opportunities });
   } catch (error) {
-    logger.error('Error fetching opportunities', { error });
-    res.status(500).json({ error: 'Failed to fetch opportunities' });
+    next(error);
   }
 });
 
 // Mark opportunity as viewed
-router.patch('/opportunity-scan/:id/view', async (req: Request, res: Response) => {
+router.patch('/opportunity-scan/:id/view', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -132,13 +129,12 @@ router.patch('/opportunity-scan/:id/view', async (req: Request, res: Response) =
 
     res.json({ data: opportunity });
   } catch (error) {
-    logger.error('Error marking opportunity viewed', { error });
-    res.status(500).json({ error: 'Failed to update opportunity' });
+    next(error);
   }
 });
 
 // Record interest/feedback on opportunity
-router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Response) => {
+router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -159,8 +155,7 @@ router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Respons
 
     res.json({ data: opportunity });
   } catch (error) {
-    logger.error('Error recording feedback', { error });
-    res.status(500).json({ error: 'Failed to record feedback' });
+    next(error);
   }
 });
 
@@ -169,7 +164,7 @@ router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Respons
 // =============================================
 
 // Submit anonymous salary data
-router.post('/salary-equity/submit', async (req: Request, res: Response) => {
+router.post('/salary-equity/submit', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id; // Optional for anonymous
 
@@ -224,13 +219,12 @@ router.post('/salary-equity/submit', async (req: Request, res: Response) => {
 
     res.json({ data: { id: dataPoint.id }, message: 'Salary data submitted successfully' });
   } catch (error) {
-    logger.error('Error submitting salary data', { error });
-    res.status(500).json({ error: 'Failed to submit salary data' });
+    next(error);
   }
 });
 
 // Get salary analysis for a role
-router.get('/salary-equity/analyze', async (req: Request, res: Response) => {
+router.get('/salary-equity/analyze', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -309,13 +303,12 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response) => {
 
     res.json({ data: analysis });
   } catch (error) {
-    logger.error('Error analyzing salary', { error });
-    res.status(500).json({ error: 'Failed to analyze salary data' });
+    next(error);
   }
 });
 
 // Get user's salary analyses history
-router.get('/salary-equity/my-analyses', async (req: Request, res: Response) => {
+router.get('/salary-equity/my-analyses', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -330,8 +323,7 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response) => 
 
     res.json({ data: analyses });
   } catch (error) {
-    logger.error('Error fetching analyses', { error });
-    res.status(500).json({ error: 'Failed to fetch salary analyses' });
+    next(error);
   }
 });
 
@@ -340,7 +332,7 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response) => 
 // =============================================
 
 // Get mentor recommendations
-router.get('/mentor-match', async (req: Request, res: Response) => {
+router.get('/mentor-match', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -369,13 +361,12 @@ router.get('/mentor-match', async (req: Request, res: Response) => {
 
     res.json({ data: matches });
   } catch (error) {
-    logger.error('Error fetching mentor matches', { error });
-    res.status(500).json({ error: 'Failed to fetch mentor matches' });
+    next(error);
   }
 });
 
 // Get match details with a specific mentor
-router.get('/mentor-match/:mentorId', async (req: Request, res: Response) => {
+router.get('/mentor-match/:mentorId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -407,8 +398,7 @@ router.get('/mentor-match/:mentorId', async (req: Request, res: Response) => {
 
     res.json({ data: match });
   } catch (error) {
-    logger.error('Error fetching mentor match', { error });
-    res.status(500).json({ error: 'Failed to fetch mentor match' });
+    next(error);
   }
 });
 
@@ -417,7 +407,7 @@ router.get('/mentor-match/:mentorId', async (req: Request, res: Response) => {
 // =============================================
 
 // Get user's trust score
-router.get('/trust-score', async (req: Request, res: Response) => {
+router.get('/trust-score', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -441,13 +431,12 @@ router.get('/trust-score', async (req: Request, res: Response) => {
 
     res.json({ data: trustScore });
   } catch (error) {
-    logger.error('Error fetching trust score', { error });
-    res.status(500).json({ error: 'Failed to fetch trust score' });
+    next(error);
   }
 });
 
 // Get trust score for another user (limited info)
-router.get('/trust-score/:userId', async (req: Request, res: Response) => {
+router.get('/trust-score/:userId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
 
@@ -462,13 +451,12 @@ router.get('/trust-score/:userId', async (req: Request, res: Response) => {
 
     res.json({ data: trustScore });
   } catch (error) {
-    logger.error('Error fetching user trust score', { error });
-    res.status(500).json({ error: 'Failed to fetch trust score' });
+    next(error);
   }
 });
 
 // Report content
-router.post('/report', async (req: Request, res: Response) => {
+router.post('/report', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -494,8 +482,7 @@ router.post('/report', async (req: Request, res: Response) => {
 
     res.json({ data: { id: report.id }, message: 'Report submitted successfully' });
   } catch (error) {
-    logger.error('Error submitting report', { error });
-    res.status(500).json({ error: 'Failed to submit report' });
+    next(error);
   }
 });
 
@@ -504,7 +491,7 @@ router.post('/report', async (req: Request, res: Response) => {
 // =============================================
 
 // Get creator analytics
-router.get('/creator-analytics', async (req: Request, res: Response) => {
+router.get('/creator-analytics', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -527,13 +514,12 @@ router.get('/creator-analytics', async (req: Request, res: Response) => {
 
     res.json({ data: analytics });
   } catch (error) {
-    logger.error('Error fetching creator analytics', { error });
-    res.status(500).json({ error: 'Failed to fetch creator analytics' });
+    next(error);
   }
 });
 
 // Get income projections
-router.get('/creator-analytics/projections', async (req: Request, res: Response) => {
+router.get('/creator-analytics/projections', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -589,8 +575,7 @@ router.get('/creator-analytics/projections', async (req: Request, res: Response)
 
     res.json({ data: analytics });
   } catch (error) {
-    logger.error('Error fetching projections', { error });
-    res.status(500).json({ error: 'Failed to fetch income projections' });
+    next(error);
   }
 });
 
@@ -599,7 +584,7 @@ router.get('/creator-analytics/projections', async (req: Request, res: Response)
 // =============================================
 
 // Get feed preferences
-router.get('/feed-preferences', async (req: Request, res: Response) => {
+router.get('/feed-preferences', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -626,13 +611,12 @@ router.get('/feed-preferences', async (req: Request, res: Response) => {
 
     res.json({ data: prefs });
   } catch (error) {
-    logger.error('Error fetching feed preferences', { error });
-    res.status(500).json({ error: 'Failed to fetch feed preferences' });
+    next(error);
   }
 });
 
 // Update feed preferences
-router.patch('/feed-preferences', async (req: Request, res: Response) => {
+router.patch('/feed-preferences', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -681,13 +665,12 @@ router.patch('/feed-preferences', async (req: Request, res: Response) => {
 
     res.json({ data: prefs });
   } catch (error) {
-    logger.error('Error updating feed preferences', { error });
-    res.status(500).json({ error: 'Failed to update feed preferences' });
+    next(error);
   }
 });
 
 // Add to search history
-router.post('/feed-preferences/search', async (req: Request, res: Response) => {
+router.post('/feed-preferences/search', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -722,8 +705,7 @@ router.post('/feed-preferences/search', async (req: Request, res: Response) => {
 
     res.json({ message: 'Search recorded' });
   } catch (error) {
-    logger.error('Error recording search', { error });
-    res.status(500).json({ error: 'Failed to record search' });
+    next(error);
   }
 });
 

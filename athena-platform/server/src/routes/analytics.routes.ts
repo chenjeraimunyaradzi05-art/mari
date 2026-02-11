@@ -3,7 +3,7 @@
  * Platform-wide and user analytics endpoints
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import * as analyticsService from '../services/analytics.service';
 import { logger } from '../utils/logger';
@@ -22,13 +22,12 @@ router.get(
   '/platform',
   authenticate,
   requireRole('ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const stats = await analyticsService.getPlatformStats();
       res.json(stats);
     } catch (error) {
-      logger.error('Get platform stats error', { error });
-      res.status(500).json({ message: 'Failed to get platform stats' });
+      next(error);
     }
   }
 );
@@ -41,14 +40,13 @@ router.get(
   '/engagement',
   authenticate,
   requireRole('ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const days = parseInt(req.query.days as string) || 30;
       const metrics = await analyticsService.getEngagementTimeSeries(days);
       res.json(metrics);
     } catch (error) {
-      logger.error('Get engagement metrics error', { error });
-      res.status(500).json({ message: 'Failed to get engagement metrics' });
+      next(error);
     }
   }
 );
@@ -61,15 +59,14 @@ router.get(
   '/top-content',
   authenticate,
   requireRole('ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const period = (req.query.period as 'day' | 'week' | 'month') || 'week';
       const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
       const content = await analyticsService.getTopContent(period, limit);
       res.json(content);
     } catch (error) {
-      logger.error('Get top content error', { error });
-      res.status(500).json({ message: 'Failed to get top content' });
+      next(error);
     }
   }
 );
@@ -82,14 +79,13 @@ router.get(
   '/growth',
   authenticate,
   requireRole('ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const days = parseInt(req.query.days as string) || 30;
       const metrics = await analyticsService.getGrowthMetrics(days);
       res.json(metrics);
     } catch (error) {
-      logger.error('Get growth metrics error', { error });
-      res.status(500).json({ message: 'Failed to get growth metrics' });
+      next(error);
     }
   }
 );
@@ -102,14 +98,13 @@ router.get(
  * GET /api/analytics/me
  * Get current user's analytics
  */
-router.get('/me', authenticate, async (req: Request, res: Response) => {
+router.get('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const days = parseInt(req.query.days as string) || 30;
     const analytics = await analyticsService.getUserAnalytics((req as AuthRequest).user!.id, days);
     res.json(analytics);
   } catch (error) {
-    logger.error('Get user analytics error', { error });
-    res.status(500).json({ message: 'Failed to get analytics' });
+    next(error);
   }
 });
 
@@ -121,15 +116,14 @@ router.get(
   '/user/:userId',
   authenticate,
   requireRole('ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId } = req.params;
       const days = parseInt(req.query.days as string) || 30;
       const analytics = await analyticsService.getUserAnalytics(userId, days);
       res.json(analytics);
     } catch (error) {
-      logger.error('Get user analytics error', { error, userId: req.params.userId });
-      res.status(500).json({ message: 'Failed to get user analytics' });
+      next(error);
     }
   }
 );
@@ -146,7 +140,7 @@ router.get(
   '/dashboard',
   authenticate,
   requireRole('ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const [platformStats, growth, topContent] = await Promise.all([
         analyticsService.getPlatformStats(),
@@ -161,8 +155,7 @@ router.get(
         lastUpdated: new Date().toISOString(),
       });
     } catch (error) {
-      logger.error('Get dashboard error', { error });
-      res.status(500).json({ message: 'Failed to get dashboard data' });
+      next(error);
     }
   }
 );
@@ -175,7 +168,7 @@ router.get(
   '/creator-dashboard',
   authenticate,
   requireRole('CREATOR', 'ADMIN'),
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const analytics = await analyticsService.getUserAnalytics((req as AuthRequest).user!.id, 30);
       res.json({
@@ -183,8 +176,7 @@ router.get(
         lastUpdated: new Date().toISOString(),
       });
     } catch (error) {
-      logger.error('Get creator dashboard error', { error });
-      res.status(500).json({ message: 'Failed to get creator dashboard' });
+      next(error);
     }
   }
 );

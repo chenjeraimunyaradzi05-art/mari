@@ -4,7 +4,7 @@
  * Phase 4: UK/EU Market Launch
  */
 
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { gdprService } from '../services/gdpr.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { DSARType, ConsentType } from '@prisma/client';
@@ -23,14 +23,13 @@ router.use(authenticate);
  * GET /api/gdpr/dsar
  * Get user's DSAR request history
  */
-router.get('/dsar', async (req: AuthRequest, res: Response) => {
+router.get('/dsar', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const requests = await gdprService.getDSARRequests(userId);
     res.json({ success: true, data: requests });
-  } catch (error: any) {
-    logger.error('Failed to retrieve DSAR requests', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to retrieve DSAR requests' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -38,7 +37,7 @@ router.get('/dsar', async (req: AuthRequest, res: Response) => {
  * POST /api/gdpr/dsar/export
  * Request data export (Right of Access)
  */
-router.post('/dsar/export', async (req: AuthRequest, res: Response) => {
+router.post('/dsar/export', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     
@@ -61,9 +60,8 @@ router.post('/dsar/export', async (req: AuthRequest, res: Response) => {
         expiresAt: dsar.exportExpiresAt,
       },
     });
-  } catch (error: any) {
-    logger.error('Failed to process data export request', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to process data export request' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -71,7 +69,7 @@ router.post('/dsar/export', async (req: AuthRequest, res: Response) => {
  * POST /api/gdpr/dsar/delete
  * Request account deletion (Right to be Forgotten)
  */
-router.post('/dsar/delete', async (req: AuthRequest, res: Response) => {
+router.post('/dsar/delete', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const { confirmation, reason } = req.body;
@@ -98,9 +96,8 @@ router.post('/dsar/delete', async (req: AuthRequest, res: Response) => {
         dueDate: dsar.dueDate,
       },
     });
-  } catch (error: any) {
-    logger.error('Failed to process deletion request', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to process deletion request' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -108,7 +105,7 @@ router.post('/dsar/delete', async (req: AuthRequest, res: Response) => {
  * POST /api/gdpr/dsar/rectify
  * Request data correction (Right to Rectification)
  */
-router.post('/dsar/rectify', async (req: AuthRequest, res: Response) => {
+router.post('/dsar/rectify', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const { corrections } = req.body;
@@ -133,9 +130,8 @@ router.post('/dsar/rectify', async (req: AuthRequest, res: Response) => {
       message: 'Your data has been corrected.',
       data: { requestId: dsar.id },
     });
-  } catch (error: any) {
-    logger.error('Failed to process rectification request', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to process rectification request' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -143,7 +139,7 @@ router.post('/dsar/rectify', async (req: AuthRequest, res: Response) => {
  * POST /api/gdpr/dsar/restrict
  * Request processing restriction (Right to Restriction)
  */
-router.post('/dsar/restrict', async (req: AuthRequest, res: Response) => {
+router.post('/dsar/restrict', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const { processingTypes, reason } = req.body;
@@ -159,9 +155,8 @@ router.post('/dsar/restrict', async (req: AuthRequest, res: Response) => {
       message: 'Your restriction request has been received and will be processed.',
       data: { requestId: dsar.id },
     });
-  } catch (error: any) {
-    logger.error('Failed to process restriction request', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to process restriction request' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -169,7 +164,7 @@ router.post('/dsar/restrict', async (req: AuthRequest, res: Response) => {
  * GET /api/gdpr/download/:requestId
  * Download exported data
  */
-router.get('/download/:requestId', async (req: AuthRequest, res: Response) => {
+router.get('/download/:requestId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const { requestId } = req.params;
@@ -194,9 +189,8 @@ router.get('/download/:requestId', async (req: AuthRequest, res: Response) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="athena-data-export-${requestId}.json"`);
     res.json(exportData);
-  } catch (error: any) {
-    logger.error('Failed to download export data', { error, userId: req.user?.id, requestId: req.params.requestId });
-    res.status(500).json({ success: false, error: 'Failed to download export data' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -208,7 +202,7 @@ router.get('/download/:requestId', async (req: AuthRequest, res: Response) => {
  * GET /api/gdpr/consents
  * Get all user consents
  */
-router.get('/consents', async (req: AuthRequest, res: Response) => {
+router.get('/consents', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const consents = await gdprService.getUserConsents(userId);
@@ -220,9 +214,8 @@ router.get('/consents', async (req: AuthRequest, res: Response) => {
     }
 
     res.json({ success: true, data: consentState });
-  } catch (error: any) {
-    logger.error('Failed to retrieve consents', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to retrieve consents' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -230,7 +223,7 @@ router.get('/consents', async (req: AuthRequest, res: Response) => {
  * PUT /api/gdpr/consents
  * Update user consents (bulk update)
  */
-router.put('/consents', async (req: AuthRequest, res: Response) => {
+router.put('/consents', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const { consents } = req.body;
@@ -251,9 +244,8 @@ router.put('/consents', async (req: AuthRequest, res: Response) => {
     await gdprService.bulkUpdateConsents(userId, consents, context);
 
     res.json({ success: true, message: 'Consents updated successfully' });
-  } catch (error: any) {
-    logger.error('Failed to update consents', { error, userId: req.user?.id });
-    res.status(500).json({ success: false, error: 'Failed to update consents' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -261,7 +253,7 @@ router.put('/consents', async (req: AuthRequest, res: Response) => {
  * POST /api/gdpr/consents/:type
  * Update single consent
  */
-router.post('/consents/:type', async (req: AuthRequest, res: Response) => {
+router.post('/consents/:type', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const consentType = req.params.type as ConsentType;
@@ -283,9 +275,8 @@ router.post('/consents/:type', async (req: AuthRequest, res: Response) => {
     const consent = await gdprService.recordConsent(userId, consentType, granted, context);
 
     res.json({ success: true, data: consent });
-  } catch (error: any) {
-    logger.error('Failed to update consent', { error, userId: req.user?.id, consentType: req.params.type });
-    res.status(500).json({ success: false, error: 'Failed to update consent' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -297,7 +288,7 @@ router.post('/consents/:type', async (req: AuthRequest, res: Response) => {
  * GET /api/gdpr/cookies/:visitorId
  * Get cookie preferences for visitor
  */
-router.get('/cookies/:visitorId', async (req: AuthRequest, res: Response) => {
+router.get('/cookies/:visitorId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { visitorId } = req.params;
     const consent = await gdprService.getCookieConsent(visitorId);
@@ -326,9 +317,8 @@ router.get('/cookies/:visitorId', async (req: AuthRequest, res: Response) => {
         consentedAt: consent.consentedAt,
       },
     });
-  } catch (error: any) {
-    logger.error('Failed to retrieve cookie preferences', { error, visitorId: req.params.visitorId });
-    res.status(500).json({ success: false, error: 'Failed to retrieve cookie preferences' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -336,7 +326,7 @@ router.get('/cookies/:visitorId', async (req: AuthRequest, res: Response) => {
  * POST /api/gdpr/cookies
  * Record cookie consent
  */
-router.post('/cookies', async (req: AuthRequest, res: Response) => {
+router.post('/cookies', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { visitorId, analytics, marketing, functional } = req.body;
 
@@ -364,9 +354,8 @@ router.post('/cookies', async (req: AuthRequest, res: Response) => {
     );
 
     res.json({ success: true, data: consent });
-  } catch (error: any) {
-    logger.error('Failed to record cookie consent', { error, visitorId: req.body.visitorId });
-    res.status(500).json({ success: false, error: 'Failed to record cookie consent' });
+  } catch (error) {
+    next(error);
   }
 });
 

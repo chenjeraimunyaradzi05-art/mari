@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
@@ -10,7 +10,7 @@ const router = Router();
 // ===========================================
 
 // GET /api/impact/metrics - Get user's impact metrics
-router.get('/metrics', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/metrics', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
 
@@ -21,13 +21,12 @@ router.get('/metrics', authenticate, async (req: AuthRequest, res: Response) => 
 
     res.json({ success: true, data: metrics });
   } catch (error) {
-    logger.error('Error fetching impact metrics', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch impact metrics' });
+    next(error);
   }
 });
 
 // POST /api/impact/metrics - Record an impact metric
-router.post('/metrics', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/metrics', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const { metricType, value, description, evidenceUrl, communityType, programId } = req.body;
@@ -50,13 +49,12 @@ router.post('/metrics', authenticate, async (req: AuthRequest, res: Response) =>
 
     res.status(201).json({ success: true, data: metric });
   } catch (error) {
-    logger.error('Error recording impact metric', { error });
-    res.status(500).json({ success: false, error: 'Failed to record impact metric' });
+    next(error);
   }
 });
 
 // GET /api/impact/reports - Get impact reports (public)
-router.get('/reports', async (req: Request, res: Response) => {
+router.get('/reports', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { communityType, region, period } = req.query;
 
@@ -73,13 +71,12 @@ router.get('/reports', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: reports });
   } catch (error) {
-    logger.error('Error fetching impact reports', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch impact reports' });
+    next(error);
   }
 });
 
 // GET /api/impact/reports/:id - Get specific impact report
-router.get('/reports/:id', async (req: Request, res: Response) => {
+router.get('/reports/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -93,13 +90,12 @@ router.get('/reports/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: report });
   } catch (error) {
-    logger.error('Error fetching impact report', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch impact report' });
+    next(error);
   }
 });
 
 // GET /api/impact/summary - Get user's impact summary
-router.get('/summary', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/summary', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
 
@@ -139,8 +135,7 @@ router.get('/summary', authenticate, async (req: AuthRequest, res: Response) => 
       },
     });
   } catch (error) {
-    logger.error('Error fetching impact summary', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch impact summary' });
+    next(error);
   }
 });
 
@@ -149,7 +144,7 @@ router.get('/summary', authenticate, async (req: AuthRequest, res: Response) => 
 // ===========================================
 
 // GET /api/impact/partners - List impact partners
-router.get('/partners', async (req: Request, res: Response) => {
+router.get('/partners', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region, type, focusArea } = req.query;
 
@@ -165,13 +160,12 @@ router.get('/partners', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: partners });
   } catch (error) {
-    logger.error('Error fetching impact partners', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch impact partners' });
+    next(error);
   }
 });
 
 // GET /api/impact/partners/:id - Get specific partner
-router.get('/partners/:id', async (req: Request, res: Response) => {
+router.get('/partners/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -185,8 +179,7 @@ router.get('/partners/:id', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: partner });
   } catch (error) {
-    logger.error('Error fetching impact partner', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch impact partner' });
+    next(error);
   }
 });
 
@@ -195,7 +188,7 @@ router.get('/partners/:id', async (req: Request, res: Response) => {
 // ===========================================
 
 // GET /api/impact/dv-services - List DV support services
-router.get('/dv-services', async (req: Request, res: Response) => {
+router.get('/dv-services', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { state, type, national } = req.query;
 
@@ -211,8 +204,7 @@ router.get('/dv-services', async (req: Request, res: Response) => {
 
     res.json({ success: true, data: services });
   } catch (error) {
-    logger.error('Error fetching DV services', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch DV services' });
+    next(error);
   }
 });
 
@@ -221,7 +213,7 @@ router.get('/dv-services', async (req: Request, res: Response) => {
 // ===========================================
 
 // GET /api/impact/safety-plan - Get user's safety plan
-router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
 
@@ -231,13 +223,12 @@ router.get('/safety-plan', authenticate, async (req: AuthRequest, res: Response)
 
     res.json({ success: true, data: safetyPlan });
   } catch (error) {
-    logger.error('Error fetching safety plan', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch safety plan' });
+    next(error);
   }
 });
 
 // POST /api/impact/safety-plan - Create/update safety plan
-router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const {
@@ -277,8 +268,7 @@ router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response
 
     res.json({ success: true, data: safetyPlan });
   } catch (error) {
-    logger.error('Error saving safety plan', { error });
-    res.status(500).json({ success: false, error: 'Failed to save safety plan' });
+    next(error);
   }
 });
 
@@ -287,7 +277,7 @@ router.post('/safety-plan', authenticate, async (req: AuthRequest, res: Response
 // ===========================================
 
 // GET /api/impact/accessibility - Get user's accessibility profile
-router.get('/accessibility', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/accessibility', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
 
@@ -297,13 +287,12 @@ router.get('/accessibility', authenticate, async (req: AuthRequest, res: Respons
 
     res.json({ success: true, data: profile });
   } catch (error) {
-    logger.error('Error fetching accessibility profile', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch accessibility profile' });
+    next(error);
   }
 });
 
 // POST /api/impact/accessibility - Create/update accessibility profile
-router.post('/accessibility', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/accessibility', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
     const {
@@ -356,13 +345,12 @@ router.post('/accessibility', authenticate, async (req: AuthRequest, res: Respon
 
     res.json({ success: true, data: profile });
   } catch (error) {
-    logger.error('Error saving accessibility profile', { error });
-    res.status(500).json({ success: false, error: 'Failed to save accessibility profile' });
+    next(error);
   }
 });
 
 // GET /api/impact/disability-friendly-employers - List disability-friendly employers
-router.get('/disability-friendly-employers', async (req: Request, res: Response) => {
+router.get('/disability-friendly-employers', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { hasRemote, hasFlexible, minRating } = req.query;
 
@@ -383,8 +371,7 @@ router.get('/disability-friendly-employers', async (req: Request, res: Response)
 
     res.json({ success: true, data: employers });
   } catch (error) {
-    logger.error('Error fetching disability-friendly employers', { error });
-    res.status(500).json({ success: false, error: 'Failed to fetch employers' });
+    next(error);
   }
 });
 

@@ -4,7 +4,7 @@
  * Phase 4: UK/EU Market Launch
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { 
@@ -216,7 +216,7 @@ router.use(authenticate);
  * POST /api/compliance/report-content
  * Report illegal or harmful content (UK Online Safety requirement)
  */
-router.post('/report-content', async (req: AuthRequest, res: Response) => {
+router.post('/report-content', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { contentType, contentId, reason, details } = req.body;
     const userId = req.user!.id;
@@ -250,9 +250,8 @@ router.post('/report-content', async (req: AuthRequest, res: Response) => {
         reviewDeadline: report.reviewDeadline,
       },
     });
-  } catch (error: any) {
-    logger.error('Failed to submit harmful content report', { error });
-    res.status(500).json({ success: false, error: 'Failed to submit report' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -260,7 +259,7 @@ router.post('/report-content', async (req: AuthRequest, res: Response) => {
  * GET /api/compliance/my-region
  * Get user's detected region and applicable compliance
  */
-router.get('/my-region', async (req: AuthRequest, res: Response) => {
+router.get('/my-region', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const user = req.user!;
     const countryCode = req.headers['cf-ipcountry'] as string || 'AU';
@@ -276,9 +275,8 @@ router.get('/my-region', async (req: AuthRequest, res: Response) => {
         gdprApplicable: isGDPRRegion(region),
       },
     });
-  } catch (error: any) {
-    logger.error('Failed to get region info', { error });
-    res.status(500).json({ success: false, error: 'Failed to get region information' });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -286,7 +284,7 @@ router.get('/my-region', async (req: AuthRequest, res: Response) => {
  * PUT /api/compliance/region-preferences
  * Update user's region preferences
  */
-router.put('/region-preferences', async (req: AuthRequest, res: Response) => {
+router.put('/region-preferences', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { region, locale, currency, timezone } = req.body;
     const userId = req.user!.id;
@@ -312,9 +310,8 @@ router.put('/region-preferences', async (req: AuthRequest, res: Response) => {
       message: 'Region preferences updated',
       data: updatedPreferences,
     });
-  } catch (error: any) {
-    logger.error('Failed to update region preferences', { error });
-    res.status(500).json({ success: false, error: 'Failed to update preferences' });
+  } catch (error) {
+    next(error);
   }
 });
 
