@@ -5,6 +5,8 @@
 ## Product & Localization
 - [ ] Launch locale bundles for: `en-US`, `es-MX`, `pt-BR`, `ja`, `ko`, `hi`
 - [ ] Localize key onboarding, billing, and safety flows
+- [ ] Review all flows for copy coverage
+- [ ] QA locale switching with RTL support where applicable
 - [ ] Add timezones for Tokyo, Seoul, Kolkata, São Paulo, Mexico City
 - [ ] Add currencies: JPY, KRW, INR, BRL, MXN
 
