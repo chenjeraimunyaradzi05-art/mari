@@ -1,6 +1,6 @@
 # 🏛️ Athena Platform
 
-**The Career SuperApp for Young Professionals**
+## The Career SuperApp for Young Professionals
 
 Athena is a comprehensive career development platform designed to help young professionals navigate their career journey through jobs, mentorship, education, community, and AI-powered guidance.
 
@@ -9,6 +9,7 @@ Athena is a comprehensive career development platform designed to help young pro
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Node.js 20.x or later
 - PostgreSQL 16+
 - Redis 7+
@@ -40,15 +41,16 @@ npm run dev
 ```
 
 The app will be available at:
-- **Frontend:** http://localhost:3000
-- **Backend API:** http://localhost:5000
-- **API Docs:** http://localhost:5000/api/docs
+
+- **Frontend:** <http://localhost:3000>
+- **Backend API:** <http://localhost:5000>
+- **API Docs:** <http://localhost:5000/api/docs>
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 athena-platform/
 ├── client/          # Next.js 14 frontend
 ├── server/          # Express.js backend API
@@ -64,6 +66,7 @@ athena-platform/
 ## 🧩 Key Features
 
 ### For Job Seekers
+
 - 🔍 AI-powered job matching and recommendations
 - 📝 Resume builder with AI suggestions
 - 🎯 Interview preparation coach
@@ -71,18 +74,21 @@ athena-platform/
 - 🌐 Professional networking
 
 ### For Employers
+
 - 📢 Job posting and applicant management
 - 🤖 AI-assisted candidate screening
 - 📈 Employer branding tools
 - 💼 Company culture showcase
 
 ### For Creators & Mentors
+
 - 🎓 Course creation platform
 - 👥 Mentorship programs
 - 💰 Monetization tools
 - 📹 Video content hosting
 
 ### Community Features
+
 - 🗣️ Professional groups and events
 - 📱 Real-time messaging
 - 📰 Content feed with engagement
@@ -133,6 +139,7 @@ npm run e2e
 ```
 
 **Test Coverage:**
+
 - Server: 22 test suites, 99 tests ✅
 - Client: TypeScript build passes ✅
 
@@ -152,6 +159,7 @@ npm run e2e
 ## 🚢 Deployment
 
 ### Backend (Railway)
+
 1. Connect your GitHub repository
 2. Set root directory to `athena-platform/server`
 3. Railway auto-detects `Dockerfile` / `nixpacks.toml`
@@ -159,6 +167,7 @@ npm run e2e
 5. Add environment variables from `server/.env.railway`
 
 ### Frontend (Netlify)
+
 1. Connect your GitHub repository
 2. Set base directory to `athena-platform/client`
 3. `@netlify/plugin-nextjs` handles SSR, API routes, and middleware automatically
@@ -204,4 +213,4 @@ For support, please contact the development team.
 
 ---
 
-**Built with ❤️ for the next generation of professionals**
+**Built with love for the next generation of professionals**
