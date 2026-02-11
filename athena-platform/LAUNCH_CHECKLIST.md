@@ -58,9 +58,9 @@ Copy from `.env.production.example` and configure:
 | `JWT_SECRET` | ✅ | Min 32 random chars |
 | `JWT_EXPIRES_IN` | ✅ | e.g., `7d` |
 | `REDIS_URL` | ✅ | Redis connection string |
-| `SENDGRID_API_KEY` | ✅ | For transactional emails |
-| `STRIPE_SECRET_KEY` | ✅ | Stripe live key |
-| `STRIPE_WEBHOOK_SECRET` | ✅ | Webhook signing secret |
+| `SENDGRID_API_KEY` | ⚠️ | For transactional emails (logs in dev if absent) |
+| `STRIPE_SECRET_KEY` | ⚠️ | Stripe live key (payments disabled if absent) |
+| `STRIPE_WEBHOOK_SECRET` | ⚠️ | Webhook signing secret |
 | `OPENAI_API_KEY` | ⚠️ | For AI features |
 | `AWS_ACCESS_KEY_ID` | ⚠️ | For file uploads |
 | `AWS_SECRET_ACCESS_KEY` | ⚠️ | For file uploads |
@@ -94,7 +94,7 @@ npm start
 
 ### 3.2 Build Settings
 - **Build Command:** `npm run build`
-- **Publish Directory:** `.next` (Vercel) or `out` (static)
+- **Publish Directory:** `.next` (auto-handled by `@netlify/plugin-nextjs`)
 - **Node Version:** `20.x`
 
 ### 3.3 Redirects & Headers
@@ -151,7 +151,7 @@ Ensure `netlify.toml` or `vercel.json` includes:
 - [x] **Helmet.js** enabled (security headers)
 - [x] **CORS** configured with allowed origins
 - [x] **Rate Limiting** enabled
-- [x] **Input Validation** via Zod schemas
+- [x] **Input Validation** via express-validator
 - [x] **SQL Injection Protection** via Prisma ORM
 - [x] **XSS Protection** via React escaping
 

@@ -144,26 +144,27 @@ npm run e2e
 - 🛡️ Helmet.js security headers
 - 🚦 Rate limiting per endpoint
 - 🔐 Password hashing with bcrypt
-- ✅ Input validation with Zod
+- ✅ Input validation with express-validator
 - 🗄️ SQL injection prevention via Prisma
 
 ---
 
 ## 🚢 Deployment
 
-### Backend (Render/Railway)
+### Backend (Railway)
 1. Connect your GitHub repository
-2. Set build command: `npm run build`
-3. Set start command: `npm start`
-4. Add environment variables from `.env.example`
+2. Set root directory to `athena-platform/server`
+3. Railway auto-detects `Dockerfile` / `nixpacks.toml`
+4. Entry point: `node dist/start.js` (runs Prisma migrations then boots server)
+5. Add environment variables from `server/.env.railway`
 
-### Frontend (Netlify/Vercel)
+### Frontend (Netlify)
 1. Connect your GitHub repository
-2. Set build command: `npm run build`
-3. Set publish directory: `.next`
-4. Add environment variables from `.env.local.example`
+2. Set base directory to `athena-platform/client`
+3. `@netlify/plugin-nextjs` handles SSR, API routes, and middleware automatically
+4. Add environment variables: `NEXT_PUBLIC_API_URL` = Railway backend URL
 
-See [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) for complete deployment guide.
+See [DEPLOY.md](./DEPLOY.md) for the complete deployment guide.
 
 ---
 
@@ -172,6 +173,9 @@ See [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) for complete deployment guide.
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /health` | Basic health check |
+| `GET /health/ready` | Readiness probe (checks DB) |
+| `GET /health/detailed` | Detailed dependency status |
+| `GET /health/auth-diag` | Auth flow diagnostics (temporary) |
 | `GET /livez` | Kubernetes liveness probe |
 | `GET /readyz` | Kubernetes readiness probe |
 | `GET /metrics` | Prometheus metrics |

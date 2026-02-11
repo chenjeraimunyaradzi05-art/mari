@@ -36,7 +36,7 @@ Railway is currently building from the root directory, which is wrong. You need 
    DATABASE_URL = postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
    JWT_SECRET = (generate a 32+ character random string)
    NODE_ENV = production
-   PORT = 5000
+   # PORT is auto-injected by Railway — do not hardcode
    ```
 
 ### Step 4: Add the Web Service
@@ -97,7 +97,7 @@ Your Railway Project
 | `DATABASE_URL` | Yes | `postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}` |
 | `JWT_SECRET` | Yes | `your-32-char-secret-key` |
 | `NODE_ENV` | Yes | `production` |
-| `PORT` | No | `3001` |
+| `PORT` | No | Auto-injected by Railway |
 | `REDIS_URL` | No | `redis://...` |
 | `STRIPE_SECRET_KEY` | No | `sk_live_...` |
 | `OPENAI_API_KEY` | No | `sk-...` |
@@ -107,7 +107,7 @@ Your Railway Project
 |----------|----------|---------|
 | `NEXT_PUBLIC_API_URL` | Yes | `https://mari-production-5c60.up.railway.app` |
 | `NODE_ENV` | Yes | `production` |
-| `NEXTAUTH_SECRET` | No | `random-string` |
+| `NEXT_PUBLIC_APP_URL` | No | Your Netlify site URL |
 
 ---
 

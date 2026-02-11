@@ -104,7 +104,7 @@ Automated deployment workflows are in `.github/workflows/`:
 |---------|----------|-----------|-------------|
 | PostgreSQL | Railway | - | Internal reference |
 | API Server | Railway | `athena-platform/server` | `https://mari-production-5c60.up.railway.app` |
-| Web Client | Netlify/Railway | `athena-platform/client` | `https://athena.netlify.app` |
+| Web Client | Netlify/Railway | `athena-platform/client` | `https://athena-empress.netlify.app` |
 | iOS App | App Store | `athena-platform/mobile` | App Store link |
 | Android App | Google Play | `athena-platform/mobile` | Play Store link |
 
@@ -116,7 +116,7 @@ Automated deployment workflows are in `.github/workflows/`:
 DATABASE_URL=postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
 JWT_SECRET=your-32-character-secret-key-here
 NODE_ENV=production
-PORT=3001
+# PORT is auto-injected by Railway — do not set manually
 ```
 
 ### API Server (Optional)
@@ -138,10 +138,9 @@ NODE_ENV=production
 
 ### Web Client (Optional)
 ```env
-NEXTAUTH_SECRET=random-string
-NEXTAUTH_URL=https://your-site.netlify.app
-NEXT_PUBLIC_STRIPE_PUBLIC_KEY=pk_live_...
-SENTRY_DSN=https://...
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
+NEXT_PUBLIC_SENTRY_DSN=https://...
+NEXT_PUBLIC_APP_URL=https://athena-empress.netlify.app
 ```
 
 ## Troubleshooting

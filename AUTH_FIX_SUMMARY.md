@@ -1,8 +1,8 @@
 # Authentication Fix Summary
 
-**Date:** January 30, 2026  
-**Issue:** Registration and login not working  
-**Status:** FIXED
+**Date:** January 30, 2026 (Updated: February 11, 2026)  
+**Issue:** Registration and login not working (500 Internal Server Error)  
+**Status:** FIXED ✅
 
 ## Root Causes Identified
 
@@ -225,7 +225,7 @@ const res = await authApi.login({
   password: 'Password123',
 });
 
-// Token is automatically stored in localStorage and passed in subsequent requests
+// Access token is stored in-memory (not localStorage). Refresh token is HttpOnly cookie.
 ```
 
 ---
@@ -322,14 +322,73 @@ npm test 2>&1 | grep -A5 "auth"
 
 ---
 
-## Database Note
+## Root Cause #3: Missing Session Migration (February 2026)
 
-**Current Status:** Database at `ep-autumn-tree-a7yj09fh-pooler.ap-southeast-2.aws.neon.tech` is not currently accessible from this environment.
+**Severity:** CRITICAL — This was the actual 500 error root cause  
+**Location:** Database schema vs. migration files
 
-**What needs to happen:**
-1. Ensure database is running and accessible
-2. Run `npx prisma db push` to sync schema
-3. Run tests with `npm test` to verify everything works
+**Problem:**
+- The `Session` model in `schema.prisma` had `revokedAt` and `updatedAt` fields
+- No migration existed to add these columns to the database
+- Every Prisma query on the Session table failed: `"The column Session.revokedAt does not exist"`
+- This crashed ALL auth routes (login, register, refresh) with 500 errors
 
-The Prisma migration file `20260128051430_women_only_gate` exists and includes the `womanSelfAttested` column addition.
+**Fix Applied:**
+- Created migration `20260211010000_add_session_revoked_updated` with:
+  - `ALTER TABLE "Session" ADD COLUMN "revokedAt" TIMESTAMP(3);`
+  - `ALTER TABLE "Session" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`
+  - `CREATE INDEX "Session_revokedAt_idx" ON "Session"("revokedAt");`
+
+**Diagnostic:** `/health/auth-diag` endpoint checks all 12 auth dependencies and identified this issue.
+
+---
+
+## Additional Fixes (February 2026)
+
+1. **Referral code exhaustion** — generation loop now throws `ApiError(500)` after 10 failed attempts instead of silently continuing with a duplicate code (would cause P2002 → 500)
+2. **Email blocking** — `forgot-password` and `verify-email` email sends are now fire-and-forget (were blocking the response)
+3. **Error handler debug exposure** — debug info (raw message + stack) is now conditional (dev + 500s only)
+4. **X-Frame-Options conflict** — aligned `netlify.toml` (was DENY) with `next.config.js` (SAMEORIGIN)
+5. **Auth cookie forwarding** — `/api/auth/*` routes excluded from middleware proxy rewrite so Next.js API route handlers forward `Set-Cookie` headers reliably
+6. **Session cleanup** — periodic cleanup runs every 6 hours + once at startup
+
+---
+
+## Current Auth Architecture
+
+```
+Browser → Netlify (Next.js) → Railway (Express API)
+
+1. Login/Register:
+   Browser POST /api/auth/login
+   → Next.js API route handler (client/src/app/api/auth/login/route.ts)
+   → Forwards to Railway backend
+   → Backend returns accessToken in JSON body + refreshToken as HttpOnly cookie
+   → API route handler forwards Set-Cookie header to browser
+   → Client stores accessToken in-memory only (NOT localStorage)
+
+2. Authenticated requests:
+   Browser GET /api/users/me
+   → Netlify middleware rewrites to Railway (edge function)
+   → Authorization: Bearer <accessToken> header forwarded
+
+3. Token refresh:
+   Browser POST /api/auth/refresh (with HttpOnly cookie)
+   → Next.js API route handler forwards cookie to Railway
+   → Backend validates refreshToken, issues new accessToken + rotates cookie
+   → API route handler forwards new Set-Cookie to browser
+```
+
+**Key design decisions:**
+- Access tokens: in-memory only (15min expiry) — no XSS risk
+- Refresh tokens: HttpOnly Secure SameSite=Lax cookies — no JS access
+- Auth routes (`/api/auth/*`): go through Next.js API route handlers (not edge rewrite) to reliably forward cookies
+- Other API routes (`/api/*`): go through Netlify middleware edge rewrite for performance
+
+---
+
+## Database
+
+**Current:** PostgreSQL 16 on Railway (auto-managed `DATABASE_URL`)
+**Migrations:** Run automatically on deploy via `start.ts` → `prisma migrate deploy`
 

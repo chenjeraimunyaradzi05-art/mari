@@ -29,10 +29,9 @@ Go to Site Settings → Environment Variables and add:
 
 ```
 NEXT_PUBLIC_API_URL=https://mari-production-5c60.up.railway.app
+NEXT_PUBLIC_APP_URL=https://athena-empress.netlify.app
 NODE_ENV=production
-NEXTAUTH_SECRET=your-nextauth-secret-here
-NEXTAUTH_URL=https://your-netlify-site.netlify.app
-NEXT_PUBLIC_STRIPE_PUBLIC_KEY=pk_live_xxx (if using Stripe)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx (if using Stripe)
 ```
 
 ### Step 4: Install Next.js Plugin
@@ -130,12 +129,11 @@ netlify deploy --prod
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `NEXT_PUBLIC_API_URL` | Yes | `https://mari-production-5c60.up.railway.app` |
+| `NEXT_PUBLIC_APP_URL` | Yes | Your Netlify site URL (e.g. `https://athena-empress.netlify.app`) |
 | `NODE_ENV` | Yes | Set to `production` |
-| `NEXTAUTH_SECRET` | Yes | Random string for NextAuth |
-| `NEXTAUTH_URL` | Yes | Your Netlify site URL |
-| `NEXT_PUBLIC_STRIPE_PUBLIC_KEY` | No | Stripe publishable key |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key |
 | `NEXT_PUBLIC_POSTHOG_KEY` | No | PostHog analytics key |
-| `SENTRY_DSN` | No | Sentry error tracking |
+| `NEXT_PUBLIC_SENTRY_DSN` | No | Sentry error tracking |
 
 ## Re-Authorizing GitHub Connection
 
