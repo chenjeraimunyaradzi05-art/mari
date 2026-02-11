@@ -400,6 +400,14 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new ApiError(401, 'Invalid refresh token');
     }
 
+    // Reject revoked or expired sessions
+    if (session.revokedAt) {
+      throw new ApiError(401, 'Session has been revoked');
+    }
+    if (session.expiresAt && session.expiresAt < new Date()) {
+      throw new ApiError(401, 'Session has expired');
+    }
+
     // Get user
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },

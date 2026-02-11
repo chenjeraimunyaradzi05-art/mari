@@ -23,15 +23,6 @@ const authRoutes = [
   '/forgot-password',
 ];
 
-// Routes that are always public
-const publicRoutes = [
-  '/',
-  '/about',
-  '/privacy',
-  '/terms',
-  '/contact',
-];
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -96,8 +87,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith(route)
   );
 
-  // Check if the route is an auth route (login, register, etc.)
-  const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
+  // Check if the route is an auth page (login, register, etc.)
+  const isAuthPage = authRoutes.some((route) => pathname.startsWith(route));
 
   // If accessing protected route without auth, redirect to login
   if (isProtectedRoute && !isAuthenticated) {
@@ -106,8 +97,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // If accessing auth route while authenticated, redirect to dashboard
-  if (isAuthRoute && isAuthenticated) {
+  // If accessing auth page while authenticated, redirect to dashboard
+  if (isAuthPage && isAuthenticated) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 

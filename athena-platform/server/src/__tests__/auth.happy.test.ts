@@ -91,8 +91,8 @@ jest.mock('../utils/prisma', () => {
       create: jest.fn(async () => ({})),
       deleteMany: jest.fn(async () => ({ count: 0 })),
       findFirst: jest.fn(async ({ where }: any) => {
-        if (where?.refreshToken && where?.userId) {
-          if (where.refreshToken === SESSION.refreshToken && where.userId === SESSION.userId) {
+        if (where?.refreshToken === SESSION.refreshToken) {
+          if (!where?.userId || where.userId === SESSION.userId) {
             return SESSION;
           }
         }

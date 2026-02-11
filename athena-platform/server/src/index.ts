@@ -168,10 +168,18 @@ const isCorsOriginAllowed = (origin: string | undefined): boolean => {
     return true;
   }
 
-  // Allow known deployment platform subdomains (Netlify, Railway)
-  if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
-      /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
-    return true;
+  // In production, only allow our specific deployment subdomains.
+  // In development, allow any Netlify/Railway subdomain for flexibility.
+  if (process.env.NODE_ENV === 'production') {
+    if (origin === 'https://athena-empress.netlify.app' ||
+        origin === 'https://mari-production-5c60.up.railway.app') {
+      return true;
+    }
+  } else {
+    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
+        /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
+      return true;
+    }
   }
 
   // In development, allow any localhost variant
