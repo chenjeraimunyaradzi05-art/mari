@@ -3,9 +3,18 @@
 **Phase 5: Mobile Parity & Production - Step 99**  
 **Last Updated:** January 29, 2026
 
+> **Note:** This document describes the **target-state** DNS/SSL architecture for when
+> ATHENA moves to a custom domain (`athena.app`) with Cloudflare, CloudFront CDN, and
+> multi-region infrastructure. The **current** deployment uses:
+>
+> - **Frontend:** `https://athena-empress.netlify.app` (Netlify, auto-SSL)
+> - **API:** `https://mari-production-5c60.up.railway.app` (Railway, auto-SSL)
+>
+> For the current setup, see [DEPLOY.md](../../../DEPLOY.md) and [NETLIFY_SETUP.md](../../../NETLIFY_SETUP.md).
+
 ## Overview
 
-This document outlines the DNS and SSL/TLS configuration for the ATHENA platform production deployment.
+This document outlines the **target-state** DNS and SSL/TLS configuration for the ATHENA platform production deployment.
 
 ---
 

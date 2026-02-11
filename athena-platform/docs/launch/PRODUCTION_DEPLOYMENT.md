@@ -1,5 +1,9 @@
 # Athena Production Deployment Guide
 
+> **Current deployment:** Railway (backend) + Netlify (frontend).
+> See [DEPLOY.md](../../../athena-platform/DEPLOY.md) for the quick-start guide.
+> This document covers additional deployment options and production hardening.
+
 ## 🚀 Quick Deployment Checklist
 
 ### Step 1: Database Migration
@@ -103,7 +107,7 @@ docker-compose logs -f
 cd server
 npm ci --production
 npm run build
-pm2 start dist/index.js --name athena-api
+pm2 start dist/start.js --name athena-api
 
 # Client
 cd client
@@ -112,20 +116,22 @@ npm run build
 pm2 start npm --name athena-web -- start
 ```
 
-**Option C: Vercel + Railway**
-- Client: Deploy to Vercel (connect GitHub repo)
-- Server: Deploy to Railway (connect GitHub repo)
-- Database: Use Railway PostgreSQL or Supabase
+**Option C: Netlify + Railway (Current)**
+- Client: Deploy to Netlify (connect GitHub repo, base dir `athena-platform/client`)
+- Server: Deploy to Railway (connect GitHub repo, root dir `athena-platform/server`)
+- Database: Railway PostgreSQL (auto-managed `DATABASE_URL`)
+- Migrations run automatically on deploy via `start.ts` → `prisma migrate deploy`
 
 ### Step 6: Verify Deployment
 
 ```bash
 # Check health endpoints
-curl https://api.athena.com/health
-curl https://api.athena.com/health/ready
+curl https://mari-production-5c60.up.railway.app/health
+curl https://mari-production-5c60.up.railway.app/readyz
+curl https://mari-production-5c60.up.railway.app/health/auth-diag
 
 # Check frontend
-curl https://athena.com
+curl https://athena-empress.netlify.app
 ```
 
 ---
@@ -145,10 +151,12 @@ curl https://athena.com
 
 ## 📊 Post-Launch Monitoring
 
-1. **Sentry**: Check for errors at https://sentry.io
-2. **Datadog**: View metrics at https://app.datadoghq.com
-3. **Stripe**: Monitor payments at https://dashboard.stripe.com
-4. **Database**: Monitor connections and slow queries
+1. **Sentry**: Check for errors at [sentry.io](https://sentry.io)
+2. **Railway Logs**: View API logs in Railway Dashboard → Service → Logs
+3. **Netlify Deploys**: Check build logs in Netlify Dashboard → Deploys
+4. **Stripe**: Monitor payments at [dashboard.stripe.com](https://dashboard.stripe.com)
+5. **Database**: Monitor connections via Railway PostgreSQL metrics
+6. **Auth Diagnostics**: `GET /health/auth-diag` (12-point auth flow check)
 
 ---
 

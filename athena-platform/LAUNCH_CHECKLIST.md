@@ -1,7 +1,10 @@
 # 🚀 Athena Platform - Launch Checklist
 
-**Last Updated:** January 21, 2026  
+**Last Updated:** February 11, 2026  
 **Status:** Ready for Launch
+
+> **See also:** [Launch Day Procedures](./docs/launch/LAUNCH_CHECKLIST.md) for the T-24h / T-1h / T-0
+> launch sequence, monitoring checklist, rollback procedure, and success metrics.
 
 ---
 

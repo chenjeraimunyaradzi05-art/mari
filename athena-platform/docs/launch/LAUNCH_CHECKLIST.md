@@ -4,6 +4,9 @@
 **Target Launch Date:** ________________  
 **Status:** Ready for Launch ✅
 
+> **See also:** [Infrastructure LAUNCH_CHECKLIST](../../LAUNCH_CHECKLIST.md) for the detailed
+> infrastructure setup, env var reference, security hardening, and go-live sequence.
+
 ---
 
 ## Pre-Launch Verification
@@ -64,19 +67,19 @@ node scripts/migration-dry-run.js
 pg_dump $DATABASE_URL > backup_pre_launch.sql
 
 # 4. Verify all health checks
-curl https://api.athena.app/health/detailed
+curl https://mari-production-5c60.up.railway.app/health/detailed
 ```
 
 ### T-1 Hour
 ```bash
 # 1. Enable maintenance mode
-curl -X POST https://api.athena.app/admin/maintenance \
+curl -X POST https://mari-production-5c60.up.railway.app/admin/maintenance \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"enabled": true, "message": "Launching soon..."}'
 
-# 2. Deploy to production
-vercel --prod
-railway up
+# 2. Deploy to production (auto-deploys on push to main)
+git push origin main
+# Railway and Netlify will auto-deploy from GitHub
 
 # 3. Run database migrations
 npx prisma migrate deploy
@@ -91,7 +94,7 @@ node scripts/warm-cdn.js
 ### T-0 (Launch)
 ```bash
 # 1. Disable maintenance mode
-curl -X POST https://api.athena.app/admin/maintenance \
+curl -X POST https://mari-production-5c60.up.railway.app/admin/maintenance \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"enabled": false}'
 
@@ -99,10 +102,10 @@ curl -X POST https://api.athena.app/admin/maintenance \
 node scripts/smoke-test.js
 
 # 3. Monitor dashboards
-# - Sentry: https://sentry.io/athena
-# - PostHog: https://app.posthog.com/athena
-# - CloudWatch: AWS Console
-# - Vercel: https://vercel.com/athena
+# - Sentry: https://sentry.io
+# - PostHog: https://app.posthog.com
+# - Railway: https://railway.app/dashboard
+# - Netlify: https://app.netlify.com
 
 # 4. Announce launch!
 echo "🚀 ATHENA is LIVE!"
@@ -141,13 +144,13 @@ If critical issues are detected:
 
 ```bash
 # 1. Enable maintenance mode immediately
-curl -X POST https://api.athena.app/admin/maintenance \
+curl -X POST https://mari-production-5c60.up.railway.app/admin/maintenance \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"enabled": true, "message": "Maintenance in progress"}'
 
 # 2. Rollback deployment
-vercel rollback
-railway rollback
+# Railway: Dashboard → Deployments → Previous deploy → Redeploy
+# Netlify: Dashboard → Deploys → Previous deploy → Publish deploy
 
 # 3. Restore database if needed
 psql $DATABASE_URL < backup_pre_launch.sql
