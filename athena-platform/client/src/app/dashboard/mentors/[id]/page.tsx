@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
@@ -30,6 +30,9 @@ interface TimeSlot {
   available: boolean;
 }
 
+const FALLBACK_NOW = new Date('2026-02-10T12:00:00.000Z');
+const FALLBACK_MONTH = new Date('2026-02-01T00:00:00.000Z');
+
 export default function MentorDetailPage() {
   const params = useParams();
   const mentorId = params.id as string;
@@ -39,8 +42,14 @@ export default function MentorDetailPage() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [sessionType, setSessionType] = useState<'30' | '60'>('30');
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [bookingStep, setBookingStep] = useState<'select' | 'confirm' | 'success'>('select');
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setCurrentMonth(new Date());
+    setIsHydrated(true);
+  }, []);
 
   // Mock mentor data
   const mockMentor = {
@@ -97,6 +106,7 @@ I believe in practical, actionable advice backed by real-world experience. My me
   };
 
   const displayMentor = mentor || mockMentor;
+  const effectiveCurrentMonth = currentMonth ?? FALLBACK_MONTH;
 
   // Generate calendar days
   const getDaysInMonth = (date: Date) => {
@@ -121,7 +131,8 @@ I believe in practical, actionable advice backed by real-world experience. My me
 
   const isDateAvailable = (date: Date) => {
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-    return displayMentor.availability?.days.includes(dayName) && date >= new Date();
+    const now = isHydrated ? new Date() : FALLBACK_NOW;
+    return displayMentor.availability?.days.includes(dayName) && date >= now;
   };
 
   const handleBookSession = () => {
@@ -388,7 +399,10 @@ I believe in practical, actionable advice backed by real-world experience. My me
                       <button
                         onClick={() =>
                           setCurrentMonth(
-                            new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1)
+                            new Date(
+                              effectiveCurrentMonth.getFullYear(),
+                              effectiveCurrentMonth.getMonth() - 1
+                            )
                           )
                         }
                         className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
@@ -396,7 +410,7 @@ I believe in practical, actionable advice backed by real-world experience. My me
                         <ChevronLeft className="w-5 h-5" />
                       </button>
                       <span className="font-medium text-gray-900 dark:text-white">
-                        {currentMonth.toLocaleDateString('en-US', {
+                        {effectiveCurrentMonth.toLocaleDateString('en-US', {
                           month: 'long',
                           year: 'numeric',
                         })}
@@ -404,7 +418,10 @@ I believe in practical, actionable advice backed by real-world experience. My me
                       <button
                         onClick={() =>
                           setCurrentMonth(
-                            new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1)
+                            new Date(
+                              effectiveCurrentMonth.getFullYear(),
+                              effectiveCurrentMonth.getMonth() + 1
+                            )
                           )
                         }
                         className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
@@ -427,7 +444,7 @@ I believe in practical, actionable advice backed by real-world experience. My me
 
                     {/* Calendar Days */}
                     <div className="grid grid-cols-7 gap-1">
-                      {getDaysInMonth(currentMonth).map((date, i) => {
+                      {getDaysInMonth(effectiveCurrentMonth).map((date, i) => {
                         if (!date) {
                           return <div key={i} className="p-2" />;
                         }

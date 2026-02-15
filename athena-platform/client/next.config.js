@@ -60,18 +60,27 @@ const nextConfig = {
     // Only use Next.js rewrites for local development.
     if (process.env.NETLIFY) return [];
 
-    // Use beforeFiles so these rewrites run BEFORE Next.js API routes.
-    // This ensures /api/* always proxies to the backend instead of being
-    // intercepted by stub route files in app/api/.
+    // Auth routes (/api/auth/*) MUST be handled by Next.js API route handlers
+    // in app/api/auth/* so they can forward Set-Cookie headers (refresh token).
+    // All other /api/* and /uploads/* requests proxy directly to the backend.
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
     return {
       beforeFiles: [
         {
-          source: '/api/:path*',
-          destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/:path*`,
-        },
-        {
           source: '/uploads/:path*',
-          destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/uploads/:path*`,
+          destination: `${backendUrl}/uploads/:path*`,
+        },
+      ],
+      afterFiles: [
+        {
+          source: '/api/auth/:path*',
+          destination: '/api/auth/:path*',
+        },
+      ],
+      fallback: [
+        {
+          source: '/api/:path*',
+          destination: `${backendUrl}/api/:path*`,
         },
       ],
     };

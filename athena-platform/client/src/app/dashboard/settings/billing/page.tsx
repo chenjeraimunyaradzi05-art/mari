@@ -8,14 +8,11 @@ import {
   Check,
   Crown,
   Sparkles,
-  Zap,
-  Calendar,
   Download,
   ExternalLink,
 } from 'lucide-react';
 import { useAuth, useSubscription, useCancelSubscription, useManageBilling, useCreateCheckout } from '@/lib/hooks';
 import { formatCurrency, formatDate, cn, getStoredPreference } from '@/lib/utils';
-import { Skeleton } from '@/components/ui/loading';
 
 const plans = [
   {
@@ -68,14 +65,12 @@ const plans = [
 export default function BillingSettingsPage() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
-  const { data: subscription, isLoading } = useSubscription();
+  const { data: subscription } = useSubscription();
   const cancelSubscription = useCancelSubscription();
   const manageBilling = useManageBilling();
   const createCheckout = useCreateCheckout();
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [region, setRegion] = useState(
-    user?.region || getStoredPreference('athena.region', 'ANZ')
-  );
+  const [region, setRegion] = useState<string>(user?.region || 'ANZ');
 
   // Auto-trigger checkout if upgrade param is present
   useEffect(() => {

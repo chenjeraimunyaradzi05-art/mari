@@ -7,6 +7,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { ConsentType } from '@prisma/client';
+import { gdprService } from '../services/gdpr.service';
+import { prisma } from '../utils/prisma';
 import { 
   REGION_CONFIGS, 
   UK_PRICING, 
@@ -18,6 +21,74 @@ import {
 } from '../config/region.config';
 
 const router = Router();
+
+type LegalDocumentEntry = {
+  id: string;
+  documentType: string;
+  title: string;
+  version: string;
+  effectiveDate: string;
+  url: string;
+  required: boolean;
+  regions: string[];
+};
+
+type LegalAgreementRecord = {
+  documentType: string;
+  documentVersion: string;
+  acceptedAt: string;
+};
+
+const LEGAL_DOCUMENTS: LegalDocumentEntry[] = [
+  {
+    id: 'terms-v1',
+    documentType: 'terms_of_service',
+    title: 'Terms of Service',
+    version: '1.0',
+    effectiveDate: '2026-01-15',
+    url: '/terms',
+    required: true,
+    regions: ['ALL'],
+  },
+  {
+    id: 'privacy-v1',
+    documentType: 'privacy_policy',
+    title: 'Privacy Policy',
+    version: '1.0',
+    effectiveDate: '2026-01-15',
+    url: '/privacy',
+    required: true,
+    regions: ['ALL'],
+  },
+  {
+    id: 'cookies-v1',
+    documentType: 'cookie_policy',
+    title: 'Cookie Policy',
+    version: '1.0',
+    effectiveDate: '2026-01-15',
+    url: '/cookies',
+    required: true,
+    regions: ['ALL'],
+  },
+  {
+    id: 'uk-privacy-addendum-v1',
+    documentType: 'uk_privacy_addendum',
+    title: 'UK Privacy Addendum',
+    version: '1.0',
+    effectiveDate: '2026-01-15',
+    url: '/privacy/uk',
+    required: true,
+    regions: ['UK'],
+  },
+];
+
+function normalizeRegionCode(code?: string): string {
+  if (!code) return 'ROW';
+  const upper = code.toUpperCase();
+  if (upper === 'GB') return 'UK';
+  if (upper in REGION_CONFIGS) return upper;
+  return getRegionFromCountry(upper);
+}
 
 // ============================================
 // Public Compliance Information
@@ -206,11 +277,76 @@ router.get('/data-transfers', (_req: Request, res: Response) => {
   });
 });
 
+/**
+ * GET /api/compliance/legal-documents
+ * Get legal documents scoped by region
+ */
+router.get('/legal-documents', (req: Request, res: Response) => {
+  const region = normalizeRegionCode((req.query.region as string | undefined) || undefined);
+  const documents = LEGAL_DOCUMENTS.filter(
+    (doc) => doc.regions.includes('ALL') || doc.regions.includes(region)
+  );
+
+  res.json({
+    success: true,
+    data: documents,
+  });
+});
+
 // ============================================
 // Protected Compliance Endpoints
 // ============================================
 
 router.use(authenticate);
+
+/**
+ * GET /api/compliance/status
+ * Get current compliance status for authenticated user
+ */
+router.get('/status', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const countryCode = (req.headers['cf-ipcountry'] as string | undefined) || 'AU';
+    const region = normalizeRegionCode(countryCode);
+    const gdprApplicable = isGDPRRegion(region);
+
+    if (!gdprApplicable) {
+      return res.json({
+        success: true,
+        data: {
+          status: 'compliant',
+          region,
+          gdprApplicable,
+          checkedAt: new Date().toISOString(),
+          requirements: {
+            dataProcessingConsent: false,
+          },
+        },
+      });
+    }
+
+    const consents = await gdprService.getUserConsents(userId);
+    const dataProcessingConsent = consents.find(
+      (consent) => consent.consentType === ConsentType.DATA_PROCESSING
+    );
+    const hasDataProcessingConsent = dataProcessingConsent?.status === 'GRANTED';
+
+    res.json({
+      success: true,
+      data: {
+        status: hasDataProcessingConsent ? 'compliant' : 'pending',
+        region,
+        gdprApplicable,
+        checkedAt: new Date().toISOString(),
+        requirements: {
+          dataProcessingConsent: hasDataProcessingConsent,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 /**
  * POST /api/compliance/report-content
@@ -309,6 +445,109 @@ router.put('/region-preferences', async (req: AuthRequest, res: Response, next: 
       success: true,
       message: 'Region preferences updated',
       data: updatedPreferences,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/compliance/agreements
+ * Get latest legal agreement acknowledgements for authenticated user
+ */
+router.get('/agreements', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const agreementLogs = await prisma.privacyAuditLog.findMany({
+      where: {
+        userId,
+        action: 'LEGAL_AGREEMENT_ACCEPTED',
+        resourceType: 'LegalDocument',
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    const latestByDocument = new Map<string, LegalAgreementRecord>();
+    for (const log of agreementLogs) {
+      const details = (log.details ?? {}) as { documentType?: string; documentVersion?: string };
+      const documentType = details.documentType || log.resourceId || '';
+      if (!documentType || latestByDocument.has(documentType)) {
+        continue;
+      }
+
+      latestByDocument.set(documentType, {
+        documentType,
+        documentVersion: details.documentVersion || '1.0',
+        acceptedAt: log.createdAt.toISOString(),
+      });
+    }
+
+    res.json({
+      success: true,
+      data: Array.from(latestByDocument.values()),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/compliance/agreements
+ * Record legal document agreement acknowledgement
+ */
+router.post('/agreements', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { documentType, documentVersion } = req.body;
+    const userId = req.user!.id;
+    const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
+    const requestRegion = typeof req.headers['cf-ipcountry'] === 'string' ? req.headers['cf-ipcountry'] : 'UNKNOWN';
+
+    if (!documentType || !documentVersion) {
+      return res.status(400).json({
+        success: false,
+        error: 'documentType and documentVersion are required',
+      });
+    }
+
+    await gdprService.recordConsent(userId, ConsentType.DATA_PROCESSING, true, {
+      ipAddress: req.ip,
+      userAgent,
+      region: requestRegion,
+    });
+
+    const agreementAudit = await prisma.privacyAuditLog.create({
+      data: {
+        userId,
+        action: 'LEGAL_AGREEMENT_ACCEPTED',
+        resourceType: 'LegalDocument',
+        resourceId: String(documentType),
+        details: {
+          documentType: String(documentType),
+          documentVersion: String(documentVersion),
+        },
+        ipAddress: req.ip,
+        userAgent,
+        region: requestRegion,
+        legalBasis: 'CONSENT',
+      },
+    });
+
+    logger.info('Legal agreement recorded', {
+      userId,
+      documentType,
+      documentVersion,
+    });
+
+    res.json({
+      success: true,
+      message: 'Agreement recorded',
+      data: {
+        acceptedAt: agreementAudit.createdAt.toISOString(),
+        documentType,
+        documentVersion,
+      },
     });
   } catch (error) {
     next(error);

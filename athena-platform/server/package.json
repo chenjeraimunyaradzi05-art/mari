@@ -16,7 +16,10 @@
     "db:seed": "ts-node prisma/seed.ts",
     "loadtest:health": "node scripts/loadtest-health.js",
     "loadtest:auth": "node scripts/loadtest-auth.js",
-    "loadtest:websocket": "node scripts/loadtest-websocket.js"
+    "loadtest:websocket": "node scripts/loadtest-websocket.js",
+    "launch:smoke": "node scripts/smoke-test.js",
+    "launch:warm-cdn": "node scripts/warm-cdn.js",
+    "launch:incident": "node scripts/send-incident-notification.js"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.971.0",

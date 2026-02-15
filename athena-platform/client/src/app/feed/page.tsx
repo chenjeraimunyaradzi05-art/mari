@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { 
@@ -47,6 +47,11 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
     post.likes?.some(like => like.userId === currentUserId) || false
   );
   const [likeCount, setLikeCount] = useState(post._count?.likes || 0);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const handleLike = async () => {
     if (isLiked) {
@@ -87,7 +92,11 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
             </div>
             <div className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+              <span suppressHydrationWarning>
+                {isHydrated
+                  ? formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })
+                  : post.createdAt.slice(0, 10)}
+              </span>
             </div>
           </div>
         </Link>

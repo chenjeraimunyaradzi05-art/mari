@@ -19,7 +19,7 @@ import {
   statusApi,
 } from './api';
 import { useAuthStore, useUIStore, useNotificationStore, useMessageStore } from './store';
-import { getAccessToken } from './auth';
+// getAccessToken no longer needed here — auth bootstrap handled by AuthInitializer
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 
@@ -49,42 +49,17 @@ export function useDebounce<T>(value: T, delay: number = 300): T {
 // AUTH HOOKS
 // ============================================
 export function useAuth() {
-  const { user, isAuthenticated, isLoading, login, logout, setUser, setLoading } = useAuthStore();
+  const { user, isAuthenticated, isLoading, login, logout } = useAuthStore();
   const queryClient = useQueryClient();
 
-  // Check auth on mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      // If server-side bootstrap placed an initial user, use it
-      const initialUser = (window as any).__INITIAL_USER as any | undefined;
-      const token = getAccessToken();
-
-      if (initialUser && !user) {
-        setUser(initialUser);
-        setLoading(false);
-        return;
-      }
-
-      if (token && !user) {
-        try {
-          const response = await authApi.me();
-          setUser(response.data.data);
-        } catch (error) {
-          logout();
-        }
-      }
-
-      setLoading(false);
-    };
-
-    checkAuth();
-  }, []);
+  // Auth bootstrap is handled by AuthInitializer in providers.tsx.
+  // This hook only reads store state — no competing mount-time fetch.
 
   const loginMutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (response) => {
-      const { user, accessToken, refreshToken } = response.data.data;
-      login(user, accessToken, refreshToken);
+      const { user: userData, accessToken } = response.data.data;
+      login(userData, accessToken, '');
       queryClient.invalidateQueries();
       toast.success('Welcome back!');
     },
@@ -96,8 +71,8 @@ export function useAuth() {
   const registerMutation = useMutation({
     mutationFn: authApi.register,
     onSuccess: (response) => {
-      const { user, accessToken, refreshToken } = response.data.data;
-      login(user, accessToken, refreshToken);
+      const { user: userData, accessToken } = response.data.data;
+      login(userData, accessToken, '');
       queryClient.invalidateQueries();
       toast.success('Welcome to ATHENA!');
     },
@@ -944,10 +919,10 @@ export function useSendMessage() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ receiverId, content }: { receiverId: string; content: string }) =>
-      messageApi.send(receiverId, content),
-    onSuccess: (_, { receiverId }) => {
-      queryClient.invalidateQueries({ queryKey: ['messages', receiverId] });
+    mutationFn: ({ conversationId, content }: { conversationId: string; content: string }) =>
+      messageApi.send(conversationId, content),
+    onSuccess: (_, { conversationId }) => {
+      queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
     },
     onError: (error: any) => {
@@ -958,9 +933,12 @@ export function useSendMessage() {
 
 export function useUnreadMessageCount() {
   return useQuery({
-    queryKey: ['unread-messages'],
-    queryFn: messageApi.getUnreadCount,
-    select: (response) => response.data.data.count,
+    queryKey: ['conversations'],
+    queryFn: messageApi.getConversations,
+    select: (response) => {
+      const conversations = response.data.data as Array<{ unreadCount?: number }>;
+      return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+    },
     refetchInterval: 30000,
   });
 }

@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useVideoFeedStore } from '@/lib/stores/video.store';
 import { useUIStore } from '@/lib/stores/ui.store';
-import { api } from '@/lib/api';
+import { api, postApi } from '@/lib/api';
 
 interface FeedInteractionProps {
   videoId: string;
@@ -67,25 +67,31 @@ export function FeedInteraction({
   const [isSaved, setIsSaved] = useState(initialIsSaved);
   const [likeCount, setLikeCount] = useState(likes);
   const [isAnimating, setIsAnimating] = useState<string | null>(null);
-  
+
   const { addToast } = useUIStore();
-  const { toggleLike } = useVideoFeedStore();
+  const { toggleLike, toggleBookmark, markAsShared, toggleFollow } = useVideoFeedStore();
 
   const handleLike = useCallback(async () => {
     // Optimistic update
     setIsLiked(!isLiked);
+
     setLikeCount(prev => isLiked ? prev - 1 : prev + 1);
     setIsAnimating('like');
     
     setTimeout(() => setIsAnimating(null), 500);
 
     try {
-      await api.post(`/api/videos/${videoId}/like`);
+      if (isLiked) {
+        await api.delete(`/video/${videoId}/like`);
+      } else {
+        await api.post(`/video/${videoId}/like`);
+      }
       toggleLike(videoId);
     } catch (error) {
       // Revert on error
       setIsLiked(isLiked);
       setLikeCount(prev => isLiked ? prev + 1 : prev - 1);
+
       addToast('Failed to update like', 'error');
     }
   }, [isLiked, videoId, toggleLike, addToast]);
@@ -97,15 +103,20 @@ export function FeedInteraction({
     setTimeout(() => setIsAnimating(null), 500);
 
     try {
-      await api.post(`/api/videos/${videoId}/save`);
+      if (isSaved) {
+        await api.delete(`/video/${videoId}/save`);
+      } else {
+        await api.post(`/video/${videoId}/save`);
+      }
+      toggleBookmark(videoId);
       addToast(isSaved ? 'Removed from saved' : 'Saved to collection', 'success');
     } catch (error) {
       setIsSaved(isSaved);
       addToast('Failed to save video', 'error');
     }
-  }, [isSaved, videoId, addToast]);
+  }, [isSaved, videoId, toggleBookmark, addToast]);
 
-  const handleShare = useCallback(async (type: 'copy' | 'native' | 'dm') => {
+  const handleShare = useCallback(async (type: 'copy' | 'native' | 'dm' | 'repost') => {
     const shareUrl = `${window.location.origin}/video/${videoId}`;
     
     if (type === 'copy') {
@@ -124,15 +135,21 @@ export function FeedInteraction({
       // Open DM modal with share link
       // This would integrate with the chat system
       addToast('Opening messages...', 'info');
+    } else if (type === 'repost') {
+      try {
+        await postApi.shareToFeed({
+          title: `Check out this video by ${creatorName}`,
+          url: shareUrl,
+          entityType: 'video',
+          entityId: videoId,
+        });
+        markAsShared(videoId);
+        addToast('Shared to feed', 'success');
+      } catch (error) {
+        addToast('Failed to share', 'error');
+      }
     }
-
-    // Track share
-    try {
-      await api.post(`/api/videos/${videoId}/share`, { type });
-    } catch (error) {
-      // Non-critical
-    }
-  }, [videoId, creatorName, addToast]);
+  }, [videoId, creatorName, addToast, markAsShared]);
 
   const handleComment = useCallback(() => {
     // Emit event to open comments panel
@@ -141,12 +158,13 @@ export function FeedInteraction({
 
   const handleFollow = useCallback(async () => {
     try {
-      await api.post(`/api/users/${creatorId}/follow`);
+      await api.post(`/users/${creatorId}/follow`);
+      toggleFollow(creatorId);
       addToast(`Following ${creatorName}`, 'success');
     } catch (error) {
       addToast('Failed to follow', 'error');
     }
-  }, [creatorId, creatorName, addToast]);
+  }, [creatorId, creatorName, toggleFollow, addToast]);
 
   const formatCount = (count: number): string => {
     if (count >= 1000000) {
@@ -249,7 +267,7 @@ export function FeedInteraction({
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleShare('repost')}>
             <Repeat2 className="h-4 w-4 mr-2" />
             Repost
           </DropdownMenuItem>

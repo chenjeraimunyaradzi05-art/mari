@@ -1,20 +1,7 @@
-import type { Metadata } from 'next';
-import { Inter, Playfair_Display } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
-
-const inter = Inter({ 
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-});
-
-const playfair = Playfair_Display({ 
-  subsets: ['latin'],
-  variable: '--font-playfair',
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'),
@@ -23,7 +10,6 @@ export const metadata: Metadata = {
   keywords: ['careers', 'women', 'empowerment', 'jobs', 'mentorship', 'networking', 'education'],
   authors: [{ name: 'ATHENA' }],
   manifest: '/manifest.json',
-  themeColor: '#7c3aed',
   openGraph: {
     title: 'ATHENA | The Life Operating System for Women',
     description: 'Discover opportunities, build your career, connect with mentors, and unlock your full potential.',
@@ -52,14 +38,18 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: '#7c3aed',
+};
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${playfair.variable}`} suppressHydrationWarning>
-      <body className="min-h-screen antialiased">
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen antialiased" suppressHydrationWarning>
         <Providers>
           {children}
           <Toaster

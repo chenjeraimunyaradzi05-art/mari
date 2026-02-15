@@ -238,6 +238,7 @@ export const useVideoFeedStore = create<VideoFeedState>()(
         videoProgress: state.videoProgress,
         isMuted: state.isMuted,
       }),
+      skipHydration: true,
     }
   )
 );

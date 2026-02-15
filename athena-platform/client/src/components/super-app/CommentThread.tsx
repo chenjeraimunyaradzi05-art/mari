@@ -89,7 +89,7 @@ export function CommentThread({
       if (onAddComment) {
         await onAddComment(newComment.trim());
       } else {
-        await api.post(`/api/posts/${postId}/comments`, {
+        await api.post(`/posts/${postId}/comments`, {
           content: newComment.trim(),
         });
       }
@@ -203,16 +203,17 @@ function CommentItem({
   const canReply = depth < maxDepth;
 
   const handleLike = useCallback(async () => {
+    if (!onLikeComment) {
+      addToast('Comment likes are not supported yet', 'info');
+      return;
+    }
+
     // Optimistic update
     setIsLiked(!isLiked);
     setLikeCount((prev) => (isLiked ? prev - 1 : prev + 1));
 
     try {
-      if (onLikeComment) {
-        await onLikeComment(comment.id);
-      } else {
-        await api.post(`/api/comments/${comment.id}/like`);
-      }
+      await onLikeComment(comment.id);
     } catch (error) {
       // Revert on error
       setIsLiked(isLiked);
@@ -229,7 +230,7 @@ function CommentItem({
       if (onAddComment) {
         await onAddComment(replyContent.trim(), comment.id);
       } else {
-        await api.post(`/api/posts/${postId}/comments`, {
+        await api.post(`/posts/${postId}/comments`, {
           content: replyContent.trim(),
           parentId: comment.id,
         });
@@ -250,27 +251,19 @@ function CommentItem({
       if (onDeleteComment) {
         await onDeleteComment(comment.id);
       } else {
-        await api.delete(`/api/comments/${comment.id}`);
+        await api.delete(`/posts/${postId}/comments/${comment.id}`);
       }
       addToast('Comment deleted', 'success');
     } catch (error) {
       addToast('Failed to delete comment', 'error');
     }
-  }, [comment.id, onDeleteComment, addToast]);
+  }, [comment.id, postId, onDeleteComment, addToast]);
 
   const handleEdit = useCallback(async () => {
-    if (!editContent.trim()) return;
-
-    try {
-      await api.patch(`/api/comments/${comment.id}`, {
-        content: editContent.trim(),
-      });
-      setIsEditing(false);
-      addToast('Comment updated', 'success');
-    } catch (error) {
-      addToast('Failed to update comment', 'error');
-    }
-  }, [editContent, comment.id, addToast]);
+    addToast('Editing comments is not supported yet', 'info');
+    setIsEditing(false);
+    setEditContent(comment.content);
+  }, [addToast, comment.content]);
 
   const formatTime = (date: Date | string) => {
     const d = new Date(date);

@@ -18,11 +18,31 @@ type PricingInfo = PricingTier;
 type ComplianceStatus = 'compliant' | 'pending' | 'non-compliant';
 type LegalDocument = {
   id: string;
+  documentType?: string;
   title: string;
   version: string;
-  content: string;
+  url?: string;
+  required?: boolean;
+  regions?: string[];
   effectiveDate: string;
 };
+
+const REGION_STORAGE_KEYS = ['athena.region', 'athena_region'] as const;
+
+function getStoredRegionCode(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  for (const key of REGION_STORAGE_KEYS) {
+    const value = localStorage.getItem(key);
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function isUkCode(code: string): boolean {
+  return code.toUpperCase() === 'UK' || code.toUpperCase() === 'GB';
+}
 
 // Default region fallback
 const DEFAULT_REGION: RegionInfo = {
@@ -73,13 +93,17 @@ export function RegionProvider({ children }: { children: ReactNode }) {
         ...regionConfig,
         region: regionConfig.name,
         requiresGDPR: regionConfig.gdprRequired,
-        requiresUKGDPR: detectedCode === 'GB',
-        dataResidency: detectedCode === 'GB' ? 'eu-west-2' : (regionConfig.gdprRequired ? 'eu-west-1' : 'us-east-1'),
+        requiresUKGDPR: isUkCode(detectedCode),
+        dataResidency: isUkCode(detectedCode)
+          ? 'eu-west-2'
+          : regionConfig.gdprRequired
+            ? 'eu-west-1'
+            : 'us-east-1',
       });
       setError(null);
     } catch (err) {
       // Fall back to checking localStorage or default
-      const savedRegion = localStorage.getItem('athena_region');
+      const savedRegion = getStoredRegionCode();
       if (savedRegion) {
         try {
           const regionConfig = await complianceService.getRegionConfig(savedRegion);
@@ -87,8 +111,12 @@ export function RegionProvider({ children }: { children: ReactNode }) {
             ...regionConfig,
             region: regionConfig.name,
             requiresGDPR: regionConfig.gdprRequired,
-            requiresUKGDPR: savedRegion === 'GB',
-            dataResidency: savedRegion === 'GB' ? 'eu-west-2' : (regionConfig.gdprRequired ? 'eu-west-1' : 'us-east-1'),
+            requiresUKGDPR: isUkCode(savedRegion),
+            dataResidency: isUkCode(savedRegion)
+              ? 'eu-west-2'
+              : regionConfig.gdprRequired
+                ? 'eu-west-1'
+                : 'us-east-1',
           });
         } catch {
           setRegionState(DEFAULT_REGION);
@@ -110,10 +138,15 @@ export function RegionProvider({ children }: { children: ReactNode }) {
         ...regionConfig,
         region: regionConfig.name,
         requiresGDPR: regionConfig.gdprRequired,
-        requiresUKGDPR: regionCode === 'GB',
-        dataResidency: regionCode === 'GB' ? 'eu-west-2' : (regionConfig.gdprRequired ? 'eu-west-1' : 'us-east-1'),
+        requiresUKGDPR: isUkCode(regionCode),
+        dataResidency: isUkCode(regionCode)
+          ? 'eu-west-2'
+          : regionConfig.gdprRequired
+            ? 'eu-west-1'
+            : 'us-east-1',
       };
       setRegionState(newRegion);
+      localStorage.setItem('athena.region', regionCode);
       localStorage.setItem('athena_region', regionCode);
       setError(null);
     } catch (err) {
@@ -130,13 +163,13 @@ export function RegionProvider({ children }: { children: ReactNode }) {
 
   const formatPrice = useCallback(
     (amount: number) => {
-      return complianceService.formatPrice(amount, region.code);
+      return complianceService.formatPrice(amount, region.currency || region.code);
     },
-    [region.code]
+    [region.code, region.currency]
   );
 
   const requiresGDPRConsent = Boolean(region.requiresGDPR || region.requiresUKGDPR);
-  const isUK = region.code === 'GB';
+  const isUK = isUkCode(region.code);
   const isEU = ['DE', 'FR', 'ES', 'IT', 'NL', 'BE', 'AT', 'PT', 'IE', 'FI', 'SE'].includes(region.code);
 
   const value = useMemo(
@@ -213,15 +246,12 @@ export function useComplianceStatus() {
   const fetchStatus = useCallback(async () => {
     try {
       setLoading(true);
-      // Check GDPR status if in GDPR region
-      if (complianceService.isGDPRRegion(region.code)) {
-        // TODO: Implement proper compliance status check via API
-        setStatus('compliant');
-      } else {
-        setStatus('compliant');
-      }
+      const response = await complianceService.getComplianceStatus();
+      setStatus(response.status || 'compliant');
       setError(null);
     } catch (err) {
+      // For public/unauthenticated contexts, fall back to a sensible local status
+      setStatus(complianceService.isGDPRRegion(region.code) ? 'pending' : 'compliant');
       setError(err instanceof Error ? err : new Error('Failed to fetch compliance status'));
     } finally {
       setLoading(false);
@@ -248,9 +278,8 @@ export function useLegalDocuments() {
     async function fetchDocuments() {
       try {
         setLoading(true);
-        // TODO: Implement proper legal documents API endpoint
-        // For now, return empty array - documents should be fetched from API
-        setDocuments([]);
+        const docs = await complianceService.getLegalDocuments(region.code);
+        setDocuments(Array.isArray(docs) ? docs : []);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err : new Error('Failed to fetch legal documents'));
@@ -263,9 +292,8 @@ export function useLegalDocuments() {
   }, [region.code]);
 
   const recordAgreement = useCallback(
-    async (_documentType: string, _documentVersion: string) => {
-      // TODO: Implement terms agreement recording via API
-      console.log('Recording agreement - to be implemented');
+    async (documentType: string, documentVersion: string) => {
+      await complianceService.recordAgreement(documentType, documentVersion);
     },
     []
   );
@@ -323,7 +351,7 @@ export function useAgeVerification() {
   return { required, verified, loading, error, verifyAge };
 }
 
-export default {
+const complianceHooks = {
   RegionProvider,
   useRegion,
   useLocalizedPricing,
@@ -331,3 +359,5 @@ export default {
   useLegalDocuments,
   useAgeVerification,
 };
+
+export default complianceHooks;

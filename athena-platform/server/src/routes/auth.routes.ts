@@ -5,7 +5,7 @@ import { prisma } from '../utils/prisma';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateAccessToken, generateRefreshToken, verifyToken } from '../utils/jwt';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -408,10 +408,23 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new ApiError(401, 'Session has expired');
     }
 
-    // Get user
+    // Get user (full profile so client can hydrate auth store without extra /me call)
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, persona: true },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        avatar: true,
+        role: true,
+        persona: true,
+        preferredLocale: true,
+        preferredCurrency: true,
+        timezone: true,
+        region: true,
+      },
     });
 
     if (!user) {
@@ -452,7 +465,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       path: '/',
     });
 
-    const responseBody: any = { accessToken: newAccessToken };
+    const responseBody: any = { accessToken: newAccessToken, user };
     if (process.env.NODE_ENV === 'test') responseBody.refreshToken = newRefreshToken;
 
     res.json({
@@ -467,7 +480,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 // ===========================================
 // LOGOUT
 // ===========================================
-router.post('/logout', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/logout', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.split(' ')[1];

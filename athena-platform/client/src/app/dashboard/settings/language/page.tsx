@@ -1,11 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Globe,
   Check,
   Search,
-  ChevronRight,
   Info,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -132,22 +131,34 @@ const currencies = [
   { value: 'EGP', label: 'EGP — Egyptian Pound' },
 ];
 
+const FALLBACK_LOCALE = 'en-AU';
+const FALLBACK_CURRENCY = 'AUD';
+
 export default function LanguageSettingsPage() {
   const { user, updateUser } = useAuthStore();
   const [selectedLanguage, setSelectedLanguage] = useState(
-    user?.preferredLocale || getPreferredLocale()
+    user?.preferredLocale || FALLBACK_LOCALE
   );
   const [selectedTimezone, setSelectedTimezone] = useState(
     user?.timezone || 'Australia/Sydney'
   );
   const [selectedCurrency, setSelectedCurrency] = useState(
-    (user?.preferredCurrency || getPreferredCurrency()).toUpperCase()
+    (user?.preferredCurrency || FALLBACK_CURRENCY).toUpperCase()
   );
   const [selectedRegion, setSelectedRegion] = useState<string>(user?.region || 'ANZ');
   const [selectedDateFormat, setSelectedDateFormat] = useState('DD/MM/YYYY');
   const [selectedTimeFormat, setSelectedTimeFormat] = useState('12h');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setSelectedLanguage(user?.preferredLocale || getPreferredLocale());
+    setSelectedCurrency((user?.preferredCurrency || getPreferredCurrency()).toUpperCase());
+    if (user?.timezone) setSelectedTimezone(user.timezone);
+    if (user?.region) setSelectedRegion(user.region);
+    setIsHydrated(true);
+  }, [user]);
 
   const filteredLanguages = languages.filter(
     (lang) =>
@@ -173,7 +184,7 @@ export default function LanguageSettingsPage() {
       setI18nLocale(selectedLanguage);
       translateDocument(selectedLanguage);
       toast.success('Preferences updated');
-    } catch (error) {
+    } catch {
       toast.error('Failed to update preferences');
     } finally {
       setIsSaving(false);
@@ -267,8 +278,11 @@ export default function LanguageSettingsPage() {
             </option>
           ))}
         </select>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-          Current time: {new Date().toLocaleTimeString(selectedLanguage, { timeZone: selectedTimezone })}
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2" suppressHydrationWarning>
+          Current time:{' '}
+          {isHydrated
+            ? new Date().toLocaleTimeString(selectedLanguage, { timeZone: selectedTimezone })
+            : '--:--'}
         </p>
       </div>
 

@@ -261,14 +261,28 @@ export function ChatInput({
       // Upload files first
       let uploadedAttachments: any[] = [];
       if (files.length > 0) {
-        const formData = new FormData();
-        files.forEach((f) => formData.append('files', f.file));
+        uploadedAttachments = await Promise.all(
+          files.map(async (f) => {
+            const uploadType =
+              f.type === 'video' ? 'video' : f.type === 'image' ? 'post' : 'document';
 
-        const uploadResponse = await api.post('/api/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+            const formData = new FormData();
+            formData.append('file', f.file);
 
-        uploadedAttachments = uploadResponse.data.files || [];
+            const uploadResponse = await api.post(`/media/upload/${uploadType}`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+
+            const data = uploadResponse.data?.data;
+            return {
+              id: data?.key,
+              type: data?.contentType || f.file.type,
+              url: data?.url,
+              name: f.file.name,
+              size: f.file.size,
+            };
+          })
+        );
       }
 
       // Create optimistic message
@@ -286,9 +300,8 @@ export function ChatInput({
       addMessage(conversationId, optimisticMessage);
 
       // Send message
-      await api.post(`/api/conversations/${conversationId}/messages`, {
+      await api.post(`/messages/conversations/${conversationId}/messages`, {
         content: content.trim(),
-        attachments: uploadedAttachments.map((a: any) => a.id),
       });
 
       // Clear input

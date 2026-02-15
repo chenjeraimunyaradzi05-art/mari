@@ -146,6 +146,7 @@ export const useUIStore = create<UIState>()(
         sidebarState: state.sidebarState,
         theme: state.theme,
       }),
+      skipHydration: true,
     }
   )
 );

@@ -2,6 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
+function forwardSetCookieHeaders(from: Response, to: NextResponse) {
+  const headersWithGetSetCookie = from.headers as Headers & {
+    getSetCookie?: () => string[];
+  };
+
+  if (typeof headersWithGetSetCookie.getSetCookie === 'function') {
+    const cookies = headersWithGetSetCookie.getSetCookie();
+    for (const cookie of cookies) {
+      to.headers.append('Set-Cookie', cookie);
+    }
+    if (cookies.length > 0) {
+      return;
+    }
+  }
+
+  const fallbackCookie = from.headers.get('set-cookie');
+  if (fallbackCookie) {
+    to.headers.append('Set-Cookie', fallbackCookie);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -18,10 +39,7 @@ export async function POST(request: NextRequest) {
 
     // Forward Set-Cookie from backend so the browser receives the refresh token cookie
     const res = NextResponse.json(data, { status: response.status });
-    const setCookie = response.headers.getSetCookie?.() ?? [];
-    for (const cookie of setCookie) {
-      res.headers.append('Set-Cookie', cookie);
-    }
+    forwardSetCookieHeaders(response, res);
     return res;
   } catch (error) {
     console.error('Login API error:', error);

@@ -222,6 +222,7 @@ export const useSearchStore = create<SearchState>()(
         savedSearches: state.savedSearches,
         searchCount: state.searchCount,
       }),
+      skipHydration: true,
     }
   )
 );

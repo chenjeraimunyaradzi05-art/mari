@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, postApi } from './api';
 
 // ============================================
 // VIDEO FEED API
@@ -30,10 +30,10 @@ export const videoApi = {
   unlike: (id: string) => api.delete(`/video/${id}/like`),
 
   // Bookmark/save a video
-  bookmark: (id: string) => api.post(`/video/${id}/bookmark`),
+  bookmark: (id: string) => api.post(`/video/${id}/save`),
 
   // Remove bookmark
-  unbookmark: (id: string) => api.delete(`/video/${id}/bookmark`),
+  unbookmark: (id: string) => api.delete(`/video/${id}/save`),
 
   // Get video comments
   getComments: (id: string, params?: { page?: number; limit?: number }) =>
@@ -44,8 +44,12 @@ export const videoApi = {
     api.post(`/video/${id}/comments`, { content }),
 
   // Share video
-  share: (id: string, platform?: string) =>
-    api.post(`/video/${id}/share`, { platform }),
+  share: (id: string, data: { title: string; url: string; description?: string; message?: string }) =>
+    postApi.shareToFeed({
+      ...data,
+      entityType: 'video',
+      entityId: id,
+    }),
 
   // Report video
   report: (id: string, reason: string) =>

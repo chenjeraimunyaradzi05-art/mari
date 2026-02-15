@@ -519,17 +519,13 @@ export const referralApi = {
 export const messageApi = {
   getConversations: () => api.get('/messages/conversations'),
 
-  getMessages: (userId: string, params?: { page?: number; limit?: number }) =>
-    api.get(`/messages/with/${userId}`, { params }),
+  getMessages: (conversationId: string, params?: { limit?: number; before?: string }) =>
+    api.get(`/messages/conversations/${conversationId}/messages`, { params }),
 
-  send: (receiverId: string, content: string) =>
-    api.post('/messages/send', { receiverId, content }),
+  send: (conversationId: string, content: string) =>
+    api.post(`/messages/conversations/${conversationId}/messages`, { content }),
 
-  delete: (id: string) => api.delete(`/messages/${id}`),
-
-  getUnreadCount: () => api.get('/messages/unread-count'),
-
-  search: (query: string) => api.get('/messages/search', { params: { q: query } }),
+  startConversation: (userId: string) => api.post('/messages/conversations', { userId }),
 };
 
 // ============================================

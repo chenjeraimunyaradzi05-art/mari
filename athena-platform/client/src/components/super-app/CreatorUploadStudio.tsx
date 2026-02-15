@@ -232,7 +232,7 @@ export function CreatorUploadStudio() {
 
     try {
       const formData = new FormData();
-      formData.append('video', uploadState.file);
+      formData.append('file', uploadState.file);
       formData.append('title', uploadState.title);
       formData.append('description', uploadState.description);
       formData.append('hashtags', JSON.stringify(uploadState.hashtags));
@@ -249,7 +249,7 @@ export function CreatorUploadStudio() {
         formData.append('scheduledAt', uploadState.scheduleTime.toISOString());
       }
 
-      await api.post('/api/videos/upload', formData, {
+      await api.post('/media/upload/video', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           const progress = progressEvent.total

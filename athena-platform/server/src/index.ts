@@ -106,10 +106,11 @@ import { presenceService } from './services/presence.service';
 const app: Application = express();
 const httpServer = createServer(app);
 
-// Trust proxy when running behind load balancers (production or explicit override)
-if (process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1);
-}
+// Trust proxy — requests always arrive through a reverse proxy
+// (Next.js dev server locally, load balancer / Netlify in production).
+// Without this, req.ip is always 127.0.0.1 and rate limiters treat
+// every user as the same person.
+app.set('trust proxy', 1);
 
 // Hide Express signature
 app.disable('x-powered-by');
@@ -271,20 +272,17 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
+  validate: { xForwardedForHeader: false },
 });
 
 // Strict rate limiter for authentication endpoints (brute-force protection)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 attempts per 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 10 : 100, // relaxed in dev
   message: 'Too many login attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => {
-    // Use both IP and email for rate limiting login attempts
-    const email = req.body?.email || '';
-    return `${req.ip}-${email}`;
-  },
+  validate: { xForwardedForHeader: false },
 });
 
 // Stricter limiter for password reset (prevent email enumeration)
@@ -294,6 +292,7 @@ const passwordResetLimiter = rateLimit({
   message: 'Too many password reset attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
 });
 
 if (rateLimitEnabled) {

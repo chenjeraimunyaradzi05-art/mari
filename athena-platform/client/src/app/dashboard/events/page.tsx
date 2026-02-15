@@ -1,14 +1,12 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import {
   Calendar,
   Clock,
   MapPin,
   Users,
   Video,
-  Filter,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -20,7 +18,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Avatar, Badge } from '@/components/ui';
 import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
-import { useEvents, useRegisterEvent, useUnregisterEvent, useSaveEvent, useUnsaveEvent } from '@/lib/hooks';
+import { useEvents, useRegisterEvent, useSaveEvent, useUnsaveEvent } from '@/lib/hooks';
 
 interface Event {
   id: string;
@@ -56,11 +54,20 @@ const eventTypes = [
   { value: 'meetup', label: 'Meetups' },
 ];
 
+const FALLBACK_WEEK_START = new Date('2026-01-05T00:00:00.000Z');
+
 export default function EventsPage() {
   const [selectedType, setSelectedType] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [currentWeekStart, setCurrentWeekStart] = useState(startOfWeek(new Date()));
+  const [currentWeekStart, setCurrentWeekStart] = useState<Date | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    const now = new Date();
+    setCurrentWeekStart(startOfWeek(now));
+    setIsHydrated(true);
+  }, []);
 
   const { data: rawEvents = [] } = useEvents({
     type: selectedType === 'all' ? 'all' : selectedType,
@@ -68,7 +75,6 @@ export default function EventsPage() {
   });
 
   const registerEvent = useRegisterEvent();
-  const unregisterEvent = useUnregisterEvent();
   const saveEvent = useSaveEvent();
   const unsaveEvent = useUnsaveEvent();
 
@@ -80,7 +86,8 @@ export default function EventsPage() {
   const filteredEvents = events
     .filter((event) => !selectedDate || isSameDay(event.date, selectedDate));
 
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
+  const effectiveWeekStart = currentWeekStart ?? FALLBACK_WEEK_START;
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(effectiveWeekStart, i));
 
   const getEventCountForDay = (date: Date) => {
     return events.filter((event) => isSameDay(event.date, date)).length;
@@ -108,16 +115,16 @@ export default function EventsPage() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <button
-            onClick={() => setCurrentWeekStart(addDays(currentWeekStart, -7))}
+            onClick={() => setCurrentWeekStart(addDays(effectiveWeekStart, -7))}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
           <h3 className="font-medium text-gray-900 dark:text-white">
-            {format(currentWeekStart, 'MMMM yyyy')}
+            {format(effectiveWeekStart, 'MMMM yyyy')}
           </h3>
           <button
-            onClick={() => setCurrentWeekStart(addDays(currentWeekStart, 7))}
+            onClick={() => setCurrentWeekStart(addDays(effectiveWeekStart, 7))}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
           >
             <ChevronRight className="w-5 h-5" />
@@ -127,7 +134,7 @@ export default function EventsPage() {
           {weekDays.map((day) => {
             const eventCount = getEventCountForDay(day);
             const isSelected = selectedDate && isSameDay(day, selectedDate);
-            const isToday = isSameDay(day, new Date());
+            const isToday = isHydrated && isSameDay(day, new Date());
 
             return (
               <button

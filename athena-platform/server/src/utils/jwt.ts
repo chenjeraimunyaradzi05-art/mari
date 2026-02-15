@@ -1,4 +1,5 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 // Resolve JWT_SECRET lazily so env.ts fallback has time to run before first use.
 // The getter is called on every sign/verify — cheap and avoids import-time crashes.
@@ -26,6 +27,7 @@ interface TokenPayload {
 export const generateAccessToken = (payload: TokenPayload): string => {
   const options: SignOptions = {
     expiresIn: JWT_EXPIRES_IN as any,
+    jwtid: randomUUID(),
   };
   return jwt.sign(payload, getJwtSecret(), options);
 };
@@ -33,6 +35,7 @@ export const generateAccessToken = (payload: TokenPayload): string => {
 export const generateRefreshToken = (payload: TokenPayload): string => {
   const options: SignOptions = {
     expiresIn: JWT_REFRESH_EXPIRES_IN as any,
+    jwtid: randomUUID(),
   };
   return jwt.sign(payload, getJwtSecret(), options);
 };

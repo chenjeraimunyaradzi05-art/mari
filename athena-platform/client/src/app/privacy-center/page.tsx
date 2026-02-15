@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuthStore } from '@/lib/store';
-import { Shield, Download, Trash2, Edit3, Eye, EyeOff, Bell, Lock, Cookie, Globe, ChevronRight, AlertTriangle, Check, Loader2 } from 'lucide-react';
+import { Shield, Download, Trash2, Eye, Bell, Lock, Cookie, ChevronRight, AlertTriangle, Check, Loader2, FileText } from 'lucide-react';
 import Link from 'next/link';
+import complianceService from '@/lib/services/compliance.service';
+import type { LegalDocument, LegalAgreementRecord } from '@/lib/services/compliance.service';
 
 interface ConsentState {
   MARKETING_EMAIL: boolean;
@@ -56,8 +58,20 @@ const CONSENT_DESCRIPTIONS: Record<keyof ConsentState, { title: string; descript
   },
 };
 
+function formatDateLabel(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString();
+}
+
+function getAgreementKey(documentType: string, documentVersion: string): string {
+  return `${documentType}:${documentVersion}`;
+}
+
 export default function PrivacyCenterPage() {
-  const { user, isAuthenticated } = useAuthStore();
+  const { isAuthenticated } = useAuthStore();
   const [consents, setConsents] = useState<ConsentState>({
     MARKETING_EMAIL: false,
     MARKETING_SMS: false,
@@ -73,14 +87,57 @@ export default function PrivacyCenterPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
+  const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
+  const [agreementHistory, setAgreementHistory] = useState<LegalAgreementRecord[]>([]);
+  const [legalLoading, setLegalLoading] = useState(true);
+  const [legalError, setLegalError] = useState<string | null>(null);
+  const [agreementMessage, setAgreementMessage] = useState<string | null>(null);
+  const [agreeingDocumentId, setAgreeingDocumentId] = useState<string | null>(null);
+
+  const acknowledgedAgreements = useMemo(() => {
+    const entries = agreementHistory.map((agreement) =>
+      getAgreementKey(agreement.documentType, agreement.documentVersion)
+    );
+    return new Set(entries);
+  }, [agreementHistory]);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchPrivacyData();
+      fetchAgreementHistory();
     } else {
+      setAgreementHistory([]);
       setLoading(false);
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    fetchLegalDocuments();
+  }, []);
+
+  const fetchLegalDocuments = async () => {
+    try {
+      setLegalLoading(true);
+      const regionCode = complianceService.detectUserRegion();
+      const documents = await complianceService.getLegalDocuments(regionCode);
+      setLegalDocuments(Array.isArray(documents) ? documents : []);
+      setLegalError(null);
+    } catch (error) {
+      console.error('Failed to fetch legal documents:', error);
+      setLegalError('Unable to load legal documents right now. Please refresh and try again.');
+    } finally {
+      setLegalLoading(false);
+    }
+  };
+
+  const fetchAgreementHistory = async () => {
+    try {
+      const history = await complianceService.getAgreementHistory();
+      setAgreementHistory(Array.isArray(history) ? history : []);
+    } catch (error) {
+      console.error('Failed to fetch agreement history:', error);
+    }
+  };
 
   const fetchPrivacyData = async () => {
     try {
@@ -105,6 +162,73 @@ export default function PrivacyCenterPage() {
       console.error('Failed to fetch privacy data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const isDocumentAcknowledged = (document: LegalDocument): boolean => {
+    const agreementKey = getAgreementKey(document.documentType, document.version);
+    if (acknowledgedAgreements.has(agreementKey)) {
+      return true;
+    }
+
+    // Backward compatibility for users who acknowledged via data-processing consent
+    // before document-level agreement history was introduced.
+    return Boolean(isAuthenticated && document.required && consents.DATA_PROCESSING);
+  };
+
+  const getAcknowledgedAt = (document: LegalDocument): string | null => {
+    const match = agreementHistory.find(
+      (agreement) =>
+        agreement.documentType === document.documentType &&
+        agreement.documentVersion === document.version
+    );
+
+    if (match?.acceptedAt) {
+      return formatDateLabel(match.acceptedAt);
+    }
+
+    if (isAuthenticated && document.required && consents.DATA_PROCESSING) {
+      return 'Previously acknowledged';
+    }
+
+    return null;
+  };
+
+  const acknowledgeDocument = async (document: LegalDocument) => {
+    if (!isAuthenticated || isDocumentAcknowledged(document)) {
+      return;
+    }
+
+    try {
+      setAgreementMessage(null);
+      setAgreeingDocumentId(document.id);
+      const response = await complianceService.recordAgreement(document.documentType, document.version);
+
+      setAgreementHistory((previous) => {
+        const filtered = previous.filter(
+          (agreement) => agreement.documentType !== response.documentType
+        );
+        return [
+          {
+            documentType: response.documentType,
+            documentVersion: response.documentVersion,
+            acceptedAt: response.acceptedAt,
+          },
+          ...filtered,
+        ];
+      });
+
+      setConsents((previous) => ({
+        ...previous,
+        DATA_PROCESSING: true,
+      }));
+
+      setAgreementMessage(`Acknowledged ${document.title} (${document.version}).`);
+    } catch (error) {
+      console.error('Failed to acknowledge legal document:', error);
+      setAgreementMessage('Could not record your acknowledgement. Please try again.');
+    } finally {
+      setAgreeingDocumentId(null);
     }
   };
 
@@ -239,9 +363,16 @@ export default function PrivacyCenterPage() {
 
         {/* Consent Management */}
         <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center gap-2 mb-6">
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <div className="flex items-center gap-2">
             <Bell className="w-5 h-5 text-purple-600" />
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Communication Preferences</h2>
+            </div>
+            {saving && (
+              <span className="inline-flex items-center gap-1 text-xs text-purple-600">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...
+              </span>
+            )}
           </div>
           <div className="space-y-4">
             {(['MARKETING_EMAIL', 'MARKETING_SMS', 'MARKETING_PUSH'] as const).map((key) => (
@@ -351,19 +482,107 @@ export default function PrivacyCenterPage() {
           </section>
         )}
 
-        {/* Legal Links */}
+        {/* Legal Documents */}
         <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Legal Documents</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <Link href="/privacy" className="flex items-center gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-750">
-              <Eye className="w-5 h-5 text-gray-400" />
-              <span className="text-gray-700 dark:text-gray-300">Privacy Policy</span>
-            </Link>
-            <Link href="/terms" className="flex items-center gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-750">
-              <Globe className="w-5 h-5 text-gray-400" />
-              <span className="text-gray-700 dark:text-gray-300">Terms of Service</span>
-            </Link>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Legal Documents</h2>
+            {legalLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-600" />}
           </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Review current legal policies and record your acknowledgement.
+          </p>
+
+          {legalError && (
+            <p className="text-sm text-red-600 dark:text-red-400 mb-4">{legalError}</p>
+          )}
+
+          {!legalLoading && legalDocuments.length === 0 && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">No legal documents are currently available.</p>
+          )}
+
+          <div className="space-y-3">
+            {legalDocuments.map((document) => {
+              const acknowledged = isDocumentAcknowledged(document);
+              const acknowledgedAt = getAcknowledgedAt(document);
+
+              return (
+                <article
+                  key={document.id}
+                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/70 dark:bg-gray-900/40"
+                >
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <FileText className="w-5 h-5 text-gray-400 mt-0.5" />
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white">{document.title}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Version {document.version} • Effective {formatDateLabel(document.effectiveDate)}
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          {document.required && (
+                            <span className="text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 px-2 py-0.5 rounded">
+                              Required
+                            </span>
+                          )}
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              acknowledged
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                            }`}
+                          >
+                            {acknowledged ? 'Acknowledged' : 'Pending acknowledgement'}
+                          </span>
+                        </div>
+                        {acknowledgedAt && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                            {acknowledgedAt === 'Previously acknowledged'
+                              ? acknowledgedAt
+                              : `Acknowledged on ${acknowledgedAt}`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2 md:items-center md:justify-end">
+                      <Link
+                        href={document.url || '/privacy'}
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800"
+                      >
+                        <Eye className="w-4 h-4" /> Review
+                      </Link>
+
+                      {isAuthenticated && document.required && (
+                        <button
+                          type="button"
+                          onClick={() => acknowledgeDocument(document)}
+                          disabled={acknowledged || agreeingDocumentId === document.id}
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {agreeingDocumentId === document.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Check className="w-4 h-4" />
+                          )}
+                          {acknowledged ? 'Acknowledged' : 'Acknowledge'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          {!isAuthenticated && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">
+              Sign in to record legal acknowledgements on your account.
+            </p>
+          )}
+
+          {agreementMessage && (
+            <p className="text-sm text-purple-700 dark:text-purple-300 mt-4">{agreementMessage}</p>
+          )}
         </section>
 
         {/* Contact DPO */}

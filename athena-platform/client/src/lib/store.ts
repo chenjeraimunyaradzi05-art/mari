@@ -91,6 +91,7 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
+      skipHydration: true,
     }
   )
 );
@@ -128,6 +129,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'athena-ui',
+      skipHydration: true,
     }
   )
 );

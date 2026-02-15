@@ -6,7 +6,7 @@ const registry = require('../i18n.registry.js');
 // Backend URL for API proxying.
 // On Netlify the env var is set in the dashboard; locally it defaults to localhost.
 const BACKEND_URL = (
-  process.env.NEXT_PUBLIC_API_URL || 'https://mari-production-5c60.up.railway.app'
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 ).replace(/\/$/, '');
 
 // Routes that require authentication

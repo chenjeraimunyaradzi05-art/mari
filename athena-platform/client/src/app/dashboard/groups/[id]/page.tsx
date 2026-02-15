@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 import { Users } from 'lucide-react';
@@ -28,6 +28,11 @@ export default function GroupDetailPage() {
 
   const posts: GroupPost[] = useMemo(() => (Array.isArray(postsRaw) ? postsRaw : []), [postsRaw]);
   const [content, setContent] = useState('');
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   if (!group) {
     return (
@@ -116,8 +121,10 @@ export default function GroupDetailPage() {
               <div className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">
                 {p.content}
               </div>
-              <div className="mt-2 text-xs text-gray-500">
-                {formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })}
+              <div className="mt-2 text-xs text-gray-500" suppressHydrationWarning>
+                {isHydrated
+                  ? formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })
+                  : p.createdAt.slice(0, 10)}
               </div>
             </div>
           ))

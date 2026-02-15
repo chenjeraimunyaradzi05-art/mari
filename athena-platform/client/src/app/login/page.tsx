@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, ArrowRight, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/lib/hooks';
 
 const loginSchema = z.object({
@@ -18,10 +18,19 @@ const loginSchema = z.object({
 type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, isLoginPending, isAuthenticated, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -45,6 +54,7 @@ export default function LoginPage() {
   });
 
   const onSubmit = (data: LoginForm) => {
+    setServerError(null);
     login(data, {
       onSuccess: () => {
         const redirect = searchParams?.get('redirect');
@@ -53,6 +63,11 @@ export default function LoginPage() {
           return;
         }
         router.push('/dashboard');
+      },
+      onError: (error: any) => {
+        setServerError(
+          error.response?.data?.message || 'Login failed. Please check your credentials and try again.'
+        );
       },
     });
   };
@@ -75,6 +90,13 @@ export default function LoginPage() {
           </p>
 
           <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6">
+            {serverError && (
+              <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950/30">
+                <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
+                <p className="text-sm text-red-700 dark:text-red-300">{serverError}</p>
+              </div>
+            )}
+
             <div>
               <label htmlFor="email" className="label">
                 Email

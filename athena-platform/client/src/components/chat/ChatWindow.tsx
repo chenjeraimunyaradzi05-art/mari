@@ -59,7 +59,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
     try {
       // Optimistic update could go here, but let's wait for success or socket
       const sentMessage = await sendMessageMutation.mutateAsync({ 
-        receiverId: conversationId, 
+        conversationId, 
         content: newMessage 
       });
       setNewMessage('');

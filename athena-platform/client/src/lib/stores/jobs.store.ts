@@ -1,4 +1,3 @@
-// @ts-nocheck - Immer Draft types conflict with explicit array callback types
 'use client';
 
 /**

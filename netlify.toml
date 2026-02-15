@@ -14,8 +14,3 @@
   package = "@netlify/plugin-nextjs"
 
 # Redirect API calls to backend (configure API URL in Netlify env vars)
-[[redirects]]
-  from = "/api/*"
-  to = "${NEXT_PUBLIC_API_URL}/api/:splat"
-  status = 200
-  force = true

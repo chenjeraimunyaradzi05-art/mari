@@ -109,7 +109,7 @@ export function GlobalSearch() {
 
       setSearching(true);
       try {
-        const response = await api.get('/api/search', {
+        const response = await api.get('/search', {
           params: {
             q: debouncedQuery,
             type: activeCategory === 'all' ? undefined : activeCategory,

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import {
   Bell,
   Check,
@@ -17,7 +17,6 @@ import {
   Award,
   AlertCircle,
   Settings,
-  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -53,7 +52,9 @@ interface Notification {
   link?: string;
 }
 
-// Extended mock data
+const MOCK_BASE_TIME = Date.parse('2026-02-10T12:00:00.000Z');
+
+// Extended mock data (deterministic timestamps to avoid hydration drift)
 const mockNotifications: Notification[] = [
   {
     id: '1',
@@ -61,7 +62,7 @@ const mockNotifications: Notification[] = [
     title: 'New Job Match',
     message: 'Senior Product Manager at Google matches your profile with 95% compatibility. This role offers competitive salary and great benefits.',
     isRead: false,
-    createdAt: new Date(Date.now() - 5 * 60000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 5 * 60000).toISOString(),
     link: '/dashboard/jobs/1',
   },
   {
@@ -70,7 +71,7 @@ const mockNotifications: Notification[] = [
     title: 'New Message',
     message: 'Sarah Chen sent you a message: "Hi! I\'d love to discuss the mentoring program with you..."',
     isRead: false,
-    createdAt: new Date(Date.now() - 30 * 60000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 30 * 60000).toISOString(),
     link: '/dashboard/messages',
   },
   {
@@ -79,7 +80,7 @@ const mockNotifications: Notification[] = [
     title: 'Post Liked',
     message: '15 people liked your post about interview tips including Maria, Jessica, and 13 others',
     isRead: false,
-    createdAt: new Date(Date.now() - 2 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 2 * 3600000).toISOString(),
     link: '/dashboard/community',
   },
   {
@@ -88,7 +89,7 @@ const mockNotifications: Notification[] = [
     title: 'New Follower',
     message: 'Emily Johnson is now following you. Emily is a Senior Engineer at Meta.',
     isRead: true,
-    createdAt: new Date(Date.now() - 6 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 6 * 3600000).toISOString(),
     link: '/dashboard/profile/emily',
   },
   {
@@ -97,7 +98,7 @@ const mockNotifications: Notification[] = [
     title: 'Achievement Unlocked!',
     message: 'Congratulations! You earned the "Community Champion" badge for helping 10 women with career advice.',
     isRead: true,
-    createdAt: new Date(Date.now() - 24 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 24 * 3600000).toISOString(),
     link: '/dashboard/settings/profile',
   },
   {
@@ -106,7 +107,7 @@ const mockNotifications: Notification[] = [
     title: 'Upcoming Event',
     message: 'Reminder: "Women in Tech Leadership Panel" starts in 2 hours. Don\'t forget to join!',
     isRead: true,
-    createdAt: new Date(Date.now() - 48 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 48 * 3600000).toISOString(),
     link: '/dashboard/events/1',
   },
   {
@@ -115,7 +116,7 @@ const mockNotifications: Notification[] = [
     title: 'Application Update',
     message: 'Your application for "Engineering Manager at Stripe" has moved to the interview stage!',
     isRead: true,
-    createdAt: new Date(Date.now() - 72 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 72 * 3600000).toISOString(),
     link: '/dashboard/applications',
   },
   {
@@ -124,7 +125,7 @@ const mockNotifications: Notification[] = [
     title: 'Profile Strength',
     message: 'Your profile is 85% complete. Add your portfolio to increase visibility to employers.',
     isRead: true,
-    createdAt: new Date(Date.now() - 96 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 96 * 3600000).toISOString(),
     link: '/dashboard/settings/profile',
   },
   {
@@ -133,7 +134,7 @@ const mockNotifications: Notification[] = [
     title: 'You were mentioned',
     message: 'Lisa Park mentioned you in a comment: "@jane Great advice on negotiation strategies!"',
     isRead: true,
-    createdAt: new Date(Date.now() - 120 * 3600000).toISOString(),
+    createdAt: new Date(MOCK_BASE_TIME - 120 * 3600000).toISOString(),
     link: '/dashboard/community',
   },
 ];
@@ -154,6 +155,11 @@ export default function NotificationsPage() {
   const [filter, setFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
@@ -163,21 +169,9 @@ export default function NotificationsPage() {
     return n.type === filter;
   });
 
-  // Group by date
+  // Group by stable UTC date key (YYYY-MM-DD) for deterministic SSR/CSR output.
   const groupedNotifications = filteredNotifications.reduce((groups, notification) => {
-    const date = new Date(notification.createdAt);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    let key;
-    if (date.toDateString() === today.toDateString()) {
-      key = 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      key = 'Yesterday';
-    } else {
-      key = format(date, 'MMMM d, yyyy');
-    }
+    const key = notification.createdAt.slice(0, 10);
 
     if (!groups[key]) {
       groups[key] = [];
@@ -401,10 +395,12 @@ export default function NotificationsPage() {
                               <p className="text-gray-600 dark:text-gray-300 mt-1">
                                 {notification.message}
                               </p>
-                              <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
-                                {formatDistanceToNow(new Date(notification.createdAt), {
-                                  addSuffix: true,
-                                })}
+                              <p className="text-sm text-gray-400 dark:text-gray-500 mt-2" suppressHydrationWarning>
+                                {isHydrated
+                                  ? formatDistanceToNow(new Date(notification.createdAt), {
+                                      addSuffix: true,
+                                    })
+                                  : notification.createdAt.slice(0, 10)}
                               </p>
                             </div>
                           </div>

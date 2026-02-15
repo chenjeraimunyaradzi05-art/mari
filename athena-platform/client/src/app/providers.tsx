@@ -3,9 +3,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, useEffect } from 'react';
-import { useAuthStore, useUIStore } from '@/lib/store';
+import { useAuthStore, useUIStore as useAppUIStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
-import { setTokens } from '@/lib/auth';
+import { setTokens, clearTokens } from '@/lib/auth';
 import { getPreferredLocale } from '@/lib/utils';
 import CookieConsentBanner from '@/components/CookieConsentBanner';
 import { observeTranslations, translateDocument } from '@/i18n/domTranslator';
@@ -14,9 +14,27 @@ import { initializeI18n, setI18nLocale } from '@/i18n/next-i18n';
 import { GDPRProvider } from '@/lib/contexts/GDPRContext';
 import { PWAInstallPrompt } from '@/components/super-app/PWAInstallPrompt';
 import { SkipLinks, AnnouncementProvider, KeyboardShortcutsProvider } from '@/lib/accessibility';
+import { ClientOnly } from '@/components/ClientOnly';
+import { useVideoFeedStore } from '@/lib/stores/video.store';
+import { useUIStore as useSuperUIStore } from '@/lib/stores/ui.store';
+import { useSearchStore } from '@/lib/stores/search.store';
+
+function StoreHydration() {
+  // Rehydrate persisted Zustand stores after mount so the first client render
+  // uses default values (matching the server render) and avoids hydration errors.
+  useEffect(() => {
+    useAuthStore.persist.rehydrate();
+    useAppUIStore.persist.rehydrate();
+    useVideoFeedStore.persist.rehydrate();
+    useSuperUIStore.persist.rehydrate();
+    useSearchStore.persist.rehydrate();
+  }, []);
+
+  return null;
+}
 
 function AuthInitializer({ children }: { children: React.ReactNode }) {
-  const { setLoading, isLoading } = useAuthStore();
+  const { setLoading, login: storeLogin } = useAuthStore();
 
   useEffect(() => {
     // Try silent refresh via HttpOnly cookie on mount.
@@ -26,12 +44,23 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
         const response = await authApi.refresh();
         const { accessToken, user } = response.data.data;
         if (!mounted) return;
-        setTokens(accessToken, null);
-        // Populate store user directly to avoid immediate me() call
-        // useAuth hook will still validate if needed
-        (window as any).__INITIAL_USER = user;
-      } catch (e) {
-        // no-op: not authenticated
+        if (accessToken && user) {
+          // Hydrate auth store directly — no __INITIAL_USER needed
+          storeLogin(user, accessToken, '');
+        } else if (accessToken) {
+          // Fallback: refresh didn't return user, fetch via /me
+          setTokens(accessToken, null);
+          try {
+            const meRes = await authApi.me();
+            if (!mounted) return;
+            storeLogin(meRes.data.data, accessToken, '');
+          } catch {
+            // /me failed — clear tokens, stay unauthenticated
+            clearTokens();
+          }
+        }
+      } catch {
+        // no-op: not authenticated (no valid refresh cookie)
       } finally {
         if (mounted) setLoading(false);
       }
@@ -40,13 +69,13 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [setLoading]);
+  }, [setLoading, storeLogin]);
 
   return <>{children}</>;
 }
 
 function ThemeSync({ children }: { children: React.ReactNode }) {
-  const { theme } = useUIStore();
+  const { theme } = useAppUIStore();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -74,9 +103,13 @@ function ThemeSync({ children }: { children: React.ReactNode }) {
       return () => mql.removeEventListener('change', onChange);
     }
 
-    // Safari fallback
-    (mql as any).addListener?.(onChange);
-    return () => (mql as any).removeListener?.(onChange);
+    // Safari fallback - these methods are deprecated but still exist in older Safari
+    const mediaList = mql as MediaQueryList & {
+      addListener?: (callback: (this: MediaQueryList, ev: MediaQueryListEvent) => void) => void;
+      removeListener?: (callback: (this: MediaQueryList, ev: MediaQueryListEvent) => void) => void;
+    };
+    mediaList.addListener?.(onChange);
+    return () => mediaList.removeListener?.(onChange);
   }, [theme]);
 
   return <>{children}</>;
@@ -122,7 +155,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       })
   );
-  const i18n = initializeI18n(getPreferredLocale());
+  // Use a default locale for server-side rendering to avoid hydration mismatch
+  const [i18n, setI18n] = useState(() => initializeI18n('en-AU'));
+  
+  // Update i18n with client-side locale after mount
+  useEffect(() => {
+    const clientLocale = getPreferredLocale();
+    if (clientLocale !== 'en-AU') {
+      setI18n(initializeI18n(clientLocale));
+    }
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -132,19 +174,28 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <AnnouncementProvider>
               <ThemeSync>
                 <LocaleSync>
+                  <StoreHydration />
                   <SkipLinks />
                   <AuthInitializer>
                     {children}
-                    <PWAInstallPrompt />
-                    <ServiceWorkerRegister />
+                    <ClientOnly>
+                      <PWAInstallPrompt />
+                    </ClientOnly>
+                    <ClientOnly>
+                      <ServiceWorkerRegister />
+                    </ClientOnly>
                   </AuthInitializer>
                 </LocaleSync>
               </ThemeSync>
             </AnnouncementProvider>
           </KeyboardShortcutsProvider>
-          <CookieConsentBanner />
+          <ClientOnly>
+            <CookieConsentBanner />
+          </ClientOnly>
         </GDPRProvider>
-        <ReactQueryDevtools initialIsOpen={false} />
+        <ClientOnly>
+          <ReactQueryDevtools initialIsOpen={false} />
+        </ClientOnly>
       </I18nextProvider>
     </QueryClientProvider>
   );

@@ -25,14 +25,6 @@
 # ===========================================
 # NOTE: Netlify does NOT interpolate env vars in netlify.toml redirect "to" fields.
 # If the Railway URL changes, update these three redirects.
-[[redirects]]
-  from = "/api/*"
-  to = "https://mari-production-5c60.up.railway.app/api/:splat"
-  status = 200
-  force = true
-  [redirects.headers]
-    X-From = "Netlify"
-
 # Proxy uploads to backend
 [[redirects]]
   from = "/uploads/*"

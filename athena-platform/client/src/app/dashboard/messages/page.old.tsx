@@ -46,7 +46,7 @@ export default function MessagesPage() {
 
     sendMessage.mutate(
       {
-        receiverId: getOtherParticipant(selectedConversation).id,
+        conversationId: selectedConversation.id,
         content: messageText,
       },
       {
