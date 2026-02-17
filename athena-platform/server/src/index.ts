@@ -169,11 +169,19 @@ const isCorsOriginAllowed = (origin: string | undefined): boolean => {
     return true;
   }
 
-  // In production, only allow our specific deployment subdomains.
+  // In production, allow the configured Netlify/Railway deployment URLs.
+  // Set NETLIFY_URL and RAILWAY_URL env vars in Railway Dashboard.
   // In development, allow any Netlify/Railway subdomain for flexibility.
   if (process.env.NODE_ENV === 'production') {
-    if (origin === 'https://athena-empress.netlify.app' ||
-        origin === 'https://mari-production-5c60.up.railway.app') {
+    const netlifyUrl = process.env.NETLIFY_URL;
+    const railwayUrl = process.env.RAILWAY_URL;
+    if ((netlifyUrl && origin === netlifyUrl) ||
+        (railwayUrl && origin === railwayUrl)) {
+      return true;
+    }
+    // Also match any *.netlify.app or *.up.railway.app for preview deploys
+    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
+        /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
       return true;
     }
   } else {

@@ -13,7 +13,8 @@
   NEXT_TELEMETRY_DISABLED = "1"
   # -------------------------------------------------------
   # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
-  # Example: NEXT_PUBLIC_API_URL = "https://mari-production-5c60.up.railway.app"
+  #   NEXT_PUBLIC_API_URL = "https://YOUR-SERVER.up.railway.app"
+  #   NEXT_PUBLIC_APP_URL = "https://YOUR-APP.netlify.app"
   # -------------------------------------------------------
 
 # Enable Next.js runtime (handles SSR, ISR, API routes, middleware)
