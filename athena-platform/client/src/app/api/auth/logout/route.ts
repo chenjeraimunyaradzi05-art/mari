@@ -26,8 +26,9 @@ function forwardSetCookieHeaders(from: Response, to: NextResponse) {
 export async function POST(request: NextRequest) {
   // Always clear the refresh cookie on the Next.js side, even if the backend call fails.
   // This ensures the user is fully logged out client-side regardless of backend availability.
+  const isProduction = process.env.NODE_ENV === 'production';
   const clearCookie =
-    'refreshToken=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+    `refreshToken=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isProduction ? '; Secure' : ''}`;
 
   try {
     const authHeader = request.headers.get('authorization');

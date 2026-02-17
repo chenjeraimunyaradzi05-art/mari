@@ -37,13 +37,18 @@ export function middleware(request: NextRequest) {
   // reliably forward Set-Cookie headers. Instead, auth requests fall
   // through to the Next.js API route handlers in app/api/auth/ which
   // explicitly forward cookies via response.headers.getSetCookie().
-  const isAuthRoute = pathname.startsWith('/api/auth');
-  if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
-    const destination = new URL(`${BACKEND_URL}${pathname}`);
-    request.nextUrl.searchParams.forEach((value, key) => {
-      destination.searchParams.set(key, value);
-    });
-    return NextResponse.rewrite(destination);
+  // On Netlify, netlify.toml redirects handle /api/* and /uploads/* proxying
+  // to Railway more reliably than edge-function rewrites. Only use middleware
+  // rewriting for local development (where there are no Netlify redirects).
+  if (!process.env.NETLIFY) {
+    const isAuthRoute = pathname.startsWith('/api/auth');
+    if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
+      const destination = new URL(`${BACKEND_URL}${pathname}`);
+      request.nextUrl.searchParams.forEach((value, key) => {
+        destination.searchParams.set(key, value);
+      });
+      return NextResponse.rewrite(destination);
+    }
   }
 
   const maintenanceMode = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
