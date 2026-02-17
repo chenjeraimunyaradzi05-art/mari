@@ -23,7 +23,12 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = { success: false, message: response.statusText || 'Backend error' };
+    }
     
     return NextResponse.json(data, { status: response.status });
   } catch (error) {

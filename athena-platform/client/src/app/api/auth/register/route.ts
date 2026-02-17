@@ -35,7 +35,12 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(body),
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = { success: false, message: response.statusText || 'Backend error' };
+    }
 
     const res = NextResponse.json(data, { status: response.status });
     forwardSetCookieHeaders(response, res);

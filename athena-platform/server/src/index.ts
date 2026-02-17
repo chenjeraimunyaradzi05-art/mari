@@ -268,10 +268,10 @@ const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX || '100', 10);
 const limiter = rateLimit({
   windowMs: Number.isFinite(rateLimitWindowMs) ? rateLimitWindowMs : 15 * 60 * 1000,
   max: Number.isFinite(rateLimitMax) ? rateLimitMax : 100,
-  message: 'Too many requests, please try again later.',
+  message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
+  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks') || req.path === '/api/auth/refresh',
   validate: { xForwardedForHeader: false },
 });
 
@@ -279,7 +279,7 @@ const limiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 10 : 100, // relaxed in dev
-  message: 'Too many login attempts, please try again later.',
+  message: { success: false, message: 'Too many login attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
@@ -289,7 +289,7 @@ const authLimiter = rateLimit({
 const passwordResetLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 5, // 5 password reset requests per hour
-  message: 'Too many password reset attempts, please try again later.',
+  message: { success: false, message: 'Too many password reset attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },

@@ -42,7 +42,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = { success: false, message: response.statusText || 'Backend error' };
+    }
 
     const res = NextResponse.json(data, { status: response.status });
     // Forward any Set-Cookie from backend
