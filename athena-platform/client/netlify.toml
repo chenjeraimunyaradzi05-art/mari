@@ -29,14 +29,14 @@
 # Proxy uploads to backend
 [[redirects]]
   from = "/uploads/*"
-  to = "https://mari-production-5c60.up.railway.app/uploads/:splat"
+  to = "https://server-production-1849.up.railway.app/uploads/:splat"
   status = 200
   force = true
 
 # Proxy Socket.IO to backend (long-polling fallback)
 [[redirects]]
   from = "/socket.io/*"
-  to = "https://mari-production-5c60.up.railway.app/socket.io/:splat"
+  to = "https://server-production-1849.up.railway.app/socket.io/:splat"
   status = 200
   force = true
 

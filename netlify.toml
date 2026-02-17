@@ -7,7 +7,7 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
   # Set NEXT_PUBLIC_API_URL in Netlify Dashboard Environment Variables
-  # Example: NEXT_PUBLIC_API_URL = "https://athena-api-production.up.railway.app"
+  # Example: NEXT_PUBLIC_API_URL = "https://server-production-1849.up.railway.app"
 
 # Enable Next.js runtime - REQUIRED for Next.js 14 on Netlify
 [[plugins]]
