@@ -28,6 +28,14 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
+function getSafeRedirectPath(redirect: string | null | undefined, fallback: string) {
+  if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    return redirect;
+  }
+
+  return fallback;
+}
+
 export default function LoginPage() {
   return (
     <Suspense fallback={null}>
@@ -42,19 +50,20 @@ function LoginContent() {
   const { login, isLoginPending, isAuthenticated, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const redirect = searchParams?.get('redirect');
+  const safeRedirect = getSafeRedirectPath(redirect, '/dashboard');
+  const isRegistrationRecovery =
+    searchParams?.get('mode') === 'register' ||
+    safeRedirect.includes('/onboarding') ||
+    safeRedirect.includes('entry=register') ||
+    safeRedirect.includes('welcome=new');
 
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) return;
 
-    const redirect = searchParams?.get('redirect');
-    if (redirect && redirect.startsWith('/')) {
-      router.replace(redirect);
-      return;
-    }
-
-    router.replace('/dashboard');
-  }, [isAuthenticated, isLoading, router, searchParams]);
+    router.replace(safeRedirect);
+  }, [isAuthenticated, isLoading, router, safeRedirect]);
 
   const {
     register,
@@ -68,12 +77,7 @@ function LoginContent() {
     setServerError(null);
     login(data, {
       onSuccess: () => {
-        const redirect = searchParams?.get('redirect');
-        if (redirect && redirect.startsWith('/')) {
-          router.push(redirect);
-          return;
-        }
-        router.push('/dashboard');
+        router.replace(safeRedirect);
       },
       onError: (error: unknown) => {
         const responseMessage = (
@@ -109,10 +113,12 @@ function LoginContent() {
 
           <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-8 shadow-xl shadow-primary-100/40 dark:border-gray-800 dark:bg-gray-900 dark:shadow-none sm:p-10">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              Welcome back
+              {isRegistrationRecovery ? 'Welcome to ATHENA' : 'Welcome back'}
             </h1>
             <p className="mt-2 text-gray-600 dark:text-gray-400">
-              Sign in to access your jobs, mentors, saved opportunities, and community.
+              {isRegistrationRecovery
+                ? 'Finish signing in to start your onboarding, workspace, mentors, and community.'
+                : 'Sign in to access your jobs, mentors, saved opportunities, and community.'}
             </p>
 
             <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6">
@@ -226,12 +232,7 @@ function LoginContent() {
                 mode="login"
                 onError={(message) => setServerError(message)}
                 onSuccess={() => {
-                  const redirect = searchParams?.get('redirect');
-                  if (redirect && redirect.startsWith('/')) {
-                    router.push(redirect);
-                    return;
-                  }
-                  router.push('/dashboard');
+                  router.replace(safeRedirect);
                 }}
               />
               <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">

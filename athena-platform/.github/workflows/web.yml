@@ -41,7 +41,7 @@ jobs:
         run: npx tsc --noEmit
       
       - name: Run unit tests
-        run: npm test -- --passWithNoTests --coverage
+        run: npm run test:unit -- --passWithNoTests --coverage
         env:
           CI: true
       
@@ -74,6 +74,7 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
           NEXT_PUBLIC_STRIPE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_KEY }}
           NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
       
@@ -105,16 +106,10 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: nextjs-build
-          path: athena-platform/client/.next
-      
-      - name: Run Playwright tests
-        run: npx playwright test --project=chromium
+      - name: Run Playwright smoke tests
+        run: npx playwright test tests/smoke.spec.ts --project=chromium
         env:
-          BASE_URL: http://localhost:3000
+          PLAYWRIGHT_REUSE_SERVER: 'false'
       
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

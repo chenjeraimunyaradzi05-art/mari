@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Persona } from '@prisma/client';
+import { Persona, UserRole, Region, WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { hashPassword, comparePassword } from '../utils/password';
 import {
@@ -310,9 +310,24 @@ router.post(
           email: true,
           firstName: true,
           lastName: true,
+          displayName: true,
+          avatar: true,
           role: true,
           persona: true,
+          country: true,
+          preferredLocale: true,
+          preferredCurrency: true,
+          timezone: true,
+          region: true,
+          womanSelfAttested: true,
+          womanVerificationStatus: true,
+          isPublic: true,
+          allowMessages: true,
+          createdAt: true,
+          updatedAt: true,
+          lastLoginAt: true,
           referralCode: true,
+          referralCredits: true,
         },
       });
 
@@ -435,6 +450,16 @@ router.post(
           preferredCurrency: true,
           timezone: true,
           region: true,
+          country: true,
+          womanSelfAttested: true,
+          womanVerificationStatus: true,
+          isPublic: true,
+          allowMessages: true,
+          createdAt: true,
+          updatedAt: true,
+          lastLoginAt: true,
+          referralCode: true,
+          referralCredits: true,
         },
       });
 
@@ -587,8 +612,15 @@ router.post(
         timezone: true,
         region: true,
         referralCode: true,
+        referralCredits: true,
         womanSelfAttested: true,
         womanVerificationStatus: true,
+        country: true,
+        isPublic: true,
+        allowMessages: true,
+        createdAt: true,
+        updatedAt: true,
+        lastLoginAt: true,
       } as const;
 
       const existingEmailUser = await prisma.user.findUnique({
@@ -607,15 +639,22 @@ router.post(
             lastName: string;
             displayName: string | null;
             avatar: string | null;
-            role: unknown;
-            persona: unknown;
+            role: UserRole;
+            persona: Persona;
             preferredLocale: string;
             preferredCurrency: string;
             timezone: string;
-            region: unknown;
+            region: Region;
             referralCode: string | null;
+            referralCredits: number;
             womanSelfAttested: boolean;
-            womanVerificationStatus: unknown;
+            womanVerificationStatus: WomanVerificationStatus;
+            country: string;
+            isPublic: boolean;
+            allowMessages: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            lastLoginAt: Date | null;
           }
         | null = null;
       let created = false;
@@ -916,7 +955,10 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
         currentCompany: true,
         yearsExperience: true,
         isPublic: true,
+        allowMessages: true,
         createdAt: true,
+        updatedAt: true,
+        lastLoginAt: true,
         referralCode: true,
         referralCredits: true,
         subscription: {

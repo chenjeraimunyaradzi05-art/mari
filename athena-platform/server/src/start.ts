@@ -25,7 +25,7 @@ console.log(`[ATHENA] node ${process.version}, pid ${process.pid}`);
 // pattern, which can silently fail on Railway's container runtime.
 try {
   console.log('[ATHENA] Running prisma migrate deploy...');
-  execSync('node_modules/.bin/prisma migrate deploy', {
+  execSync('npx prisma migrate deploy', {
     stdio: 'inherit',
     timeout: 60_000, // 60 s safety net
   });

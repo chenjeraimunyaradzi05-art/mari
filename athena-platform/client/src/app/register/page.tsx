@@ -66,6 +66,8 @@ const registerSchema = z
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
+const DEFAULT_POST_REGISTER_PATH = '/onboarding?entry=register';
+
 function buildCompatibilityUsername(email: string, firstName: string, lastName: string) {
   const emailBase = email.split('@')[0] || `${firstName}.${lastName}`;
   const normalized = emailBase
@@ -96,6 +98,14 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   return responseData?.message || responseData?.error?.message || fallback;
 }
 
+function getSafeRedirectPath(redirect: string | null | undefined, fallback: string) {
+  if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    return redirect;
+  }
+
+  return fallback;
+}
+
 export default function RegisterPage() {
   return (
     <Suspense fallback={null}>
@@ -115,12 +125,9 @@ function RegisterContent() {
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated) {
-      const redirect = searchParams?.get('redirect');
-      if (redirect && redirect.startsWith('/')) {
-        router.replace(redirect);
-      } else {
-        router.replace('/dashboard/persona');
-      }
+      router.replace(
+        getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_POST_REGISTER_PATH)
+      );
     }
   }, [isAuthenticated, isLoading, router, searchParams]);
 
@@ -159,12 +166,9 @@ function RegisterContent() {
       },
       {
         onSuccess: () => {
-          const redirect = searchParams?.get('redirect');
-          if (redirect && redirect.startsWith('/')) {
-            router.push(redirect);
-            return;
-          }
-          router.push('/dashboard/persona');
+          router.replace(
+            getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_POST_REGISTER_PATH)
+          );
         },
         onError: (error: unknown) => {
           setServerError(getApiErrorMessage(error, 'Registration failed. Please review your details and try again.'));
@@ -465,12 +469,9 @@ function RegisterContent() {
                 inviteCode={inviteCodeValue?.trim() || undefined}
                 onError={(message) => setServerError(message)}
                 onSuccess={() => {
-                  const redirect = searchParams?.get('redirect');
-                  if (redirect && redirect.startsWith('/')) {
-                    router.push(redirect);
-                    return;
-                  }
-                  router.push('/dashboard/persona');
+                  router.replace(
+                    getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_POST_REGISTER_PATH)
+                  );
                 }}
               />
               <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">

@@ -87,13 +87,20 @@ test.describe('Critical Path: User to Mentor to Payment', () => {
     await userPage.getByRole('button', { name: /create account/i }).click();
 
     // Registration may be throttled in local environments; accept either
-    // successful persona redirect or staying on register.
+    // successful onboarding redirect or staying on register.
     await expect
       .poll(() => userPage.url())
-      .toMatch(/\/dashboard\/persona|\/register/i);
+      .toMatch(/\/onboarding|\/register/i);
   });
 
   test('2. Persona Dashboard Available', async () => {
+    if (/\/onboarding/.test(userPage.url())) {
+      await expect(userPage.getByRole('heading', { name: /welcome to athena/i })).toBeVisible();
+      await userPage.getByRole('button', { name: /skip for now/i }).click();
+      await expect(userPage).toHaveURL(/\/dashboard(\?|$)/, { timeout: 10000 });
+      return;
+    }
+
     if (!/\/dashboard\/persona/.test(userPage.url())) {
       await userPage.goto('/dashboard/persona');
     }

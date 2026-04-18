@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Briefcase,
   TrendingUp,
@@ -19,9 +20,12 @@ import { formatRelativeTime, PERSONA_LABELS, APPLICATION_STATUS_LABELS, APPLICAT
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const { data: recommendations, isLoading: loadingJobs } = useJobRecommendations();
   const { data: applications, isLoading: loadingApps } = useMyApplications();
   const { data: feedData, isLoading: loadingFeed } = useFeed({ limit: 5 });
+  const isNewWelcome =
+    searchParams?.get('welcome') === 'new' || !user?.lastLoginAt;
 
   const quickActions = [
     { name: 'Find Jobs', href: '/dashboard/jobs', icon: Briefcase, color: 'bg-blue-500' },
@@ -44,10 +48,14 @@ export default function DashboardPage() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">
-              Welcome back, {user?.firstName}! 👋
+              {isNewWelcome
+                ? `Welcome to ATHENA, ${user?.firstName}!`
+                : `Welcome back, ${user?.firstName}! 👋`}
             </h1>
             <p className="mt-1 text-white/90">
-              Here's what's happening with your career today.
+              {isNewWelcome
+                ? "You're in. Let's set up momentum across jobs, mentors, AI tools, and community."
+                : "Here's what's happening with your career today."}
             </p>
             {user?.persona && (
               <span className="inline-block mt-2 px-3 py-1 bg-white/20 rounded-full text-sm">

@@ -37,7 +37,21 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   const { setLoading, login: storeLogin, logout: storeLogout } = useAuthStore();
 
   useEffect(() => {
-    // Try silent refresh via HttpOnly cookie on mount.
+    const pathname = window.location.pathname;
+    const hasStoredAuth = Boolean(window.localStorage.getItem('athena-auth'));
+    const shouldBootstrapSession =
+      hasStoredAuth ||
+      pathname.startsWith('/dashboard') ||
+      pathname.startsWith('/admin') ||
+      pathname.startsWith('/employer') ||
+      pathname.startsWith('/onboarding');
+
+    if (!shouldBootstrapSession) {
+      setLoading(false);
+      return;
+    }
+
+    // Try silent refresh via HttpOnly cookie when we likely need an authenticated session.
     let mounted = true;
     (async () => {
       try {

@@ -23,6 +23,18 @@ const authRoutes = [
   '/forgot-password',
 ];
 
+function getSafeRedirectPath(candidate: string | null): string | null {
+  if (!candidate) {
+    return null;
+  }
+
+  if (!candidate.startsWith('/') || candidate.startsWith('//')) {
+    return null;
+  }
+
+  return candidate;
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -98,13 +110,15 @@ export function middleware(request: NextRequest) {
   // If accessing protected route without auth, redirect to login
   if (isProtectedRoute && !isAuthenticated) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
+    const fullPath = `${pathname}${request.nextUrl.search}`;
+    loginUrl.searchParams.set('redirect', fullPath);
     return NextResponse.redirect(loginUrl);
   }
 
   // If accessing auth page while authenticated, redirect to dashboard
   if (isAuthPage && isAuthenticated) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const requestedRedirect = getSafeRedirectPath(request.nextUrl.searchParams.get('redirect'));
+    return NextResponse.redirect(new URL(requestedRedirect || '/dashboard', request.url));
   }
 
   return NextResponse.next();

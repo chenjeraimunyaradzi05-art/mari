@@ -14,6 +14,15 @@ const REGISTER_EMAIL = 'new.user@example.com';
 const ACTIVE_ACCESS_TOKEN = 'access_token_test_1';
 const ACTIVE_REFRESH_TOKEN = 'refresh_token_test_1';
 
+function getSetCookieHeader(res: request.Response): string {
+  const header = res.headers['set-cookie'];
+  if (Array.isArray(header)) {
+    return header.join(';');
+  }
+
+  return header || '';
+}
+
 jest.mock('../utils/email', () => ({
   sendVerificationEmail: jest.fn(async () => true),
   sendPasswordResetEmail: jest.fn(async () => true),
@@ -156,7 +165,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
       .post('/api/auth/register')
       .send({
         email: 'NEW.USER@EXAMPLE.COM',
-        password: 'Password123',
+        password: 'Password123!',
         firstName: 'Test',
         lastName: 'User',
         womanSelfAttested: true,
@@ -167,10 +176,9 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body?.data?.user?.email).toBe('new.user@example.com');
     expect(typeof res.body?.data?.accessToken).toBe('string');
     expect(res.body.data.accessToken.length).toBeGreaterThan(10);
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
-    expect(res.body.data.refreshToken.length).toBeGreaterThan(10);
     expect(typeof res.body?.data?.expiresIn).toBe('number');
     expect(res.body.data.expiresIn).toBeGreaterThan(0);
+    expect(getSetCookieHeader(res)).toContain('refreshToken=');
   });
 
   it('POST /api/auth/login returns 200 and tokens', async () => {
@@ -178,7 +186,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
       .post('/api/auth/login')
       .send({
         email: TEST_USER.email,
-        password: 'Password123',
+        password: 'Password123!',
       })
       .expect(200);
 
@@ -187,10 +195,9 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body?.data?.user?.email).toBe(TEST_USER.email);
     expect(typeof res.body?.data?.accessToken).toBe('string');
     expect(res.body.data.accessToken.length).toBeGreaterThan(10);
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
-    expect(res.body.data.refreshToken.length).toBeGreaterThan(10);
     expect(typeof res.body?.data?.expiresIn).toBe('number');
     expect(res.body.data.expiresIn).toBeGreaterThan(0);
+    expect(getSetCookieHeader(res)).toContain('refreshToken=');
   });
 
   it('POST /api/auth/refresh returns 200 and new tokens for a valid session', async () => {
@@ -202,10 +209,9 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body).toHaveProperty('success', true);
     expect(typeof res.body?.data?.accessToken).toBe('string');
     expect(res.body.data.accessToken.length).toBeGreaterThan(10);
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
-    expect(res.body.data.refreshToken.length).toBeGreaterThan(10);
     expect(typeof res.body?.data?.expiresIn).toBe('number');
     expect(res.body.data.expiresIn).toBeGreaterThan(0);
+    expect(getSetCookieHeader(res)).toContain('refreshToken=');
   });
 
   it('POST /api/auth/refresh rejects cookie-based refresh without a trusted origin', async () => {
@@ -226,7 +232,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
 
     expect(res.body).toHaveProperty('success', true);
     expect(typeof res.body?.data?.accessToken).toBe('string');
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
+    expect(getSetCookieHeader(res)).toContain('refreshToken=');
   });
 
   it('POST /api/auth/register allows empty persona and defaults', async () => {
@@ -234,7 +240,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
       .post('/api/auth/register')
       .send({
         email: 'empty.persona@example.com',
-        password: 'Password123',
+        password: 'Password123!',
         firstName: 'Empty',
         lastName: 'Persona',
         persona: '',
@@ -244,8 +250,8 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
 
     expect(res.body).toHaveProperty('success', true);
     expect(typeof res.body?.data?.accessToken).toBe('string');
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
     expect(typeof res.body?.data?.expiresIn).toBe('number');
+    expect(getSetCookieHeader(res)).toContain('refreshToken=');
   });
 
   it('GET /api/auth/me returns 200 for an active access-token session', async () => {

@@ -115,6 +115,9 @@ athena-platform/
 
 | Document | Description |
 |----------|-------------|
+| [docs/product/BUSINESS_SOCIAL_OVERVIEW.md](./docs/product/BUSINESS_SOCIAL_OVERVIEW.md) | Strategic business model, positioning, and social-product overview |
+| [docs/marketing/LANDING_PAGE_COPY.md](./docs/marketing/LANDING_PAGE_COPY.md) | Reusable landing-page messaging and CTA copy |
+| [docs/investors/INVESTOR_ONE_PAGER.md](./docs/investors/INVESTOR_ONE_PAGER.md) | Investor-facing summary of the product, business model, and moat |
 | [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) | Production deployment checklist |
 | [docs/api/API_OVERVIEW.md](./docs/api/API_OVERVIEW.md) | API documentation |
 | [docs/runbooks/ONCALL.md](./docs/runbooks/ONCALL.md) | On-call procedures |

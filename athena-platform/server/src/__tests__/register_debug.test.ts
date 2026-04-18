@@ -81,13 +81,22 @@ jest.mock('../utils/prisma', () => {
 import { app } from '../index';
 import { prisma } from '../utils/prisma';
 
+function getSetCookieHeader(res: request.Response): string {
+  const header = res.headers['set-cookie'];
+  if (Array.isArray(header)) {
+    return header.join(';');
+  }
+
+  return header || '';
+}
+
 describe('registration flow (mocked prisma)', () => {
   it('registers a new user with a normalized email and invite code without a live database', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .send({
         email: 'DEBUG.USER@EXAMPLE.COM',
-        password: 'Password123',
+        password: 'Password123!',
         firstName: 'Debug',
         lastName: 'User',
         persona: 'mid_career',
@@ -100,9 +109,9 @@ describe('registration flow (mocked prisma)', () => {
     expect(res.body?.data?.user?.email).toBe('debug.user@example.com');
     expect(res.body?.data?.user?.persona).toBe('MID_CAREER');
     expect(typeof res.body?.data?.accessToken).toBe('string');
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
     expect(typeof res.body?.data?.expiresIn).toBe('number');
     expect(res.body.data.expiresIn).toBeGreaterThan(0);
+    expect(getSetCookieHeader(res)).toContain('refreshToken=');
 
     expect(prisma.user.findUnique).toHaveBeenNthCalledWith(
       1,
