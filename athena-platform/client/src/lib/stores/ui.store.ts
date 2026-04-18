@@ -97,7 +97,7 @@ export const useUIStore = create<UIState>()(
       setMobileNavOpen: (open) => set({ isMobileNavOpen: open }),
       
       // Theme
-      theme: 'system',
+      theme: 'dark',
       setTheme: (theme) => set({ theme }),
       
       // Notification Panel

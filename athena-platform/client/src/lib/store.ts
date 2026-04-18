@@ -116,7 +116,7 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: true,
       sidebarCollapsed: false,
       isMobileMenuOpen: false,
-      theme: 'system',
+      theme: 'dark',
 
       toggleSidebar: () => {
         const next = !get().isSidebarOpen;

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
@@ -44,8 +45,48 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#7c3aed',
+  themeColor: '#020617',
 };
+
+const themeBootScript = `
+  (function() {
+    const storageKeys = ['athena-ui', 'athena-ui-store', 'athena-theme'];
+
+    const readStoredTheme = () => {
+      for (const key of storageKeys) {
+        try {
+          const raw = window.localStorage.getItem(key);
+          if (!raw) continue;
+
+          if (raw === 'light' || raw === 'dark' || raw === 'system') {
+            return raw;
+          }
+
+          const parsed = JSON.parse(raw);
+          const theme = parsed && typeof parsed === 'object'
+            ? (parsed.state && parsed.state.theme) || parsed.theme
+            : null;
+
+          if (theme === 'light' || theme === 'dark' || theme === 'system') {
+            return theme;
+          }
+        } catch (_) {}
+      }
+
+      return 'dark';
+    };
+
+    const storedTheme = readStoredTheme();
+    const resolvedTheme = storedTheme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : storedTheme;
+
+    const root = document.documentElement;
+    root.classList.toggle('dark', resolvedTheme === 'dark');
+    root.dataset.theme = resolvedTheme;
+    root.style.colorScheme = resolvedTheme;
+  })();
+`;
 
 export default function RootLayout({
   children,
@@ -54,7 +95,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen antialiased" suppressHydrationWarning>
+      <body className="min-h-screen bg-background text-foreground antialiased transition-colors duration-300" suppressHydrationWarning>
+        <Script id="athena-theme-boot" strategy="beforeInteractive">
+          {themeBootScript}
+        </Script>
         <Providers>
           {children}
           <Toaster

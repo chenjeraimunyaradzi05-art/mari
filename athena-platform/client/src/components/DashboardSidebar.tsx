@@ -187,7 +187,7 @@ export default function DashboardSidebar() {
         {/* Logo (Mobile only) */}
         <div className="lg:hidden flex items-center space-x-2 p-4 border-b border-gray-200 dark:border-gray-700">
             <Image
-              src="/athena-logo.png"
+              src="/logo.svg"
               alt="ATHENA"
               width={36}
               height={36}

@@ -133,7 +133,7 @@ export default function DashboardLayout({
         {/* Logo */}
         <div className="flex h-16 items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800">
           <Link href="/dashboard" className="flex items-center space-x-2">
-            <Image src="/athena-logo.png" alt="ATHENA" width={32} height={32} className="rounded-lg flex-shrink-0" />
+            <Image src="/logo.svg" alt="ATHENA" width={32} height={32} className="rounded-lg flex-shrink-0" />
             {isSidebarOpen && (
               <span className="text-xl font-bold gradient-text">ATHENA</span>
             )}

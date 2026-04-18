@@ -48,7 +48,7 @@ function VerifyEmailContent() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center space-x-2 mb-4">
-            <Image src="/athena-logo.png" alt="ATHENA" width={40} height={40} className="rounded-lg" />
+            <Image src="/logo.svg" alt="ATHENA" width={40} height={40} className="rounded-lg" />
             <span className="text-2xl font-bold gradient-text">ATHENA</span>
           </div>
         </div>

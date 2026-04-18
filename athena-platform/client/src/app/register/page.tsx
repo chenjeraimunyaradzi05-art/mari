@@ -184,7 +184,7 @@ function RegisterContent() {
         <div className="mx-auto w-full max-w-xl lg:max-w-lg">
           <div className="flex items-center space-x-3 mb-8">
             <Image
-              src="/athena-logo.png"
+              src="/logo.svg"
               alt="ATHENA"
               width={48}
               height={48}

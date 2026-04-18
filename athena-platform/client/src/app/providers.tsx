@@ -13,6 +13,7 @@ import { I18nextProvider } from 'react-i18next';
 import { initializeI18n, setI18nLocale } from '@/i18n/next-i18n';
 import { GDPRProvider } from '@/lib/contexts/GDPRContext';
 import { PWAInstallPrompt } from '@/components/super-app/PWAInstallPrompt';
+import FloatingAIButton from '@/components/ai/FloatingAIButton';
 import { SkipLinks, AnnouncementProvider, KeyboardShortcutsProvider } from '@/lib/accessibility';
 import { ClientOnly } from '@/components/ClientOnly';
 import { useVideoFeedStore } from '@/lib/stores/video.store';
@@ -97,15 +98,23 @@ function ThemeSync({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
+    const themeColor = document.querySelector('meta[name="theme-color"]');
 
     const applyTheme = (selected: 'light' | 'dark' | 'system') => {
-      if (selected === 'system') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        root.classList.toggle('dark', prefersDark);
-        return;
-      }
+      const resolvedTheme =
+        selected === 'system'
+          ? window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+          : selected;
 
-      root.classList.toggle('dark', selected === 'dark');
+      root.classList.toggle('dark', resolvedTheme === 'dark');
+      root.dataset.theme = resolvedTheme;
+      root.style.colorScheme = resolvedTheme;
+
+      if (themeColor instanceof HTMLMetaElement) {
+        themeColor.content = resolvedTheme === 'dark' ? '#020617' : '#fff7ed';
+      }
     };
 
     applyTheme(theme);
@@ -196,6 +205,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
                   <SkipLinks />
                   <AuthInitializer>
                     {children}
+                    <ClientOnly>
+                      <FloatingAIButton />
+                    </ClientOnly>
                     <ClientOnly>
                       <PWAInstallPrompt />
                     </ClientOnly>
