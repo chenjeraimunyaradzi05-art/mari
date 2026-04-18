@@ -7,6 +7,7 @@ import {
   Building2,
   Check,
   Coins,
+  Globe2,
   GraduationCap,
   LayoutGrid,
   MessageSquare,
@@ -27,6 +28,15 @@ const navLinks = [
   { href: '/feed', label: 'Community' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/help/safety-center', label: 'Trust & Safety' },
+];
+
+const headerShortcuts = [
+  { href: '/jobs', label: 'Jobs', icon: Briefcase },
+  { href: '/mentors', label: 'Mentors', icon: Users },
+  { href: '/feed', label: 'Community', icon: MessageSquare },
+  { href: '/pricing', label: 'Pricing', icon: Coins },
+  { href: '/help/safety-center', label: 'Safety', icon: ShieldCheck },
+  { href: '/dashboard/ai/chat', label: 'ATHENA AI', icon: Sparkles },
 ];
 
 const headlineStats = [
@@ -329,45 +339,82 @@ export default function HomepageLanding() {
         className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[34rem] bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.22),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(45,212,191,0.18),_transparent_30%),radial-gradient(circle_at_center,_rgba(14,165,233,0.12),_transparent_45%)] dark:bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.16),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(56,189,248,0.16),_transparent_28%),radial-gradient(circle_at_center,_rgba(59,130,246,0.14),_transparent_42%)]"
       />
 
-      <nav className="sticky top-0 z-50 border-b border-white/70 bg-white/80 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/72">
-        <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <Image src="/logo.svg" alt="ATHENA" width={38} height={38} className="rounded-2xl" />
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-600 dark:text-amber-300">
-                ATHENA
+      <nav className="sticky top-0 z-50 border-b border-white/70 bg-white/88 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/78">
+        <div className="mx-auto flex max-w-7xl flex-col px-4 sm:px-6 lg:px-8">
+          <div className="flex min-h-[5.25rem] items-center justify-between gap-4">
+            <Link href="/" className="flex min-w-0 items-center gap-3">
+              <Image src="/logo.svg" alt="ATHENA" width={42} height={42} className="shrink-0 rounded-2xl" />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="truncate text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-600 dark:text-amber-300">
+                    ATHENA
+                  </div>
+                  <span className="hidden rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 sm:inline-flex dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                    Live
+                  </span>
+                </div>
+                <div className="truncate text-sm font-medium text-slate-500 dark:text-slate-400">Career superapp</div>
               </div>
-              <div className="text-sm font-medium text-slate-500 dark:text-slate-400">Career superapp</div>
-            </div>
-          </Link>
+            </Link>
 
-          <div className="hidden items-center gap-7 lg:flex">
-            {navLinks.map((link) => (
+            <div className="hidden items-center gap-7 lg:flex">
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="text-sm font-medium text-slate-600 transition hover:text-slate-950 dark:text-slate-300 dark:hover:text-white"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              <div className="hidden md:block">
+                <ClientOnly>
+                  <PublicThemeToggle />
+                </ClientOnly>
+              </div>
               <Link
-                key={link.href}
-                href={link.href}
-                className="text-sm font-medium text-slate-600 transition hover:text-slate-950 dark:text-slate-300 dark:hover:text-white"
+                href="/login"
+                className="inline-flex items-center rounded-full px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
               >
-                {link.label}
+                Sign in
               </Link>
-            ))}
+              <Link
+                href="/register"
+                className="inline-flex items-center rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+              >
+                Join free
+              </Link>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden md:block">
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200/80 py-3 lg:hidden dark:border-white/10">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
+              <Globe2 className="h-3.5 w-3.5" />
+              Quick routes
+            </div>
+            <div className="md:hidden">
               <ClientOnly>
                 <PublicThemeToggle />
               </ClientOnly>
             </div>
-            <Link href="/login" className="text-sm font-medium text-slate-600 transition hover:text-slate-950 dark:text-slate-300 dark:hover:text-white">
-              Sign in
-            </Link>
-            <Link
-              href="/register"
-              className="inline-flex items-center rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-            >
-              Join free
-            </Link>
+          </div>
+
+          <div className="-mx-4 overflow-x-auto px-4 pb-3 lg:hidden sm:-mx-6 sm:px-6">
+            <div className="flex min-w-max items-center gap-2">
+              {headerShortcuts.map((shortcut) => (
+                <Link
+                  key={shortcut.href}
+                  href={shortcut.href}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10 dark:hover:text-white"
+                >
+                  <shortcut.icon className="h-4 w-4" />
+                  {shortcut.label}
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
       </nav>
@@ -522,7 +569,7 @@ export default function HomepageLanding() {
             </Link>
           </div>
 
-          <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {launchpadCards.map((card) => (
               <div
                 key={card.title}
@@ -737,9 +784,9 @@ export default function HomepageLanding() {
         <section className="mx-auto max-w-7xl px-4 pb-20 pt-12 sm:px-6 lg:px-8">
           <div className="rounded-[2.25rem] bg-slate-950 px-8 py-10 text-white shadow-[0_30px_120px_rgba(15,23,42,0.22)] dark:border dark:border-sky-400/20 dark:bg-[linear-gradient(145deg,#0f172a_0%,#111827_55%,#0b1120_100%)] lg:px-10 lg:py-12">
             <div className="grid gap-8 lg:grid-cols-12 lg:items-center">
-              <div>
+              <div className="lg:col-span-8">
                 <div className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-300">Get started</div>
-                <h2 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">
+                <h2 className="mt-3 max-w-4xl text-4xl font-semibold tracking-[-0.04em]">
                   Build your next chapter with one platform designed for real momentum.
                 </h2>
                 <p className="mt-4 max-w-2xl text-base leading-8 text-slate-300">
@@ -748,7 +795,7 @@ export default function HomepageLanding() {
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 lg:col-span-4">
+              <div className="flex flex-col gap-3 lg:col-span-4 lg:justify-self-end lg:min-w-[20rem]">
                 <Link
                   href="/register"
                   className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
