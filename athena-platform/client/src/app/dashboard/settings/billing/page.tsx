@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -63,6 +63,14 @@ const plans = [
 ];
 
 export default function BillingSettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <BillingContent />
+    </Suspense>
+  );
+}
+
+function BillingContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const { data: subscription } = useSubscription();

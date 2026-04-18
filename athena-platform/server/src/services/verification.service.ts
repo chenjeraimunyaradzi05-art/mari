@@ -3,13 +3,15 @@
  * Identity, employer, educator, mentor, and creator verification flows
  */
 
-import { prisma } from '../utils/prisma';
-import { logger } from '../utils/logger';
-import { sendNotification } from './socket.service';
+import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { hashOpaqueToken } from '../utils/opaqueToken';
+import { logger } from '../utils/logger';
+import { prisma } from '../utils/prisma';
+import { sendNotification } from './socket.service';
 
 export type VerificationType = 'IDENTITY' | 'EMPLOYER' | 'EDUCATOR' | 'MENTOR' | 'CREATOR';
-export type VerificationStatus = 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+export type VerificationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface VerificationRequest {
   id: string;
@@ -88,8 +90,136 @@ const VERIFICATION_REQUIREMENTS: Record<VerificationType, VerificationRequiremen
   },
 };
 
-// Email verification store (in-memory, would be Redis in production)
-const emailVerificationCodes = new Map<string, { code: string; expiresAt: Date; email: string; type: VerificationType }>();
+interface EmailVerificationChallenge {
+  codeHash: string;
+  expiresAt: string;
+  email: string;
+  type: VerificationType;
+}
+
+interface VerificationMetadata extends Record<string, any> {
+  documents?: VerificationDocument[];
+  emailVerification?: EmailVerificationChallenge;
+  verificationExpiresAt?: string;
+}
+
+function getVerificationMetadata(metadata: unknown): VerificationMetadata {
+  return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? (metadata as VerificationMetadata)
+    : {};
+}
+
+function serializeMetadata(
+  metadata: Record<string, any> | undefined
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return Prisma.JsonNull;
+  }
+
+  return JSON.parse(JSON.stringify(metadata)) as Prisma.InputJsonValue;
+}
+
+function mergeVerificationMetadata(
+  metadata: unknown,
+  updates: Record<string, unknown> = {},
+  keysToRemove: string[] = []
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  const nextMetadata: VerificationMetadata = {
+    ...getVerificationMetadata(metadata),
+    ...updates,
+  };
+
+  for (const key of keysToRemove) {
+    delete nextMetadata[key];
+  }
+
+  return serializeMetadata(nextMetadata);
+}
+
+function getVerificationExpiresAt(metadata: unknown): Date | undefined {
+  const expiresAt = getVerificationMetadata(metadata).verificationExpiresAt;
+  return expiresAt ? new Date(expiresAt) : undefined;
+}
+
+function getVerificationDocuments(metadata: unknown): VerificationDocument[] {
+  return (getVerificationMetadata(metadata).documents as VerificationDocument[] | undefined) || [];
+}
+
+function mapVerificationRequest(badge: {
+  id: string;
+  userId: string;
+  type: string;
+  status: string;
+  submittedAt: Date;
+  reviewedAt: Date | null;
+  reviewedById: string | null;
+  metadata: unknown;
+  reason: string | null;
+}): VerificationRequest {
+  return {
+    id: badge.id,
+    userId: badge.userId,
+    type: badge.type as VerificationType,
+    status: badge.status as VerificationStatus,
+    submittedAt: badge.submittedAt,
+    reviewedAt: badge.reviewedAt || undefined,
+    reviewedBy: badge.reviewedById || undefined,
+    expiresAt: getVerificationExpiresAt(badge.metadata),
+    documents: getVerificationDocuments(badge.metadata),
+    metadata: getVerificationMetadata(badge.metadata),
+    rejectionReason: badge.reason || undefined,
+    appealable: badge.status === 'REJECTED',
+  };
+}
+
+async function storeEmailVerificationChallenge(
+  verificationId: string,
+  challenge: EmailVerificationChallenge
+): Promise<void> {
+  const verification = await prisma.verificationBadge.findUnique({
+    where: { id: verificationId },
+    select: { metadata: true },
+  });
+
+  await prisma.verificationBadge.update({
+    where: { id: verificationId },
+    data: {
+      metadata: mergeVerificationMetadata(verification?.metadata, {
+        emailVerification: challenge,
+      }),
+    },
+  });
+}
+
+async function loadEmailVerificationChallenge(
+  verificationId: string
+): Promise<{
+  verification: Record<string, any>;
+  challenge: EmailVerificationChallenge;
+} | null> {
+  const verification = await prisma.verificationBadge.findUnique({
+    where: { id: verificationId },
+  });
+
+  if (!verification) {
+    return null;
+  }
+
+  const challenge = getVerificationMetadata(verification.metadata)
+    .emailVerification as EmailVerificationChallenge | undefined;
+
+  if (!challenge) {
+    return null;
+  }
+
+  return { verification, challenge };
+}
+
+function removeEmailVerificationChallenge(
+  metadata: unknown
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  return mergeVerificationMetadata(metadata, {}, ['emailVerification']);
+}
 
 /**
  * Get verification requirements for a type
@@ -105,23 +235,22 @@ export async function getUserVerifications(userId: string): Promise<Verification
   try {
     const badges = await prisma.verificationBadge.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { submittedAt: 'desc' },
     });
 
-    return badges.map((badge: any) => ({
-      id: badge.id,
-      userId: badge.userId,
-      type: badge.type as VerificationType,
-      status: badge.status as VerificationStatus,
-      submittedAt: badge.createdAt,
-      reviewedAt: badge.reviewedAt,
-      reviewedBy: badge.reviewedBy,
-      expiresAt: badge.expiresAt,
-      documents: [],
-      metadata: (badge.metadata as Record<string, any>) || {},
-      rejectionReason: badge.rejectionReason,
-      appealable: badge.status === 'REJECTED',
-    }));
+    return badges.map((badge) =>
+      mapVerificationRequest({
+        id: badge.id,
+        userId: badge.userId,
+        type: badge.type,
+        status: badge.status,
+        submittedAt: badge.submittedAt,
+        reviewedAt: badge.reviewedAt,
+        reviewedById: badge.reviewedById,
+        metadata: badge.metadata,
+        reason: badge.reason,
+      })
+    );
   } catch (error) {
     logger.error('Failed to get user verifications', { error, userId });
     return [];
@@ -170,23 +299,24 @@ export async function submitVerification(
       userId,
       type,
       status: 'PENDING',
-      metadata: {
+      metadata: serializeMetadata({
         ...metadata,
         documents: documents.map(d => ({
           id: randomBytes(8).toString('hex'),
           ...d,
           verified: false,
         })),
-      },
+      }),
     },
   });
 
   // Log audit trail
   await prisma.auditLog.create({
     data: {
-      userId,
+      actorUserId: userId,
+      targetUserId: userId,
       action: 'USER_VERIFICATION_SUBMIT',
-      details: { type, documentCount: documents.length },
+      metadata: { type, documentCount: documents.length },
     },
   });
 
@@ -209,9 +339,9 @@ export async function submitVerification(
     userId,
     type,
     status: 'PENDING',
-    submittedAt: verification.createdAt,
-    documents: (verification.metadata as any)?.documents || [],
-    metadata: metadata || {},
+    submittedAt: verification.submittedAt,
+    documents: getVerificationDocuments(verification.metadata),
+    metadata: getVerificationMetadata(verification.metadata),
     appealable: false,
   };
 }
@@ -228,22 +358,28 @@ async function sendEmailVerification(
   const code = randomBytes(3).toString('hex').toUpperCase();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-  emailVerificationCodes.set(verificationId, {
-    code,
-    expiresAt,
+  await storeEmailVerificationChallenge(verificationId, {
+    codeHash: hashOpaqueToken(code),
+    expiresAt: expiresAt.toISOString(),
     email,
     type,
   });
 
-  // In production, send actual email
-  logger.info('Email verification code sent', { userId, email, code, type });
-  
-  // Simulate email sending
+  logger.info('Email verification challenge created', {
+    userId,
+    email,
+    type,
+    verificationId,
+  });
+
   await sendNotification({
     userId,
     type: 'SYSTEM',
     title: 'Verify Your Email',
-    message: `Enter code ${code} to verify ${email}`,
+    message:
+      process.env.NODE_ENV === 'production'
+        ? `We've sent a verification code to ${email}.`
+        : `Development verification code for ${email}: ${code}`,
     link: `/dashboard/settings/verification?id=${verificationId}`,
   });
 }
@@ -255,37 +391,47 @@ export async function verifyEmailCode(
   verificationId: string,
   code: string
 ): Promise<{ success: boolean; message: string }> {
-  const stored = emailVerificationCodes.get(verificationId);
+  const loaded = await loadEmailVerificationChallenge(verificationId);
 
-  if (!stored) {
+  if (!loaded) {
     return { success: false, message: 'Verification not found or expired' };
   }
 
-  if (new Date() > stored.expiresAt) {
-    emailVerificationCodes.delete(verificationId);
+  const { verification, challenge } = loaded;
+  const challengeExpiresAt = new Date(challenge.expiresAt);
+
+  if (new Date() > challengeExpiresAt) {
+    await prisma.verificationBadge.update({
+      where: { id: verificationId },
+      data: {
+        metadata: removeEmailVerificationChallenge(verification.metadata),
+      },
+    });
     return { success: false, message: 'Verification code has expired' };
   }
 
-  if (stored.code !== code.toUpperCase()) {
+  if (challenge.codeHash !== hashOpaqueToken(code.toUpperCase())) {
     return { success: false, message: 'Invalid verification code' };
   }
 
   // Mark as approved
   const expiresAt = new Date();
-  expiresAt.setFullYear(expiresAt.getFullYear() + (stored.type === 'EMPLOYER' ? 1 : 4));
+  expiresAt.setFullYear(expiresAt.getFullYear() + (challenge.type === 'EMPLOYER' ? 1 : 4));
 
   await prisma.verificationBadge.update({
     where: { id: verificationId },
     data: {
       status: 'APPROVED',
       reviewedAt: new Date(),
-      expiresAt,
+      metadata: mergeVerificationMetadata(
+        verification.metadata,
+        { verificationExpiresAt: expiresAt.toISOString() },
+        ['emailVerification']
+      ),
     },
   });
 
-  emailVerificationCodes.delete(verificationId);
-
-  logger.info('Email verification successful', { verificationId, type: stored.type });
+  logger.info('Email verification successful', { verificationId, type: challenge.type });
 
   return { success: true, message: 'Email verified successfully!' };
 }
@@ -297,6 +443,11 @@ async function processCreatorVerification(
   userId: string,
   verificationId: string
 ): Promise<void> {
+  const verification = await prisma.verificationBadge.findUnique({
+    where: { id: verificationId },
+    select: { metadata: true },
+  });
+
   // Check creator metrics
   const [followerCount, postCount, accountAge] = await Promise.all([
     prisma.follow.count({ where: { followingId: userId } }),
@@ -328,10 +479,10 @@ async function processCreatorVerification(
       data: {
         status: 'APPROVED',
         reviewedAt: new Date(),
-        metadata: {
+        metadata: mergeVerificationMetadata(verification?.metadata, {
           autoVerified: true,
           metrics: { followerCount, postCount, daysSinceCreation },
-        },
+        }),
       },
     });
 
@@ -348,7 +499,7 @@ async function processCreatorVerification(
       where: { id: verificationId },
       data: {
         status: 'REJECTED',
-        rejectionReason: `Creator verification requires: ${requirements.minFollowers.toLocaleString()} followers (you have ${followerCount.toLocaleString()}), ${requirements.minPosts} posts (you have ${postCount}), and ${requirements.minAccountAgeDays} days account age (you have ${daysSinceCreation}).`,
+        reason: `Creator verification requires: ${requirements.minFollowers.toLocaleString()} followers (you have ${followerCount.toLocaleString()}), ${requirements.minPosts} posts (you have ${postCount}), and ${requirements.minAccountAgeDays} days account age (you have ${daysSinceCreation}).`,
         reviewedAt: new Date(),
       },
     });
@@ -372,7 +523,7 @@ export async function reviewVerification(
     throw new Error('Verification not found');
   }
 
-  if (verification.status !== 'PENDING' && verification.status !== 'IN_REVIEW') {
+  if (verification.status !== 'PENDING') {
     throw new Error('Verification has already been reviewed');
   }
 
@@ -390,18 +541,24 @@ export async function reviewVerification(
     data: {
       status: decision,
       reviewedAt: new Date(),
-      reviewedBy: reviewerId,
-      rejectionReason: decision === 'REJECTED' ? reason : null,
-      expiresAt,
+      reviewedById: reviewerId,
+      reason: decision === 'REJECTED' ? reason ?? null : null,
+      metadata:
+        decision === 'APPROVED' && expiresAt
+          ? mergeVerificationMetadata(verification.metadata, {
+              verificationExpiresAt: expiresAt.toISOString(),
+            })
+          : mergeVerificationMetadata(verification.metadata, {}, ['verificationExpiresAt']),
     },
   });
 
   // Log audit trail
   await prisma.auditLog.create({
     data: {
-      userId: reviewerId,
+      actorUserId: reviewerId,
+      targetUserId: verification.userId,
       action: decision === 'APPROVED' ? 'ADMIN_VERIFICATION_APPROVE' : 'ADMIN_VERIFICATION_REJECT',
-      details: { verificationId, type: verification.type, reason },
+      metadata: { verificationId, type: verification.type, reason },
     },
   });
 
@@ -422,20 +579,17 @@ export async function reviewVerification(
     reviewerId,
   });
 
-  return {
+  return mapVerificationRequest({
     id: updated.id,
     userId: updated.userId,
-    type: updated.type as VerificationType,
-    status: updated.status as VerificationStatus,
-    submittedAt: updated.createdAt,
-    reviewedAt: updated.reviewedAt || undefined,
-    reviewedBy: updated.reviewedBy || undefined,
-    expiresAt: updated.expiresAt || undefined,
-    documents: [],
-    metadata: (updated.metadata as Record<string, any>) || {},
-    rejectionReason: updated.rejectionReason || undefined,
-    appealable: decision === 'REJECTED',
-  };
+    type: updated.type,
+    status: updated.status,
+    submittedAt: updated.submittedAt,
+    reviewedAt: updated.reviewedAt,
+    reviewedById: updated.reviewedById,
+    metadata: updated.metadata,
+    reason: updated.reason,
+  });
 }
 
 /**
@@ -486,15 +640,18 @@ export async function submitAppeal(
     where: { id: verificationId },
     data: {
       status: 'PENDING',
-      rejectionReason: null,
+      reason: null,
+      reviewedAt: null,
+      reviewedById: null,
     },
   });
 
   await prisma.auditLog.create({
     data: {
-      userId,
+      actorUserId: userId,
+      targetUserId: userId,
       action: 'USER_APPEAL_SUBMIT',
-      details: { verificationId, type: verification.type },
+      metadata: { verificationId, type: verification.type },
     },
   });
 
@@ -507,25 +664,32 @@ export async function submitAppeal(
  * Check if verification is expiring soon
  */
 export async function checkExpiringVerifications(): Promise<void> {
+  const now = new Date();
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
   const expiring = await prisma.verificationBadge.findMany({
     where: {
       status: 'APPROVED',
-      expiresAt: {
-        lte: thirtyDaysFromNow,
-        gt: new Date(),
-      },
     },
     include: {
       user: { select: { id: true, displayName: true } },
     },
   });
 
-  for (const verification of expiring as any[]) {
+  const expiringSoon = expiring.filter((verification) => {
+    const expiresAt = getVerificationExpiresAt(verification.metadata);
+    return !!expiresAt && expiresAt <= thirtyDaysFromNow && expiresAt > now;
+  });
+
+  for (const verification of expiringSoon) {
+    const expiresAt = getVerificationExpiresAt(verification.metadata);
+    if (!expiresAt) {
+      continue;
+    }
+
     const daysUntilExpiry = Math.ceil(
-      ((verification.expiresAt?.getTime() || 0) - Date.now()) / (1000 * 60 * 60 * 24)
+      (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
 
     await sendNotification({
@@ -537,7 +701,7 @@ export async function checkExpiringVerifications(): Promise<void> {
     });
   }
 
-  logger.info('Checked expiring verifications', { count: expiring.length });
+  logger.info('Checked expiring verifications', { count: expiringSoon.length });
 }
 
 /**

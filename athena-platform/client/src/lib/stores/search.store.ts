@@ -15,7 +15,7 @@ export interface SearchResult {
   subtitle?: string;
   image?: string;
   url: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   relevanceScore?: number;
 }
 
@@ -31,7 +31,7 @@ export interface SavedSearch {
   id: string;
   query: string;
   category: SearchCategory;
-  filters?: Record<string, any>;
+  filters?: Record<string, unknown>;
   createdAt: number;
   alertEnabled?: boolean;
 }
@@ -46,8 +46,8 @@ interface SearchState {
   setCategory: (category: SearchCategory) => void;
   
   // Advanced filters
-  filters: Record<string, any>;
-  setFilters: (filters: Record<string, any>) => void;
+  filters: Record<string, unknown>;
+  setFilters: (filters: Record<string, unknown>) => void;
   clearFilters: () => void;
   
   // Results
@@ -67,7 +67,7 @@ interface SearchState {
   
   // Saved searches
   savedSearches: SavedSearch[];
-  saveSearch: (query: string, category: SearchCategory, filters?: Record<string, any>) => void;
+  saveSearch: (query: string, category: SearchCategory, filters?: Record<string, unknown>) => void;
   removeSavedSearch: (id: string) => void;
   toggleSearchAlert: (id: string) => void;
   

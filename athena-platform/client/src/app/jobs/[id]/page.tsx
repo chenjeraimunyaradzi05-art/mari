@@ -5,33 +5,28 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { 
-  Building2, 
-  MapPin, 
-  Clock, 
-  DollarSign, 
-  Briefcase, 
-  Globe, 
+  Building2,
+  MapPin,
+  Clock,
+  DollarSign,
+  Briefcase,
+  Globe,
   CheckCircle,
-  Flag
 } from 'lucide-react';
 import { jobApi } from '@/lib/api';
 import { Job } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Avatar } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
-import { useAuth } from '@/lib/hooks';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
 
 export default function JobDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  const { user } = useAuth();
   
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('details');
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -109,7 +104,7 @@ export default function JobDetailsPage() {
                 <CrossModuleShareButton
                   title={job.title}
                   description={`${job.organization?.name || 'Employer'} • ${job.isRemote ? 'Remote' : `${job.city}, ${job.state}`}`}
-                  url={`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/jobs/${job.id}`}
+                  url={`${process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/jobs/${job.id}`}
                   entityType="job"
                   entityId={job.id}
                 />

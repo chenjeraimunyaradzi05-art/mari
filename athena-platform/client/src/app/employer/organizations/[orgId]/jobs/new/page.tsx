@@ -233,7 +233,7 @@ export default function CreateJobPage() {
                     type="text"
                     value={skillInput}
                     onChange={(e) => setSkillInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addSkill())}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSkill(); } }}
                     className="input flex-1"
                     placeholder="Type a skill and press Enter"
                   />

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Search,
@@ -12,9 +13,7 @@ import {
   DollarSign,
   Filter,
   X,
-  ChevronDown,
   Bookmark,
-  ExternalLink,
   Target,
 } from 'lucide-react';
 import { useJobs, useSavedJobs, useSaveJob, useUnsaveJob } from '@/lib/hooks';
@@ -43,7 +42,31 @@ const sortOptions = [
   { value: 'salary_low', label: 'Lowest Salary' },
 ];
 
+type JobListItem = {
+  id: string;
+  title: string;
+  location?: string;
+  type: string;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  createdAt: string | Date;
+  organization?: {
+    name?: string;
+    logo?: string | null;
+  };
+  matchScore?: number | null;
+  requiredSkills?: string[];
+};
+
 export default function JobsPage() {
+  return (
+    <Suspense fallback={null}>
+      <JobsContent />
+    </Suspense>
+  );
+}
+
+function JobsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -54,7 +77,7 @@ export default function JobsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState('relevance');
 
-  const { data, isLoading, error } = useJobs({
+  const { data, isLoading } = useJobs({
     q: searchQuery,
     location,
     type: selectedTypes.join(','),
@@ -67,7 +90,7 @@ export default function JobsPage() {
   const { data: savedJobs } = useSavedJobs();
   const saveJobMutation = useSaveJob();
   const unsaveJobMutation = useUnsaveJob();
-  const savedJobIds = new Set((savedJobs || []).map((job: any) => job.id));
+  const savedJobIds = new Set((savedJobs || []).map((job: { id: string }) => job.id));
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,7 +317,7 @@ export default function JobsPage() {
           </div>
         ) : data?.jobs?.length ? (
           <div className="space-y-4">
-            {data.jobs.map((job: any) => (
+            {data.jobs.map((job: JobListItem) => (
               <Link
                 key={job.id}
                 href={`/dashboard/jobs/${job.id}`}
@@ -304,9 +327,12 @@ export default function JobsPage() {
                   {/* Company logo */}
                   <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
                     {job.organization?.logo ? (
-                      <img
+                      <Image
                         src={job.organization.logo}
-                        alt={job.organization.name}
+                        alt={job.organization.name || 'Company logo'}
+                        width={40}
+                        height={40}
+                        unoptimized
                         className="w-10 h-10 object-contain"
                       />
                     ) : (
@@ -346,7 +372,7 @@ export default function JobsPage() {
                       {(job.salaryMin || job.salaryMax) && (
                         <span className="flex items-center">
                           <DollarSign className="w-4 h-4 mr-1" />
-                          {formatSalaryRange(job.salaryMin, job.salaryMax)}
+                          {formatSalaryRange(job.salaryMin ?? undefined, job.salaryMax ?? undefined)}
                         </span>
                       )}
                       <span className="flex items-center">
@@ -356,9 +382,9 @@ export default function JobsPage() {
                     </div>
 
                     {/* Skills */}
-                    {job.requiredSkills?.length > 0 && (
+                    {(job.requiredSkills?.length ?? 0) > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {job.requiredSkills.slice(0, 5).map((skill: string) => (
+                        {(job.requiredSkills ?? []).slice(0, 5).map((skill: string) => (
                           <span
                             key={skill}
                             className="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded text-xs"
@@ -366,9 +392,9 @@ export default function JobsPage() {
                             {skill}
                           </span>
                         ))}
-                        {job.requiredSkills.length > 5 && (
+                        {(job.requiredSkills?.length ?? 0) > 5 && (
                           <span className="px-2 py-1 text-gray-500 text-xs">
-                            +{job.requiredSkills.length - 5} more
+                            +{(job.requiredSkills?.length ?? 0) - 5} more
                           </span>
                         )}
                       </div>

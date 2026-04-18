@@ -12,8 +12,10 @@ export function clearInMemoryAccessToken() {
   accessToken = null;
 }
 
-export default {
+const tokenStore = {
   getInMemoryAccessToken,
   setInMemoryAccessToken,
   clearInMemoryAccessToken,
 };
+
+export default tokenStore;

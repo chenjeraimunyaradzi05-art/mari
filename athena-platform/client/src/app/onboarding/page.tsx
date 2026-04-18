@@ -410,7 +410,7 @@ export default function OnboardingPage() {
                   type="text"
                   value={newSkill}
                   onChange={(e) => setNewSkill(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addSkill(newSkill)}
+                  onKeyDown={(e) => e.key === 'Enter' && addSkill(newSkill)}
                   placeholder="Type a skill..."
                   className="input flex-1"
                 />

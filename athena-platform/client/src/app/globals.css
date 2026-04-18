@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Font CSS variables referenced by tailwind.config.ts fontFamily.
+ * Using system font stacks since remote Google Fonts caused build timeouts.
+ * If you later add @next/font imports, update these variables accordingly.
+ */
+:root {
+  --font-inter: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-playfair: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --font-jetbrains: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
-  Shield,
   Key,
   Smartphone,
   Monitor,
@@ -12,12 +11,11 @@ import {
   AlertTriangle,
   Eye,
   EyeOff,
-  LogOut,
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { formatDate, cn } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 type PasswordFormData = {
@@ -26,8 +24,16 @@ type PasswordFormData = {
   confirmPassword: string;
 };
 
+type SessionItem = {
+  id: string;
+  device?: string | null;
+  isCurrent?: boolean;
+  location?: string | null;
+  lastActive: string;
+};
+
 export default function SecuritySettingsPage() {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const queryClient = useQueryClient();
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -59,8 +65,11 @@ export default function SecuritySettingsPage() {
       toast.success('Password changed successfully');
       reset();
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to change password');
+    onError: (error: unknown) => {
+      const responseMessage = (
+        error as { response?: { data?: { message?: string } } }
+      )?.response?.data?.message;
+      toast.error(responseMessage || 'Failed to change password');
     },
   });
 
@@ -166,8 +175,8 @@ export default function SecuritySettingsPage() {
                     message: 'Password must be at least 8 characters',
                   },
                   pattern: {
-                    value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
-                    message: 'Password must contain uppercase, lowercase, and number',
+                    value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, 
+                    message: 'Password must contain uppercase, lowercase, number, and special character',
                   },
                 })}
                 className="input w-full pr-10"
@@ -299,7 +308,7 @@ export default function SecuritySettingsPage() {
 
         <div className="space-y-4">
           {sessions?.length > 0 ? (
-            sessions.map((session: any) => (
+            sessions.map((session: SessionItem) => (
               <div
                 key={session.id}
                 className="flex items-start justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg"

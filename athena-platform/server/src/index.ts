@@ -94,6 +94,7 @@ import { localeMiddleware } from './middleware/locale';
 import { createRateLimiter } from './middleware/rateLimiter';
 import { logger } from './utils/logger';
 import { register } from './utils/metrics';
+import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
 
 // Import services
 import { initializeSocketHandlers } from './services/socket.service';
@@ -138,69 +139,9 @@ if (process.env.ENABLE_WORKERS === 'true') {
   });
 }
 
-const fallbackOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:3002',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001',
-  'http://127.0.0.1:3002',
-];
-
-const envOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-const allowedOrigins = Array.from(new Set([
-  ...envOrigins,
-  ...fallbackOrigins,
-]));
-
-// CORS origin checker function - handles localhost flexibly for development
-const isCorsOriginAllowed = (origin: string | undefined): boolean => {
-  if (!origin) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
-    return true;
-  }
-
-  // Check exact match first
-  if (allowedOrigins.includes(origin)) {
-    return true;
-  }
-
-  // In production, allow the configured Netlify/Railway deployment URLs.
-  // Set NETLIFY_URL and RAILWAY_URL env vars in Railway Dashboard.
-  // In development, allow any Netlify/Railway subdomain for flexibility.
-  if (process.env.NODE_ENV === 'production') {
-    const netlifyUrl = process.env.NETLIFY_URL;
-    const railwayUrl = process.env.RAILWAY_URL;
-    if ((netlifyUrl && origin === netlifyUrl) ||
-        (railwayUrl && origin === railwayUrl)) {
-      return true;
-    }
-    // Also match any *.netlify.app or *.up.railway.app for preview deploys
-    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
-        /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
-      return true;
-    }
-  } else {
-    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
-        /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
-      return true;
-    }
-  }
-
-  // In development, allow any localhost variant
-  if (process.env.NODE_ENV !== 'production') {
-    if (origin.match(/^https?:\/\/localhost(:\d+)?$/i) || 
-        origin.match(/^https?:\/\/127\.0\.0\.1(:\d+)?$/i)) {
-      return true;
-    }
-  }
-
-  return false;
-};
+function logCorsRejection(origin: string | undefined) {
+  logger.warn('CORS rejected origin', { origin, allowedOrigins: getAllowedOrigins() });
+}
 
 // Initialize Socket.IO
 const io = new SocketIOServer(httpServer, {
@@ -209,7 +150,7 @@ const io = new SocketIOServer(httpServer, {
       if (isCorsOriginAllowed(origin)) {
         callback(null, true);
       } else {
-        logger.warn('CORS rejected origin', { origin, allowedOrigins });
+        logCorsRejection(origin);
         callback(new Error('Not allowed by CORS'));
       }
     },
@@ -230,12 +171,19 @@ app.use(cors({
       return callback(null, true);
     }
     // Log rejected origins for debugging
-    logger.warn('CORS rejected origin', { origin, allowedOrigins });
+    logCorsRejection(origin);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Request-ID',
+    'X-Debug-Auth',
+    'X-Health-Token',
+    'X-Metrics-Token',
+  ],
 }));
 
 // Cookie parser (for refresh token cookie handling)
@@ -356,8 +304,19 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from uploads directory
 const uploadsPath = path.join(process.cwd(), 'uploads');
+const publicUploadFolders = new Set(['avatars', 'covers', 'posts', 'videos']);
 logger.info('Mounting static uploads', { path: uploadsPath });
 app.use('/uploads', (req, res, next) => {
+  const normalizedPath = req.path.replace(/\\/g, '/').replace(/^\/+/, '');
+  const folder = normalizedPath.split('/')[0];
+
+  if (folder && !publicUploadFolders.has(folder)) {
+    return res.status(404).json({
+      success: false,
+      message: 'Not found',
+    });
+  }
+
   logger.debug('Static file request', { method: req.method, path: req.path });
   next();
 }, express.static(uploadsPath));
@@ -429,6 +388,10 @@ if (process.env.NODE_ENV !== 'production') {
 app.get('/metrics', async (req: Request, res: Response) => {
   try {
     const metricsToken = process.env.METRICS_TOKEN;
+    if (process.env.NODE_ENV === 'production' && !metricsToken) {
+      return res.status(404).json({ success: false, message: 'Not found' });
+    }
+
     if (metricsToken) {
       const auth = req.headers.authorization;
       const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;

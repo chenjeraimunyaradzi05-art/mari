@@ -433,18 +433,22 @@ async function escalateReport(ticketId: string, report: any): Promise<void> {
 // Helper: Get user ID from content
 async function getUserIdFromContent(contentType: string, contentId: string): Promise<string | null> {
   switch (contentType.toLowerCase()) {
-    case 'post':
+    case 'post': {
       const post = await prisma.post.findUnique({ where: { id: contentId }, select: { authorId: true } });
       return post?.authorId || null;
-    case 'comment':
+    }
+    case 'comment': {
       const comment = await prisma.comment.findUnique({ where: { id: contentId }, select: { authorId: true } });
       return comment?.authorId || null;
-    case 'message':
+    }
+    case 'message': {
       const message = await prisma.message.findUnique({ where: { id: contentId }, select: { senderId: true } });
       return message?.senderId || null;
-    case 'job':
+    }
+    case 'job': {
       const job = await prisma.job.findUnique({ where: { id: contentId }, select: { postedById: true } });
       return job?.postedById || null;
+    }
     default:
       return null;
   }

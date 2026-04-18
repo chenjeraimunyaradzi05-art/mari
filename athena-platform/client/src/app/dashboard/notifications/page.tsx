@@ -17,34 +17,33 @@ import {
   Award,
   AlertCircle,
   Settings,
+  Gift,
 } from 'lucide-react';
+import {
+  useNotifications,
+  useMarkNotificationRead,
+  useMarkAllNotificationsRead,
+  useDeleteNotification,
+} from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 
-const notificationIcons: Record<string, React.ElementType> = {
-  job_match: Briefcase,
-  message: MessageCircle,
-  like: Heart,
-  follow: UserPlus,
-  mention: MessageCircle,
-  event: Calendar,
-  achievement: Award,
-  system: AlertCircle,
-};
+type NotificationType =
+  | 'JOB_MATCH'
+  | 'APPLICATION_UPDATE'
+  | 'MESSAGE'
+  | 'MENTION'
+  | 'SYSTEM'
+  | 'MENTOR_SESSION'
+  | 'LIKE'
+  | 'COMMENT'
+  | 'FOLLOW'
+  | 'ACHIEVEMENT'
+  | 'LEVEL_UP'
+  | 'GIFT_RECEIVED';
 
-const notificationColors: Record<string, string> = {
-  job_match: 'bg-blue-100 dark:bg-blue-900/30 text-blue-500',
-  message: 'bg-green-100 dark:bg-green-900/30 text-green-500',
-  like: 'bg-red-100 dark:bg-red-900/30 text-red-500',
-  follow: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
-  mention: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500',
-  event: 'bg-orange-100 dark:bg-orange-900/30 text-orange-500',
-  achievement: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
-  system: 'bg-gray-100 dark:bg-gray-700 text-gray-500',
-};
-
-interface Notification {
+interface NotificationItem {
   id: string;
-  type: string;
+  type: NotificationType;
   title: string;
   message: string;
   isRead: boolean;
@@ -52,106 +51,59 @@ interface Notification {
   link?: string;
 }
 
-const MOCK_BASE_TIME = Date.parse('2026-02-10T12:00:00.000Z');
+const notificationIcons: Record<NotificationType, React.ElementType> = {
+  JOB_MATCH: Briefcase,
+  APPLICATION_UPDATE: Briefcase,
+  MESSAGE: MessageCircle,
+  MENTION: MessageCircle,
+  SYSTEM: AlertCircle,
+  MENTOR_SESSION: Calendar,
+  LIKE: Heart,
+  COMMENT: MessageCircle,
+  FOLLOW: UserPlus,
+  ACHIEVEMENT: Award,
+  LEVEL_UP: Award,
+  GIFT_RECEIVED: Gift,
+};
 
-// Extended mock data (deterministic timestamps to avoid hydration drift)
-const mockNotifications: Notification[] = [
-  {
-    id: '1',
-    type: 'job_match',
-    title: 'New Job Match',
-    message: 'Senior Product Manager at Google matches your profile with 95% compatibility. This role offers competitive salary and great benefits.',
-    isRead: false,
-    createdAt: new Date(MOCK_BASE_TIME - 5 * 60000).toISOString(),
-    link: '/dashboard/jobs/1',
-  },
-  {
-    id: '2',
-    type: 'message',
-    title: 'New Message',
-    message: 'Sarah Chen sent you a message: "Hi! I\'d love to discuss the mentoring program with you..."',
-    isRead: false,
-    createdAt: new Date(MOCK_BASE_TIME - 30 * 60000).toISOString(),
-    link: '/dashboard/messages',
-  },
-  {
-    id: '3',
-    type: 'like',
-    title: 'Post Liked',
-    message: '15 people liked your post about interview tips including Maria, Jessica, and 13 others',
-    isRead: false,
-    createdAt: new Date(MOCK_BASE_TIME - 2 * 3600000).toISOString(),
-    link: '/dashboard/community',
-  },
-  {
-    id: '4',
-    type: 'follow',
-    title: 'New Follower',
-    message: 'Emily Johnson is now following you. Emily is a Senior Engineer at Meta.',
-    isRead: true,
-    createdAt: new Date(MOCK_BASE_TIME - 6 * 3600000).toISOString(),
-    link: '/dashboard/profile/emily',
-  },
-  {
-    id: '5',
-    type: 'achievement',
-    title: 'Achievement Unlocked!',
-    message: 'Congratulations! You earned the "Community Champion" badge for helping 10 women with career advice.',
-    isRead: true,
-    createdAt: new Date(MOCK_BASE_TIME - 24 * 3600000).toISOString(),
-    link: '/dashboard/settings/profile',
-  },
-  {
-    id: '6',
-    type: 'event',
-    title: 'Upcoming Event',
-    message: 'Reminder: "Women in Tech Leadership Panel" starts in 2 hours. Don\'t forget to join!',
-    isRead: true,
-    createdAt: new Date(MOCK_BASE_TIME - 48 * 3600000).toISOString(),
-    link: '/dashboard/events/1',
-  },
-  {
-    id: '7',
-    type: 'job_match',
-    title: 'Application Update',
-    message: 'Your application for "Engineering Manager at Stripe" has moved to the interview stage!',
-    isRead: true,
-    createdAt: new Date(MOCK_BASE_TIME - 72 * 3600000).toISOString(),
-    link: '/dashboard/applications',
-  },
-  {
-    id: '8',
-    type: 'system',
-    title: 'Profile Strength',
-    message: 'Your profile is 85% complete. Add your portfolio to increase visibility to employers.',
-    isRead: true,
-    createdAt: new Date(MOCK_BASE_TIME - 96 * 3600000).toISOString(),
-    link: '/dashboard/settings/profile',
-  },
-  {
-    id: '9',
-    type: 'mention',
-    title: 'You were mentioned',
-    message: 'Lisa Park mentioned you in a comment: "@jane Great advice on negotiation strategies!"',
-    isRead: true,
-    createdAt: new Date(MOCK_BASE_TIME - 120 * 3600000).toISOString(),
-    link: '/dashboard/community',
-  },
-];
+const notificationColors: Record<NotificationType, string> = {
+  JOB_MATCH: 'bg-blue-100 dark:bg-blue-900/30 text-blue-500',
+  APPLICATION_UPDATE: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-500',
+  MESSAGE: 'bg-green-100 dark:bg-green-900/30 text-green-500',
+  MENTION: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500',
+  SYSTEM: 'bg-gray-100 dark:bg-gray-700 text-gray-500',
+  MENTOR_SESSION: 'bg-orange-100 dark:bg-orange-900/30 text-orange-500',
+  LIKE: 'bg-red-100 dark:bg-red-900/30 text-red-500',
+  COMMENT: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
+  FOLLOW: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
+  ACHIEVEMENT: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
+  LEVEL_UP: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-500',
+  GIFT_RECEIVED: 'bg-amber-100 dark:bg-amber-900/30 text-amber-500',
+};
 
 const filterOptions = [
   { value: 'all', label: 'All Notifications' },
   { value: 'unread', label: 'Unread Only' },
-  { value: 'job_match', label: 'Job Matches' },
-  { value: 'message', label: 'Messages' },
-  { value: 'like', label: 'Likes & Reactions' },
-  { value: 'follow', label: 'Followers' },
-  { value: 'event', label: 'Events' },
-  { value: 'achievement', label: 'Achievements' },
+  { value: 'JOB_MATCH', label: 'Job Matches' },
+  { value: 'APPLICATION_UPDATE', label: 'Applications' },
+  { value: 'MESSAGE', label: 'Messages' },
+  { value: 'MENTOR_SESSION', label: 'Mentoring' },
+  { value: 'FOLLOW', label: 'Followers' },
+  { value: 'ACHIEVEMENT', label: 'Achievements' },
+  { value: 'SYSTEM', label: 'System' },
 ];
 
+function normalizeType(rawType: unknown): NotificationType {
+  const value = String(rawType || 'SYSTEM').toUpperCase();
+  return value in notificationIcons ? (value as NotificationType) : 'SYSTEM';
+}
+
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
+  const { data, isLoading } = useNotifications({ limit: 100 });
+  const markRead = useMarkNotificationRead();
+  const markAllRead = useMarkAllNotificationsRead();
+  const deleteNotification = useDeleteNotification();
+
   const [filter, setFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
@@ -161,68 +113,95 @@ export default function NotificationsPage() {
     setIsHydrated(true);
   }, []);
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const notifications: NotificationItem[] = (data?.notifications || []).map((notification: any) => ({
+    id: notification.id,
+    type: normalizeType(notification.type),
+    title: notification.title || 'Notification',
+    message: notification.message || 'There is an update on your account.',
+    isRead:
+      typeof notification.isRead === 'boolean'
+        ? notification.isRead
+        : Boolean(notification.readAt),
+    createdAt: notification.createdAt,
+    link: notification.link || undefined,
+  }));
 
-  const filteredNotifications = notifications.filter((n) => {
+  const unreadCount = notifications.filter((notification) => !notification.isRead).length;
+  const filteredNotifications = notifications.filter((notification) => {
     if (filter === 'all') return true;
-    if (filter === 'unread') return !n.isRead;
-    return n.type === filter;
+    if (filter === 'unread') return !notification.isRead;
+    return notification.type === filter;
   });
 
-  // Group by stable UTC date key (YYYY-MM-DD) for deterministic SSR/CSR output.
-  const groupedNotifications = filteredNotifications.reduce((groups, notification) => {
-    const key = notification.createdAt.slice(0, 10);
+  const groupedNotifications = filteredNotifications.reduce(
+    (groups, notification) => {
+      const key = notification.createdAt.slice(0, 10);
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(notification);
+      return groups;
+    },
+    {} as Record<string, NotificationItem[]>
+  );
 
-    if (!groups[key]) {
-      groups[key] = [];
-    }
-    groups[key].push(notification);
-    return groups;
-  }, {} as Record<string, Notification[]>);
+  const hasBulkSelection = selectedIds.length > 0;
+  const hasPendingMutation =
+    markRead.isPending || markAllRead.isPending || deleteNotification.isPending;
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
 
   const selectAll = () => {
     if (selectedIds.length === filteredNotifications.length) {
       setSelectedIds([]);
-    } else {
-      setSelectedIds(filteredNotifications.map((n) => n.id));
+      return;
     }
+    setSelectedIds(filteredNotifications.map((notification) => notification.id));
   };
 
-  const markSelectedAsRead = () => {
-    setNotifications((prev) =>
-      prev.map((n) => (selectedIds.includes(n.id) ? { ...n, isRead: true } : n))
-    );
+  const markSelectedAsRead = async () => {
+    await Promise.all(selectedIds.map((id) => markRead.mutateAsync(id)));
     setSelectedIds([]);
   };
 
-  const deleteSelected = () => {
-    setNotifications((prev) => prev.filter((n) => !selectedIds.includes(n.id)));
+  const deleteSelected = async () => {
+    await Promise.all(selectedIds.map((id) => deleteNotification.mutateAsync(id)));
     setSelectedIds([]);
   };
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  const handleMarkAllAsRead = () => {
+    markAllRead.mutate();
+    setSelectedIds([]);
   };
 
-  const markAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+  const handleMarkAsRead = (id: string) => {
+    markRead.mutate(id);
+  };
+
+  const handleDelete = (id: string) => {
+    deleteNotification.mutate(id);
+    setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
+  };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto p-6 space-y-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 w-48 rounded bg-gray-200 dark:bg-gray-700" />
+          <div className="h-20 rounded-xl bg-gray-200 dark:bg-gray-700" />
+          <div className="h-28 rounded-xl bg-gray-200 dark:bg-gray-700" />
+          <div className="h-28 rounded-xl bg-gray-200 dark:bg-gray-700" />
+        </div>
+      </div>
     );
-  };
-
-  const deleteNotification = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  };
+  }
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
@@ -230,7 +209,9 @@ export default function NotificationsPage() {
             Notifications
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            {unreadCount > 0 ? `You have ${unreadCount} unread notifications` : 'You\'re all caught up!'}
+            {unreadCount > 0
+              ? `You have ${unreadCount} unread notifications`
+              : "You're all caught up!"}
           </p>
         </div>
         <Link
@@ -242,35 +223,37 @@ export default function NotificationsPage() {
         </Link>
       </div>
 
-      {/* Actions Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-white p-4 shadow dark:bg-gray-800">
         <div className="flex items-center space-x-4">
-          {/* Select All */}
           <label className="flex items-center space-x-2 cursor-pointer">
             <input
               type="checkbox"
-              checked={selectedIds.length === filteredNotifications.length && filteredNotifications.length > 0}
+              checked={
+                filteredNotifications.length > 0 &&
+                selectedIds.length === filteredNotifications.length
+              }
               onChange={selectAll}
               className="rounded border-gray-300 dark:border-gray-600"
             />
             <span className="text-sm text-gray-600 dark:text-gray-300">
-              {selectedIds.length > 0 ? `${selectedIds.length} selected` : 'Select all'}
+              {hasBulkSelection ? `${selectedIds.length} selected` : 'Select all'}
             </span>
           </label>
 
-          {/* Bulk Actions */}
-          {selectedIds.length > 0 && (
+          {hasBulkSelection && (
             <div className="flex items-center space-x-2">
               <button
-                onClick={markSelectedAsRead}
-                className="flex items-center space-x-1 px-3 py-1.5 text-sm text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition"
+                onClick={() => void markSelectedAsRead()}
+                disabled={hasPendingMutation}
+                className="flex items-center space-x-1 rounded-lg px-3 py-1.5 text-sm text-primary-500 transition hover:bg-primary-50 disabled:opacity-50 dark:hover:bg-primary-900/20"
               >
                 <Check className="w-4 h-4" />
                 <span>Mark as read</span>
               </button>
               <button
-                onClick={deleteSelected}
-                className="flex items-center space-x-1 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
+                onClick={() => void deleteSelected()}
+                disabled={hasPendingMutation}
+                className="flex items-center space-x-1 rounded-lg px-3 py-1.5 text-sm text-red-500 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Delete</span>
@@ -280,29 +263,29 @@ export default function NotificationsPage() {
         </div>
 
         <div className="flex items-center space-x-4">
-          {/* Filter */}
           <div className="relative">
             <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center space-x-2 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+              onClick={() => setShowFilters((prev) => !prev)}
+              className="flex items-center space-x-2 rounded-lg px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
             >
               <Filter className="w-4 h-4" />
-              <span>{filterOptions.find((f) => f.value === filter)?.label}</span>
+              <span>{filterOptions.find((option) => option.value === filter)?.label}</span>
             </button>
 
             {showFilters && (
-              <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-10">
+              <div className="absolute right-0 top-full z-10 mt-2 w-48 rounded-lg border border-gray-200 bg-white py-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
                 {filterOptions.map((option) => (
                   <button
                     key={option.value}
                     onClick={() => {
                       setFilter(option.value);
                       setShowFilters(false);
+                      setSelectedIds([]);
                     }}
                     className={cn(
-                      'w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition',
+                      'w-full px-4 py-2 text-left text-sm transition hover:bg-gray-100 dark:hover:bg-gray-700',
                       filter === option.value
-                        ? 'text-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                        ? 'bg-primary-50 text-primary-500 dark:bg-primary-900/20'
                         : 'text-gray-700 dark:text-gray-300'
                     )}
                   >
@@ -313,11 +296,11 @@ export default function NotificationsPage() {
             )}
           </div>
 
-          {/* Mark All Read */}
           {unreadCount > 0 && (
             <button
-              onClick={markAllAsRead}
-              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition"
+              onClick={handleMarkAllAsRead}
+              disabled={hasPendingMutation}
+              className="flex items-center space-x-1 rounded-lg px-3 py-1.5 text-sm text-primary-500 transition hover:bg-primary-50 disabled:opacity-50 dark:hover:bg-primary-900/20"
             >
               <CheckCheck className="w-4 h-4" />
               <span>Mark all as read</span>
@@ -326,41 +309,41 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {/* Notifications List */}
       {filteredNotifications.length === 0 ? (
-        <div className="card text-center py-16">
-          <Bell className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+        <div className="card py-16 text-center">
+          <Bell className="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600" />
+          <h3 className="mb-2 text-lg font-medium text-gray-900 dark:text-white">
             No notifications
           </h3>
           <p className="text-gray-500 dark:text-gray-400">
             {filter === 'all'
               ? "You don't have any notifications yet"
-              : `No ${filterOptions.find((f) => f.value === filter)?.label.toLowerCase()} to show`}
+              : `No ${filterOptions
+                  .find((option) => option.value === filter)
+                  ?.label.toLowerCase()} to show`}
           </p>
         </div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(groupedNotifications).map(([date, notifications]) => (
+          {Object.entries(groupedNotifications).map(([date, group]) => (
             <div key={date}>
-              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">
+              <h3 className="mb-3 text-sm font-medium text-gray-500 dark:text-gray-400">
                 {date}
               </h3>
               <div className="space-y-2">
-                {notifications.map((notification) => {
-                  const Icon = notificationIcons[notification.type] || AlertCircle;
-                  const colorClass = notificationColors[notification.type] || notificationColors.system;
+                {group.map((notification) => {
+                  const Icon = notificationIcons[notification.type];
+                  const colorClass = notificationColors[notification.type];
 
                   return (
                     <div
                       key={notification.id}
                       className={cn(
-                        'group relative bg-white dark:bg-gray-800 rounded-lg p-4 shadow hover:shadow-md transition',
+                        'group relative rounded-lg bg-white p-4 shadow transition hover:shadow-md dark:bg-gray-800',
                         !notification.isRead && 'ring-2 ring-primary-500/20'
                       )}
                     >
                       <div className="flex items-start space-x-4">
-                        {/* Checkbox */}
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(notification.id)}
@@ -368,34 +351,39 @@ export default function NotificationsPage() {
                           className="mt-1 rounded border-gray-300 dark:border-gray-600"
                         />
 
-                        {/* Icon */}
                         <div
                           className={cn(
-                            'w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0',
+                            'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full',
                             colorClass
                           )}
                         >
-                          <Icon className="w-5 h-5" />
+                          <Icon className="h-5 w-5" />
                         </div>
 
-                        {/* Content */}
                         <Link
-                          href={notification.link || '#'}
-                          onClick={() => markAsRead(notification.id)}
-                          className="flex-1 min-w-0"
+                          href={notification.link || '/dashboard/notifications'}
+                          onClick={() => {
+                            if (!notification.isRead) {
+                              handleMarkAsRead(notification.id);
+                            }
+                          }}
+                          className="min-w-0 flex-1"
                         >
                           <div className="flex items-start justify-between">
                             <div>
                               <p className="font-medium text-gray-900 dark:text-white">
                                 {notification.title}
                                 {!notification.isRead && (
-                                  <span className="ml-2 inline-block w-2 h-2 bg-primary-500 rounded-full" />
+                                  <span className="ml-2 inline-block h-2 w-2 rounded-full bg-primary-500" />
                                 )}
                               </p>
-                              <p className="text-gray-600 dark:text-gray-300 mt-1">
+                              <p className="mt-1 text-gray-600 dark:text-gray-300">
                                 {notification.message}
                               </p>
-                              <p className="text-sm text-gray-400 dark:text-gray-500 mt-2" suppressHydrationWarning>
+                              <p
+                                className="mt-2 text-sm text-gray-400 dark:text-gray-500"
+                                suppressHydrationWarning
+                              >
                                 {isHydrated
                                   ? formatDistanceToNow(new Date(notification.createdAt), {
                                       addSuffix: true,
@@ -406,23 +394,24 @@ export default function NotificationsPage() {
                           </div>
                         </Link>
 
-                        {/* Actions */}
-                        <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
+                        <div className="flex items-center space-x-1 opacity-0 transition group-hover:opacity-100">
                           {!notification.isRead && (
                             <button
-                              onClick={() => markAsRead(notification.id)}
-                              className="p-2 text-gray-400 hover:text-primary-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+                              onClick={() => handleMarkAsRead(notification.id)}
+                              disabled={hasPendingMutation}
+                              className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-primary-500 disabled:opacity-50 dark:hover:bg-gray-700"
                               title="Mark as read"
                             >
-                              <Check className="w-4 h-4" />
+                              <Check className="h-4 w-4" />
                             </button>
                           )}
                           <button
-                            onClick={() => deleteNotification(notification.id)}
-                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+                            onClick={() => handleDelete(notification.id)}
+                            disabled={hasPendingMutation}
+                            className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-red-500 disabled:opacity-50 dark:hover:bg-gray-700"
                             title="Delete"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </div>

@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 async function run() {
   const consumerName = process.env.EVENT_CONSUMER_NAME || `analytics-${process.pid}`;
 
-  while (true) {
+  for (;;) {
     await consumeEvents(consumerName, async (event) => {
       logger.info('Event received', { event: event.event, payload: event.payload });
     });

@@ -525,6 +525,7 @@ enum BookingStatus {
 model User {
   id                String    @id @default(uuid())
   email             String    @unique
+  googleId          String?   @unique
   passwordHash      String?
   emailVerified     Boolean   @default(false)
   emailVerifiedAt   DateTime?

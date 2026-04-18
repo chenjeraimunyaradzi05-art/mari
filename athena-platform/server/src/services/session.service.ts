@@ -1,5 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { hashOpaqueToken } from '../utils/opaqueToken';
+import { getTokenExpiresInSeconds } from '../utils/jwt';
 
 /**
  * Session Management Service
@@ -17,6 +19,40 @@ export interface SessionInfo {
 }
 
 export const sessionService = {
+  async findActiveSessionByAccessToken(accessToken: string) {
+    const hashedToken = hashOpaqueToken(accessToken);
+    const session =
+      await prisma.session.findUnique({
+        where: { token: hashedToken },
+      }) ||
+      await prisma.session.findUnique({
+        where: { token: accessToken },
+      });
+
+    if (!session) return null;
+    if (session.revokedAt) return null;
+    if (session.expiresAt < new Date()) return null;
+
+    return session;
+  },
+
+  async findActiveSessionByRefreshToken(refreshToken: string) {
+    const hashedRefreshToken = hashOpaqueToken(refreshToken);
+    const session =
+      await prisma.session.findFirst({
+        where: { refreshToken: hashedRefreshToken },
+      }) ||
+      await prisma.session.findFirst({
+        where: { refreshToken },
+      });
+
+    if (!session) return null;
+    if (session.revokedAt) return null;
+    if (session.expiresAt < new Date()) return null;
+
+    return session;
+  },
+
   /**
    * Create a new session
    */
@@ -27,12 +63,14 @@ export const sessionService = {
     userAgent?: string,
     ipAddress?: string
   ) {
+    const refreshExpiresIn = getTokenExpiresInSeconds(refreshToken);
+
     const session = await prisma.session.create({
       data: {
         userId,
-        token: accessToken,
-        refreshToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        token: hashOpaqueToken(accessToken),
+        refreshToken: hashOpaqueToken(refreshToken),
+        expiresAt: new Date(Date.now() + (refreshExpiresIn ?? 7 * 24 * 60 * 60) * 1000),
         userAgent,
         ipAddress,
       },
@@ -58,12 +96,10 @@ export const sessionService = {
     ipAddress?: string
   ) {
     // Find and revoke old session
-    const oldSession = await prisma.session.findFirst({
-      where: { refreshToken: oldRefreshToken },
-    });
+    const oldSession = await sessionService.findActiveSessionByRefreshToken(oldRefreshToken);
 
     if (!oldSession) {
-      throw new Error('Session not found');
+      throw new Error('Session not found or expired');
     }
 
     // Revoke old session
@@ -156,15 +192,8 @@ export const sessionService = {
    * Validate session (check if not revoked and not expired)
    */
   async validateSession(refreshToken: string): Promise<boolean> {
-    const session = await prisma.session.findFirst({
-      where: { refreshToken },
-    });
-
-    if (!session) return false;
-    if (session.revokedAt) return false;
-    if (session.expiresAt < new Date()) return false;
-
-    return true;
+    const session = await sessionService.findActiveSessionByRefreshToken(refreshToken);
+    return !!session;
   },
 
   /**

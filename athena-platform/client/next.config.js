@@ -5,14 +5,6 @@ const nextConfig = {
   // Enable standalone output for Docker/Railway deployments only.
   // Netlify's @netlify/plugin-nextjs manages output automatically.
   ...(process.env.NETLIFY ? {} : { output: 'standalone' }),
-  // Ignore ESLint errors during production builds
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  // Ignore TypeScript errors during production builds
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   // Security headers (DNS_SSL_CONFIGURATION.md §6)
   async headers() {
     return [

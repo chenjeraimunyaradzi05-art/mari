@@ -34,7 +34,7 @@ function StoreHydration() {
 }
 
 function AuthInitializer({ children }: { children: React.ReactNode }) {
-  const { setLoading, login: storeLogin } = useAuthStore();
+  const { setLoading, login: storeLogin, logout: storeLogout } = useAuthStore();
 
   useEffect(() => {
     // Try silent refresh via HttpOnly cookie on mount.
@@ -42,25 +42,29 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const response = await authApi.refresh();
-        const { accessToken, user } = response.data.data;
+        const { accessToken, user } = response.data.data || {};
         if (!mounted) return;
         if (accessToken && user) {
-          // Hydrate auth store directly — no __INITIAL_USER needed
           storeLogin(user, accessToken, '');
-        } else if (accessToken) {
-          // Fallback: refresh didn't return user, fetch via /me
+          return;
+        }
+        if (accessToken) {
           setTokens(accessToken, null);
           try {
             const meRes = await authApi.me();
             if (!mounted) return;
             storeLogin(meRes.data.data, accessToken, '');
+            return;
           } catch {
-            // /me failed — clear tokens, stay unauthenticated
-            clearTokens();
+            // fall through to logout below
           }
         }
+        // If we reach here, refresh failed or returned no usable data
+        clearTokens();
+        storeLogout();
       } catch {
-        // no-op: not authenticated (no valid refresh cookie)
+        clearTokens();
+        storeLogout();
       } finally {
         if (mounted) setLoading(false);
       }
@@ -69,7 +73,7 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [setLoading, storeLogin]);
+  }, [setLoading, storeLogin, storeLogout]);
 
   return <>{children}</>;
 }

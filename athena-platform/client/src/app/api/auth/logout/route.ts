@@ -1,27 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  buildBackendProxyHeaders,
+  forwardSetCookieHeaders,
+  rejectUntrustedSameOriginRequest,
+} from '../proxy-utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-
-function forwardSetCookieHeaders(from: Response, to: NextResponse) {
-  const headersWithGetSetCookie = from.headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-
-  if (typeof headersWithGetSetCookie.getSetCookie === 'function') {
-    const cookies = headersWithGetSetCookie.getSetCookie();
-    for (const cookie of cookies) {
-      to.headers.append('Set-Cookie', cookie);
-    }
-    if (cookies.length > 0) {
-      return;
-    }
-  }
-
-  const fallbackCookie = from.headers.get('set-cookie');
-  if (fallbackCookie) {
-    to.headers.append('Set-Cookie', fallbackCookie);
-  }
-}
 
 export async function POST(request: NextRequest) {
   // Always clear the refresh cookie on the Next.js side, even if the backend call fails.
@@ -31,16 +15,14 @@ export async function POST(request: NextRequest) {
     `refreshToken=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isProduction ? '; Secure' : ''}`;
 
   try {
-    const authHeader = request.headers.get('authorization');
-    const cookieHeader = request.headers.get('cookie');
+    const originError = rejectUntrustedSameOriginRequest(request);
+    if (originError) {
+      return originError;
+    }
 
     const response = await fetch(`${API_URL}/api/auth/logout`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authHeader ? { Authorization: authHeader } : {}),
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-      },
+      headers: buildBackendProxyHeaders(request),
     });
 
     let data;

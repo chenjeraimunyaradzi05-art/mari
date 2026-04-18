@@ -1,37 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  buildBackendProxyHeaders,
+  forwardSetCookieHeaders,
+  rejectUntrustedSameOriginRequest,
+} from '../proxy-utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-function forwardSetCookieHeaders(from: Response, to: NextResponse) {
-  const headersWithGetSetCookie = from.headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-
-  if (typeof headersWithGetSetCookie.getSetCookie === 'function') {
-    const cookies = headersWithGetSetCookie.getSetCookie();
-    for (const cookie of cookies) {
-      to.headers.append('Set-Cookie', cookie);
-    }
-    if (cookies.length > 0) {
-      return;
-    }
-  }
-
-  const fallbackCookie = from.headers.get('set-cookie');
-  if (fallbackCookie) {
-    to.headers.append('Set-Cookie', fallbackCookie);
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
+    const originError = rejectUntrustedSameOriginRequest(request);
+    if (originError) {
+      return originError;
+    }
+
     const body = await request.json();
     
     const response = await fetch(`${API_URL}/api/auth/register`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: buildBackendProxyHeaders(request),
       body: JSON.stringify(body),
     });
 

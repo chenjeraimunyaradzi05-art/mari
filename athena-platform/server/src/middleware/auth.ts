@@ -2,16 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
 import { UnauthorizedError } from './errorHandler';
-
-// Resolve JWT_SECRET lazily — env.ts may inject a fallback after import time.
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === 'production') {
-    // eslint-disable-next-line no-console
-    console.error('[AUTH] WARNING: JWT_SECRET is not set in production!');
-  }
-  return secret || 'dev-only-secret-not-for-production';
-}
+import { verifyToken } from '../utils/jwt';
+import { sessionService } from '../services/session.service';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -27,6 +19,26 @@ interface JwtPayload {
   email: string;
   role: string;
   persona: string;
+}
+
+async function resolveAuthenticatedUser(token: string) {
+  const decoded = verifyToken(token) as JwtPayload;
+  const session = await sessionService.findActiveSessionByAccessToken(token);
+
+  if (!session || session.userId !== decoded.userId) {
+    throw UnauthorizedError('Session expired or revoked');
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: decoded.userId },
+    select: { id: true, email: true, role: true, persona: true },
+  });
+
+  if (!user) {
+    throw UnauthorizedError('User not found');
+  }
+
+  return user;
 }
 
 export const authenticate = async (
@@ -47,20 +59,7 @@ export const authenticate = async (
       throw UnauthorizedError('No token provided');
     }
 
-    const decoded = jwt.verify(
-      token,
-      getJwtSecret()
-    ) as JwtPayload;
-
-    // Verify user still exists
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, persona: true },
-    });
-
-    if (!user) {
-      throw UnauthorizedError('User not found');
-    }
+    const user = await resolveAuthenticatedUser(token);
 
     req.user = {
       id: user.id,
@@ -93,15 +92,7 @@ export const optionalAuth = async (
       const token = authHeader.split(' ')[1];
 
       if (token) {
-        const decoded = jwt.verify(
-          token,
-          getJwtSecret()
-        ) as JwtPayload;
-
-        const user = await prisma.user.findUnique({
-          where: { id: decoded.userId },
-          select: { id: true, email: true, role: true, persona: true },
-        });
+        const user = await resolveAuthenticatedUser(token);
 
         if (user) {
           req.user = {

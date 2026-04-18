@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -10,16 +10,40 @@ import {
   GraduationCap,
   Building2,
   FileText,
-  Filter,
   X,
-  MapPin,
-  Clock,
 } from 'lucide-react';
 import { cn, formatSalary, formatRelativeTime } from '@/lib/utils';
 import { Avatar, Badge } from '@/components/ui';
 import { searchApi } from '@/lib/api';
 
 type SearchCategory = 'all' | 'jobs' | 'people' | 'mentors' | 'videos' | 'courses' | 'companies' | 'posts';
+type ApiSearchType = 'all' | 'users' | 'posts' | 'jobs' | 'courses' | 'videos' | 'mentors';
+
+interface ApiMetadata {
+  [key: string]: unknown;
+  location?: string;
+  city?: string;
+  state?: string;
+  company?: { name?: string; logo?: string };
+  salaryMin?: number;
+  salaryMax?: number;
+  createdAt?: string;
+  provider?: string;
+  organization?: { logo?: string };
+  cost?: number;
+  durationMonths?: number;
+  author?: { displayName?: string };
+  thumbnailUrl?: string;
+  viewCount?: number;
+  duration?: number;
+  headline?: string;
+  avatar?: string;
+  rating?: number;
+  sessionCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  followers?: number;
+}
 
 interface SearchResult {
   id: string;
@@ -38,7 +62,7 @@ interface ApiSearchResult {
   title?: string;
   content?: string;
   highlight?: string;
-  metadata: Record<string, any>;
+  metadata: ApiMetadata;
 }
 
 interface ApiSearchResponse {
@@ -48,96 +72,6 @@ interface ApiSearchResponse {
   totalPages: number;
   suggestions?: string[];
 }
-
-// Mock search results
-const mockResults: SearchResult[] = [
-  {
-    id: '1',
-    type: 'job',
-    title: 'Senior Product Manager',
-    subtitle: 'Google • San Francisco, CA',
-    description: 'Lead product strategy for Google Cloud AI products...',
-    image: 'https://images.unsplash.com/photo-1573804633927-bfcbcd909acd?w=100',
-    url: '/dashboard/jobs/1',
-    metadata: { salary: '$180,000 - $250,000', posted: '2 days ago' },
-  },
-  {
-    id: '2',
-    type: 'job',
-    title: 'Product Manager',
-    subtitle: 'Meta • Menlo Park, CA',
-    description: 'Drive product development for Instagram features...',
-    image: 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=100',
-    url: '/dashboard/jobs/2',
-    metadata: { salary: '$150,000 - $200,000', posted: '1 week ago' },
-  },
-  {
-    id: '3',
-    type: 'person',
-    title: 'Sarah Chen',
-    subtitle: 'Senior Product Manager at Google',
-    description: 'Passionate about women in tech. Open to mentoring.',
-    image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
-    url: '/dashboard/profile/sarah',
-  },
-  {
-    id: '4',
-    type: 'person',
-    title: 'Emily Johnson',
-    subtitle: 'Engineering Manager at Stripe',
-    description: 'Building the future of payments. Career coach.',
-    image: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=100',
-    url: '/dashboard/profile/emily',
-  },
-  {
-    id: '5',
-    type: 'course',
-    title: 'Product Management Fundamentals',
-    subtitle: 'By Sarah Chen • 8 hours • 4.9 rating',
-    description: 'Learn the core skills needed to become a product manager...',
-    image: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=200',
-    url: '/dashboard/learn/1',
-    metadata: { price: '$99', enrolled: '2,345 enrolled' },
-  },
-  {
-    id: '6',
-    type: 'company',
-    title: 'Google',
-    subtitle: 'Technology • Mountain View, CA',
-    description: 'Organizing the world\'s information and making it accessible...',
-    image: 'https://images.unsplash.com/photo-1573804633927-bfcbcd909acd?w=100',
-    url: '/dashboard/organizations/google',
-    metadata: { jobs: '45 open positions', followers: '12K followers' },
-  },
-  {
-    id: '7',
-    type: 'post',
-    title: 'How I Landed My Dream PM Role at Google',
-    subtitle: 'Posted by Sarah Chen • 3 days ago',
-    description: 'After 6 months of preparation and 10 interviews, I finally got the offer...',
-    url: '/dashboard/community?post=1',
-    metadata: { likes: '234 likes', comments: '45 comments' },
-  },
-  {
-    id: '8',
-    type: 'video',
-    title: 'Negotiating Your Salary with Confidence',
-    subtitle: 'Video • 8 min • 12.3K views',
-    description: 'A practical walkthrough for structuring your negotiation call.',
-    url: '/community?video=salary-negotiation',
-    metadata: { duration: '08:12', views: '12.3K views' },
-  },
-  {
-    id: '9',
-    type: 'mentor',
-    title: 'Priya Patel',
-    subtitle: 'Career Coach • Product Leadership',
-    description: 'Mentoring mid-career PMs on leadership growth and transitions.',
-    image: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=100',
-    url: '/mentors/priya-patel',
-    metadata: { sessions: '120 sessions', rating: '4.9 rating' },
-  },
-];
 
 const categories: { value: SearchCategory; label: string; icon: React.ElementType }[] = [
   { value: 'all', label: 'All', icon: Search },
@@ -151,6 +85,14 @@ const categories: { value: SearchCategory; label: string; icon: React.ElementTyp
 ];
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={null}>
+      <SearchContent />
+    </Suspense>
+  );
+}
+
+function SearchContent() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
 
@@ -158,6 +100,8 @@ export default function SearchPage() {
   const [category, setCategory] = useState<SearchCategory>('all');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const latestQueryRef = useRef(query);
 
   const mapApiResult = (result: ApiSearchResult): SearchResult => {
     if (result.type === 'job') {
@@ -169,7 +113,7 @@ export default function SearchPage() {
         subtitle: [result.metadata?.company?.name, location].filter(Boolean).join(' • '),
         description: result.content,
         image: result.metadata?.company?.logo || undefined,
-        url: `/jobs/${result.id}`,
+        url: `/dashboard/jobs/${result.id}`,
         metadata: {
           salary: result.metadata?.salaryMin || result.metadata?.salaryMax
             ? `${formatSalary(result.metadata?.salaryMin || 0)} - ${formatSalary(result.metadata?.salaryMax || 0)}`
@@ -203,7 +147,7 @@ export default function SearchPage() {
         subtitle: result.metadata?.author?.displayName ? `Video • ${result.metadata.author.displayName}` : 'Video',
         description: result.content,
         image: result.metadata?.thumbnailUrl || undefined,
-        url: `/community?video=${result.id}`,
+        url: `/dashboard/community?video=${result.id}`,
         metadata: {
           ...(result.metadata?.viewCount && { views: `${result.metadata.viewCount} views` }),
           ...(result.metadata?.duration && { duration: `${result.metadata.duration} sec` }),
@@ -256,7 +200,7 @@ export default function SearchPage() {
     };
   };
 
-  const mapCategoryToApiType = (value: SearchCategory) => {
+  const mapCategoryToApiType = (value: SearchCategory): ApiSearchType => {
     if (value === 'people') return 'users';
     if (value === 'videos') return 'videos';
     if (value === 'mentors') return 'mentors';
@@ -266,55 +210,59 @@ export default function SearchPage() {
     return 'all';
   };
 
-  useEffect(() => {
-    if (initialQuery) {
-      performSearch(initialQuery);
-    }
-  }, [initialQuery]);
-
-  const performSearch = async (searchQuery: string, nextCategory?: SearchCategory) => {
+  const performSearch = useCallback(async (searchQuery: string, categoryValue: SearchCategory) => {
     if (!searchQuery.trim()) {
       setResults([]);
+      setSearchError(null);
       return;
     }
 
     setIsLoading(true);
-    const categoryValue = nextCategory || category;
+    setSearchError(null);
 
     try {
       const response = await searchApi.unified({
         q: searchQuery,
-        type: mapCategoryToApiType(categoryValue) as any,
+        type: mapCategoryToApiType(categoryValue),
         limit: 25,
       });
 
-      const payload = response.data as ApiSearchResponse;
+      const payload = (response.data?.results
+        ? response.data
+        : response.data?.data) as ApiSearchResponse;
       const mapped = payload.results.map(mapApiResult);
       setResults(mapped);
     } catch (error) {
-      console.error('Search failed, using fallback results', error);
-      const filtered = mockResults.filter(
-        (result) =>
-          result.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          result.subtitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          result.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setResults(filtered);
+      console.error('Search failed', error);
+      setResults([]);
+      setSearchError('Search is temporarily unavailable. Please try again in a moment.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (initialQuery) {
+      setQuery(initialQuery);
+      performSearch(initialQuery, 'all');
+    }
+  }, [initialQuery, performSearch]);
+
+  useEffect(() => {
+    latestQueryRef.current = query;
+  }, [query]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    performSearch(query);
+    performSearch(query, category);
   };
 
   useEffect(() => {
-    if (query.trim()) {
-      performSearch(query, category);
+    const activeQuery = latestQueryRef.current;
+    if (activeQuery.trim()) {
+      performSearch(activeQuery, category);
     }
-  }, [category]);
+  }, [category, performSearch]);
 
   const filteredResults =
     category === 'all'
@@ -508,11 +456,12 @@ export default function SearchPage() {
         <div className="card text-center py-16">
           <Search className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-            No results found
+            {searchError ? 'Search unavailable' : 'No results found'}
           </h3>
           <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-            We couldn't find anything matching "{query}". Try different keywords or
-            check your spelling.
+            {searchError
+              ? searchError
+              : `We couldn't find anything matching "${query}". Try different keywords or check your spelling.`}
           </p>
           <div className="mt-6">
             <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -524,7 +473,7 @@ export default function SearchPage() {
                   key={term}
                   onClick={() => {
                     setQuery(term);
-                    performSearch(term);
+                    performSearch(term, category);
                   }}
                   className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                 >
@@ -555,7 +504,7 @@ export default function SearchPage() {
                     key={term}
                     onClick={() => {
                       setQuery(term);
-                      performSearch(term);
+                      performSearch(term, category);
                     }}
                     className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                   >

@@ -382,7 +382,7 @@ async function searchPosts(
 async function searchJobs(
   keywords: string[],
   filters: SearchOptions['filters'],
-  persona?: string
+  _persona?: string
 ): Promise<SearchResult[]> {
   const jobs = await prisma.job.findMany({
     where: {
@@ -410,7 +410,7 @@ async function searchJobs(
     const popularity = job.applicationCount;
 
     // Persona matching
-    let personaBoost = 1;
+    const personaBoost = 1;
 
     const score = calculateRelevanceScore(
       searchableText,
@@ -577,12 +577,13 @@ async function searchMentors(
 
     return {
       type: 'mentor' as const,
-      id: mentor.userId,
+      id: mentor.id,
       score,
       title: mentor.user.displayName || 'Mentor',
       content: mentor.user.headline || mentor.user.bio || '',
       highlight: highlightMatch(searchableText, keywords),
       metadata: {
+        userId: mentor.userId,
         avatar: mentor.user.avatar,
         headline: mentor.user.headline,
         rating: mentor.rating ? Number(mentor.rating) : null,

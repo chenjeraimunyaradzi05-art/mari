@@ -1,30 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  buildBackendProxyHeaders,
+  forwardSetCookieHeaders,
+  rejectUntrustedSameOriginRequest,
+} from '../proxy-utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-function forwardSetCookieHeaders(from: Response, to: NextResponse) {
-  const headersWithGetSetCookie = from.headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-
-  if (typeof headersWithGetSetCookie.getSetCookie === 'function') {
-    const cookies = headersWithGetSetCookie.getSetCookie();
-    for (const cookie of cookies) {
-      to.headers.append('Set-Cookie', cookie);
-    }
-    if (cookies.length > 0) {
-      return;
-    }
-  }
-
-  const fallbackCookie = from.headers.get('set-cookie');
-  if (fallbackCookie) {
-    to.headers.append('Set-Cookie', fallbackCookie);
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
+    const originError = rejectUntrustedSameOriginRequest(request);
+    if (originError) {
+      return originError;
+    }
+
     // The client sends an empty body with HttpOnly cookie for refresh.
     // request.json() throws on empty body, so we guard it.
     let body = {};
@@ -34,14 +23,9 @@ export async function POST(request: NextRequest) {
       // Empty body is expected — refresh relies on the cookie, not a body payload.
     }
 
-    const cookieHeader = request.headers.get('cookie');
-
     const response = await fetch(`${API_URL}/api/auth/refresh`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-      },
+      headers: buildBackendProxyHeaders(request),
       body: JSON.stringify(body),
     });
 

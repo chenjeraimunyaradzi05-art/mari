@@ -1,49 +1,78 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('User Journey: Registration to Onboarding', () => {
+async function dismissCookieBanner(page: import('@playwright/test').Page) {
+  const rejectOptional = page.getByRole('button', { name: /reject optional/i });
+  const acceptAll = page.getByRole('button', { name: /accept all/i });
+  const closeButton = page.getByRole('button', { name: /close/i });
+  const banner = page.locator('[data-testid="cookie-banner"], [aria-label*="cookie" i]');
+  const backdrop = page.locator('.fixed.inset-x-0.bottom-0');
+
+  if (await rejectOptional.count()) {
+    await rejectOptional.click();
+  } else if (await acceptAll.count()) {
+    await acceptAll.click();
+  } else if (await closeButton.count()) {
+    await closeButton.click();
+  }
+
+  if (await banner.count()) {
+    await expect(banner.first()).not.toBeVisible({ timeout: 5000 });
+  }
+
+  if (await backdrop.count()) {
+    await backdrop.first().evaluate((el) => {
+      (el as HTMLElement).style.display = 'none';
+      (el as HTMLElement).style.pointerEvents = 'none';
+    });
+  }
+
+  await page.evaluate(() => {
+    const cookieDialogs = document.querySelectorAll('[data-testid="cookie-banner"], [aria-label*="cookie" i]');
+    cookieDialogs.forEach((node) => {
+      const el = node as HTMLElement;
+      el.style.display = 'none';
+      el.style.pointerEvents = 'none';
+    });
+  });
+}
+
+test.describe('User Journey: Registration to Persona Dashboard', () => {
   
   test('Complete registration flow', async ({ page }) => {
-    // 1. Navigate to Register
     await page.goto('/register');
-    
-    // 2. Step 1: Personal Details
+    await expect(page.getByRole('heading', { name: /create an account/i })).toBeVisible();
+    await dismissCookieBanner(page);
+
+    // Fill personal details
     await page.getByPlaceholder('Jane').fill('Test');
     await page.getByPlaceholder('Doe').fill('User');
     
-    // Generate a random email to ensure uniqueness
+    // Generate unique email per run
     const randomEmail = `test.user.${Date.now()}@example.com`;
     await page.getByPlaceholder('you@example.com').fill(randomEmail);
+
+    // Ensure client-side handlers are hydrated before submit.
+    const passwordInput = page.locator('#password');
+    const passwordToggle = page.locator('#password + button');
+    await passwordToggle.click();
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+    await passwordToggle.click();
+    await expect(passwordInput).toHaveAttribute('type', 'password');
     
-    await page.getByPlaceholder('••••••••').fill('Password123'); // Meets requirements
+    await page.getByLabel('Password', { exact: true }).fill('Password123!'); // Meets requirements
+    await page.getByLabel('Confirm Password').fill('Password123!');
+    await dismissCookieBanner(page);
+    await page.getByLabel(/i confirm that i am a woman/i).check({ force: true });
     
-    // Click Continue
-    await page.getByRole('button', { name: 'Continue' }).click();
+    // Submit registration
+    await dismissCookieBanner(page);
+    await page.getByRole('button', { name: /create account/i }).click({ force: true });
     
-    // 3. Step 2: Persona Selection
-    await expect(page.getByText('What brings you here?')).toBeVisible();
+    // Expect redirect to persona dashboard after auth bootstrap
+    await expect(page).toHaveURL(/\/dashboard\/persona/, { timeout: 20000 });
     
-    // Select a Persona (e.g., Early Career)
-    // Assuming the persona selection is a radio or clickable card. 
-    // Based on code reading, it's likely a list of cards mapping to radio buttons or just divs.
-    // I'll select by text content.
-    await page.getByText('Early Career').click();
-    
-    // Accept Terms (Checkbox)
-    await page.locator('#acceptTerms').check();
-    
-    // 4. Submit Registration
-    // The button typically says "Create Account" or "Join Athena" in step 2
-    // I need to check the exact text in a moment, but "Create account" is a safe bet for now or "Join".
-    // Let's assume the button is the primary submit button.
-    const submitButton = page.locator('button[type="submit"]');
-    await submitButton.click();
-    
-    // 5. Expect Redirection to Onboarding
-    // The code does router.push('/onboarding') on success.
-    await expect(page).toHaveURL(/\/onboarding/);
-    
-    // 6. Verify Onboarding Page Load
-    await expect(page.getByText('Welcome to Athena')).toBeVisible(); // Hypothetical header
+    // Verify persona dashboard loaded
+    await expect(page.getByRole('heading', { name: /personality dashboards/i })).toBeVisible();
   });
 
 });

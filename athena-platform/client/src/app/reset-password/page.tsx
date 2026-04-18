@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Eye, EyeOff, Loader2, CheckCircle, Check } from 'lucide-react';
+import Image from 'next/image';
 import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -16,7 +17,8 @@ const resetPasswordSchema = z.object({
     .min(8, 'Password must be at least 8 characters')
     .regex(/[A-Z]/, 'Password must contain an uppercase letter')
     .regex(/[a-z]/, 'Password must contain a lowercase letter')
-    .regex(/[0-9]/, 'Password must contain a number'),
+    .regex(/[0-9]/, 'Password must contain a number')
+    .regex(/[^A-Za-z0-9]/, 'Password must contain a special character'),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
@@ -26,7 +28,14 @@ const resetPasswordSchema = z.object({
 type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 
 export default function ResetPasswordPage() {
-  const router = useRouter();
+  return (
+    <Suspense fallback={null}>
+      <ResetPasswordContent />
+    </Suspense>
+  );
+}
+
+function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   
@@ -51,6 +60,7 @@ export default function ResetPasswordPage() {
     { label: 'Contains uppercase letter', met: /[A-Z]/.test(password || '') },
     { label: 'Contains lowercase letter', met: /[a-z]/.test(password || '') },
     { label: 'Contains a number', met: /[0-9]/.test(password || '') },
+    { label: 'Contains a special character', met: /[^A-Za-z0-9]/.test(password || '') },
   ];
 
   const onSubmit = async (data: ResetPasswordForm) => {
@@ -66,8 +76,11 @@ export default function ResetPasswordPage() {
         password: data.password,
       });
       setIsSuccess(true);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to reset password');
+    } catch (error: unknown) {
+      const responseMessage = (
+        error as { response?: { data?: { message?: string } } }
+      )?.response?.data?.message;
+      toast.error(responseMessage || 'Failed to reset password');
     } finally {
       setIsSubmitting(false);
     }
@@ -121,7 +134,7 @@ export default function ResetPasswordPage() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center space-x-2 mb-4">
-            <div className="w-10 h-10 bg-athena-gradient rounded-lg" />
+            <Image src="/athena-logo.png" alt="ATHENA" width={40} height={40} className="rounded-lg" />
             <span className="text-2xl font-bold gradient-text">ATHENA</span>
           </div>
         </div>

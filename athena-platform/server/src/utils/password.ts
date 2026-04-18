@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 
 const SALT_ROUNDS = process.env.NODE_ENV === 'test' ? 4 : 12;
 
@@ -14,5 +15,5 @@ export const comparePassword = async (
 };
 
 export const generateRandomToken = (): string => {
-  return require('crypto').randomBytes(32).toString('hex');
+  return randomBytes(32).toString('hex');
 };

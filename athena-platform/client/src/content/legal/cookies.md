@@ -1,7 +1,7 @@
 # ATHENA Cookie Policy
 
-**Effective Date:** January 20, 2026  
-**Last Updated:** January 20, 2026
+**Effective Date:** March 8, 2026  
+**Last Updated:** March 8, 2026
 
 ---
 
@@ -175,16 +175,16 @@ If you have questions about our use of cookies:
 
 **Email:** privacy@athena.com
 
-**Data Protection Officer:** dpo@athena.com
+**Data rights contact:** dpo@athena.com
 
 **Postal Address:**  
 ATHENA Platform Pty Ltd  
-[Address]  
 Australia
 
+Registered office details will be published here before ATHENA accepts public legal or privacy notices through a live production launch.
+
 **UK Representative:**  
-[UK Representative Name]  
-[UK Address]
+If ATHENA launches a UK service that requires a local representative, the relevant contact details will be published here before that launch.
 
 ---
 
@@ -224,4 +224,4 @@ Below is a detailed list of all cookies used on the Platform, updated regularly:
 
 ---
 
-*Last declaration update: January 20, 2026*
+*Last declaration update: March 8, 2026*

@@ -72,16 +72,14 @@ export interface InvoiceData {
 // ==========================================
 
 const ATHENA_INFO = {
-  name: 'Athena Platform Inc.',
+  name: 'ATHENA Platform Pty Ltd',
   address: [
-    '123 Innovation Drive',
-    'Suite 500',
-    'San Francisco, CA 94105',
-    'United States',
+    'Australia',
+    'Final billing address to be published before production invoicing is enabled',
   ],
   email: 'billing@athena.app',
-  phone: '+1 (555) 123-4567',
-  taxId: 'US12-3456789',
+  phone: undefined,
+  taxId: undefined,
 };
 
 const CURRENCY_SYMBOLS: Record<string, string> = {

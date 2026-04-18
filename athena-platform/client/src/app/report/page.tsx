@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { AlertTriangle, Send, CheckCircle, ArrowLeft, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -44,6 +44,14 @@ const REPORT_REASONS = [
 ];
 
 export default function ReportContentPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReportContent />
+    </Suspense>
+  );
+}
+
+function ReportContent() {
   const searchParams = useSearchParams();
   const prefilledContentId = searchParams.get('contentId');
   const prefilledType = searchParams.get('type');

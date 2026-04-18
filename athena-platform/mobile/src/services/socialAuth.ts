@@ -7,7 +7,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { api } from './api';
+import { api, unwrapApiData } from './api';
 
 const GOOGLE_CLIENT_ID = Constants.expoConfig?.extra?.googleClientId || '';
 const GOOGLE_IOS_CLIENT_ID = Constants.expoConfig?.extra?.googleIosClientId || '';
@@ -56,11 +56,17 @@ export function useGoogleAuth() {
         return { success: false, error: backendResponse.data.message || 'Backend authentication failed' };
       }
 
-      const { accessToken, refreshToken, user } = backendResponse.data.data;
+      const { accessToken, refreshToken, user } = unwrapApiData<{
+        accessToken: string;
+        refreshToken?: string;
+        user: SocialAuthResult['user'];
+      }>(backendResponse.data);
 
       // Store tokens securely
       await SecureStore.setItemAsync('accessToken', accessToken);
-      await SecureStore.setItemAsync('refreshToken', refreshToken);
+      if (refreshToken) {
+        await SecureStore.setItemAsync('refreshToken', refreshToken);
+      }
 
       return { success: true, accessToken, refreshToken, user };
     } catch (error: any) {
@@ -116,11 +122,17 @@ export async function signInWithApple(): Promise<SocialAuthResult> {
       return { success: false, error: backendResponse.data.message || 'Backend authentication failed' };
     }
 
-    const { accessToken, refreshToken, user } = backendResponse.data.data;
+    const { accessToken, refreshToken, user } = unwrapApiData<{
+      accessToken: string;
+      refreshToken?: string;
+      user: SocialAuthResult['user'];
+    }>(backendResponse.data);
 
     // Store tokens securely
     await SecureStore.setItemAsync('accessToken', accessToken);
-    await SecureStore.setItemAsync('refreshToken', refreshToken);
+    if (refreshToken) {
+      await SecureStore.setItemAsync('refreshToken', refreshToken);
+    }
 
     return { success: true, accessToken, refreshToken, user };
   } catch (error: any) {

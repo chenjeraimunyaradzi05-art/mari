@@ -234,4 +234,20 @@ router.patch(
   }
 );
 
+/**
+ * GET /api/mentors/:mentorId
+ * Get mentor profile by mentor profile id
+ */
+router.get('/:mentorId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const profile = await mentorService.getMentorProfileById(req.params.mentorId);
+    if (!profile) {
+      throw new ApiError(404, 'Mentor profile not found');
+    }
+    res.json({ success: true, data: profile });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

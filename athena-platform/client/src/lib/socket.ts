@@ -3,6 +3,8 @@ import { useChatStore } from './stores/chat.store';
 import { useNotificationStore } from './stores/notification.store';
 import { API_ORIGIN } from './api';
 
+const SOCKET_ORIGIN = (process.env.NEXT_PUBLIC_SOCKET_URL || API_ORIGIN).replace(/\/$/, '');
+
 class SocketClient {
   private socket: Socket | null = null;
   private static instance: SocketClient;
@@ -19,7 +21,7 @@ class SocketClient {
   public connect(token: string) {
     if (this.socket?.connected) return;
 
-    this.socket = io(API_ORIGIN, {
+    this.socket = io(SOCKET_ORIGIN, {
       auth: { token },
       autoConnect: true,
       reconnection: true,
@@ -65,7 +67,7 @@ class SocketClient {
       }
     });
 
-    this.socket.on('messages:typing', ({ conversationId, userId, isTyping }) => {
+    this.socket.on('messages:typing', ({ conversationId, isTyping }) => {
         // We could enhance store to track WHO is typing, for now just boolean toggle
         useChatStore.getState().setTyping(conversationId, isTyping);
     });
@@ -78,7 +80,7 @@ class SocketClient {
   }
   
   // Method to manually emit events
-  public emit(event: string, data: any) {
+  public emit(event: string, data: unknown) {
       if (this.socket?.connected) {
           this.socket.emit(event, data);
       }

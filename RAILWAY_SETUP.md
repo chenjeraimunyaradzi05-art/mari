@@ -36,7 +36,7 @@ Railway is currently building from the root directory, which is wrong. You need 
    DATABASE_URL = postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}
    JWT_SECRET = (generate a 32+ character random string)
    NODE_ENV = production
-   # PORT is auto-injected by Railway — do not hardcode
+   PORT = 5000
    ```
 
 ### Step 4: Add the Web Service
@@ -48,7 +48,7 @@ Railway is currently building from the root directory, which is wrong. You need 
 6. After created, go to service **Settings** → rename to `athena-web`
 7. Add these **Environment Variables**:
    ```
-   NEXT_PUBLIC_API_URL = https://mari-production-5c60.up.railway.app
+   NEXT_PUBLIC_API_URL = (your athena-api URL, e.g., https://athena-api-production-xxxx.up.railway.app)
    NODE_ENV = production
    ```
 
@@ -97,7 +97,7 @@ Your Railway Project
 | `DATABASE_URL` | Yes | `postgresql://${{Postgres.POSTGRES_USER}}:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.POSTGRES_DB}}` |
 | `JWT_SECRET` | Yes | `your-32-char-secret-key` |
 | `NODE_ENV` | Yes | `production` |
-| `PORT` | No | Auto-injected by Railway |
+| `PORT` | No | `3001` |
 | `REDIS_URL` | No | `redis://...` |
 | `STRIPE_SECRET_KEY` | No | `sk_live_...` |
 | `OPENAI_API_KEY` | No | `sk-...` |
@@ -105,9 +105,9 @@ Your Railway Project
 ### Web Service (athena-web)
 | Variable | Required | Example |
 |----------|----------|---------|
-| `NEXT_PUBLIC_API_URL` | Yes | `https://mari-production-5c60.up.railway.app` |
+| `NEXT_PUBLIC_API_URL` | Yes | `https://athena-api-xxx.up.railway.app` |
 | `NODE_ENV` | Yes | `production` |
-| `NEXT_PUBLIC_APP_URL` | No | Your Netlify site URL |
+| `NEXTAUTH_SECRET` | No | `random-string` |
 
 ---
 

@@ -5,7 +5,11 @@
 import axios, { AxiosInstance } from 'axios';
 import Constants from 'expo-constants';
 
-const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:4000/api';
+const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:5000/api';
+
+export function unwrapApiData<T>(payload: any): T {
+  return (payload?.data ?? payload) as T;
+}
 
 export const api: AxiosInstance = axios.create({
   baseURL: API_URL,
@@ -18,7 +22,7 @@ export const api: AxiosInstance = axios.create({
 // Token management
 let authToken: string | null = null;
 let refreshToken: string | null = null;
-let refreshPromise: Promise<{ accessToken: string; refreshToken?: string }> | null = null;
+let refreshPromise: Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number }> | null = null;
 
 export const setAuthToken = (token: string | null) => {
   authToken = token;
@@ -65,7 +69,7 @@ api.interceptors.response.use(
         if (!refreshPromise) {
           refreshPromise = axios
             .post(`${API_URL}/auth/refresh`, { refreshToken })
-            .then((response) => response.data?.data)
+            .then((response) => unwrapApiData(response.data))
             .finally(() => {
               refreshPromise = null;
             });
@@ -112,7 +116,14 @@ api.interceptors.response.use(
 export const authApi = {
   login: (email: string, password: string) =>
     api.post('/auth/login', { email, password }),
-  register: (data: { email: string; password: string; firstName: string; lastName: string; persona: string }) =>
+  register: (data: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    persona: string;
+    womanSelfAttested: boolean;
+  }) =>
     api.post('/auth/register', data),
   me: () => api.get('/auth/me'),
   forgotPassword: (email: string) =>

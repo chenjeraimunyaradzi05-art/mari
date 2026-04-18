@@ -296,18 +296,18 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       updateTimeSlot: (id, updates) => set((state) => {
-        const index = state.availability.findIndex((s) => s.id === id);
+        const index = state.availability.findIndex((s: TimeSlot) => s.id === id);
         if (index !== -1) {
           state.availability[index] = { ...state.availability[index], ...updates };
         }
       }),
 
       removeTimeSlot: (id) => set((state) => {
-        state.availability = state.availability.filter((s) => s.id !== id);
+        state.availability = state.availability.filter((s: TimeSlot) => s.id !== id);
       }),
 
       toggleSlotActive: (id) => set((state) => {
-        const index = state.availability.findIndex((s) => s.id === id);
+        const index = state.availability.findIndex((s: TimeSlot) => s.id === id);
         if (index !== -1) {
           state.availability[index].isActive = !state.availability[index].isActive;
         }
@@ -342,14 +342,14 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       updateSession: (id, updates) => set((state) => {
-        const index = state.sessions.findIndex((s) => s.id === id);
+        const index = state.sessions.findIndex((s: Session) => s.id === id);
         if (index !== -1) {
           state.sessions[index] = { ...state.sessions[index], ...updates };
         }
       }),
 
       cancelSession: (id, reason) => set((state) => {
-        const index = state.sessions.findIndex((s) => s.id === id);
+        const index = state.sessions.findIndex((s: Session) => s.id === id);
         if (index !== -1) {
           state.sessions[index].status = 'cancelled';
           if (reason) {
@@ -359,7 +359,7 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       completeSession: (id, notes) => set((state) => {
-        const index = state.sessions.findIndex((s) => s.id === id);
+        const index = state.sessions.findIndex((s: Session) => s.id === id);
         if (index !== -1) {
           state.sessions[index].status = 'completed';
           if (notes) {
@@ -382,14 +382,14 @@ export const useMentorStore = create<MentorStore>()(
 
       // Optimistic updates
       confirmSessionOptimistic: (sessionId) => set((state) => {
-        const index = state.sessions.findIndex((s) => s.id === sessionId);
+        const index = state.sessions.findIndex((s: Session) => s.id === sessionId);
         if (index !== -1 && state.sessions[index].status === 'scheduled') {
           state.sessions[index].status = 'confirmed';
         }
       }),
 
       rescheduleSessionOptimistic: (sessionId, newDate, newStartTime, newEndTime) => set((state) => {
-        const index = state.sessions.findIndex((s) => s.id === sessionId);
+        const index = state.sessions.findIndex((s: Session) => s.id === sessionId);
         if (index !== -1) {
           state.sessions[index].date = newDate;
           state.sessions[index].startTime = newStartTime;
@@ -406,14 +406,14 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       updateMentee: (id, updates) => set((state) => {
-        const index = state.mentees.findIndex((m) => m.id === id);
+        const index = state.mentees.findIndex((m: Mentee) => m.id === id);
         if (index !== -1) {
           state.mentees[index] = { ...state.mentees[index], ...updates };
         }
       }),
 
       addMenteeNote: (id, note) => set((state) => {
-        const index = state.mentees.findIndex((m) => m.id === id);
+        const index = state.mentees.findIndex((m: Mentee) => m.id === id);
         if (index !== -1) {
           const existingNote = state.mentees[index].notes || '';
           state.mentees[index].notes = existingNote ? `${existingNote}\n${note}` : note;
@@ -421,7 +421,7 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       addMenteeTag: (id, tag) => set((state) => {
-        const index = state.mentees.findIndex((m) => m.id === id);
+        const index = state.mentees.findIndex((m: Mentee) => m.id === id);
         if (index !== -1) {
           const tags = state.mentees[index].tags || [];
           if (!tags.includes(tag)) {
@@ -431,9 +431,9 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       removeMenteeTag: (id, tag) => set((state) => {
-        const index = state.mentees.findIndex((m) => m.id === id);
+        const index = state.mentees.findIndex((m: Mentee) => m.id === id);
         if (index !== -1 && state.mentees[index].tags) {
-          state.mentees[index].tags = state.mentees[index].tags!.filter((t) => t !== tag);
+          state.mentees[index].tags = state.mentees[index].tags!.filter((t: string) => t !== tag);
         }
       }),
 
@@ -462,11 +462,11 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       removePayoutMethod: (id) => set((state) => {
-        state.payoutMethods = state.payoutMethods.filter((m) => m.id !== id);
+        state.payoutMethods = state.payoutMethods.filter((m: PayoutMethod) => m.id !== id);
       }),
 
       setDefaultPayoutMethod: (id) => set((state) => {
-        state.payoutMethods = state.payoutMethods.map((m) => ({
+        state.payoutMethods = state.payoutMethods.map((m: PayoutMethod) => ({
           ...m,
           isDefault: m.id === id,
         }));
@@ -481,7 +481,6 @@ export const useMentorStore = create<MentorStore>()(
       }),
 
       requestPayout: async (amount, methodId) => {
-        const state = get();
         set((s) => { s.loading.earnings = true; });
         
         try {
@@ -562,11 +561,11 @@ export const useMentorStore = create<MentorStore>()(
 
 export const selectUpcomingSessions = (state: MentorStore) =>
   state.sessions
-    .filter((s) => 
+    .filter((s: Session) => 
       (s.status === 'scheduled' || s.status === 'confirmed') && 
       new Date(s.date) >= new Date()
     )
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .sort((a: Session, b: Session) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
 export const selectTodaySessions = (state: MentorStore) => {
   const today = new Date();
@@ -574,7 +573,7 @@ export const selectTodaySessions = (state: MentorStore) => {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   
-  return state.sessions.filter((s) => {
+  return state.sessions.filter((s: Session) => {
     const sessionDate = new Date(s.date);
     return sessionDate >= today && sessionDate < tomorrow;
   });
@@ -586,7 +585,7 @@ export const selectSessionsByDate = (date: Date) => (state: MentorStore) => {
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   
-  return state.sessions.filter((s) => {
+  return state.sessions.filter((s: Session) => {
     const sessionDate = new Date(s.date);
     return sessionDate >= start && sessionDate < end;
   });
@@ -627,7 +626,7 @@ export const selectTotalEarningsForPeriod = (state: MentorStore) =>
   );
 
 export const selectPendingTransactions = (state: MentorStore) =>
-  state.transactions.filter((t) => t.status === 'pending' || t.status === 'processing');
+  state.transactions.filter((t: Transaction) => t.status === 'pending' || t.status === 'processing');
 
 export const selectDefaultPayoutMethod = (state: MentorStore) =>
-  state.payoutMethods.find((m) => m.isDefault);
+  state.payoutMethods.find((m: PayoutMethod) => m.isDefault);

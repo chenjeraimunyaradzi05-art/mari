@@ -4,7 +4,7 @@
  */
 
 import { prisma } from '../utils/prisma';
-import { cacheGetOrSet, cacheSet, cacheDel, CacheKeys } from '../utils/cache';
+import { cacheGetOrSet, cacheDel, CacheKeys } from '../utils/cache';
 
 // ==========================================
 // ACHIEVEMENT DEFINITIONS
@@ -327,7 +327,7 @@ export async function getUserAchievements(userId: string) {
 
   const earnedIds = new Set(earned.map((e) => e.achievementId));
 
-  const allAchievements = Object.entries(ACHIEVEMENTS).map(([key, achievement]) => ({
+  const allAchievements = Object.entries(ACHIEVEMENTS).map(([, achievement]) => ({
     ...achievement,
     earned: earnedIds.has(achievement.id),
     earnedAt: earned.find((e) => e.achievementId === achievement.id)?.earnedAt,
@@ -491,7 +491,7 @@ export async function getLeaderboard(
             take: limit,
           });
 
-        case 'posts':
+        case 'posts': {
           const postCounts = await prisma.post.groupBy({
             by: ['authorId'],
             _count: true,
@@ -513,6 +513,7 @@ export async function getLeaderboard(
               postCount: p._count,
             };
           });
+        }
 
         case 'streak':
           return prisma.userStreak.findMany({

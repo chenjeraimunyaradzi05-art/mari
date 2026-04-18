@@ -78,26 +78,6 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           <Text style={styles.buttonText}>{isLoading ? 'Signing in...' : 'Sign In'}</Text>
         </TouchableOpacity>
 
-        <View style={styles.dividerRow}>
-          <View style={styles.divider} />
-          <Text style={styles.dividerText}>or</Text>
-          <View style={styles.divider} />
-        </View>
-
-        <TouchableOpacity
-          style={styles.socialButton}
-          onPress={() => Alert.alert('Coming Soon', 'Google sign-in will be available soon.')}
-        >
-          <Text style={styles.socialButtonText}>Continue with Google</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.socialButton, styles.appleButton]}
-          onPress={() => Alert.alert('Coming Soon', 'Apple sign-in will be available soon.')}
-        >
-          <Text style={[styles.socialButtonText, styles.appleButtonText]}>Continue with Apple</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')}>
           <Text style={styles.linkText}>Forgot your password?</Text>
         </TouchableOpacity>
@@ -109,9 +89,6 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Demo: demo@athena.com / Demo123!</Text>
-      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -180,47 +157,5 @@ const styles = StyleSheet.create({
   linkBold: {
     color: '#6366f1',
     fontWeight: '600',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  divider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e5e7eb',
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    color: '#9ca3af',
-  },
-  socialButton: {
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  socialButtonText: {
-    color: '#111827',
-    fontWeight: '600',
-  },
-  appleButton: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
-  },
-  appleButtonText: {
-    color: '#fff',
-  },
-  footer: {
-    marginTop: 30,
-    alignItems: 'center',
-  },
-  footerText: {
-    color: '#999',
-    fontSize: 12,
   },
 });

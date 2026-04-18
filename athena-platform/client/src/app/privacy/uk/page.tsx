@@ -37,18 +37,24 @@ export default function UKPrivacyAddendumPage() {
 
         <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Data Controller</h2>
-          <p>For UK users, the data controller responsible for your personal data is:</p>
+          <p>
+            For UK users, ATHENA currently manages privacy operations from Australia. If ATHENA begins a public UK
+            launch that requires a local representative or UK registration details, those details will be published
+            here before that launch.
+          </p>
           <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 mt-4">
-            <p className="font-semibold">ATHENA Platform Ltd</p>
+            <p className="font-semibold">ATHENA Platform Pty Ltd</p>
             <p className="flex items-center gap-2 mt-2">
               <MapPin className="w-4 h-4 text-gray-400" />
-              [Registered Address], London, United Kingdom
+              Australia-based privacy operations; UK service contact details will be published before launch
             </p>
             <p className="flex items-center gap-2 mt-1">
               <Mail className="w-4 h-4 text-gray-400" />
               <a href="mailto:privacy@athena.com" className="text-purple-600">privacy@athena.com</a>
             </p>
-            <p className="text-sm text-gray-500 mt-2">ICO Registration Number: [To be added]</p>
+            <p className="text-sm text-gray-500 mt-2">
+              ICO registration and any UK representative details will be added before a regulated public UK launch.
+            </p>
           </div>
         </section>
 
@@ -149,19 +155,22 @@ export default function UKPrivacyAddendumPage() {
             <li>Additional technical and organisational measures</li>
           </ul>
           <p className="mt-4">
-            For more information about our international data transfers and the safeguards in place, 
-            please contact our Data Protection Officer.
+            For more information about our international data transfers and the safeguards in place,
+            please contact our privacy team.
           </p>
         </section>
 
         <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
-          <h2 className="text-2xl font-semibold mb-4">Data Protection Officer</h2>
-          <p>We have appointed a Data Protection Officer (DPO) who can be contacted for any privacy-related queries:</p>
+          <h2 className="text-2xl font-semibold mb-4">Privacy Contact</h2>
+          <p>
+            For privacy-related queries, including UK GDPR rights requests, contact the ATHENA privacy team using the
+            dedicated inbox below.
+          </p>
           <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 mt-4">
-            <p className="font-semibold">Data Protection Officer</p>
+            <p className="font-semibold">ATHENA privacy team</p>
             <p className="flex items-center gap-2 mt-2">
               <Mail className="w-4 h-4 text-gray-400" />
-              <a href="mailto:dpo@athena.com" className="text-purple-600">dpo@athena.com</a>
+              <a href="mailto:privacy@athena.com" className="text-purple-600">privacy@athena.com</a>
             </p>
           </div>
         </section>

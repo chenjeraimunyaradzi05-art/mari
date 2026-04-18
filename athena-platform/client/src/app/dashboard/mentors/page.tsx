@@ -4,18 +4,15 @@ import { useState } from 'react';
 import Link from 'next/link';
 import {
   Search,
-  Filter,
   Star,
-  Calendar,
-  MessageCircle,
-  Globe,
   Award,
   Clock,
   Users,
   ChevronDown,
+  CheckCircle2,
 } from 'lucide-react';
-import { useMentors, useAuth } from '@/lib/hooks';
-import { formatCurrency, getFullName, getInitials, cn } from '@/lib/utils';
+import { useMentors } from '@/lib/hooks';
+import { formatCurrency, cn } from '@/lib/utils';
 import { CardSkeleton } from '@/components/ui/loading';
 
 const specializations = [
@@ -38,29 +35,60 @@ const sortOptions = [
   { value: 'price_high', label: 'Price: High to Low' },
 ];
 
+function getDisplayName(mentor: any) {
+  return mentor.user?.displayName || 'ATHENA Mentor';
+}
+
+function getHeadline(mentor: any) {
+  return (
+    mentor.user?.headline ||
+    (mentor.yearsExperience
+      ? `${mentor.yearsExperience}+ years of mentoring experience`
+      : 'Career mentor')
+  );
+}
+
+function getInitials(name: string) {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join('')
+    .toUpperCase();
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
 export default function MentorsPage() {
-  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSpecialization, setSelectedSpecialization] = useState('All Specializations');
   const [sortBy, setSortBy] = useState('rating');
-  const [showFilters, setShowFilters] = useState(false);
 
   const { data, isLoading } = useMentors({
     search: searchQuery,
-    specialization: selectedSpecialization !== 'All Specializations' ? selectedSpecialization : undefined,
+    specialization:
+      selectedSpecialization !== 'All Specializations'
+        ? selectedSpecialization
+        : undefined,
     sortBy,
   });
 
+  const mentors = data?.mentors || [];
+
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             Find Your Mentor
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Connect with experienced professionals who can guide your journey
+            Connect with experienced professionals who can guide your next move.
           </p>
         </div>
         <Link
@@ -71,13 +99,12 @@ export default function MentorsPage() {
         </Link>
       </div>
 
-      {/* Search and Filters */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="Search mentors by name, expertise, or company..."
+            placeholder="Search mentors by name or expertise..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input pl-10 w-full"
@@ -88,21 +115,21 @@ export default function MentorsPage() {
             <select
               value={selectedSpecialization}
               onChange={(e) => setSelectedSpecialization(e.target.value)}
-              className="input pr-10 appearance-none"
+              className="input appearance-none pr-10"
             >
-              {specializations.map((spec) => (
-                <option key={spec} value={spec}>
-                  {spec}
+              {specializations.map((specialization) => (
+                <option key={specialization} value={specialization}>
+                  {specialization}
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           </div>
           <div className="relative">
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="input pr-10 appearance-none"
+              className="input appearance-none pr-10"
             >
               {sortOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -110,13 +137,12 @@ export default function MentorsPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           </div>
         </div>
       </div>
 
-      {/* Mentors Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         {isLoading ? (
           <>
             <CardSkeleton />
@@ -126,113 +152,140 @@ export default function MentorsPage() {
             <CardSkeleton />
             <CardSkeleton />
           </>
-        ) : data?.mentors?.length ? (
-          data.mentors.map((mentor: any) => (
-            <div key={mentor.id} className="card hover:shadow-lg transition-shadow">
-              {/* Mentor Header */}
-              <div className="flex items-start space-x-4 mb-4">
-                <div className="relative">
-                  {mentor.user?.profile?.avatarUrl ? (
-                    <img
-                      src={mentor.user.profile.avatarUrl}
-                      alt={getFullName(mentor.user?.firstName || '', mentor.user?.lastName || '')}
-                      className="w-16 h-16 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 font-semibold text-xl">
-                      {getInitials(mentor.user?.firstName || '', mentor.user?.lastName || '')}
-                    </div>
-                  )}
-                  {mentor.verified && (
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-                      <Award className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 dark:text-white truncate">
-                    {getFullName(mentor.user?.firstName || '', mentor.user?.lastName || '')}
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                    {mentor.title || mentor.user?.profile?.headline || 'Mentor'}
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                    {mentor.company}
-                  </p>
-                </div>
-              </div>
+        ) : mentors.length ? (
+          mentors.map((mentor: any) => {
+            const displayName = getDisplayName(mentor);
+            const headline = getHeadline(mentor);
+            const specializationsList = toStringArray(mentor.specializations);
+            const hourlyRate =
+              mentor.hourlyRate !== null && mentor.hourlyRate !== undefined
+                ? Number(mentor.hourlyRate)
+                : null;
+            const rating =
+              mentor.rating !== null && mentor.rating !== undefined
+                ? Number(mentor.rating)
+                : null;
 
-              {/* Stats */}
-              <div className="flex items-center space-x-4 mb-4 text-sm">
-                <div className="flex items-center text-yellow-500">
-                  <Star className="w-4 h-4 fill-current mr-1" />
-                  <span className="font-medium">{mentor.rating?.toFixed(1) || '5.0'}</span>
-                  <span className="text-gray-400 ml-1">({mentor.reviewCount || 0})</span>
-                </div>
-                <div className="flex items-center text-gray-500 dark:text-gray-400">
-                  <Users className="w-4 h-4 mr-1" />
-                  <span>{mentor.sessionCount || 0} sessions</span>
-                </div>
-              </div>
+            return (
+              <div
+                key={mentor.id}
+                className="card border border-transparent transition-shadow hover:shadow-lg"
+              >
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex items-start space-x-4">
+                    {mentor.user?.avatar ? (
+                      <img
+                        src={mentor.user.avatar}
+                        alt={displayName}
+                        className="h-16 w-16 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary-100 font-semibold text-xl text-primary-600 dark:bg-primary-900">
+                        {getInitials(displayName) || 'AM'}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold text-gray-900 dark:text-white">
+                        {displayName}
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        {headline}
+                      </p>
+                    </div>
+                  </div>
 
-              {/* Specializations */}
-              <div className="flex flex-wrap gap-2 mb-4">
-                {mentor.specializations?.slice(0, 3).map((spec: string, index: number) => (
                   <span
-                    key={index}
-                    className="px-2 py-1 text-xs font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full"
+                    className={cn(
+                      'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium',
+                      mentor.isAvailable
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                    )}
                   >
-                    {spec}
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                    {mentor.isAvailable ? 'Available' : 'Unavailable'}
                   </span>
-                ))}
-                {mentor.specializations?.length > 3 && (
-                  <span className="px-2 py-1 text-xs font-medium text-gray-500">
-                    +{mentor.specializations.length - 3} more
-                  </span>
-                )}
-              </div>
-
-              {/* Bio */}
-              <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-3">
-                {mentor.bio || 'Passionate about helping others grow in their careers.'}
-              </p>
-
-              {/* Pricing & Availability */}
-              <div className="flex items-center justify-between text-sm mb-4">
-                <div className="flex items-center text-gray-500 dark:text-gray-400">
-                  <Clock className="w-4 h-4 mr-1" />
-                  <span>{mentor.sessionDuration || 60} min</span>
                 </div>
-                <div className="font-semibold text-gray-900 dark:text-white">
-                  {formatCurrency(mentor.hourlyRate || 100)}/session
+
+                <div className="mb-4 flex flex-wrap items-center gap-4 text-sm">
+                  <div className="flex items-center text-yellow-500">
+                    <Star className="mr-1 h-4 w-4 fill-current" />
+                    <span className="font-medium">
+                      {rating ? rating.toFixed(1) : 'New'}
+                    </span>
+                    <span className="ml-1 text-gray-400">
+                      ({mentor.reviewCount || 0})
+                    </span>
+                  </div>
+                  <div className="flex items-center text-gray-500 dark:text-gray-400">
+                    <Users className="mr-1 h-4 w-4" />
+                    <span>{mentor.sessionCount || 0} sessions</span>
+                  </div>
+                  {mentor.yearsExperience ? (
+                    <div className="flex items-center text-gray-500 dark:text-gray-400">
+                      <Award className="mr-1 h-4 w-4" />
+                      <span>{mentor.yearsExperience}+ years</span>
+                    </div>
+                  ) : null}
+                </div>
+
+                {specializationsList.length > 0 ? (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {specializationsList.slice(0, 3).map((specialization, index) => (
+                      <span
+                        key={`${mentor.id}-${specialization}-${index}`}
+                        className="rounded-full bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+                      >
+                        {specialization}
+                      </span>
+                    ))}
+                    {specializationsList.length > 3 ? (
+                      <span className="px-2 py-1 text-xs font-medium text-gray-500">
+                        +{specializationsList.length - 3} more
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <p className="mb-4 line-clamp-3 text-sm text-gray-600 dark:text-gray-300">
+                  {mentor.user?.bio || 'This mentor has not added a public bio yet.'}
+                </p>
+
+                <div className="mb-4 flex items-center justify-between text-sm">
+                  <div className="flex items-center text-gray-500 dark:text-gray-400">
+                    <Clock className="mr-1 h-4 w-4" />
+                    <span>30 or 60 minute sessions</span>
+                  </div>
+                  <div className="font-semibold text-gray-900 dark:text-white">
+                    {hourlyRate ? `${formatCurrency(hourlyRate)}/hour` : 'Rate on request'}
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Link
+                    href={`/dashboard/mentors/${mentor.id}`}
+                    className="flex-1 btn-outline py-2 text-center text-sm"
+                  >
+                    View Profile
+                  </Link>
+                  <Link
+                    href={`/dashboard/mentors/${mentor.id}`}
+                    className="flex-1 btn-primary py-2 text-center text-sm"
+                  >
+                    Book Session
+                  </Link>
                 </div>
               </div>
-
-              {/* Actions */}
-              <div className="flex items-center space-x-2">
-                <Link
-                  href={`/dashboard/mentors/${mentor.id}`}
-                  className="flex-1 btn-outline py-2 text-center text-sm"
-                >
-                  View Profile
-                </Link>
-                <Link
-                  href={`/dashboard/mentors/${mentor.id}`}
-                  className="flex-1 btn-primary py-2 text-center text-sm"
-                >
-                  Book Session
-                </Link>
-              </div>
-            </div>
-          ))
+            );
+          })
         ) : (
-          <div className="col-span-full card text-center py-12">
-            <Users className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <div className="col-span-full card py-12 text-center">
+            <Users className="mx-auto mb-4 h-12 w-12 text-gray-400" />
+            <h3 className="mb-2 text-lg font-medium text-gray-900 dark:text-white">
               No mentors found
             </h3>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
-              Try adjusting your search or filters
+            <p className="mb-4 text-gray-500 dark:text-gray-400">
+              Try adjusting your search or filters.
             </p>
             <button
               onClick={() => {
@@ -247,19 +300,17 @@ export default function MentorsPage() {
         )}
       </div>
 
-      {/* Become a Mentor CTA */}
       <div className="card bg-gradient-to-r from-primary-600 to-secondary-600 text-white">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-bold mb-2">Share Your Knowledge</h2>
+            <h2 className="mb-2 text-xl font-bold">Share Your Knowledge</h2>
             <p className="text-white/80">
               Join ATHENA as a mentor and help other women achieve their career goals.
-              Set your own rates and schedule.
             </p>
           </div>
           <Link
             href="/dashboard/mentors/become-mentor"
-            className="btn bg-white text-primary-600 hover:bg-gray-100 px-6 py-3 flex-shrink-0"
+            className="btn flex-shrink-0 bg-white px-6 py-3 text-primary-600 hover:bg-gray-100"
           >
             Apply to Mentor
           </Link>

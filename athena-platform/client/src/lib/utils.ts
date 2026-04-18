@@ -141,25 +141,25 @@ export function pluralize(count: number, singular: string, plural?: string): str
   return count === 1 ? singular : (plural || `${singular}s`);
 }
 
-export function debounce<T extends (...args: any[]) => any>(
-  func: T,
+export function debounce<TArgs extends unknown[]>(
+  func: (...args: TArgs) => void,
   wait: number
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
   let timeout: NodeJS.Timeout | null = null;
 
-  return (...args: Parameters<T>) => {
+  return (...args: TArgs) => {
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
   };
 }
 
-export function throttle<T extends (...args: any[]) => any>(
-  func: T,
+export function throttle<TArgs extends unknown[]>(
+  func: (...args: TArgs) => void,
   limit: number
-): (...args: Parameters<T>) => void {
-  let inThrottle: boolean;
+): (...args: TArgs) => void {
+  let inThrottle = false;
 
-  return (...args: Parameters<T>) => {
+  return (...args: TArgs) => {
     if (!inThrottle) {
       func(...args);
       inThrottle = true;

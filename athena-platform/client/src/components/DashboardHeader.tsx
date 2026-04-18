@@ -54,7 +54,7 @@ export default function DashboardHeader() {
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center space-x-2">
             <Image
-              src="/logo.svg"
+              src="/athena-logo.png"
               alt="ATHENA"
               width={40}
               height={40}

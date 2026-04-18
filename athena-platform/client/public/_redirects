@@ -1,12 +1,5 @@
 # Proxy rules for Netlify — processed in order, first match wins.
 # The ! suffix = force (apply even if a function exists at the path).
 
-# Auth routes: identity rewrite → Next.js API handlers (cookie forwarding)
-/api/auth/*  /api/auth/:splat  200!
-
-# All other API routes: proxy to Railway backend
-/api/*       https://server-production-1849.up.railway.app/api/:splat       200!
-
-# Uploads & Socket.IO
-/uploads/*   https://server-production-1849.up.railway.app/uploads/:splat   200!
-/socket.io/* https://server-production-1849.up.railway.app/socket.io/:splat 200!
+# Uploads
+/uploads/*   /uploads/:splat   200!

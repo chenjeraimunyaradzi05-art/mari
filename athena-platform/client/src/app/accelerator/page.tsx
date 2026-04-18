@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Rocket, Calendar, Users, DollarSign, CheckCircle, ArrowRight, Award, Target, Zap, Globe } from 'lucide-react';
+import { Rocket, Calendar, Users, DollarSign, CheckCircle, ArrowRight, Award, Zap } from 'lucide-react';
 
 export default function AcceleratorPage() {
   const programDetails = [

@@ -11,6 +11,8 @@ const TEST_USER = {
 };
 
 const REGISTER_EMAIL = 'new.user@example.com';
+const ACTIVE_ACCESS_TOKEN = 'access_token_test_1';
+const ACTIVE_REFRESH_TOKEN = 'refresh_token_test_1';
 
 jest.mock('../utils/email', () => ({
   sendVerificationEmail: jest.fn(async () => true),
@@ -40,7 +42,10 @@ jest.mock('../utils/prisma', () => {
   const SESSION = {
     id: 'sess_test_1',
     userId: TEST_USER.id,
-    refreshToken: 'refresh_token_test_1',
+    token: ACTIVE_ACCESS_TOKEN,
+    refreshToken: ACTIVE_REFRESH_TOKEN,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    revokedAt: null,
   };
 
   const prisma = {
@@ -88,17 +93,33 @@ jest.mock('../utils/prisma', () => {
       findFirst: jest.fn(async () => null),
     },
     session: {
-      create: jest.fn(async () => ({})),
+      create: jest.fn(async ({ data }: any) => ({
+        id: 'sess_created',
+        ...data,
+      })),
       deleteMany: jest.fn(async () => ({ count: 0 })),
       findFirst: jest.fn(async ({ where }: any) => {
         if (where?.refreshToken === SESSION.refreshToken) {
-          if (!where?.userId || where.userId === SESSION.userId) {
+          if (
+            (!where?.userId || where.userId === SESSION.userId) &&
+            (!where?.revokedAt || SESSION.revokedAt === where.revokedAt) &&
+            (!where?.expiresAt?.gt || SESSION.expiresAt > where.expiresAt.gt)
+          ) {
             return SESSION;
           }
         }
         return null;
       }),
-      update: jest.fn(async () => ({})),
+      findUnique: jest.fn(async ({ where }: any) => {
+        if (where?.token === SESSION.token) {
+          return SESSION;
+        }
+        return null;
+      }),
+      update: jest.fn(async ({ data }: any) => ({
+        ...SESSION,
+        ...data,
+      })),
     },
     referral: {
       create: jest.fn(async () => ({})),
@@ -120,6 +141,16 @@ jest.mock('../utils/prisma', () => {
 import { app } from '../index';
 
 describe('auth endpoints (happy path, mocked prisma)', () => {
+  const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
+
+  afterEach(() => {
+    if (originalAllowedOrigins === undefined) {
+      delete process.env.ALLOWED_ORIGINS;
+    } else {
+      process.env.ALLOWED_ORIGINS = originalAllowedOrigins;
+    }
+  });
+
   it('POST /api/auth/register returns 201 and tokens', async () => {
     const res = await request(app)
       .post('/api/auth/register')
@@ -138,6 +169,8 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body.data.accessToken.length).toBeGreaterThan(10);
     expect(typeof res.body?.data?.refreshToken).toBe('string');
     expect(res.body.data.refreshToken.length).toBeGreaterThan(10);
+    expect(typeof res.body?.data?.expiresIn).toBe('number');
+    expect(res.body.data.expiresIn).toBeGreaterThan(0);
   });
 
   it('POST /api/auth/login returns 200 and tokens', async () => {
@@ -156,6 +189,8 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body.data.accessToken.length).toBeGreaterThan(10);
     expect(typeof res.body?.data?.refreshToken).toBe('string');
     expect(res.body.data.refreshToken.length).toBeGreaterThan(10);
+    expect(typeof res.body?.data?.expiresIn).toBe('number');
+    expect(res.body.data.expiresIn).toBeGreaterThan(0);
   });
 
   it('POST /api/auth/refresh returns 200 and new tokens for a valid session', async () => {
@@ -169,6 +204,29 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body.data.accessToken.length).toBeGreaterThan(10);
     expect(typeof res.body?.data?.refreshToken).toBe('string');
     expect(res.body.data.refreshToken.length).toBeGreaterThan(10);
+    expect(typeof res.body?.data?.expiresIn).toBe('number');
+    expect(res.body.data.expiresIn).toBeGreaterThan(0);
+  });
+
+  it('POST /api/auth/refresh rejects cookie-based refresh without a trusted origin', async () => {
+    await request(app)
+      .post('/api/auth/refresh')
+      .set('Cookie', ['refreshToken=refresh_token_test_1'])
+      .expect(403);
+  });
+
+  it('POST /api/auth/refresh accepts cookie-based refresh from a trusted origin', async () => {
+    process.env.ALLOWED_ORIGINS = 'https://app.athena.example';
+
+    const res = await request(app)
+      .post('/api/auth/refresh')
+      .set('Cookie', ['refreshToken=refresh_token_test_1'])
+      .set('Origin', 'https://app.athena.example')
+      .expect(200);
+
+    expect(res.body).toHaveProperty('success', true);
+    expect(typeof res.body?.data?.accessToken).toBe('string');
+    expect(typeof res.body?.data?.refreshToken).toBe('string');
   });
 
   it('POST /api/auth/register allows empty persona and defaults', async () => {
@@ -187,5 +245,24 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body).toHaveProperty('success', true);
     expect(typeof res.body?.data?.accessToken).toBe('string');
     expect(typeof res.body?.data?.refreshToken).toBe('string');
+    expect(typeof res.body?.data?.expiresIn).toBe('number');
+  });
+
+  it('GET /api/auth/me returns 200 for an active access-token session', async () => {
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${ACTIVE_ACCESS_TOKEN}`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body?.data?.id).toBe(TEST_USER.id);
+    expect(res.body?.data?.email).toBe(TEST_USER.email);
+  });
+
+  it('GET /api/auth/me returns 401 when the access-token session is missing', async () => {
+    await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer revoked_access_token')
+      .expect(401);
   });
 });

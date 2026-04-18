@@ -301,7 +301,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       updateBusiness: (id, updates) => set((state) => {
-        const index = state.businesses.findIndex((b) => b.id === id);
+        const index = state.businesses.findIndex((b: Business) => b.id === id);
         if (index !== -1) {
           state.businesses[index] = { 
             ...state.businesses[index], 
@@ -312,7 +312,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       removeBusiness: (id) => set((state) => {
-        state.businesses = state.businesses.filter((b) => b.id !== id);
+        state.businesses = state.businesses.filter((b: Business) => b.id !== id);
         if (state.currentBusinessId === id) {
           state.currentBusinessId = null;
         }
@@ -341,7 +341,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       updateOwner: (id, updates) => set((state) => {
-        const index = state.wizardData.owners.findIndex((o) => o.id === id);
+        const index = state.wizardData.owners.findIndex((o: FormationWizardData['owners'][0]) => o.id === id);
         if (index !== -1) {
           state.wizardData.owners[index] = { 
             ...state.wizardData.owners[index], 
@@ -352,7 +352,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       removeOwner: (id) => set((state) => {
-        state.wizardData.owners = state.wizardData.owners.filter((o) => o.id !== id);
+        state.wizardData.owners = state.wizardData.owners.filter((o: FormationWizardData['owners'][0]) => o.id !== id);
         state.wizardDirty = true;
       }),
 
@@ -363,12 +363,11 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       saveWizardProgress: async () => {
-        const state = get();
         set((s) => { s.loading.wizard = true; });
         
         try {
           // API call would go here
-          // await formationApi.saveWizardProgress(state.currentBusinessId, state.wizardData);
+          // await formationApi.saveWizardProgress(get().currentBusinessId, get().wizardData);
           set((s) => { 
             s.wizardDirty = false; 
             s.loading.wizard = false;
@@ -391,7 +390,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       updateCofounderStatus: (matchId, status, message) => set((state) => {
-        const index = state.cofounderMatches.findIndex((m) => m.id === matchId);
+        const index = state.cofounderMatches.findIndex((m: CofounderMatch) => m.id === matchId);
         if (index !== -1) {
           state.cofounderMatches[index].status = status;
           if (message) {
@@ -408,7 +407,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       markMatchViewed: (matchId) => set((state) => {
-        const index = state.cofounderMatches.findIndex((m) => m.id === matchId);
+        const index = state.cofounderMatches.findIndex((m: CofounderMatch) => m.id === matchId);
         if (index !== -1) {
           state.cofounderMatches[index].viewedAt = new Date();
         }
@@ -423,7 +422,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       updateComplianceItem: (id, updates) => set((state) => {
-        const index = state.complianceItems.findIndex((c) => c.id === id);
+        const index = state.complianceItems.findIndex((c: ComplianceItem) => c.id === id);
         if (index !== -1) {
           state.complianceItems[index] = { 
             ...state.complianceItems[index], 
@@ -433,7 +432,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       markComplianceComplete: (id) => set((state) => {
-        const index = state.complianceItems.findIndex((c) => c.id === id);
+        const index = state.complianceItems.findIndex((c: ComplianceItem) => c.id === id);
         if (index !== -1) {
           state.complianceItems[index].status = 'complete';
           state.complianceItems[index].completedAt = new Date();
@@ -453,7 +452,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       updateDocument: (id, updates) => set((state) => {
-        const index = state.documents.findIndex((d) => d.id === id);
+        const index = state.documents.findIndex((d: FormationDocument) => d.id === id);
         if (index !== -1) {
           state.documents[index] = { 
             ...state.documents[index], 
@@ -464,7 +463,7 @@ export const useFormationStore = create<FormationStore>()(
       }),
 
       removeDocument: (id) => set((state) => {
-        state.documents = state.documents.filter((d) => d.id !== id);
+        state.documents = state.documents.filter((d: FormationDocument) => d.id !== id);
       }),
 
       // ============================================
@@ -507,16 +506,16 @@ export const useFormationStore = create<FormationStore>()(
 // ============================================
 
 export const selectCurrentBusiness = (state: FormationStore) => 
-  state.businesses.find((b) => b.id === state.currentBusinessId);
+  state.businesses.find((b: Business) => b.id === state.currentBusinessId);
 
 export const selectBusinessesByStatus = (status: BusinessStatus) => (state: FormationStore) =>
-  state.businesses.filter((b) => b.status === status);
+  state.businesses.filter((b: Business) => b.status === status);
 
 export const selectPendingComplianceItems = (state: FormationStore) =>
-  state.complianceItems.filter((c) => c.status === 'pending' || c.status === 'overdue');
+  state.complianceItems.filter((c: ComplianceItem) => c.status === 'pending' || c.status === 'overdue');
 
 export const selectOverdueComplianceItems = (state: FormationStore) =>
-  state.complianceItems.filter((c) => c.status === 'overdue');
+  state.complianceItems.filter((c: ComplianceItem) => c.status === 'overdue');
 
 export const selectFilteredCofounderMatches = (state: FormationStore) => {
   const { cofounderMatches, cofounderFilters } = state;
@@ -528,7 +527,7 @@ export const selectFilteredCofounderMatches = (state: FormationStore) => {
       return false;
     }
     if (cofounderFilters.skills.length) {
-      const hasSkill = cofounderFilters.skills.some((s) => match.skills.includes(s));
+      const hasSkill = cofounderFilters.skills.some((s: string) => match.skills.includes(s));
       if (!hasSkill) return false;
     }
     return true;

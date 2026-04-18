@@ -13,6 +13,8 @@ import { mlService } from '../services/ml.service';
 // import { getAllQueueStats } from '../utils/queue';
 import { logger } from '../utils/logger';
 import os from 'os';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 const router = Router();
 
@@ -33,6 +35,40 @@ interface ComponentHealth {
   latency?: number;
   message?: string;
   details?: Record<string, any>;
+}
+
+function hasProtectedHealthAccess(req: Request): boolean {
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+
+  const configuredTokens = [
+    process.env.HEALTH_DIAGNOSTICS_TOKEN,
+    process.env.DEBUG_SECRET,
+    process.env.METRICS_TOKEN,
+  ].filter((token): token is string => !!token);
+
+  if (configuredTokens.length === 0) {
+    return false;
+  }
+
+  const auth = req.headers.authorization;
+  const bearer =
+    typeof auth === 'string' && auth.startsWith('Bearer ')
+      ? auth.slice('Bearer '.length)
+      : null;
+  const headerToken =
+    typeof req.headers['x-health-token'] === 'string'
+      ? req.headers['x-health-token']
+      : null;
+  const debugHeader =
+    typeof req.headers['x-debug-auth'] === 'string'
+      ? req.headers['x-debug-auth']
+      : null;
+
+  return [bearer, headerToken, debugHeader].some(
+    (token) => !!token && configuredTokens.includes(token)
+  );
 }
 
 // ===========================================
@@ -101,7 +137,6 @@ router.get('/ready', async (req: Request, res: Response) => {
  * @description Comprehensive health check of all dependencies
  */
 router.get('/detailed', async (req: Request, res: Response) => {
-  const startTime = Date.now();
   const checks: Record<string, ComponentHealth> = {};
 
   // Database check
@@ -340,6 +375,13 @@ router.get('/version', (req: Request, res: Response) => {
  * @description Tests every DB operation used in the auth registration flow
  */
 router.get('/auth-diag', async (req: Request, res: Response) => {
+  if (!hasProtectedHealthAccess(req)) {
+    return res.status(404).json({
+      success: false,
+      message: 'Not found',
+    });
+  }
+
   const results: Record<string, { ok: boolean; ms: number; error?: string }> = {};
 
   // 1. User table query
@@ -354,7 +396,6 @@ router.get('/auth-diag', async (req: Request, res: Response) => {
   // 2. Bcrypt hash
   t = Date.now();
   try {
-    const bcrypt = require('bcryptjs');
     await bcrypt.hash('testpassword', 4);
     results['2_bcrypt'] = { ok: true, ms: Date.now() - t };
   } catch (e: any) {
@@ -364,7 +405,6 @@ router.get('/auth-diag', async (req: Request, res: Response) => {
   // 3. JWT sign
   t = Date.now();
   try {
-    const jwt = require('jsonwebtoken');
     const secret = process.env.JWT_SECRET || 'diag-fallback';
     jwt.sign({ test: true }, secret, { expiresIn: '1m' });
     results['3_jwt_sign'] = { ok: true, ms: Date.now() - t };

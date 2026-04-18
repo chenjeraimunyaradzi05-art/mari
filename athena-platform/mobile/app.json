@@ -56,10 +56,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiUrl": "https://api.athena.com",
-      "eas": {
-        "projectId": "your-project-id"
-      }
+      "apiUrl": "https://api.athena.com"
     },
     "plugins": []
   }

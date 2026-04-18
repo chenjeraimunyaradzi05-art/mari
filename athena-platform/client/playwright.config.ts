@@ -1,17 +1,28 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const playwrightPort = Number(process.env.PLAYWRIGHT_PORT || '3000');
+const playwrightBaseUrl = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${playwrightPort}`;
+const reuseExistingServer =
+  process.env.PLAYWRIGHT_REUSE_SERVER === 'true'
+    ? true
+    : process.env.PLAYWRIGHT_REUSE_SERVER === 'false'
+    ? false
+    : !process.env.CI;
+
 export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
   retries: process.env.CI ? 1 : 0,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    baseURL: playwrightBaseUrl,
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: process.env.CI ? 'npm run start -- -p 3000' : 'npm run dev -- -p 3000',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    command: process.env.CI
+      ? `npm run start -- -p ${playwrightPort}`
+      : `npm run dev -- -p ${playwrightPort}`,
+    url: playwrightBaseUrl,
+    reuseExistingServer,
     timeout: 120_000,
   },
   projects: [

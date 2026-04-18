@@ -1,20 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { ChannelSidebar, ChatArea, CreateChannelModal, Channel, Message } from '@/components/channels';
 import { channelApi } from '@/lib/api-extensions';
+import { useAuth } from '@/lib/hooks';
 import { Loader2 } from 'lucide-react';
 
 export default function CommunityPage() {
-  const router = useRouter();
+  const { user } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string>(''); // Will be set from auth context
+  const currentUserId = user?.id ?? '';
 
   // Fetch channels
   useEffect(() => {

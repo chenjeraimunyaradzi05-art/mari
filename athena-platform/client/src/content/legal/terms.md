@@ -1,15 +1,15 @@
 # ATHENA Terms of Service
 
-**Effective Date:** January 20, 2026  
-**Version:** 2.0  
-**Last Updated:** January 20, 2026
+**Effective Date:** March 8, 2026  
+**Version:** 2.1  
+**Last Updated:** March 8, 2026
 
 ---
 
 ## 1. Introduction and Acceptance of Terms
 
 ### 1.1 Agreement Overview
-These Terms of Service ("Terms") constitute a legally binding agreement between you ("User", "you", or "your") and ATHENA Platform Pty Ltd (ACN: [Number]) ("ATHENA", "we", "us", or "our"), governing your access to and use of the ATHENA platform, including our website at athena.com, mobile applications, and all related services (collectively, the "Platform").
+These Terms of Service ("Terms") constitute a legally binding agreement between you ("User", "you", or "your") and ATHENA Platform Pty Ltd ("ATHENA", "we", "us", or "our"), governing your access to and use of the ATHENA platform, including our website at athena.com, mobile applications, and all related services (collectively, the "Platform").
 
 ### 1.2 Acceptance
 By accessing or using the Platform, you acknowledge that you have read, understood, and agree to be bound by these Terms. If you do not agree to these Terms, you must not access or use the Platform.
@@ -243,12 +243,12 @@ For UK users, we are committed to complying with the UK Online Safety Act 2023. 
 - Protection of children and vulnerable users
 
 ### 12.2 Transparency Reports
-We publish quarterly transparency reports detailing our content moderation activities, available at athena.com/help/transparency-report.
+We intend to publish transparency reports detailing our content moderation activities. When available, they will be linked from athena.com/help/transparency-report.
 
 ### 12.3 Designated Contact
 Our UK designated contact for regulatory matters:
 - Email: uk-regulatory@athena.com
-- Address: [UK Representative Address]
+- Address: A UK regulatory postal contact will be published here before any public UK launch that requires one.
 
 ### 12.4 Children's Safety
 The Platform is not intended for users under 18. We implement age verification and do not knowingly collect data from children.
@@ -282,15 +282,15 @@ We shall not be liable for delays or failures resulting from circumstances beyon
 
 ### Legal Matters
 - Email: legal@athena.com
-- Address: ATHENA Platform Pty Ltd, [Address], Australia
+- Address: ATHENA Platform Pty Ltd, Australia. A registered office address for formal notices will be published here before public launch.
 
 ### Privacy Matters
 - Email: privacy@athena.com
-- Data Protection Officer: dpo@athena.com
+- Data rights contact: dpo@athena.com
 
 ### UK Users
 - Email: uk-support@athena.com
-- UK Representative: [Name and Address]
+- UK representative details will be published here before any public UK launch that requires one.
 
 ---
 

@@ -1,12 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 
-declare global {
-  namespace Express {
-    interface Request {
-      /** Unique request correlation ID */
-      requestId: string;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    /** Unique request correlation ID */
+    requestId: string;
   }
 }
 

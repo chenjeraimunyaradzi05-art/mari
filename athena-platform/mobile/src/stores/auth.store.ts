@@ -16,16 +16,25 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export interface User {
   id: string;
   email: string;
-  name: string;
+  name?: string;
+  displayName?: string;
   firstName?: string;
   lastName?: string;
   avatar?: string;
   persona?: string;
-  role: 'USER' | 'EMPLOYER' | 'MENTOR' | 'ADMIN';
-  subscriptionTier: 'FREE' | 'PREMIUM_CAREER' | 'EMPLOYER_BASIC' | 'EMPLOYER_PRO';
-  onboardingComplete: boolean;
-  emailVerified: boolean;
-  createdAt: Date;
+  role: 'USER' | 'CREATOR' | 'EMPLOYER' | 'MENTOR' | 'EDUCATION_PROVIDER' | 'ADMIN';
+  subscriptionTier?:
+    | 'FREE'
+    | 'PREMIUM_CAREER'
+    | 'PREMIUM_PROFESSIONAL'
+    | 'PREMIUM_ENTREPRENEUR'
+    | 'PREMIUM_CREATOR'
+    | 'ENTERPRISE'
+    | 'EMPLOYER_BASIC'
+    | 'EMPLOYER_PRO';
+  onboardingComplete?: boolean;
+  emailVerified?: boolean;
+  createdAt?: string | Date;
 }
 
 export interface AuthTokens {

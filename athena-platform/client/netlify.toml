@@ -22,38 +22,16 @@
   package = "@netlify/plugin-nextjs"
 
 # ===========================================
-# API PROXY — forwards /api/* to Railway backend
+# RUNTIME ROUTING
 # ===========================================
-# NOTE: Netlify does NOT interpolate env vars in netlify.toml redirect "to" fields.
-# If the Railway URL changes, update these redirects.
-#
-# Rules are processed in order — first match wins.
-# 1) Auth routes: identity rewrite so Next.js API route handlers run
-#    (they forward Set-Cookie headers for refresh token).
-# 2) All other /api/*: proxy straight to Railway.
-[[redirects]]
-  from = "/api/auth/*"
-  to = "/api/auth/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/api/*"
-  to = "https://server-production-1849.up.railway.app/api/:splat"
-  status = 200
-  force = true
-
-# Proxy uploads to backend
+# Keep only the uploads self-rewrite here.
+# Realtime should connect directly to Railway using:
+#   NEXT_PUBLIC_SOCKET_URL
+# falling back to:
+#   NEXT_PUBLIC_API_URL
 [[redirects]]
   from = "/uploads/*"
-  to = "https://server-production-1849.up.railway.app/uploads/:splat"
-  status = 200
-  force = true
-
-# Proxy Socket.IO to backend (long-polling fallback)
-[[redirects]]
-  from = "/socket.io/*"
-  to = "https://server-production-1849.up.railway.app/socket.io/:splat"
+  to = "/uploads/:splat"
   status = 200
   force = true
 

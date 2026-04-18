@@ -181,7 +181,7 @@ export class NotificationService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let admin: any;
         try {
-          // @ts-ignore - firebase-admin may not be installed
+          // @ts-expect-error - firebase-admin may not be installed
           admin = await import('firebase-admin');
         } catch {
           logger.warn('firebase-admin package not installed; push notifications disabled');

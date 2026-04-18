@@ -5,7 +5,7 @@
  * Common hooks used across web and mobile clients
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 // ==========================================
 // DEBOUNCE HOOK
@@ -211,7 +211,7 @@ interface UseIntersectionObserverOptions {
 }
 
 export function useIntersectionObserver(
-  elementRef: React.RefObject<Element>,
+  elementRef: RefObject<Element>,
   {
     threshold = 0,
     root = null,

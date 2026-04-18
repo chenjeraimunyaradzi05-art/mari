@@ -24,8 +24,9 @@ type RegisterScreenProps = {
 
 const PERSONAS = [
   { value: Persona.EARLY_CAREER, label: 'Early Career' },
-  { value: Persona.CAREER_CHANGER, label: 'Professional' },
+  { value: Persona.MID_CAREER, label: 'Professional' },
   { value: Persona.ENTREPRENEUR, label: 'Entrepreneur' },
+  { value: Persona.CREATOR, label: 'Creator' },
   { value: Persona.MENTOR, label: 'Mentor' },
   { value: Persona.EMPLOYER, label: 'Employer' },
 ];
@@ -58,6 +59,7 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
         email,
         password,
         persona: selectedPersona,
+        womanSelfAttested: true,
       });
     } catch (error: any) {
       Alert.alert('Registration Failed', error.response?.data?.message || 'Please try again');
@@ -141,26 +143,6 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
             <Text style={styles.buttonText}>
               {isLoading ? 'Creating Account...' : 'Create Account'}
             </Text>
-          </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.divider} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.divider} />
-          </View>
-
-          <TouchableOpacity
-            style={styles.socialButton}
-            onPress={() => Alert.alert('Coming Soon', 'Google sign-up will be available soon.')}
-          >
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.socialButton, styles.appleButton]}
-            onPress={() => Alert.alert('Coming Soon', 'Apple sign-up will be available soon.')}
-          >
-            <Text style={[styles.socialButtonText, styles.appleButtonText]}>Continue with Apple</Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => navigation.navigate('Login')}>
@@ -272,40 +254,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  divider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e5e7eb',
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    color: '#9ca3af',
-  },
-  socialButton: {
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  socialButtonText: {
-    color: '#111827',
-    fontWeight: '600',
-  },
-  appleButton: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
-  },
-  appleButtonText: {
-    color: '#fff',
   },
   linkText: {
     textAlign: 'center',

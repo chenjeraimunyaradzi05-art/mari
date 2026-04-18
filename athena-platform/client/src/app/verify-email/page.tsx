@@ -1,12 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import Image from 'next/image';
 import { api } from '@/lib/api';
 
 export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyEmailContent />
+    </Suspense>
+  );
+}
+
+function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   
@@ -39,7 +48,7 @@ export default function VerifyEmailPage() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center space-x-2 mb-4">
-            <div className="w-10 h-10 bg-athena-gradient rounded-lg" />
+            <Image src="/athena-logo.png" alt="ATHENA" width={40} height={40} className="rounded-lg" />
             <span className="text-2xl font-bold gradient-text">ATHENA</span>
           </div>
         </div>

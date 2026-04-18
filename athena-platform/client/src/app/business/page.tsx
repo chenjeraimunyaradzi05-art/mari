@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Building, Briefcase, FileText, CheckCircle, ArrowRight, Shield, Clock, Globe, Zap } from 'lucide-react';
+import { Building, Briefcase, CheckCircle, ArrowRight, Shield, Clock, Zap } from 'lucide-react';
 
 export default function BusinessPage() {
   const services = [

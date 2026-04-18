@@ -25,15 +25,18 @@ import {
   Sun,
   Moon,
   Monitor,
+  type LucideIcon,
 } from 'lucide-react';
+import Image from 'next/image';
 import { useAuth, useNotifications, useUnreadMessageCount } from '@/lib/hooks';
 import { useUIStore } from '@/lib/store';
 import { cn, getFullName, getInitials } from '@/lib/utils';
 import { trackEvent } from '@/lib/analytics';
 
 type AppMode = 'social' | 'professional' | 'learning';
+type NavigationItem = { name: string; href: string; icon: LucideIcon };
 
-const modeNavigation: Record<AppMode, { name: string; href: string; icon: any }[]> = {
+const modeNavigation: Record<AppMode, NavigationItem[]> = {
   social: [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Community', href: '/dashboard/community', icon: Users },
@@ -58,7 +61,7 @@ const secondaryNav = [
   { name: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   { name: 'Notifications', href: '/dashboard/notifications', icon: Bell },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
-];
+] satisfies NavigationItem[];
 
 export default function DashboardLayout({
   children,
@@ -66,7 +69,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout } = useAuth();
   const { isSidebarOpen, toggleSidebar, theme, setTheme } = useUIStore();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -91,6 +94,7 @@ export default function DashboardLayout({
   const { data: unreadMessages } = useUnreadMessageCount();
 
   const unreadCount = notificationsData?.unreadCount || 0;
+  const unreadMessageCount = unreadMessages ?? 0;
 
   const toggleTheme = () => {
     if (theme === 'dark') {
@@ -129,7 +133,7 @@ export default function DashboardLayout({
         {/* Logo */}
         <div className="flex h-16 items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800">
           <Link href="/dashboard" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-athena-gradient rounded-lg flex-shrink-0" />
+            <Image src="/athena-logo.png" alt="ATHENA" width={32} height={32} className="rounded-lg flex-shrink-0" />
             {isSidebarOpen && (
               <span className="text-xl font-bold gradient-text">ATHENA</span>
             )}
@@ -205,7 +209,7 @@ export default function DashboardLayout({
                 const isActive = pathname === item.href;
                 const hasNotification =
                   (item.name === 'Notifications' && unreadCount > 0) ||
-                  (item.name === 'Messages' && unreadMessages > 0);
+                  (item.name === 'Messages' && unreadMessageCount > 0);
 
                 return (
                   <li key={item.name}>
@@ -391,9 +395,9 @@ export default function DashboardLayout({
                 className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
               >
                 <MessageSquare className="w-5 h-5" />
-                {unreadMessages > 0 && (
+                {unreadMessageCount > 0 && (
                   <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-                    {unreadMessages > 9 ? '9+' : unreadMessages}
+                    {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
                   </span>
                 )}
               </Link>

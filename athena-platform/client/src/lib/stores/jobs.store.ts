@@ -315,7 +315,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       updateJob: (id, updates) => set((state) => {
-        const index = state.jobs.findIndex((j) => j.id === id);
+        const index = state.jobs.findIndex((j: Job) => j.id === id);
         if (index !== -1) {
           state.jobs[index] = { 
             ...state.jobs[index], 
@@ -326,12 +326,12 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       removeJob: (id) => set((state) => {
-        state.jobs = state.jobs.filter((j) => j.id !== id);
+        state.jobs = state.jobs.filter((j: Job) => j.id !== id);
         if (state.selectedJobId === id) {
           state.selectedJobId = null;
         }
         // Also remove associated candidates
-        state.candidates = state.candidates.filter((c) => c.jobId !== id);
+        state.candidates = state.candidates.filter((c: Candidate) => c.jobId !== id);
       }),
 
       setSelectedJob: (id) => set((state) => {
@@ -339,7 +339,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       publishJob: (id) => set((state) => {
-        const index = state.jobs.findIndex((j) => j.id === id);
+        const index = state.jobs.findIndex((j: Job) => j.id === id);
         if (index !== -1) {
           state.jobs[index].status = 'active';
           state.jobs[index].postedAt = new Date();
@@ -348,7 +348,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       pauseJob: (id) => set((state) => {
-        const index = state.jobs.findIndex((j) => j.id === id);
+        const index = state.jobs.findIndex((j: Job) => j.id === id);
         if (index !== -1) {
           state.jobs[index].status = 'paused';
           state.jobs[index].updatedAt = new Date();
@@ -356,7 +356,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       closeJob: (id) => set((state) => {
-        const index = state.jobs.findIndex((j) => j.id === id);
+        const index = state.jobs.findIndex((j: Job) => j.id === id);
         if (index !== -1) {
           state.jobs[index].status = 'closed';
           state.jobs[index].updatedAt = new Date();
@@ -365,7 +365,7 @@ export const useJobsStore = create<JobsStore>()(
 
       duplicateJob: (id) => {
         const state = get();
-        const job = state.jobs.find((j) => j.id === id);
+        const job = state.jobs.find((j: Job) => j.id === id);
         if (!job) throw new Error('Job not found');
         
         const newJob: Job = {
@@ -394,23 +394,23 @@ export const useJobsStore = create<JobsStore>()(
       setCandidates: (candidates) => set((state) => {
         state.candidates = candidates;
         // Update kanban column counts
-        state.kanbanColumns = state.kanbanColumns.map((col) => ({
+        state.kanbanColumns = state.kanbanColumns.map((col: KanbanColumn) => ({
           ...col,
-          candidateCount: candidates.filter((c) => c.stage === col.id).length,
+          candidateCount: candidates.filter((c: Candidate) => c.stage === col.id).length,
         }));
       }),
 
       addCandidate: (candidate) => set((state) => {
         state.candidates.push(candidate);
         // Update kanban column count
-        const colIndex = state.kanbanColumns.findIndex((c) => c.id === candidate.stage);
+        const colIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === candidate.stage);
         if (colIndex !== -1) {
           state.kanbanColumns[colIndex].candidateCount++;
         }
       }),
 
       updateCandidate: (id, updates) => set((state) => {
-        const index = state.candidates.findIndex((c) => c.id === id);
+        const index = state.candidates.findIndex((c: Candidate) => c.id === id);
         if (index !== -1) {
           state.candidates[index] = { 
             ...state.candidates[index], 
@@ -425,7 +425,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       addCandidateNote: (candidateId, note) => set((state) => {
-        const index = state.candidates.findIndex((c) => c.id === candidateId);
+        const index = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (index !== -1) {
           state.candidates[index].notes.push({
             ...note,
@@ -437,7 +437,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       rateCandidate: (id, rating) => set((state) => {
-        const index = state.candidates.findIndex((c) => c.id === id);
+        const index = state.candidates.findIndex((c: Candidate) => c.id === id);
         if (index !== -1) {
           state.candidates[index].rating = rating;
           state.candidates[index].lastActivity = new Date();
@@ -445,7 +445,7 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       addCandidateTag: (id, tag) => set((state) => {
-        const index = state.candidates.findIndex((c) => c.id === id);
+        const index = state.candidates.findIndex((c: Candidate) => c.id === id);
         if (index !== -1) {
           const tags = state.candidates[index].tags || [];
           if (!tags.includes(tag)) {
@@ -455,9 +455,9 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       removeCandidateTag: (id, tag) => set((state) => {
-        const index = state.candidates.findIndex((c) => c.id === id);
+        const index = state.candidates.findIndex((c: Candidate) => c.id === id);
         if (index !== -1 && state.candidates[index].tags) {
-          state.candidates[index].tags = state.candidates[index].tags!.filter((t) => t !== tag);
+          state.candidates[index].tags = state.candidates[index].tags!.filter((t: string) => t !== tag);
         }
       }),
 
@@ -466,7 +466,7 @@ export const useJobsStore = create<JobsStore>()(
       // ============================================
       
       moveCandidate: (candidateId, toStage) => set((state) => {
-        const candidateIndex = state.candidates.findIndex((c) => c.id === candidateId);
+        const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (candidateIndex !== -1) {
           const fromStage = state.candidates[candidateIndex].stage;
           
@@ -475,8 +475,8 @@ export const useJobsStore = create<JobsStore>()(
           state.candidates[candidateIndex].lastActivity = new Date();
           
           // Update column counts
-          const fromColIndex = state.kanbanColumns.findIndex((c) => c.id === fromStage);
-          const toColIndex = state.kanbanColumns.findIndex((c) => c.id === toStage);
+          const fromColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === fromStage);
+          const toColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === toStage);
           
           if (fromColIndex !== -1) {
             state.kanbanColumns[fromColIndex].candidateCount--;
@@ -488,13 +488,13 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       moveCandidateOptimistic: (candidateId, fromStage, toStage) => set((state) => {
-        const candidateIndex = state.candidates.findIndex((c) => c.id === candidateId);
+        const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (candidateIndex !== -1) {
           state.candidates[candidateIndex].stage = toStage;
           
           // Update column counts
-          const fromColIndex = state.kanbanColumns.findIndex((c) => c.id === fromStage);
-          const toColIndex = state.kanbanColumns.findIndex((c) => c.id === toStage);
+          const fromColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === fromStage);
+          const toColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === toStage);
           
           if (fromColIndex !== -1) {
             state.kanbanColumns[fromColIndex].candidateCount--;
@@ -506,14 +506,14 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       revertCandidateMove: (candidateId, originalStage) => set((state) => {
-        const candidateIndex = state.candidates.findIndex((c) => c.id === candidateId);
+        const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (candidateIndex !== -1) {
           const currentStage = state.candidates[candidateIndex].stage;
           state.candidates[candidateIndex].stage = originalStage;
           
           // Revert column counts
-          const currentColIndex = state.kanbanColumns.findIndex((c) => c.id === currentStage);
-          const originalColIndex = state.kanbanColumns.findIndex((c) => c.id === originalStage);
+          const currentColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === currentStage);
+          const originalColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === originalStage);
           
           if (currentColIndex !== -1) {
             state.kanbanColumns[currentColIndex].candidateCount--;
@@ -534,7 +534,7 @@ export const useJobsStore = create<JobsStore>()(
       
       toggleCandidateSelection: (id) => set((state) => {
         if (state.selectedCandidateIds.includes(id)) {
-          state.selectedCandidateIds = state.selectedCandidateIds.filter((cid) => cid !== id);
+          state.selectedCandidateIds = state.selectedCandidateIds.filter((cid: string) => cid !== id);
         } else {
           state.selectedCandidateIds.push(id);
         }
@@ -543,10 +543,10 @@ export const useJobsStore = create<JobsStore>()(
       selectAllCandidates: (stage) => set((state) => {
         if (stage) {
           state.selectedCandidateIds = state.candidates
-            .filter((c) => c.stage === stage)
-            .map((c) => c.id);
+            .filter((c: Candidate) => c.stage === stage)
+            .map((c: Candidate) => c.id);
         } else {
-          state.selectedCandidateIds = state.candidates.map((c) => c.id);
+          state.selectedCandidateIds = state.candidates.map((c: Candidate) => c.id);
         }
       }),
 
@@ -555,16 +555,16 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       bulkMoveCandidate: (toStage) => set((state) => {
-        state.selectedCandidateIds.forEach((id) => {
-          const candidateIndex = state.candidates.findIndex((c) => c.id === id);
+        state.selectedCandidateIds.forEach((id: string) => {
+          const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === id);
           if (candidateIndex !== -1) {
             const fromStage = state.candidates[candidateIndex].stage;
             state.candidates[candidateIndex].stage = toStage;
             state.candidates[candidateIndex].lastActivity = new Date();
             
             // Update column counts
-            const fromColIndex = state.kanbanColumns.findIndex((c) => c.id === fromStage);
-            const toColIndex = state.kanbanColumns.findIndex((c) => c.id === toStage);
+            const fromColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === fromStage);
+            const toColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === toStage);
             
             if (fromColIndex !== -1) {
               state.kanbanColumns[fromColIndex].candidateCount--;
@@ -578,8 +578,8 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       bulkRejectCandidates: (reason) => set((state) => {
-        state.selectedCandidateIds.forEach((id) => {
-          const candidateIndex = state.candidates.findIndex((c) => c.id === id);
+        state.selectedCandidateIds.forEach((id: string) => {
+          const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === id);
           if (candidateIndex !== -1) {
             const fromStage = state.candidates[candidateIndex].stage;
             state.candidates[candidateIndex].stage = 'rejected';
@@ -596,8 +596,8 @@ export const useJobsStore = create<JobsStore>()(
             }
             
             // Update column counts
-            const fromColIndex = state.kanbanColumns.findIndex((c) => c.id === fromStage);
-            const rejectedColIndex = state.kanbanColumns.findIndex((c) => c.id === 'rejected');
+            const fromColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === fromStage);
+            const rejectedColIndex = state.kanbanColumns.findIndex((c: KanbanColumn) => c.id === 'rejected');
             
             if (fromColIndex !== -1) {
               state.kanbanColumns[fromColIndex].candidateCount--;
@@ -615,7 +615,7 @@ export const useJobsStore = create<JobsStore>()(
       // ============================================
       
       scheduleInterview: (candidateId, interview) => set((state) => {
-        const index = state.candidates.findIndex((c) => c.id === candidateId);
+        const index = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (index !== -1) {
           if (!state.candidates[index].interviews) {
             state.candidates[index].interviews = [];
@@ -630,10 +630,10 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       updateInterview: (candidateId, interviewId, updates) => set((state) => {
-        const candidateIndex = state.candidates.findIndex((c) => c.id === candidateId);
+        const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (candidateIndex !== -1 && state.candidates[candidateIndex].interviews) {
           const interviewIndex = state.candidates[candidateIndex].interviews!.findIndex(
-            (i) => i.id === interviewId
+            (i: Interview) => i.id === interviewId
           );
           if (interviewIndex !== -1) {
             state.candidates[candidateIndex].interviews![interviewIndex] = {
@@ -645,10 +645,10 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       cancelInterview: (candidateId, interviewId) => set((state) => {
-        const candidateIndex = state.candidates.findIndex((c) => c.id === candidateId);
+        const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (candidateIndex !== -1 && state.candidates[candidateIndex].interviews) {
           const interviewIndex = state.candidates[candidateIndex].interviews!.findIndex(
-            (i) => i.id === interviewId
+            (i: Interview) => i.id === interviewId
           );
           if (interviewIndex !== -1) {
             state.candidates[candidateIndex].interviews![interviewIndex].status = 'cancelled';
@@ -657,10 +657,10 @@ export const useJobsStore = create<JobsStore>()(
       }),
 
       submitInterviewFeedback: (candidateId, interviewId, feedback) => set((state) => {
-        const candidateIndex = state.candidates.findIndex((c) => c.id === candidateId);
+        const candidateIndex = state.candidates.findIndex((c: Candidate) => c.id === candidateId);
         if (candidateIndex !== -1 && state.candidates[candidateIndex].interviews) {
           const interviewIndex = state.candidates[candidateIndex].interviews!.findIndex(
-            (i) => i.id === interviewId
+            (i: Interview) => i.id === interviewId
           );
           if (interviewIndex !== -1) {
             state.candidates[candidateIndex].interviews![interviewIndex].status = 'completed';
@@ -744,10 +744,10 @@ export const useJobsStore = create<JobsStore>()(
 // ============================================
 
 export const selectJobById = (id: string) => (state: JobsStore) =>
-  state.jobs.find((j) => j.id === id);
+  state.jobs.find((j: Job) => j.id === id);
 
 export const selectCurrentJob = (state: JobsStore) =>
-  state.jobs.find((j) => j.id === state.selectedJobId);
+  state.jobs.find((j: Job) => j.id === state.selectedJobId);
 
 export const selectFilteredJobs = (state: JobsStore) => {
   const { jobs, jobFilters } = state;
@@ -774,10 +774,10 @@ export const selectFilteredJobs = (state: JobsStore) => {
 };
 
 export const selectCandidatesByStage = (stage: StageId) => (state: JobsStore) =>
-  state.candidates.filter((c) => c.stage === stage);
+  state.candidates.filter((c: Candidate) => c.stage === stage);
 
 export const selectCandidatesForJob = (jobId: string) => (state: JobsStore) =>
-  state.candidates.filter((c) => c.jobId === jobId);
+  state.candidates.filter((c: Candidate) => c.jobId === jobId);
 
 export const selectFilteredCandidates = (state: JobsStore) => {
   const { candidates, candidateFilters, selectedJobId } = state;
@@ -798,7 +798,7 @@ export const selectFilteredCandidates = (state: JobsStore) => {
       return false;
     }
     if (candidateFilters.skills.length) {
-      const hasSkill = candidateFilters.skills.some((s) => candidate.skills.includes(s));
+      const hasSkill = candidateFilters.skills.some((s: string) => candidate.skills.includes(s));
       if (!hasSkill) return false;
     }
     if (candidateFilters.search) {
@@ -817,7 +817,7 @@ export const selectSortedCandidates = (state: JobsStore) => {
   const filtered = selectFilteredCandidates(state);
   const { sortBy, sortOrder } = state;
   
-  return [...filtered].sort((a, b) => {
+  return [...filtered].sort((a: Candidate, b: Candidate) => {
     let comparison = 0;
     
     switch (sortBy) {
@@ -840,12 +840,15 @@ export const selectSortedCandidates = (state: JobsStore) => {
 };
 
 export const selectSelectedCandidate = (state: JobsStore) =>
-  state.candidates.find((c) => c.id === state.selectedCandidateId);
+  state.candidates.find((c: Candidate) => c.id === state.selectedCandidateId);
 
 export const selectUpcomingInterviews = (state: JobsStore) => {
   const now = new Date();
   return state.candidates
-    .flatMap((c) => (c.interviews || []).map((i) => ({ ...i, candidate: c })))
-    .filter((i) => i.status === 'scheduled' && new Date(i.scheduledAt) > now)
-    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+    .flatMap((c: Candidate) => (c.interviews || []).map((i: Interview) => ({ ...i, candidate: c })))
+    .filter((i: Interview & { candidate: Candidate }) => i.status === 'scheduled' && new Date(i.scheduledAt) > now)
+    .sort(
+      (a: Interview & { candidate: Candidate }, b: Interview & { candidate: Candidate }) =>
+        new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+    );
 };

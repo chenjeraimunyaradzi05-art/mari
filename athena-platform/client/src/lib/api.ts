@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './auth';
+import { clearTokens, getAccessToken, setTokens } from './auth';
 
 // Direct backend origin — used for WebSocket connections and SSR calls
 export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
@@ -15,6 +15,16 @@ export const api = axios.create({
   },
   withCredentials: true,
 });
+
+const authPathsToSkipRefresh = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/google',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
 
 // Request interceptor to add auth token
 api.interceptors.request.use(
@@ -35,9 +45,11 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = String(originalRequest?.url || '');
+    const shouldSkipRefresh = authPathsToSkipRefresh.some((path) => requestUrl.includes(path));
 
     // If 401 and we haven't already tried to refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !shouldSkipRefresh) {
       originalRequest._retry = true;
 
       try {
@@ -57,7 +69,9 @@ api.interceptors.response.use(
       } catch (refreshError) {
         // Refresh failed, clear tokens and redirect to login
         clearTokens();
-        window.location.href = '/login';
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       }
     }
@@ -75,11 +89,20 @@ export const authApi = {
     password: string;
     firstName: string;
     lastName: string;
+    username?: string;
     persona?: string;
     womanSelfAttested: boolean;
     inviteCode?: string;
     referralCode?: string;
   }) => api.post('/auth/register', data),
+
+  google: (data: {
+    credential: string;
+    mode?: 'login' | 'register';
+    persona?: string;
+    womanSelfAttested?: boolean;
+    inviteCode?: string;
+  }) => api.post('/auth/google', data),
 
   login: (data: { email: string; password: string }) =>
     api.post('/auth/login', data),
@@ -266,8 +289,27 @@ export const mentorApi = {
 
   updateProfile: (data: any) => api.patch('/mentors/me', data),
 
-  bookSession: (data: any) =>
-    api.post(`/mentors/${data.mentorId}/book`, data),
+  bookSession: (data: {
+    mentorId: string;
+    scheduledAt?: string;
+    date?: string;
+    time?: string;
+    durationMinutes?: number;
+    duration?: number;
+    note?: string;
+  }) => {
+    const scheduledAt =
+      data.scheduledAt ||
+      (data.date && data.time
+        ? new Date(`${data.date}T${data.time}`).toISOString()
+        : undefined);
+
+    return api.post(`/mentors/${data.mentorId}/book`, {
+      scheduledAt,
+      durationMinutes: data.durationMinutes ?? data.duration,
+      note: data.note,
+    });
+  },
 };
 
 // ============================================

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Search, MapPin, Filter } from 'lucide-react';
 import { jobApi } from '@/lib/api';
@@ -8,11 +8,17 @@ import { Job } from '@/lib/types';
 import JobCard from '@/components/jobs/JobCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
 
 export default function JobsPage() {
+  return (
+    <Suspense fallback={null}>
+      <JobsContent />
+    </Suspense>
+  );
+}
+
+function JobsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   

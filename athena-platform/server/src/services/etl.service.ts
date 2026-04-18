@@ -6,7 +6,6 @@
 
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
-import { queueDataExport } from '../utils/queue';
 import { uploadFile, BUCKETS } from '../utils/storage';
 import { format } from 'date-fns';
 
@@ -49,7 +48,7 @@ export async function extractInteractionEvents(
     endDate: config.endDate,
   });
 
-  while (true) {
+  for (;;) {
     // Extract post interactions
     const postInteractions = await prisma.postLike.findMany({
       where: {
@@ -91,7 +90,7 @@ export async function extractInteractionEvents(
 
   // Extract job applications
   offset = 0;
-  while (true) {
+  for (;;) {
     const applications = await prisma.application.findMany({
       where: {
         createdAt: {
@@ -146,7 +145,7 @@ export async function extractUserProfiles(
 
   logger.info('Starting user profile extraction');
 
-  while (true) {
+  for (;;) {
     const users = await prisma.user.findMany({
       where: {
         updatedAt: {
@@ -213,7 +212,7 @@ export async function extractJobData(
 
   logger.info('Starting job data extraction');
 
-  while (true) {
+  for (;;) {
     const jobRecords = await prisma.job.findMany({
       where: {
         createdAt: {

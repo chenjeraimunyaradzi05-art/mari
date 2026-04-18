@@ -12,7 +12,8 @@
  * some container runtimes like Railway).
  */
 
-const { execSync } = require('child_process');
+import { execSync } from 'node:child_process';
+import * as http from 'node:http';
 
 // Immediately log so Railway always sees output
 console.log('[ATHENA] start.ts — bootstrapping server...');
@@ -45,44 +46,47 @@ process.on('unhandledRejection', (reason) => {
   console.error('[ATHENA] UNHANDLED REJECTION:', reason);
 });
 
-try {
-  console.log('[ATHENA] Loading index module...');
-  const indexModule = require('./index');
-  console.log('[ATHENA] index module loaded successfully');
+async function bootstrap() {
+  try {
+    console.log('[ATHENA] Loading index module...');
+    const indexModule = await import('./index');
+    console.log('[ATHENA] index module loaded successfully');
 
-  // index.ts exports startServer() — call it to actually boot the server.
-  // (require.main !== module inside index.ts, so it won't auto-start)
-  if (typeof indexModule.startServer === 'function') {
-    console.log('[ATHENA] Calling startServer()...');
-    indexModule.startServer().catch((err: Error) => {
-      console.error('[ATHENA] startServer() rejected:', err);
-    });
-  } else {
-    console.error('[ATHENA] WARNING: index module has no startServer export!');
+    // index.ts exports startServer() — call it to actually boot the server.
+    // (require.main !== module inside index.ts, so it won't auto-start)
+    if (typeof indexModule.startServer === 'function') {
+      console.log('[ATHENA] Calling startServer()...');
+      indexModule.startServer().catch((err: Error) => {
+        console.error('[ATHENA] startServer() rejected:', err);
+      });
+    } else {
+      console.error('[ATHENA] WARNING: index module has no startServer export!');
+    }
+  } catch (err) {
+    console.error('[ATHENA] FATAL — index.js crashed during load:');
+    console.error(err);
+
+    // Start a minimal health server so Railway healthcheck passes
+    // and we can see the error in the deploy logs
+    const PORT = process.env.PORT || 5000;
+    const errorMessage = err instanceof Error ? err.message : String(err);
+
+    http
+      .createServer((_req: any, res: any) => {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: 'error',
+            message: 'Server failed to start',
+            error: errorMessage,
+          })
+        );
+      })
+      .listen(PORT, () => {
+        console.log(`[ATHENA] Emergency health server on port ${PORT}`);
+        console.log('[ATHENA] Fix the error above and redeploy.');
+      });
   }
-} catch (err) {
-  console.error('[ATHENA] FATAL — index.js crashed during load:');
-  console.error(err);
-
-  // Start a minimal health server so Railway healthcheck passes
-  // and we can see the error in the deploy logs
-  const http = require('http');
-  const PORT = process.env.PORT || 5000;
-  const errorMessage = err instanceof Error ? err.message : String(err);
-
-  http
-    .createServer((_req: any, res: any) => {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          status: 'error',
-          message: 'Server failed to start',
-          error: errorMessage,
-        })
-      );
-    })
-    .listen(PORT, () => {
-      console.log(`[ATHENA] Emergency health server on port ${PORT}`);
-      console.log('[ATHENA] Fix the error above and redeploy.');
-    });
 }
+
+void bootstrap();

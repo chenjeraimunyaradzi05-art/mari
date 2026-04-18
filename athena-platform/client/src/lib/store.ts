@@ -89,7 +89,6 @@ export const useAuthStore = create<AuthState>()(
       name: 'athena-auth',
       partialize: (state) => ({
         user: state.user,
-        isAuthenticated: state.isAuthenticated,
       }),
       skipHydration: true,
     }

@@ -19,8 +19,16 @@ export const errorHandler = (
   const locale = ((req as any).locale as SupportedLocale) || 'en';
   const rawMessage = err.message || 'Internal Server Error';
   const inferredKey = rawMessage.startsWith('errors.') ? rawMessage : undefined;
-  const i18nKey = err.i18nKey || inferredKey || ERROR_KEYS.SERVER_INTERNAL_ERROR;
-  const message = i18nService.tSync(i18nKey, err.i18nParams as Record<string, string | number> | undefined, locale);
+  const i18nKey = err.i18nKey || inferredKey;
+
+  // For operational errors (4xx) without an i18n key, use the original message
+  // so validation messages like "Invalid or expired invite code" reach the client.
+  // Only use the generic "An unexpected error occurred" for 5xx / unknown errors.
+  const message = i18nKey
+    ? i18nService.tSync(i18nKey, err.i18nParams as Record<string, string | number> | undefined, locale)
+    : (err.isOperational && statusCode < 500)
+      ? rawMessage
+      : i18nService.tSync(ERROR_KEYS.SERVER_INTERNAL_ERROR, undefined, locale);
   const requestId = (req as any).requestId as string | undefined;
 
   logger.error(message, {
@@ -31,12 +39,12 @@ export const errorHandler = (
     stack: err.stack,
   });
 
-  // Show debug info in development, or for 500s in production (helps diagnose deploy issues).
-  // Non-500 errors (4xx) in production only show the i18n message.
-  const showDebug =
-    process.env.NODE_ENV !== 'production' ||
-    statusCode >= 500 ||
+  const hasDebugAccess =
+    !!process.env.DEBUG_SECRET &&
     req.headers['x-debug-auth'] === process.env.DEBUG_SECRET;
+
+  const showDebug =
+    process.env.NODE_ENV !== 'production' || hasDebugAccess;
 
   res.status(statusCode).json({
     success: false,

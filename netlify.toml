@@ -1,11 +1,12 @@
 [build]
   base = "athena-platform/client"
-  command = "npm install --legacy-peer-deps && npm run build"
+  command = "npm ci --legacy-peer-deps && npm run build"
   # publish = ".next" # Let Next.js plugin handle the publish directory
 
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
+  NEXT_TELEMETRY_DISABLED = "1"
   # Set NEXT_PUBLIC_API_URL in Netlify Dashboard Environment Variables
   # Example: NEXT_PUBLIC_API_URL = "https://server-production-1849.up.railway.app"
 

@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
@@ -33,38 +38,64 @@ const FILE_CONFIGS = {
     allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
     folder: 'avatars',
     resize: { width: 400, height: 400 },
+    visibility: 'public' as const,
   },
   cover: {
     maxSize: 10 * 1024 * 1024, // 10MB
     allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
     folder: 'covers',
     resize: { width: 1500, height: 500 },
+    visibility: 'public' as const,
   },
   post: {
     maxSize: 20 * 1024 * 1024, // 20MB
     allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
     folder: 'posts',
     resize: { width: 1200, height: 1200 },
+    visibility: 'public' as const,
   },
   video: {
     maxSize: 500 * 1024 * 1024, // 500MB
     allowedTypes: ['video/mp4', 'video/quicktime', 'video/webm'],
     folder: 'videos',
     resize: null,
+    visibility: 'public' as const,
   },
   document: {
     maxSize: 25 * 1024 * 1024, // 25MB
-    allowedTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    allowedTypes: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
     folder: 'documents',
     resize: null,
+    visibility: 'private' as const,
   },
   resume: {
     maxSize: 10 * 1024 * 1024, // 10MB
-    allowedTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    allowedTypes: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
     folder: 'resumes',
     resize: null,
+    visibility: 'private' as const,
   },
 };
+
+type FileConfig = (typeof FILE_CONFIGS)[keyof typeof FILE_CONFIGS];
+
+const LOCAL_UPLOADS_ROOT = path.resolve(process.cwd(), 'uploads');
+const VALID_UPLOAD_FOLDERS = new Set(
+  Object.values(FILE_CONFIGS).map((config) => config.folder)
+);
+const PRIVATE_UPLOAD_FOLDERS = new Set(
+  Object.values(FILE_CONFIGS)
+    .filter((config) => config.visibility === 'private')
+    .map((config) => config.folder)
+);
 
 // Configure multer for memory storage
 const upload = multer({
@@ -73,6 +104,106 @@ const upload = multer({
     fileSize: 500 * 1024 * 1024, // 500MB max (for videos)
   },
 });
+
+function hasS3Credentials(): boolean {
+  return !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
+}
+
+function normalizeUploadKey(key: string): string {
+  return key.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+function resolveLocalFilePath(key: string): string {
+  const normalizedKey = normalizeUploadKey(key);
+  const filePath = path.resolve(LOCAL_UPLOADS_ROOT, normalizedKey);
+
+  if (
+    filePath !== LOCAL_UPLOADS_ROOT &&
+    !filePath.startsWith(`${LOCAL_UPLOADS_ROOT}${path.sep}`)
+  ) {
+    throw new ApiError(400, 'Invalid file path');
+  }
+
+  return filePath;
+}
+
+function buildLocalFileUrl(
+  key: string,
+  visibility: FileConfig['visibility']
+): string {
+  const apiUrl = process.env.API_URL || 'http://localhost:5000';
+  const normalizedKey = normalizeUploadKey(key);
+
+  if (visibility === 'private') {
+    return `${apiUrl}/api/media/local/${normalizedKey}`;
+  }
+
+  return `${apiUrl}/uploads/${normalizedKey}`;
+}
+
+function validateOwnedUploadKey(key: string, userId: string) {
+  const normalizedKey = normalizeUploadKey(key);
+  const keyParts = normalizedKey.split('/');
+
+  if (keyParts.length < 3 || !keyParts[2]) {
+    throw new ApiError(400, 'Invalid file key format');
+  }
+
+  const [folder, userIdInPath] = keyParts;
+
+  if (!VALID_UPLOAD_FOLDERS.has(folder)) {
+    throw new ApiError(400, 'Invalid file path');
+  }
+
+  if (userIdInPath !== userId) {
+    logger.warn('Unauthorized file access attempt', {
+      userId,
+      attemptedKey: normalizedKey,
+      keyUserId: userIdInPath,
+    });
+    throw new ApiError(403, 'Not authorized to access this file');
+  }
+
+  return { normalizedKey, folder };
+}
+
+function hasLocalFile(key: string): boolean {
+  try {
+    return fs.existsSync(resolveLocalFilePath(key));
+  } catch {
+    return false;
+  }
+}
+
+async function saveFileLocally(
+  buffer: Buffer,
+  key: string,
+  visibility: FileConfig['visibility']
+): Promise<string> {
+  const filePath = resolveLocalFilePath(key);
+  const dir = path.dirname(filePath);
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  fs.writeFileSync(filePath, buffer);
+  logger.info('File saved locally', { filePath, key, visibility });
+
+  return buildLocalFileUrl(key, visibility);
+}
+
+async function deleteLocalFileIfPresent(key: string): Promise<boolean> {
+  const filePath = resolveLocalFilePath(key);
+
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+
+  fs.unlinkSync(filePath);
+  logger.info('Local file deleted', { filePath, key });
+  return true;
+}
 
 // ===========================================
 // GET PRESIGNED UPLOAD URL
@@ -137,7 +268,9 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
       throw new ApiError(400, 'No file provided');
     }
 
-    logger.info(`File details: name=${file.originalname}, size=${file.size}, mimetype=${file.mimetype}`);
+    logger.info(
+      `File details: name=${file.originalname}, size=${file.size}, mimetype=${file.mimetype}`
+    );
 
     const config = FILE_CONFIGS[type as keyof typeof FILE_CONFIGS];
     if (!config) {
@@ -145,28 +278,38 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
     }
 
     if (!config.allowedTypes.includes(file.mimetype)) {
-      throw new ApiError(400, `Invalid file type. Allowed: ${config.allowedTypes.join(', ')}`);
+      throw new ApiError(
+        400,
+        `Invalid file type. Allowed: ${config.allowedTypes.join(', ')}`
+      );
     }
 
     if (file.size > config.maxSize) {
-      throw new ApiError(400, `File too large. Max size: ${config.maxSize / (1024 * 1024)}MB`);
+      throw new ApiError(
+        400,
+        `File too large. Max size: ${config.maxSize / (1024 * 1024)}MB`
+      );
     }
 
     let processedBuffer = file.buffer;
     let contentType = file.mimetype;
 
-    // Moderate content before processing/upload
     if (file.mimetype.startsWith('image/')) {
-        const moderationResult = await moderateImage(file.buffer);
-        if (moderationResult.action === 'block') {
-            logger.warn('Image upload blocked by moderation', { userId: req.user?.id, reason: moderationResult.reason });
-            throw new ApiError(400, `Image rejected: ${moderationResult.reason}`);
-        }
-        // If 'review', we could flag it in DB but allow upload. For now, strict allowance.
+      const moderationResult = await moderateImage(file.buffer);
+      if (moderationResult.action === 'block') {
+        logger.warn('Image upload blocked by moderation', {
+          userId: req.user?.id,
+          reason: moderationResult.reason,
+        });
+        throw new ApiError(400, `Image rejected: ${moderationResult.reason}`);
+      }
     }
 
-    // Process images
-    if (config.resize && file.mimetype.startsWith('image/') && !file.mimetype.includes('gif')) {
+    if (
+      config.resize &&
+      file.mimetype.startsWith('image/') &&
+      !file.mimetype.includes('gif')
+    ) {
       processedBuffer = await sharp(file.buffer)
         .resize(config.resize.width, config.resize.height, {
           fit: 'cover',
@@ -177,39 +320,19 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
       contentType = 'image/webp';
     }
 
-    const fileExtension = contentType === 'image/webp' ? '.webp' : path.extname(file.originalname);
+    const fileExtension =
+      contentType === 'image/webp'
+        ? '.webp'
+        : path.extname(file.originalname);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
     let publicUrl: string;
 
-    // Helper function to save file locally
-    const saveLocally = async (buffer: Buffer): Promise<string> => {
-      // Use process.cwd() to ensure we point to the project root, NOT the transient ts-node folder
-      const uploadsDir = path.join(process.cwd(), 'uploads');
-      const filePath = path.join(uploadsDir, key);
-      const dir = path.dirname(filePath);
+    logger.info(
+      `AWS credentials check: hasKeyId=${!!process.env.AWS_ACCESS_KEY_ID}, hasSecret=${!!process.env.AWS_SECRET_ACCESS_KEY}`
+    );
 
-      logger.info(`Saving file locally: uploadsDir=${uploadsDir}, filePath=${filePath}`);
-
-      if (!fs.existsSync(dir)) {
-        logger.info(`Creating directory: ${dir}`);
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      fs.writeFileSync(filePath, buffer);
-      logger.info(`File written successfully: ${filePath}, size=${buffer.length}`);
-      
-      const apiUrl = process.env.API_URL || 'http://localhost:5000';
-      const localUrl = `${apiUrl}/uploads/${key}`;
-      
-      logger.info(`File saved locally: ${filePath}, URL: ${localUrl}`);
-      return localUrl;
-    };
-
-    logger.info(`AWS credentials check: hasKeyId=${!!process.env.AWS_ACCESS_KEY_ID}, hasSecret=${!!process.env.AWS_SECRET_ACCESS_KEY}`);
-
-    // Try S3 if credentials are present, fallback to local storage on failure
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    if (hasS3Credentials()) {
       try {
         await s3Client.send(
           new PutObjectCommand({
@@ -225,23 +348,25 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
         );
         publicUrl = `${CDN_URL}/${key}`;
       } catch (s3Error) {
-        // S3 failed, fallback to local storage
-        logger.warn(`S3 upload failed, falling back to local storage: ${(s3Error as Error).message}`);
-        publicUrl = await saveLocally(processedBuffer);
+        logger.warn(
+          `S3 upload failed, falling back to local storage: ${(s3Error as Error).message}`
+        );
+        publicUrl = await saveFileLocally(
+          processedBuffer,
+          key,
+          config.visibility
+        );
       }
     } else {
-      // No S3 credentials, use local storage
-      publicUrl = await saveLocally(processedBuffer);
+      publicUrl = await saveFileLocally(processedBuffer, key, config.visibility);
     }
 
-    // Update user profile if avatar
     if (type === 'avatar') {
       await prisma.user.update({
         where: { id: req.user!.id },
         data: { avatar: publicUrl },
       });
     }
-    // Note: cover image field not in schema - store URL but don't persist to DB
 
     logger.info(`File uploaded: ${key} by user ${req.user!.id}`);
 
@@ -270,38 +395,33 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    // Verify ownership by checking the key path structure
-    // Files are stored as: {folder}/{userId}/{uuid}.{ext}
-    // We must validate that the userId segment matches the authenticated user
-    const keyParts = key.split('/');
-    if (keyParts.length < 3) {
-      throw new ApiError(400, 'Invalid file key format');
-    }
-    
-    const userIdInPath = keyParts[1];
-    if (userIdInPath !== req.user!.id) {
-      logger.warn('Unauthorized file deletion attempt', {
-        userId: req.user!.id,
-        attemptedKey: key,
-        keyUserId: userIdInPath,
-      });
-      throw new ApiError(403, 'Not authorized to delete this file');
-    }
-    
-    // Additional validation: ensure folder is a known upload folder
-    const validFolders = ['avatars', 'covers', 'posts', 'videos', 'documents', 'resumes'];
-    if (!validFolders.includes(keyParts[0])) {
-      throw new ApiError(400, 'Invalid file path');
+    const { normalizedKey } = validateOwnedUploadKey(key, req.user!.id);
+
+    let deletedFromS3 = false;
+    if (hasS3Credentials()) {
+      try {
+        await s3Client.send(
+          new DeleteObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: normalizedKey,
+          })
+        );
+        deletedFromS3 = true;
+      } catch (s3Error) {
+        logger.warn('S3 delete failed, attempting local cleanup', {
+          key: normalizedKey,
+          error: (s3Error as Error).message,
+        });
+      }
     }
 
-    await s3Client.send(
-      new DeleteObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: key,
-      })
-    );
+    const deletedLocally = await deleteLocalFileIfPresent(normalizedKey);
 
-    logger.info(`File deleted: ${key} by user ${req.user!.id}`);
+    if (!deletedFromS3 && !deletedLocally) {
+      throw new ApiError(404, 'File not found');
+    }
+
+    logger.info(`File deleted: ${normalizedKey} by user ${req.user!.id}`);
 
     res.json({
       success: true,
@@ -323,9 +443,26 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
       throw new ApiError(400, 'File key is required');
     }
 
+    const { normalizedKey, folder } = validateOwnedUploadKey(key, req.user!.id);
+    const visibility = PRIVATE_UPLOAD_FOLDERS.has(folder) ? 'private' : 'public';
+
+    if (hasLocalFile(normalizedKey)) {
+      return res.json({
+        success: true,
+        data: {
+          downloadUrl: buildLocalFileUrl(normalizedKey, visibility),
+          expiresIn: 3600,
+        },
+      });
+    }
+
+    if (!hasS3Credentials()) {
+      throw new ApiError(404, 'File not found');
+    }
+
     const command = new GetObjectCommand({
       Bucket: BUCKET_NAME,
-      Key: key,
+      Key: normalizedKey,
     });
 
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
@@ -337,6 +474,32 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
         expiresIn: 3600,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const key = req.params[0];
+
+    if (!key) {
+      throw new ApiError(400, 'File key is required');
+    }
+
+    const { normalizedKey, folder } = validateOwnedUploadKey(key, req.user!.id);
+
+    if (!PRIVATE_UPLOAD_FOLDERS.has(folder)) {
+      throw new ApiError(404, 'File not found');
+    }
+
+    const filePath = resolveLocalFilePath(normalizedKey);
+    if (!fs.existsSync(filePath)) {
+      throw new ApiError(404, 'File not found');
+    }
+
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.sendFile(filePath);
   } catch (error) {
     next(error);
   }
@@ -356,11 +519,17 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
     const config = FILE_CONFIGS.resume;
 
     if (!config.allowedTypes.includes(file.mimetype)) {
-      throw new ApiError(400, 'Invalid file type. Only PDF and Word documents are allowed.');
+      throw new ApiError(
+        400,
+        'Invalid file type. Only PDF and Word documents are allowed.'
+      );
     }
 
     if (file.size > config.maxSize) {
-      throw new ApiError(400, `File too large. Max size: ${config.maxSize / (1024 * 1024)}MB`);
+      throw new ApiError(
+        400,
+        `File too large. Max size: ${config.maxSize / (1024 * 1024)}MB`
+      );
     }
 
     const fileExtension = path.extname(file.originalname);
@@ -368,25 +537,7 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
 
     let publicUrl: string;
 
-    // Helper function to save file locally
-    const saveLocally = async (buffer: Buffer): Promise<string> => {
-      const uploadsDir = path.join(__dirname, '../../uploads');
-      const filePath = path.join(uploadsDir, key);
-      const dir = path.dirname(filePath);
-
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      fs.writeFileSync(filePath, buffer);
-      
-      const apiUrl = process.env.API_URL || 'http://localhost:5000';
-      logger.info(`Resume saved locally: ${filePath}`);
-      return `${apiUrl}/uploads/${key}`;
-    };
-
-    // Try S3 if credentials are present, fallback to local storage on failure
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    if (hasS3Credentials()) {
       try {
         await s3Client.send(
           new PutObjectCommand({
@@ -402,15 +553,14 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
         );
         publicUrl = `${CDN_URL}/${key}`;
       } catch (s3Error) {
-        logger.warn(`S3 resume upload failed, falling back to local storage: ${(s3Error as Error).message}`);
-        publicUrl = await saveLocally(file.buffer);
+        logger.warn(
+          `S3 resume upload failed, falling back to local storage: ${(s3Error as Error).message}`
+        );
+        publicUrl = await saveFileLocally(file.buffer, key, config.visibility);
       }
     } else {
-      publicUrl = await saveLocally(file.buffer);
+      publicUrl = await saveFileLocally(file.buffer, key, config.visibility);
     }
-
-    // Store resume as media asset - URL is returned to client
-    // Resume can be fetched from MediaAsset by type 'resume'
 
     logger.info(`Resume uploaded: ${key} by user ${req.user!.id}`);
 
@@ -455,7 +605,6 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
       let processedBuffer = file.buffer;
       let contentType = file.mimetype;
 
-      // Process images (except GIFs)
       if (!file.mimetype.includes('gif')) {
         processedBuffer = await sharp(file.buffer)
           .resize(config.resize!.width, config.resize!.height, {
@@ -467,30 +616,15 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
         contentType = 'image/webp';
       }
 
-      const fileExtension = contentType === 'image/webp' ? '.webp' : path.extname(file.originalname);
+      const fileExtension =
+        contentType === 'image/webp'
+          ? '.webp'
+          : path.extname(file.originalname);
       const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
       let fileUrl: string;
 
-      // Helper function to save file locally
-      const saveLocally = async (buffer: Buffer, fileKey: string): Promise<string> => {
-        const uploadsDir = path.join(__dirname, '../../uploads');
-        const filePath = path.join(uploadsDir, fileKey);
-        const dir = path.dirname(filePath);
-
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-
-        fs.writeFileSync(filePath, buffer);
-        
-        const apiUrl = process.env.API_URL || 'http://localhost:5000';
-        logger.info(`Post image saved locally: ${filePath}`);
-        return `${apiUrl}/uploads/${fileKey}`;
-      };
-
-      // Try S3 if credentials are present, fallback to local storage on failure
-      if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      if (hasS3Credentials()) {
         try {
           await s3Client.send(
             new PutObjectCommand({
@@ -506,11 +640,17 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
           );
           fileUrl = `${CDN_URL}/${key}`;
         } catch (s3Error) {
-          logger.warn(`S3 post image upload failed, falling back to local storage: ${(s3Error as Error).message}`);
-          fileUrl = await saveLocally(processedBuffer, key);
+          logger.warn(
+            `S3 post image upload failed, falling back to local storage: ${(s3Error as Error).message}`
+          );
+          fileUrl = await saveFileLocally(
+            processedBuffer,
+            key,
+            config.visibility
+          );
         }
       } else {
-        fileUrl = await saveLocally(processedBuffer, key);
+        fileUrl = await saveFileLocally(processedBuffer, key, config.visibility);
       }
 
       uploadedFiles.push({

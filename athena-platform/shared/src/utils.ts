@@ -74,11 +74,15 @@ export function formatDate(
     return formatRelativeTime(d);
   }
 
-  const options: Intl.DateTimeFormatOptions = {
+  const dateFormatOptions: Record<
+    Exclude<typeof format, 'relative'>,
+    Intl.DateTimeFormatOptions
+  > = {
     short: { month: 'short', day: 'numeric' },
     medium: { year: 'numeric', month: 'short', day: 'numeric' },
     long: { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' },
-  }[format];
+  };
+  const options = dateFormatOptions[format];
 
   return new Intl.DateTimeFormat(locale, options).format(d);
 }
@@ -351,9 +355,11 @@ export const JOB_TYPES_DISPLAY = {
 export const APPLICATION_STATUS_DISPLAY = {
   PENDING: 'Pending Review',
   REVIEWING: 'Under Review',
+  REVIEWED: 'Reviewed',
   SHORTLISTED: 'Shortlisted',
   INTERVIEW: 'Interview',
   OFFER: 'Offer Extended',
+  OFFERED: 'Offer Extended',
   REJECTED: 'Not Selected',
   WITHDRAWN: 'Withdrawn',
 };

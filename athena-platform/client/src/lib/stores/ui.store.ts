@@ -8,6 +8,7 @@ import { persist } from 'zustand/middleware';
 
 export type AppMode = 'social' | 'professional' | 'learning' | 'business';
 export type SidebarState = 'expanded' | 'collapsed' | 'hidden';
+export type ModalPayload = Record<string, unknown> | null;
 
 interface UIState {
   // App Mode
@@ -21,8 +22,8 @@ interface UIState {
   
   // Modals
   activeModal: string | null;
-  modalData: any;
-  openModal: (modalId: string, data?: any) => void;
+  modalData: ModalPayload;
+  openModal: (modalId: string, data?: ModalPayload) => void;
   closeModal: () => void;
   
   // Command Palette / Global Search

@@ -160,6 +160,25 @@ export async function getMentorProfile(userId: string) {
   return profile;
 }
 
+export async function getMentorProfileById(mentorId: string) {
+  return prisma.mentorProfile.findUnique({
+    where: { id: mentorId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          displayName: true,
+          avatar: true,
+          headline: true,
+          bio: true,
+          experience: true,
+          education: true,
+        },
+      },
+    },
+  });
+}
+
 /**
  * Create or update mentor profile
  */
@@ -419,14 +438,6 @@ export async function updateSessionStatus(
   // State transitions validtion
   if (session.status === 'COMPLETED' || session.status === 'CANCELED') {
     throw new ApiError(400, 'Cannot update finished session');
-  }
-
-  // Logic for generating video link if confirmed
-  let additionalData = {};
-  if (status === 'CONFIRMED') {
-    // In a real app, generate Jitsi/Zoom/Chime link here
-    // For now, construct a platform link
-    // additionalData = { videoUrl: `https://meet.athena.io/${session.id}` };
   }
 
   let paymentUpdates: Record<string, any> = {};

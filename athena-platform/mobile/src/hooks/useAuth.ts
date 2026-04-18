@@ -5,7 +5,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../stores';
-import { api } from '../services/api';
+import { api, unwrapApiData } from '../services/api';
 import * as SecureStore from 'expo-secure-store';
 
 // ============================================
@@ -22,7 +22,11 @@ interface RegisterData {
   password: string;
   firstName: string;
   lastName: string;
+  persona?: string;
+  womanSelfAttested?: boolean;
   username?: string;
+  inviteCode?: string;
+  referralCode?: string;
 }
 
 interface ResetPasswordData {
@@ -42,6 +46,13 @@ interface ProfileUpdateData {
   avatar?: string;
   location?: string;
   skills?: string[];
+}
+
+interface AuthResponseData {
+  user: any;
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
 }
 
 // ============================================
@@ -93,12 +104,12 @@ export function useCurrentUser() {
     queryKey: authKeys.user(),
     queryFn: async () => {
       const response = await api.get('/auth/me');
-      return response.data;
+      return unwrapApiData(response.data);
     },
     enabled: isAuthenticated(),
     staleTime: 5 * 60 * 1000, // 5 minutes
     onSuccess: (data) => {
-      setUser(data);
+      setUser(data as any);
     },
     initialData: user,
   });
@@ -114,16 +125,24 @@ export function useLogin() {
   return useMutation({
     mutationFn: async (credentials: LoginCredentials) => {
       const response = await api.post('/auth/login', credentials);
-      return response.data;
+      return unwrapApiData<AuthResponseData>(response.data);
     },
     onSuccess: async (data) => {
       const { user, accessToken, refreshToken, expiresIn } = data;
+      const resolvedRefreshToken = refreshToken || (await secureStorage.getTokens())?.refreshToken;
       
       // Save tokens securely
-      await secureStorage.saveTokens(accessToken, refreshToken);
+      if (!resolvedRefreshToken) {
+        throw new Error('Missing refresh token');
+      }
+      await secureStorage.saveTokens(accessToken, resolvedRefreshToken);
       
       // Update store
-      login(user, { accessToken, refreshToken, expiresAt: Date.now() + expiresIn * 1000 });
+      login(user, {
+        accessToken,
+        refreshToken: resolvedRefreshToken,
+        expiresAt: Date.now() + (expiresIn ?? 0) * 1000,
+      });
       
       // Invalidate queries
       queryClient.invalidateQueries({ queryKey: authKeys.all });
@@ -140,14 +159,26 @@ export function useRegister() {
 
   return useMutation({
     mutationFn: async (data: RegisterData) => {
-      const response = await api.post('/auth/register', data);
-      return response.data;
+      const response = await api.post('/auth/register', {
+        ...data,
+        womanSelfAttested: data.womanSelfAttested ?? true,
+      });
+      return unwrapApiData<AuthResponseData>(response.data);
     },
     onSuccess: async (data) => {
       const { user, accessToken, refreshToken, expiresIn } = data;
-      
-      await secureStorage.saveTokens(accessToken, refreshToken);
-      login(user, { accessToken, refreshToken, expiresAt: Date.now() + expiresIn * 1000 });
+      const resolvedRefreshToken = refreshToken || (await secureStorage.getTokens())?.refreshToken;
+
+      if (!resolvedRefreshToken) {
+        throw new Error('Missing refresh token');
+      }
+
+      await secureStorage.saveTokens(accessToken, resolvedRefreshToken);
+      login(user, {
+        accessToken,
+        refreshToken: resolvedRefreshToken,
+        expiresAt: Date.now() + (expiresIn ?? 0) * 1000,
+      });
       queryClient.invalidateQueries({ queryKey: authKeys.all });
     },
   });
@@ -192,12 +223,21 @@ export function useRefreshToken() {
       const response = await api.post('/auth/refresh', {
         refreshToken: tokens.refreshToken,
       });
-      return response.data;
+      return unwrapApiData<AuthResponseData>(response.data);
     },
     onSuccess: async (data) => {
       const { accessToken, refreshToken, expiresIn } = data;
-      await secureStorage.saveTokens(accessToken, refreshToken);
-      setTokens({ accessToken, refreshToken, expiresAt: Date.now() + expiresIn * 1000 });
+      const existingTokens = await secureStorage.getTokens();
+      const resolvedRefreshToken = refreshToken || existingTokens?.refreshToken;
+      if (!resolvedRefreshToken) {
+        throw new Error('Missing refresh token');
+      }
+      await secureStorage.saveTokens(accessToken, resolvedRefreshToken);
+      setTokens({
+        accessToken,
+        refreshToken: resolvedRefreshToken,
+        expiresAt: Date.now() + (expiresIn ?? 0) * 1000,
+      });
     },
   });
 }
@@ -326,7 +366,7 @@ export function useVerifyEmail() {
   return useMutation({
     mutationFn: async (token: string) => {
       const response = await api.post('/auth/verify-email', { token });
-      return response.data;
+      return unwrapApiData(response.data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: authKeys.user() });
@@ -341,7 +381,7 @@ export function useResendVerification() {
   return useMutation({
     mutationFn: async () => {
       const response = await api.post('/auth/resend-verification');
-      return response.data;
+      return unwrapApiData(response.data);
     },
   });
 }

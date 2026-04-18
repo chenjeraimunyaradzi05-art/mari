@@ -585,11 +585,11 @@ export default function PrivacyCenterPage() {
           )}
         </section>
 
-        {/* Contact DPO */}
+        {/* Privacy contact */}
         <section className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Questions about your privacy?</h2>
           <p className="text-gray-600 dark:text-gray-400 mb-4">
-            Contact our Data Protection Officer for any privacy-related inquiries or to exercise your rights.
+            Contact our privacy team for any privacy-related inquiries or to exercise your rights.
           </p>
           <a href="mailto:privacy@athena.com" className="inline-flex items-center gap-2 text-purple-600 hover:text-purple-700 font-medium">
             privacy@athena.com

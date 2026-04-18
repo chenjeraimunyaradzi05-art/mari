@@ -1,8 +1,8 @@
 # ATHENA PRIVACY POLICY
 
-**Effective Date:** January 2025
-**Version:** 1.0
-**Jurisdiction:** Australia, United Kingdom, European Union
+**Effective Date:** March 8, 2026
+**Version:** 1.1
+**Jurisdiction:** Australia and any additional markets where ATHENA formally launches services
 
 ---
 
@@ -14,7 +14,7 @@ This summary provides key points from our privacy policy. You can find out more 
 - We process your information for legitimate business purposes, with your consent, and/or to comply with legal obligations
 - We share your information with service providers who assist in our operations
 - You have rights over your personal data, including access, correction, deletion, and portability
-- UK and EU users have additional rights under GDPR
+- UK and EU users may have additional rights where ATHENA launches services that are subject to GDPR or UK GDPR
 
 ---
 
@@ -48,22 +48,17 @@ By using our Platform, you agree to the collection and use of information in acc
 
 **Data Controller:**
 ATHENA Platform Pty Ltd
-123 Innovation Drive
-Sydney, NSW 2000
 Australia
 
-**Data Protection Officer:**
+**Primary privacy contact:**
+Email: privacy@athena.com
+
+**Data rights contact:**
 Email: dpo@athena.com
 
-**UK Representative:**
-ATHENA UK Limited
-[UK Address]
-Email: uk-privacy@athena.com
-
-**EU Representative:**
-ATHENA EU GmbH
-[EU Address]
-Email: eu-privacy@athena.com
+**UK and EU representation:**
+ATHENA has not yet published separate UK or EU representative details for a public launch.
+If ATHENA begins offering services in a market that requires a local representative, the applicable name, address, and contact details will be published here before that launch.
 
 ---
 
@@ -232,7 +227,7 @@ Under UK GDPR and EU GDPR, you have additional rights:
 - **Right to Object** (Article 21): Object to processing based on legitimate interests
 - **Rights Related to Automated Decision-Making** (Article 22): Not be subject to decisions based solely on automated processing
 
-To exercise these rights, visit our [Privacy Center](/privacy-center) or contact us at dpo@athena.com.
+To exercise these rights, visit our [Privacy Center](/privacy-center) or contact us at privacy@athena.com.
 
 **Response Time:** We respond to all requests within 30 days. Complex requests may take up to 60 days (we will inform you).
 
@@ -284,21 +279,18 @@ If you have questions about this Privacy Policy or our data practices, please co
 **General Privacy Inquiries:**
 Email: privacy@athena.com
 
-**Data Protection Officer:**
+**Data rights contact:**
 Email: dpo@athena.com
 
-**UK Users:**
-Email: uk-privacy@athena.com
-
-**EU Users:**
-Email: eu-privacy@athena.com
+**UK and EU launch queries:**
+Email: privacy@athena.com
 
 **Postal Address:**
 ATHENA Platform Pty Ltd
 Privacy Team
-123 Innovation Drive
-Sydney, NSW 2000
 Australia
+
+Registered office and any local representative addresses will be published here before ATHENA accepts public legal or privacy notices in those jurisdictions.
 
 ---
 
@@ -311,4 +303,4 @@ Australia
 
 ---
 
-*Last updated: January 2025*
+*Last updated: March 8, 2026*

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/lib/store';
-import { useLogout } from '@/lib/hooks';
+import { useLogout, useUnreadMessageCount } from '@/lib/hooks';
 import { Avatar } from '@/components/ui';
 
 interface MenuItem {
@@ -38,6 +38,7 @@ export default function UserMenuDropdown() {
   const { user, logout: storeLogout } = useAuthStore();
   const { theme, setTheme } = useUIStore();
   const logoutMutation = useLogout();
+  const { data: unreadMessageCount } = useUnreadMessageCount();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -85,7 +86,7 @@ export default function UserMenuDropdown() {
       icon: MessageCircle,
       label: 'Messages',
       href: '/dashboard/messages',
-      badge: '3',
+      badge: unreadMessageCount && unreadMessageCount > 0 ? String(unreadMessageCount) : undefined,
     },
     {
       icon: Crown,

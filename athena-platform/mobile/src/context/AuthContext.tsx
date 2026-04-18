@@ -4,7 +4,7 @@
  */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { api, setAuthTokens } from '../services/api';
+import { api, setAuthTokens, unwrapApiData } from '../services/api';
 import { resolvePreferences, setLocalPreferences } from '../utils/preferences';
 
 interface User {
@@ -12,9 +12,13 @@ interface User {
   email: string;
   firstName: string;
   lastName: string;
-  displayName: string;
+  displayName?: string;
   avatar?: string;
   persona: string;
+  preferredLocale?: string;
+  preferredCurrency?: string;
+  timezone?: string;
+  region?: string;
 }
 
 interface AuthContextType {
@@ -33,6 +37,7 @@ interface RegisterData {
   firstName: string;
   lastName: string;
   persona: string;
+  womanSelfAttested: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -56,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (accessToken) {
         setAuthTokens(accessToken, storedRefreshToken);
         const response = await api.get('/auth/me');
-        const userData = response.data.data;
+        const userData = unwrapApiData<User>(response.data);
         setUser(userData);
         const preferences = await resolvePreferences({
           preferredLocale: userData?.preferredLocale,
@@ -77,7 +82,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const response = await api.post('/auth/login', { email, password });
-    const { user: userData, accessToken, refreshToken } = response.data?.data || {};
+    const { user: userData, accessToken, refreshToken } = unwrapApiData<{
+      user: User;
+      accessToken: string;
+      refreshToken?: string;
+      expiresIn?: number;
+    }>(response.data);
     
     if (!accessToken || !userData) {
       throw new Error('Invalid login response');
@@ -100,7 +110,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (data: RegisterData) => {
     const response = await api.post('/auth/register', data);
-    const { user: userData, accessToken, refreshToken } = response.data?.data || {};
+    const { user: userData, accessToken, refreshToken } = unwrapApiData<{
+      user: User;
+      accessToken: string;
+      refreshToken?: string;
+      expiresIn?: number;
+    }>(response.data);
     
     if (!accessToken || !userData) {
       throw new Error('Invalid registration response');
@@ -135,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = async () => {
     const response = await api.get('/auth/me');
-    setUser(response.data.data);
+    setUser(unwrapApiData<User>(response.data));
   };
 
   return (
