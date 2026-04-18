@@ -77,7 +77,7 @@ const themeBootScript = `
         } catch (_) {}
       }
 
-      return 'dark';
+      return 'system';
     };
 
     const storedTheme = readStoredTheme();

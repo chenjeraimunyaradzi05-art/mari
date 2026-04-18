@@ -387,33 +387,13 @@ router.post(
       // Send verification email (async, don't block response)
       sendVerificationEmail(email, firstName, verificationToken).catch((err) => logger.error('Failed to send verification email', { error: err }));
 
-      // Generate tokens
-      const tokenPayload = {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        persona: user.persona,
-      };
-
-      const accessToken = generateAccessToken(tokenPayload);
-      const refreshToken = generateRefreshToken(tokenPayload);
-
-      // Set refresh token in an HttpOnly secure cookie
-      const cookieOptions = getRefreshTokenCookieOptions(refreshToken);
-      res.cookie('refreshToken', refreshToken, cookieOptions);
-
-      await sessionService.createSession(
-        user.id,
-        accessToken,
-        refreshToken,
-        req.headers['user-agent'],
-        req.ip
-      );
-
       res.status(201).json({
         success: true,
         message: 'Registration successful. Please check your email to verify your account.',
-        data: buildAuthResponseData(accessToken, user as Record<string, unknown>),
+        data: {
+          user,
+          verificationRequired: true,
+        },
       });
     } catch (error) {
       next(error);
@@ -439,6 +419,7 @@ router.post(
         select: {
           id: true,
           email: true,
+          emailVerified: true,
           passwordHash: true,
           firstName: true,
           lastName: true,
@@ -470,6 +451,10 @@ router.post(
       const isValidPassword = await comparePassword(password, user.passwordHash);
       if (!isValidPassword) {
         throw new ApiError(401, 'Invalid email or password');
+      }
+
+      if (!user.emailVerified) {
+        throw new ApiError(403, 'Please verify your email before signing in.');
       }
 
       await prisma.user.update({
@@ -1125,18 +1110,30 @@ router.post('/verify-email', async (req: Request, res: Response, next: NextFunct
 // ===========================================
 // RESEND VERIFICATION EMAIL
 // ===========================================
-router.post('/resend-verification', authenticate, async (req: AuthRequest, res, next) => {
+router.post(
+  '/resend-verification',
+  [body('email').isEmail().normalizeEmail()],
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-    });
-
-    if (!user) {
-      throw new ApiError(404, 'User not found');
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
     }
 
-    if (user.emailVerified) {
-      throw new ApiError(400, 'Email already verified');
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const successMessage =
+      'If an unverified account exists for that email, a new verification link has been sent.';
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || user.emailVerified) {
+      res.json({
+        success: true,
+        message: successMessage,
+      });
+      return;
     }
 
     // Delete existing verification tokens
@@ -1161,7 +1158,7 @@ router.post('/resend-verification', authenticate, async (req: AuthRequest, res, 
 
     res.json({
       success: true,
-      message: 'Verification email sent successfully',
+      message: successMessage,
     });
   } catch (error) {
     next(error);

@@ -71,10 +71,8 @@ export function useAuth() {
   const registerMutation = useMutation({
     mutationFn: authApi.register,
     onSuccess: (response) => {
-      const { user: userData, accessToken } = response.data.data;
-      login(userData, accessToken, '');
       queryClient.invalidateQueries();
-      toast.success('Welcome to ATHENA!');
+      toast.success(response.data.message || 'Registration successful. Please verify your email.');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Registration failed');

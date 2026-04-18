@@ -36,6 +36,17 @@ function getSafeRedirectPath(redirect: string | null | undefined, fallback: stri
   return fallback;
 }
 
+function buildVerificationRecoveryPath(email: string, redirect: string | null | undefined) {
+  const params = new URLSearchParams({ registered: '1', email });
+  const safeRedirect = getSafeRedirectPath(redirect, '');
+
+  if (safeRedirect) {
+    params.set('redirect', safeRedirect);
+  }
+
+  return `/verify-email?${params.toString()}`;
+}
+
 export default function LoginPage() {
   return (
     <Suspense fallback={null}>
@@ -83,6 +94,12 @@ function LoginContent() {
         const responseMessage = (
           error as { response?: { data?: { message?: string } } }
         )?.response?.data?.message;
+
+        if (responseMessage?.toLowerCase().includes('verify your email')) {
+          router.replace(buildVerificationRecoveryPath(data.email, redirect));
+          return;
+        }
+
         setServerError(
           responseMessage || 'Login failed. Please check your credentials and try again.'
         );

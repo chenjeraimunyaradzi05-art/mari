@@ -84,7 +84,7 @@
   }
 
   .btn-outline {
-    @apply btn border-2 border-primary-500 text-primary-500 hover:bg-primary-50;
+    @apply btn border-2 border-primary-500 text-primary-600 hover:bg-primary-50 dark:text-primary-300 dark:hover:bg-primary-950/40;
   }
 
   .btn-ghost {
@@ -96,7 +96,7 @@
   }
 
   .input {
-    @apply block w-full rounded-lg border border-gray-300 px-4 py-2 text-gray-900 placeholder-gray-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder-gray-500;
+    @apply block w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder-gray-500;
   }
 
   .label {

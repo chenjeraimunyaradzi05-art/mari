@@ -66,7 +66,8 @@ const registerSchema = z
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
-const DEFAULT_POST_REGISTER_PATH = '/onboarding?entry=register';
+const DEFAULT_AUTHENTICATED_PATH = '/dashboard';
+const DEFAULT_GOOGLE_REGISTER_PATH = '/dashboard/persona';
 
 function buildCompatibilityUsername(email: string, firstName: string, lastName: string) {
   const emailBase = email.split('@')[0] || `${firstName}.${lastName}`;
@@ -106,6 +107,17 @@ function getSafeRedirectPath(redirect: string | null | undefined, fallback: stri
   return fallback;
 }
 
+function buildPostRegisterPath(email: string, redirect: string | null | undefined) {
+  const params = new URLSearchParams({ registered: '1', email });
+  const safeRedirect = getSafeRedirectPath(redirect, '');
+
+  if (safeRedirect) {
+    params.set('redirect', safeRedirect);
+  }
+
+  return `/verify-email?${params.toString()}`;
+}
+
 export default function RegisterPage() {
   return (
     <Suspense fallback={null}>
@@ -125,9 +137,7 @@ function RegisterContent() {
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated) {
-      router.replace(
-        getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_POST_REGISTER_PATH)
-      );
+      router.replace(getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_AUTHENTICATED_PATH));
     }
   }, [isAuthenticated, isLoading, router, searchParams]);
 
@@ -166,9 +176,7 @@ function RegisterContent() {
       },
       {
         onSuccess: () => {
-          router.replace(
-            getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_POST_REGISTER_PATH)
-          );
+          router.replace(buildPostRegisterPath(data.email, searchParams?.get('redirect')));
         },
         onError: (error: unknown) => {
           setServerError(getApiErrorMessage(error, 'Registration failed. Please review your details and try again.'));
@@ -213,277 +221,275 @@ function RegisterContent() {
                   <p className="text-sm text-red-700 dark:text-red-300">{serverError}</p>
                 </div>
               )}
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label htmlFor="firstName" className="label">
-                  First Name
-                </label>
-                <input
-                  {...register('firstName')}
-                  type="text"
-                  id="firstName"
-                  className="input"
-                  placeholder="Jane"
-                  autoComplete="given-name"
-                  aria-invalid={errors.firstName ? 'true' : 'false'}
-                />
-                {errors.firstName && (
-                  <p className="mt-1 text-sm text-red-600">{errors.firstName.message}</p>
-                )}
-              </div>
-              <div className="flex-1">
-                <label htmlFor="lastName" className="label">
-                  Last Name
-                </label>
-                <input
-                  {...register('lastName')}
-                  type="text"
-                  id="lastName"
-                  className="input"
-                  placeholder="Doe"
-                  autoComplete="family-name"
-                  aria-invalid={errors.lastName ? 'true' : 'false'}
-                />
-                {errors.lastName && (
-                  <p className="mt-1 text-sm text-red-600">{errors.lastName.message}</p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="email" className="label">
-                Email
-              </label>
-              <input
-                {...register('email')}
-                type="email"
-                id="email"
-                className="input"
-                placeholder="you@example.com"
-                autoComplete="email"
-                aria-invalid={errors.email ? 'true' : 'false'}
-              />
-              {errors.email && (
-                <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label htmlFor="password" className="label">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  {...register('password')}
-                  type={showPassword ? 'text' : 'password'}
-                  id="password"
-                  className="input pr-10"
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                  aria-invalid={errors.password ? 'true' : 'false'}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3"
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
-                  ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
-                  )}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
-              )}
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {passwordRequirements.map((requirement) => (
-                  <div key={requirement.label} className="flex items-center gap-2 text-sm">
-                    <CheckCircle2
-                      className={`h-4 w-4 ${
-                        requirement.met
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-gray-300 dark:text-gray-600'
-                      }`}
-                    />
-                    <span
-                      className={
-                        requirement.met
-                          ? 'text-green-700 dark:text-green-300'
-                          : 'text-gray-500 dark:text-gray-400'
-                      }
-                    >
-                      {requirement.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="confirmPassword" className="label">
-                Confirm Password
-              </label>
-              <div className="relative">
-                <input
-                  {...register('confirmPassword')}
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  id="confirmPassword"
-                  className="input pr-10"
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                  aria-invalid={errors.confirmPassword ? 'true' : 'false'}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3"
-                >
-                  {showConfirmPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
-                  ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
-                  )}
-                </button>
-              </div>
-              {errors.confirmPassword && (
-                <p className="mt-1 text-sm text-red-600">
-                  {errors.confirmPassword.message}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label htmlFor="persona" className="label">
-                I&apos;m joining as
-              </label>
-              <select
-                {...register('persona')}
-                id="persona"
-                className="input"
-                defaultValue=""
-              >
-                <option value="">Select your focus area</option>
-                {personaOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="inviteCode" className="label">
-                Invite Code (optional)
-              </label>
-              <input
-                {...register('inviteCode')}
-                type="text"
-                id="inviteCode"
-                className="input"
-                placeholder="Leave blank if you don't have one"
-                autoComplete="off"
-              />
-              {errors.inviteCode && (
-                <p className="mt-1 text-sm text-red-600">{errors.inviteCode.message}</p>
-              )}
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Invite codes use letters, numbers, and dashes only.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950/40">
-              <div className="flex items-start gap-3">
-                <input
-                  {...register('womanSelfAttested')}
-                  type="checkbox"
-                  id="womanSelfAttested"
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <div>
-                  <label htmlFor="womanSelfAttested" className="text-sm font-medium text-gray-900 dark:text-white">
-                    I confirm that I am a woman (self-attestation)
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label htmlFor="firstName" className="label">
+                    First Name
                   </label>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    This helps ATHENA maintain the trust and safety standards of the community.
-                  </p>
+                  <input
+                    {...register('firstName')}
+                    type="text"
+                    id="firstName"
+                    className="input"
+                    placeholder="Jane"
+                    autoComplete="given-name"
+                    aria-invalid={errors.firstName ? 'true' : 'false'}
+                  />
+                  {errors.firstName && (
+                    <p className="mt-1 text-sm text-red-600">{errors.firstName.message}</p>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <label htmlFor="lastName" className="label">
+                    Last Name
+                  </label>
+                  <input
+                    {...register('lastName')}
+                    type="text"
+                    id="lastName"
+                    className="input"
+                    placeholder="Doe"
+                    autoComplete="family-name"
+                    aria-invalid={errors.lastName ? 'true' : 'false'}
+                  />
+                  {errors.lastName && (
+                    <p className="mt-1 text-sm text-red-600">{errors.lastName.message}</p>
+                  )}
                 </div>
               </div>
-            </div>
-            {errors.womanSelfAttested && (
-              <p className="mt-1 text-sm text-red-600">{errors.womanSelfAttested.message}</p>
-            )}
 
-            <button
-              type="submit"
-              disabled={isRegisterPending}
-              className="btn-primary w-full py-3 text-base"
-            >
-              {isRegisterPending ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Creating account...
-                </>
-              ) : (
-                <>
-                  Create account
-                  <ArrowRight className="w-5 h-5 ml-2" />
-                </>
+              <div>
+                <label htmlFor="email" className="label">
+                  Email
+                </label>
+                <input
+                  {...register('email')}
+                  type="email"
+                  id="email"
+                  className="input"
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  aria-invalid={errors.email ? 'true' : 'false'}
+                />
+                {errors.email && (
+                  <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="password" className="label">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    {...register('password')}
+                    type={showPassword ? 'text' : 'password'}
+                    id="password"
+                    className="input pr-10"
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    aria-invalid={errors.password ? 'true' : 'false'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5 text-gray-400" />
+                    ) : (
+                      <Eye className="w-5 h-5 text-gray-400" />
+                    )}
+                  </button>
+                </div>
+                {errors.password && (
+                  <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+                )}
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {passwordRequirements.map((requirement) => (
+                    <div key={requirement.label} className="flex items-center gap-2 text-sm">
+                      <CheckCircle2
+                        className={`h-4 w-4 ${
+                          requirement.met
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-gray-300 dark:text-gray-600'
+                        }`}
+                      />
+                      <span
+                        className={
+                          requirement.met
+                            ? 'text-green-700 dark:text-green-300'
+                            : 'text-gray-500 dark:text-gray-400'
+                        }
+                      >
+                        {requirement.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="confirmPassword" className="label">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <input
+                    {...register('confirmPassword')}
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    id="confirmPassword"
+                    className="input pr-10"
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    aria-invalid={errors.confirmPassword ? 'true' : 'false'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="w-5 h-5 text-gray-400" />
+                    ) : (
+                      <Eye className="w-5 h-5 text-gray-400" />
+                    )}
+                  </button>
+                </div>
+                {errors.confirmPassword && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.confirmPassword.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="persona" className="label">
+                  I&apos;m joining as
+                </label>
+                <select
+                  {...register('persona')}
+                  id="persona"
+                  className="input"
+                  defaultValue=""
+                >
+                  <option value="">Select your focus area</option>
+                  {personaOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="inviteCode" className="label">
+                  Invite Code (optional)
+                </label>
+                <input
+                  {...register('inviteCode')}
+                  type="text"
+                  id="inviteCode"
+                  className="input"
+                  placeholder="Leave blank if you don't have one"
+                  autoComplete="off"
+                />
+                {errors.inviteCode && (
+                  <p className="mt-1 text-sm text-red-600">{errors.inviteCode.message}</p>
+                )}
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Invite codes use letters, numbers, and dashes only.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950/40">
+                <div className="flex items-start gap-3">
+                  <input
+                    {...register('womanSelfAttested')}
+                    type="checkbox"
+                    id="womanSelfAttested"
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <div>
+                    <label htmlFor="womanSelfAttested" className="text-sm font-medium text-gray-900 dark:text-white">
+                      I confirm that I am a woman (self-attestation)
+                    </label>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      This helps ATHENA maintain the trust and safety standards of the community.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {errors.womanSelfAttested && (
+                <p className="mt-1 text-sm text-red-600">{errors.womanSelfAttested.message}</p>
               )}
-            </button>
-            <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">
-              By creating an account, you agree to our{' '}
-              <Link href="/terms" className="font-medium text-primary-600 hover:text-primary-500">
-                Terms
-              </Link>{' '}
-              and acknowledge our{' '}
-              <Link href="/privacy-center" className="font-medium text-primary-600 hover:text-primary-500">
-                Privacy Center
-              </Link>{' '}
-              and{' '}
-              <Link href="/help/community-guidelines" className="font-medium text-primary-600 hover:text-primary-500">
-                Community Guidelines
-              </Link>
-              .
-            </p>
-          </form>
 
-          <div className="mt-8">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300 dark:border-gray-700" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white dark:bg-gray-950 text-gray-500">
-                  Or continue with
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-4">
-              <GoogleSignInButton
-                mode="register"
-                persona={personaValue || undefined}
-                womanSelfAttested={womanSelfAttestedValue}
-                inviteCode={inviteCodeValue?.trim() || undefined}
-                onError={(message) => setServerError(message)}
-                onSuccess={() => {
-                  router.replace(
-                    getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_POST_REGISTER_PATH)
-                  );
-                }}
-              />
-              <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">
-                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M22.675 0h-21.35C.593 0 0 .593 0 1.326v21.348C0 23.407.593 24 1.326 24h11.495v-9.294H9.692v-3.622h3.129V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.794.715-1.794 1.763v2.312h3.587l-.467 3.622h-3.12V24h6.116C23.407 24 24 23.407 24 22.674V1.326C24 .593 23.407 0 22.675 0z" />
-                </svg>
-                Facebook Soon
+              <button
+                type="submit"
+                disabled={isRegisterPending}
+                className="btn-primary w-full py-3 text-base"
+              >
+                {isRegisterPending ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Creating account...
+                  </>
+                ) : (
+                  <>
+                    Create account
+                    <ArrowRight className="w-5 h-5 ml-2" />
+                  </>
+                )}
               </button>
+              <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">
+                By creating an account, you agree to our{' '}
+                <Link href="/terms" className="font-medium text-primary-600 hover:text-primary-500">
+                  Terms
+                </Link>{' '}
+                and acknowledge our{' '}
+                <Link href="/privacy-center" className="font-medium text-primary-600 hover:text-primary-500">
+                  Privacy Center
+                </Link>{' '}
+                and{' '}
+                <Link href="/help/community-guidelines" className="font-medium text-primary-600 hover:text-primary-500">
+                  Community Guidelines
+                </Link>
+                .
+              </p>
+            </form>
+            <div className="mt-8">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300 dark:border-gray-700" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white dark:bg-gray-950 text-gray-500">
+                    Or continue with
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-2 gap-4">
+                <GoogleSignInButton
+                  mode="register"
+                  persona={personaValue || undefined}
+                  womanSelfAttested={womanSelfAttestedValue}
+                  inviteCode={inviteCodeValue?.trim() || undefined}
+                  onError={(message) => setServerError(message)}
+                  onSuccess={() => {
+                    router.replace(getSafeRedirectPath(searchParams?.get('redirect'), DEFAULT_GOOGLE_REGISTER_PATH));
+                  }}
+                />
+                <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M22.675 0h-21.35C.593 0 0 .593 0 1.326v21.348C0 23.407.593 24 1.326 24h11.495v-9.294H9.692v-3.622h3.129V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.794.715-1.794 1.763v2.312h3.587l-.467 3.622h-3.12V24h6.116C23.407 24 24 23.407 24 22.674V1.326C24 .593 23.407 0 22.675 0z" />
+                  </svg>
+                  Facebook Soon
+                </button>
+              </div>
+              <p className="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
+                Google sign-in is live. Facebook sign-in is still being finalized for launch.
+              </p>
             </div>
-            <p className="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
-              Google sign-in is live. Facebook sign-in is still being finalized for launch.
-            </p>
           </div>
 
           <p className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
@@ -494,7 +500,6 @@ function RegisterContent() {
           </p>
           </div>
         </div>
-      </div>
 
       {/* Right side - Image/Pattern */}
       <div className="relative hidden overflow-hidden bg-athena-gradient lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
