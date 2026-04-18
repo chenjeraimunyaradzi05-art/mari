@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { BACKEND_API_URL } from '@/lib/runtime-config';
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
 const registry = require('../i18n.registry.js');
 
@@ -32,31 +31,6 @@ function getSafeRedirectPath(candidate: string | null): string | null {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  // ── API Proxy ────────────────────────────────────────────────────
-  // Rewrite /api/* and /uploads/* to the Railway backend.
-  // Running in middleware (Edge Function on Netlify) ensures this
-  // executes before any redirect rules or serverless functions.
-  //
-  // EXCEPTION: /api/auth/* routes are NOT rewritten here.
-  // Auth routes set HttpOnly cookies (refreshToken) and
-  // NextResponse.rewrite() to external URLs on Netlify Edge may not
-  // reliably forward Set-Cookie headers. Instead, auth requests fall
-  // through to the Next.js API route handlers in app/api/auth/ which
-  // explicitly forward cookies via response.headers.getSetCookie().
-  // On Netlify, netlify.toml redirects handle /api/* and /uploads/* proxying
-  // to Railway more reliably than edge-function rewrites. Only use middleware
-  // rewriting for local development (where there are no Netlify redirects).
-  if (!process.env.NETLIFY) {
-    const isAuthRoute = pathname.startsWith('/api/auth');
-    if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
-      const destination = new URL(`${BACKEND_API_URL}${pathname}`);
-      request.nextUrl.searchParams.forEach((value, key) => {
-        destination.searchParams.set(key, value);
-      });
-      return NextResponse.rewrite(destination);
-    }
-  }
 
   const maintenanceMode = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
   if (maintenanceMode && !pathname.startsWith('/maintenance')) {

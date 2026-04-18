@@ -16,140 +16,11 @@ import JobCard from '@/components/jobs/JobCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
-
-const FALLBACK_JOBS: Job[] = [
-  {
-    id: 'spotlight-product-ops',
-    title: 'Product Operations Lead',
-    slug: 'product-operations-lead',
-    description:
-      'Build launch systems, close feedback loops, and coordinate cross-functional delivery across product, support, and growth teams.',
-    postedById: 'athena-demo',
-    type: 'FULL_TIME',
-    status: 'ACTIVE',
-    city: 'Perth',
-    state: 'WA',
-    country: 'Australia',
-    isRemote: true,
-    salaryMin: 120000,
-    salaryMax: 145000,
-    showSalary: true,
-    viewCount: 0,
-    applicationCount: 0,
-    createdAt: '2026-04-01T08:00:00.000Z',
-    updatedAt: '2026-04-01T08:00:00.000Z',
-    publishedAt: '2026-04-12T08:00:00.000Z',
-    organization: {
-      id: 'org-athena',
-      name: 'ATHENA Labs',
-      slug: 'athena-labs',
-      country: 'Australia',
-      industry: 'Career Technology',
-      isVerified: true,
-      safetyScore: 98,
-    },
-  },
-  {
-    id: 'spotlight-growth-marketing',
-    title: 'Growth Marketing Strategist',
-    slug: 'growth-marketing-strategist',
-    description:
-      'Own lifecycle campaigns, referral experiments, and creator partnerships focused on women building long-term career momentum.',
-    postedById: 'athena-demo',
-    type: 'CONTRACT',
-    status: 'ACTIVE',
-    city: 'Sydney',
-    state: 'NSW',
-    country: 'Australia',
-    isRemote: true,
-    salaryMin: 90000,
-    salaryMax: 115000,
-    showSalary: true,
-    viewCount: 0,
-    applicationCount: 0,
-    createdAt: '2026-04-02T08:00:00.000Z',
-    updatedAt: '2026-04-02T08:00:00.000Z',
-    publishedAt: '2026-04-10T08:00:00.000Z',
-    organization: {
-      id: 'org-lighthouse',
-      name: 'Lighthouse Studio',
-      slug: 'lighthouse-studio',
-      country: 'Australia',
-      industry: 'Digital Strategy',
-      isVerified: true,
-      safetyScore: 94,
-    },
-  },
-  {
-    id: 'spotlight-community-partnerships',
-    title: 'Community Partnerships Manager',
-    slug: 'community-partnerships-manager',
-    description:
-      'Shape partner activations, mentorship experiences, and regional events that bring trusted opportunities into the ATHENA ecosystem.',
-    postedById: 'athena-demo',
-    type: 'PART_TIME',
-    status: 'ACTIVE',
-    city: 'Melbourne',
-    state: 'VIC',
-    country: 'Australia',
-    isRemote: false,
-    salaryMin: 70000,
-    salaryMax: 90000,
-    showSalary: true,
-    viewCount: 0,
-    applicationCount: 0,
-    createdAt: '2026-04-03T08:00:00.000Z',
-    updatedAt: '2026-04-03T08:00:00.000Z',
-    publishedAt: '2026-04-08T08:00:00.000Z',
-    organization: {
-      id: 'org-rise',
-      name: 'Rise Collective',
-      slug: 'rise-collective',
-      country: 'Australia',
-      industry: 'Community & Partnerships',
-      isVerified: true,
-      safetyScore: 96,
-    },
-  },
-];
-
-function filterFallbackJobs(
-  jobs: Job[],
-  params: { search: string; location: string; type: string; isRemote: boolean }
-) {
-  const searchNeedle = params.search.trim().toLowerCase();
-  const locationNeedle = params.location.trim().toLowerCase();
-
-  return jobs.filter((job) => {
-    if (params.type && job.type !== params.type) {
-      return false;
-    }
-
-    if (params.isRemote && !job.isRemote) {
-      return false;
-    }
-
-    if (
-      searchNeedle &&
-      !`${job.title} ${job.description} ${job.organization?.name || ''}`
-        .toLowerCase()
-        .includes(searchNeedle)
-    ) {
-      return false;
-    }
-
-    if (
-      locationNeedle &&
-      !`${job.city || ''} ${job.state || ''} ${job.country}`
-        .toLowerCase()
-        .includes(locationNeedle)
-    ) {
-      return false;
-    }
-
-    return true;
-  });
-}
+import {
+  FALLBACK_JOBS,
+  filterFallbackJobs,
+  isFallbackJobId,
+} from '@/lib/public-fallbacks';
 
 export default function JobsPage() {
   return (
@@ -188,10 +59,19 @@ function JobsContent() {
         type: type || undefined,
         remote: isRemote || undefined,
       });
+      const nextJobs = response.data.data as Job[];
+      const fallbackMode =
+        Boolean(response.data.meta?.fallback) ||
+        nextJobs.some((job) => isFallbackJobId(job.id));
 
-      setJobs(response.data.data);
+      setJobs(nextJobs);
       setTotal(response.data.pagination.total);
-      setUsingFallbackData(false);
+      setUsingFallbackData(fallbackMode);
+      setLoadMessage(
+        fallbackMode
+          ? 'Live roles are reconnecting. Showing curated spotlight opportunities in the meantime.'
+          : null
+      );
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
 

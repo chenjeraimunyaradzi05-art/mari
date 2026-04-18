@@ -159,11 +159,66 @@ function LocaleSync({ children }: { children: React.ReactNode }) {
 
 function ServiceWorkerRegister() {
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    let cancelled = false;
+    const enablePwa = process.env.NEXT_PUBLIC_ENABLE_PWA === 'true';
+    const resetSessionKey = 'athena-sw-reset';
+
+    const clearAthenaCaches = async () => {
+      if (typeof window === 'undefined' || !('caches' in window)) {
+        return false;
+      }
+
+      const cacheNames = await window.caches.keys();
+      const athenaCacheNames = cacheNames.filter((cacheName) => cacheName.startsWith('athena-'));
+
+      await Promise.all(athenaCacheNames.map((cacheName) => window.caches.delete(cacheName)));
+
+      return athenaCacheNames.length > 0;
+    };
+
+    const unregisterLegacyWorker = async () => {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        const hadRegistrations = registrations.length > 0;
+
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+        const clearedCaches = await clearAthenaCaches();
+
+        if (
+          cancelled ||
+          !(hadRegistrations || clearedCaches) ||
+          window.sessionStorage.getItem(resetSessionKey)
+        ) {
+          return;
+        }
+
+        window.sessionStorage.setItem(resetSessionKey, '1');
+        window.location.reload();
+      } catch {
         // Silent fail for unsupported environments
-      });
+      }
+    };
+
+    const registerWorker = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        await registration.update();
+      } catch {
+        // Silent fail for unsupported environments
+      }
+    };
+
+    if (enablePwa) {
+      registerWorker();
+    } else {
+      unregisterLegacyWorker();
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return null;

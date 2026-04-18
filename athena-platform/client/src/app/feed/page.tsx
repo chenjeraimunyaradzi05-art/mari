@@ -22,6 +22,11 @@ import {
 } from 'lucide-react';
 import { useFeed, useCreatePost, useLikePost, useUnlikePost, useAuth } from '@/lib/hooks';
 import { formatDistanceToNow } from 'date-fns';
+import {
+  FALLBACK_POSTS,
+  isFallbackPostId,
+  type PublicFallbackFeedPost,
+} from '@/lib/public-fallbacks';
 
 interface Post {
   id: string;
@@ -33,6 +38,7 @@ interface Post {
     lastName: string;
     profileImage?: string;
     headline?: string;
+    profileHref?: string;
   };
   _count?: {
     likes: number;
@@ -41,60 +47,6 @@ interface Post {
   likes?: { userId: string }[];
   media?: { url: string; type: string }[];
 }
-
-const FALLBACK_POSTS: Post[] = [
-  {
-    id: 'fallback-post-1',
-    content:
-      'Career momentum grows faster when job search, mentorship, community, and AI support all live in one place. What part of your next chapter are you focusing on this month?',
-    createdAt: '2026-04-16T09:00:00.000Z',
-    author: {
-      id: 'athena-team',
-      firstName: 'ATHENA',
-      lastName: 'Team',
-      headline: 'Platform updates and launch notes',
-    },
-    _count: {
-      likes: 28,
-      comments: 6,
-    },
-    likes: [],
-  },
-  {
-    id: 'fallback-post-2',
-    content:
-      'Women in product, operations, and growth are sharing interview prep wins inside the ATHENA network this week. Light mode is available, but the platform now ships dark-first by default.',
-    createdAt: '2026-04-15T14:30:00.000Z',
-    author: {
-      id: 'launch-mentor',
-      firstName: 'Maya',
-      lastName: 'Chen',
-      headline: 'Startup mentor and operator',
-    },
-    _count: {
-      likes: 41,
-      comments: 9,
-    },
-    likes: [],
-  },
-  {
-    id: 'fallback-post-3',
-    content:
-      'If the live feed is still syncing, use this space as a quick orientation hub: check jobs, explore mentors, and open the floating AI assistant for guidance on resumes, interviews, and strategy.',
-    createdAt: '2026-04-14T18:45:00.000Z',
-    author: {
-      id: 'community-guide',
-      firstName: 'Nadia',
-      lastName: 'Brooks',
-      headline: 'Community success lead',
-    },
-    _count: {
-      likes: 33,
-      comments: 4,
-    },
-    likes: [],
-  },
-];
 
 function getInitials(firstName?: string, lastName?: string) {
   const safeFirst = firstName?.trim().charAt(0) || 'A';
@@ -105,6 +57,7 @@ function getInitials(firstName?: string, lastName?: string) {
 function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string }) {
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
+  const isFallbackPost = isFallbackPostId(post.id);
   const [isLiked, setIsLiked] = useState(
     post.likes?.some(like => like.userId === currentUserId) || false
   );
@@ -116,6 +69,10 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
   }, []);
 
   const handleLike = async () => {
+    if (isFallbackPost) {
+      return;
+    }
+
     if (isLiked) {
       setIsLiked(false);
       setLikeCount(prev => prev - 1);
@@ -127,41 +84,51 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
     }
   };
 
+  const authorContent = (
+    <>
+      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-pink-500 flex items-center justify-center text-white font-semibold overflow-hidden">
+        {post.author.profileImage ? (
+          <Image
+            src={post.author.profileImage}
+            alt={post.author.firstName}
+            width={48}
+            height={48}
+            className="object-cover"
+          />
+        ) : (
+          getInitials(post.author.firstName, post.author.lastName)
+        )}
+      </div>
+      <div>
+        <div className="font-semibold text-gray-900 dark:text-white hover:text-primary-600 transition">
+          {post.author.firstName} {post.author.lastName}
+        </div>
+        <div className="text-sm text-gray-500 dark:text-gray-400">
+          {post.author.headline || 'ATHENA Member'}
+        </div>
+        <div className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+          <Clock className="w-3 h-3" />
+          <span suppressHydrationWarning>
+            {isHydrated
+              ? formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })
+              : post.createdAt.slice(0, 10)}
+          </span>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <article className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition">
       {/* Author */}
       <div className="flex items-start justify-between mb-4">
-        <Link href={`/profile/${post.author.id}`} className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-pink-500 flex items-center justify-center text-white font-semibold overflow-hidden">
-            {post.author.profileImage ? (
-              <Image 
-                src={post.author.profileImage} 
-                alt={post.author.firstName}
-                width={48}
-                height={48}
-                className="object-cover"
-              />
-            ) : (
-              getInitials(post.author.firstName, post.author.lastName)
-            )}
-          </div>
-          <div>
-            <div className="font-semibold text-gray-900 dark:text-white hover:text-primary-600 transition">
-              {post.author.firstName} {post.author.lastName}
-            </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              {post.author.headline || 'ATHENA Member'}
-            </div>
-            <div className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              <span suppressHydrationWarning>
-                {isHydrated
-                  ? formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })
-                  : post.createdAt.slice(0, 10)}
-              </span>
-            </div>
-          </div>
-        </Link>
+        {post.author.profileHref ? (
+          <Link href={post.author.profileHref} className="flex items-center gap-3">
+            {authorContent}
+          </Link>
+        ) : (
+          <div className="flex items-center gap-3">{authorContent}</div>
+        )}
         <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition">
           <MoreHorizontal className="w-5 h-5 text-gray-500" />
         </button>
@@ -202,27 +169,38 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       <div className="flex items-center justify-between pt-3">
         <button 
           onClick={handleLike}
+          disabled={isFallbackPost}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
             isLiked 
               ? 'text-red-500 bg-red-50 dark:bg-red-900/20' 
               : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
+          } ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}
         >
           <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
           Like
         </button>
-        <Link 
-          href={`/dashboard/community/post/${post.id}`}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-        >
-          <MessageSquare className="w-5 h-5" />
-          Comment
-        </Link>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+        {isFallbackPost ? (
+          <button
+            disabled
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 opacity-70 cursor-not-allowed"
+          >
+            <MessageSquare className="w-5 h-5" />
+            Comment
+          </button>
+        ) : (
+          <Link 
+            href={`/dashboard/community/post/${post.id}`}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+          >
+            <MessageSquare className="w-5 h-5" />
+            Comment
+          </Link>
+        )}
+        <button disabled={isFallbackPost} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}>
           <Share2 className="w-5 h-5" />
           Share
         </button>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+        <button disabled={isFallbackPost} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}>
           <Bookmark className="w-5 h-5" />
           Save
         </button>
@@ -315,8 +293,11 @@ export default function FeedPage() {
   const [filter, setFilter] = useState<'latest' | 'trending' | 'following'>('latest');
   const { data: posts, isLoading, error } = useFeed({ sort: filter });
   const { user, isAuthenticated } = useAuth();
+  const fallbackFromApi = Boolean(
+    posts?.some((post: PublicFallbackFeedPost) => isFallbackPostId(post.id))
+  );
   const isFallbackFeed =
-    searchParams.get('demoFallback') === '1' || Boolean(error);
+    searchParams.get('demoFallback') === '1' || fallbackFromApi || Boolean(error);
   const renderedPosts = isFallbackFeed ? FALLBACK_POSTS : posts;
 
   return (

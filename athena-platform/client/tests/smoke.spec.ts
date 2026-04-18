@@ -8,6 +8,11 @@ test('homepage exposes theme toggle, launch matrix, and AI launcher', async ({ p
   await expect(page.getByRole('button', { name: 'Light' })).toBeVisible();
   await expect(page.getByRole('link', { name: /open athena ai assistant/i })).toBeVisible();
   await expect(page.getByRole('table')).toBeVisible();
+
+  const footerBackground = await page.locator('footer').evaluate((element) => {
+    return window.getComputedStyle(element).backgroundColor;
+  });
+  expect(footerBackground).not.toBe('rgb(255, 255, 255)');
 });
 
 test('login page loads', async ({ page }) => {
@@ -50,4 +55,45 @@ test('feed page shows curated fallback when live feed fails', async ({ page }) =
   await expect(page.getByText(/career momentum grows faster/i)).toBeVisible({
     timeout: 15000,
   });
+});
+
+test('api feed alias returns fallback payload for public clients', async ({ request }) => {
+  const response = await request.get('/api/feed');
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()['x-athena-fallback']).toBe('1');
+
+  const payload = await response.json();
+  expect(Array.isArray(payload.data)).toBeTruthy();
+  expect(payload.meta?.fallback).toBeTruthy();
+});
+
+test('explore page renders fallback videos when live feed is unavailable', async ({ page }) => {
+  await page.route('**/api/video/feed**', async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, message: 'Backend unavailable' }),
+    });
+  });
+
+  await page.goto('/explore');
+
+  await expect(page.getByTestId('video-feed')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('video-player').first()).toBeVisible({ timeout: 15000 });
+});
+
+test('manifest only references launch assets that exist', async ({ request }) => {
+  const manifestResponse = await request.get('/manifest.json');
+  expect(manifestResponse.ok()).toBeTruthy();
+
+  const manifest = await manifestResponse.json();
+  const shortcutIcons = (manifest.shortcuts || []).flatMap(
+    (shortcut: { icons?: Array<{ src: string }> }) => shortcut.icons || []
+  );
+  const assetRefs = [...(manifest.icons || []), ...shortcutIcons];
+
+  for (const asset of assetRefs) {
+    const assetResponse = await request.get(asset.src);
+    expect(assetResponse.ok(), asset.src).toBeTruthy();
+  }
 });

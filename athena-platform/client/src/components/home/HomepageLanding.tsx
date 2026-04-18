@@ -769,17 +769,17 @@ export default function HomepageLanding() {
         </section>
       </main>
 
-      <footer className="border-t border-slate-200 bg-white dark:border-white/10 dark:bg-slate-950/88">
+      <footer className="border-t border-slate-800 bg-slate-950 text-slate-200">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-8">
           <div>
             <div className="flex items-center gap-3">
               <Image src="/logo.svg" alt="ATHENA" width={34} height={34} className="rounded-xl" />
               <div>
-                <div className="text-sm font-semibold text-slate-950 dark:text-white">ATHENA</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">Jobs, mentorship, community, and AI guidance</div>
+                <div className="text-sm font-semibold text-white">ATHENA</div>
+                <div className="text-sm text-slate-400">Jobs, mentorship, community, and AI guidance</div>
               </div>
             </div>
-            <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-slate-300">
+            <p className="mt-4 max-w-xl text-sm leading-7 text-slate-300">
               ATHENA helps professionals grow, connect, learn, and earn from a single platform designed for
               long-term career momentum.
             </p>
@@ -787,36 +787,36 @@ export default function HomepageLanding() {
 
           <div className="grid gap-8 sm:grid-cols-3">
             <div>
-              <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Platform</h3>
-              <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
-                <div><Link href="/jobs" className="transition hover:text-slate-950 dark:hover:text-white">Jobs</Link></div>
-                <div><Link href="/feed" className="transition hover:text-slate-950 dark:hover:text-white">Community</Link></div>
-                <div><Link href="/pricing" className="transition hover:text-slate-950 dark:hover:text-white">Pricing</Link></div>
+              <h3 className="text-sm font-semibold text-white">Platform</h3>
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <div><Link href="/jobs" className="transition hover:text-white">Jobs</Link></div>
+                <div><Link href="/feed" className="transition hover:text-white">Community</Link></div>
+                <div><Link href="/pricing" className="transition hover:text-white">Pricing</Link></div>
               </div>
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Trust</h3>
-              <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
-                <div><Link href="/help/community-guidelines" className="transition hover:text-slate-950 dark:hover:text-white">Community Guidelines</Link></div>
-                <div><Link href="/help/safety-center" className="transition hover:text-slate-950 dark:hover:text-white">Safety Center</Link></div>
-                <div><Link href="/privacy" className="transition hover:text-slate-950 dark:hover:text-white">Privacy</Link></div>
+              <h3 className="text-sm font-semibold text-white">Trust</h3>
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <div><Link href="/help/community-guidelines" className="transition hover:text-white">Community Guidelines</Link></div>
+                <div><Link href="/help/safety-center" className="transition hover:text-white">Safety Center</Link></div>
+                <div><Link href="/privacy" className="transition hover:text-white">Privacy</Link></div>
               </div>
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Company</h3>
-              <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
-                <div><Link href="/press" className="transition hover:text-slate-950 dark:hover:text-white">Press</Link></div>
-                <div><Link href="/terms" className="transition hover:text-slate-950 dark:hover:text-white">Terms</Link></div>
-                <div><Link href="/developers" className="transition hover:text-slate-950 dark:hover:text-white">Developers</Link></div>
+              <h3 className="text-sm font-semibold text-white">Company</h3>
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <div><Link href="/press" className="transition hover:text-white">Press</Link></div>
+                <div><Link href="/terms" className="transition hover:text-white">Terms</Link></div>
+                <div><Link href="/developers" className="transition hover:text-white">Developers</Link></div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="border-t border-slate-200 dark:border-white/10">
-          <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-5 text-sm text-slate-500 dark:text-slate-400 sm:px-6 sm:flex-row sm:items-center sm:justify-between lg:px-8">
+        <div className="border-t border-slate-800">
+          <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-5 text-sm text-slate-400 sm:px-6 sm:flex-row sm:items-center sm:justify-between lg:px-8">
             <p>ATHENA. All rights reserved.</p>
             <p>Built for momentum across jobs, community, learning, and AI.</p>
           </div>

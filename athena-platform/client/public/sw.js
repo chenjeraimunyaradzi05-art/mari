@@ -1,29 +1,27 @@
-self.addEventListener('install', (event) => {
+const CACHE_PREFIX = 'athena-';
+
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) =>
+      Promise.all(
+        cacheNames
+          .filter((cacheName) => cacheName.startsWith(CACHE_PREFIX))
+          .map((cacheName) => caches.delete(cacheName))
+      ).then(() => self.clients.claim())
+    )
+  );
 });
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET') return;
 
-  event.respondWith(
-    caches.open('athena-static-v1').then((cache) =>
-      cache.match(request).then((cached) => {
-        const fetchPromise = fetch(request)
-          .then((response) => {
-            if (response.status === 200 && request.url.includes(self.location.origin)) {
-              cache.put(request, response.clone());
-            }
-            return response;
-          })
-          .catch(() => cached);
+  if (request.method !== 'GET') {
+    return;
+  }
 
-        return cached || fetchPromise;
-      })
-    )
-  );
+  event.respondWith(fetch(request));
 });

@@ -12,6 +12,14 @@ export const metadata: Metadata = {
   keywords: ['careers', 'women', 'empowerment', 'jobs', 'mentorship', 'networking', 'education'],
   authors: [{ name: 'ATHENA' }],
   manifest: '/manifest.json',
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/logo.png', type: 'image/png', sizes: '512x512' },
+    ],
+    apple: '/logo.png',
+    shortcut: '/logo.png',
+  },
   openGraph: {
     title: 'ATHENA | The Life Operating System for Women',
     description: 'Discover opportunities, build your career, connect with mentors, and unlock your full potential.',
@@ -19,10 +27,10 @@ export const metadata: Metadata = {
     siteName: 'ATHENA',
     images: [
       {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'ATHENA Platform',
+        url: '/logo.png',
+        width: 2048,
+        height: 2048,
+        alt: 'ATHENA logo',
       },
     ],
     locale: 'en_AU',
@@ -32,7 +40,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'ATHENA | The Life Operating System for Women',
     description: 'Discover opportunities, build your career, connect with mentors, and unlock your full potential.',
-    images: ['/og-image.png'],
+    images: ['/logo.png'],
   },
   robots: {
     index: true,
