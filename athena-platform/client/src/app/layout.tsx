@@ -3,14 +3,10 @@ import Script from 'next/script';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
-
-const siteUrl =
-  process.env.NEXT_PUBLIC_APP_URL ||
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  'http://localhost:3000';
+import { APP_SITE_URL } from '@/lib/runtime-config';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: new URL(APP_SITE_URL),
   title: 'ATHENA | The Life Operating System for Women',
   description: 'Discover opportunities, build your career, connect with mentors, and unlock your full potential. ATHENA is the all-in-one platform empowering women to thrive.',
   keywords: ['careers', 'women', 'empowerment', 'jobs', 'mentorship', 'networking', 'education'],
@@ -19,7 +15,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'ATHENA | The Life Operating System for Women',
     description: 'Discover opportunities, build your career, connect with mentors, and unlock your full potential.',
-    url: siteUrl,
+    url: APP_SITE_URL,
     siteName: 'ATHENA',
     images: [
       {

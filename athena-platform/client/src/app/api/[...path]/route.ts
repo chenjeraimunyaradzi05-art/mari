@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { BACKEND_API_URL } from '@/lib/runtime-config';
 
 export const dynamic = 'force-dynamic';
-
-const BACKEND_URL = (
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-).replace(/\/$/, '');
 
 /**
  * Catch-all API proxy – forwards any /api/* request that does NOT have
@@ -15,7 +12,7 @@ const BACKEND_URL = (
  */
 async function proxy(request: NextRequest) {
   const { pathname, search } = new URL(request.url);
-  const target = `${BACKEND_URL}${pathname}${search}`;
+  const target = `${BACKEND_API_URL}${pathname}${search}`;
 
   // Forward essential request headers
   const headers: Record<string, string> = {};

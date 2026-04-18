@@ -20,6 +20,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
+import { getAppSiteUrl } from '@/lib/runtime-config';
 
 export default function JobDetailsPage() {
   const params = useParams();
@@ -104,7 +105,7 @@ export default function JobDetailsPage() {
                 <CrossModuleShareButton
                   title={job.title}
                   description={`${job.organization?.name || 'Employer'} • ${job.isRemote ? 'Remote' : `${job.city}, ${job.state}`}`}
-                  url={`${process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/jobs/${job.id}`}
+                  url={`${getAppSiteUrl()}/jobs/${job.id}`}
                   entityType="job"
                   entityId={job.id}
                 />

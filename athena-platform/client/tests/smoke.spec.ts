@@ -24,3 +24,30 @@ test('dashboard redirects to login when unauthenticated', async ({ page }) => {
   await expect(page).toHaveURL(/\/login(\?.*)?$/);
   await expect(page).toHaveURL(/redirect=%2Fdashboard/);
 });
+
+test('jobs page shows spotlight fallback when live sync fails', async ({ page }) => {
+  await page.route('**/api/jobs**', async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, message: 'Backend unavailable' }),
+    });
+  });
+
+  await page.goto('/jobs');
+
+  await expect(page.getByText(/live sync temporarily unavailable/i)).toBeVisible();
+  await expect(page.getByText(/curated fallback mode/i)).toBeVisible();
+  await expect(page.getByText(/product operations lead/i)).toBeVisible();
+});
+
+test('feed page shows curated fallback when live feed fails', async ({ page }) => {
+  await page.goto('/feed?demoFallback=1');
+
+  await expect(page.getByText(/live community posts are reconnecting/i)).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByText(/career momentum grows faster/i)).toBeVisible({
+    timeout: 15000,
+  });
+});

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { BACKEND_API_URL as API_URL } from '@/lib/runtime-config';
 
 export const dynamic = 'force-dynamic';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function GET(request: NextRequest) {
   try {

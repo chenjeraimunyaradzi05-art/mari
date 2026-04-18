@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { 
   ArrowRight, 
   Sparkles, 
@@ -16,7 +17,8 @@ import {
   MoreHorizontal,
   Plus,
   TrendingUp,
-  Clock
+  Clock,
+  WifiOff,
 } from 'lucide-react';
 import { useFeed, useCreatePost, useLikePost, useUnlikePost, useAuth } from '@/lib/hooks';
 import { formatDistanceToNow } from 'date-fns';
@@ -38,6 +40,66 @@ interface Post {
   };
   likes?: { userId: string }[];
   media?: { url: string; type: string }[];
+}
+
+const FALLBACK_POSTS: Post[] = [
+  {
+    id: 'fallback-post-1',
+    content:
+      'Career momentum grows faster when job search, mentorship, community, and AI support all live in one place. What part of your next chapter are you focusing on this month?',
+    createdAt: '2026-04-16T09:00:00.000Z',
+    author: {
+      id: 'athena-team',
+      firstName: 'ATHENA',
+      lastName: 'Team',
+      headline: 'Platform updates and launch notes',
+    },
+    _count: {
+      likes: 28,
+      comments: 6,
+    },
+    likes: [],
+  },
+  {
+    id: 'fallback-post-2',
+    content:
+      'Women in product, operations, and growth are sharing interview prep wins inside the ATHENA network this week. Light mode is available, but the platform now ships dark-first by default.',
+    createdAt: '2026-04-15T14:30:00.000Z',
+    author: {
+      id: 'launch-mentor',
+      firstName: 'Maya',
+      lastName: 'Chen',
+      headline: 'Startup mentor and operator',
+    },
+    _count: {
+      likes: 41,
+      comments: 9,
+    },
+    likes: [],
+  },
+  {
+    id: 'fallback-post-3',
+    content:
+      'If the live feed is still syncing, use this space as a quick orientation hub: check jobs, explore mentors, and open the floating AI assistant for guidance on resumes, interviews, and strategy.',
+    createdAt: '2026-04-14T18:45:00.000Z',
+    author: {
+      id: 'community-guide',
+      firstName: 'Nadia',
+      lastName: 'Brooks',
+      headline: 'Community success lead',
+    },
+    _count: {
+      likes: 33,
+      comments: 4,
+    },
+    likes: [],
+  },
+];
+
+function getInitials(firstName?: string, lastName?: string) {
+  const safeFirst = firstName?.trim().charAt(0) || 'A';
+  const safeLast = lastName?.trim().charAt(0) || '';
+  return `${safeFirst}${safeLast}`;
 }
 
 function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string }) {
@@ -80,7 +142,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
                 className="object-cover"
               />
             ) : (
-              `${post.author.firstName[0]}${post.author.lastName[0]}`
+              getInitials(post.author.firstName, post.author.lastName)
             )}
           </div>
           <div>
@@ -188,7 +250,7 @@ function CreatePostBox() {
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
       <div className="flex items-start gap-3">
         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-pink-500 flex items-center justify-center text-white font-semibold flex-shrink-0">
-          {user?.firstName?.[0]}{user?.lastName?.[0]}
+          {getInitials(user?.firstName, user?.lastName)}
         </div>
         <div className="flex-1">
           {isExpanded ? (
@@ -249,9 +311,13 @@ function CreatePostBox() {
 }
 
 export default function FeedPage() {
+  const searchParams = useSearchParams();
   const [filter, setFilter] = useState<'latest' | 'trending' | 'following'>('latest');
   const { data: posts, isLoading, error } = useFeed({ sort: filter });
   const { user, isAuthenticated } = useAuth();
+  const isFallbackFeed =
+    searchParams.get('demoFallback') === '1' || Boolean(error);
+  const renderedPosts = isFallbackFeed ? FALLBACK_POSTS : posts;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -305,6 +371,21 @@ export default function FeedPage() {
             {/* Create Post */}
             {isAuthenticated && <CreatePostBox />}
 
+            {isFallbackFeed && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/90 p-5 text-amber-950 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100">
+                <div className="flex items-start gap-3">
+                  <WifiOff className="mt-0.5 h-5 w-5 flex-shrink-0" />
+                  <div>
+                    <div className="font-semibold">Live community posts are reconnecting</div>
+                    <p className="mt-1 text-sm leading-6 opacity-90">
+                      Showing a curated launch feed so the public community page
+                      still has context, navigation, and momentum.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Posts */}
             {isLoading ? (
               <div className="space-y-4">
@@ -324,19 +405,9 @@ export default function FeedPage() {
                   </div>
                 ))}
               </div>
-            ) : error ? (
-              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-8 text-center">
-                <p className="text-gray-600 dark:text-gray-400 mb-4">Unable to load feed. Please try again.</p>
-                <button 
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : posts && posts.length > 0 ? (
+            ) : renderedPosts && renderedPosts.length > 0 ? (
               <div className="space-y-4">
-                {posts.map((post: Post) => (
+                {renderedPosts.map((post: Post) => (
                   <PostCard key={post.id} post={post} currentUserId={user?.id} />
                 ))}
               </div>

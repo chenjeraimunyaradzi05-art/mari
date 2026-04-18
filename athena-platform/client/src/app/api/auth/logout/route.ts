@@ -4,8 +4,7 @@ import {
   forwardSetCookieHeaders,
   rejectUntrustedSameOriginRequest,
 } from '../proxy-utils';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+import { BACKEND_API_URL as API_URL } from '@/lib/runtime-config';
 
 export async function POST(request: NextRequest) {
   // Always clear the refresh cookie on the Next.js side, even if the backend call fails.

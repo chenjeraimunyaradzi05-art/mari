@@ -1,13 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { BACKEND_API_URL } from '@/lib/runtime-config';
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
 const registry = require('../i18n.registry.js');
-
-// Backend URL for API proxying.
-// On Netlify the env var is set in the dashboard; locally it defaults to localhost.
-const BACKEND_URL = (
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-).replace(/\/$/, '');
 
 // Routes that require authentication
 const protectedRoutes = [
@@ -55,7 +50,7 @@ export function middleware(request: NextRequest) {
   if (!process.env.NETLIFY) {
     const isAuthRoute = pathname.startsWith('/api/auth');
     if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
-      const destination = new URL(`${BACKEND_URL}${pathname}`);
+      const destination = new URL(`${BACKEND_API_URL}${pathname}`);
       request.nextUrl.searchParams.forEach((value, key) => {
         destination.searchParams.set(key, value);
       });

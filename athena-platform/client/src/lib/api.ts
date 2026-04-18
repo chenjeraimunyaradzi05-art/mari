@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { clearTokens, getAccessToken, setTokens } from './auth';
+import { getBackendApiUrl } from './runtime-config';
 
 // Direct backend origin — used for WebSocket connections and SSR calls
-export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+export const API_ORIGIN = getBackendApiUrl();
 
 // REST API base URL — use relative path so requests go through the proxy
 // (Netlify redirects in prod, Next.js rewrites in dev) avoiding CORS issues.
