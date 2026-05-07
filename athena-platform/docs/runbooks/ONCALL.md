@@ -1,8 +1,8 @@
 # On-Call Runbook
 
-**Backend:** `https://mari-production-5c60.up.railway.app`  
+**Backend:** `https://api.your-domain.com`  
 **Frontend:** `https://athena-empress.netlify.app`  
-**Hosting:** Railway (API + DB) / Netlify (web client)
+**Hosting:** Node container host (API) + Neon Postgres (DB) + Netlify (web client)
 
 ---
 
@@ -10,16 +10,16 @@
 
 ```bash
 # Basic health
-curl https://mari-production-5c60.up.railway.app/health
+curl https://api.your-domain.com/health
 
 # Readiness (checks DB)
-curl https://mari-production-5c60.up.railway.app/readyz
+curl https://api.your-domain.com/readyz
 
 # Auth flow diagnostics (12 checks)
-curl https://mari-production-5c60.up.railway.app/health/auth-diag
+curl https://api.your-domain.com/health/auth-diag
 
 # Metrics (requires token)
-curl -H "X-Metrics-Token: $METRICS_TOKEN" https://mari-production-5c60.up.railway.app/metrics
+curl -H "X-Metrics-Token: $METRICS_TOKEN" https://api.your-domain.com/metrics
 ```
 
 **Correlation:** Every request includes `X-Request-Id`. Error responses include `requestId` to correlate with server logs.
@@ -33,12 +33,12 @@ curl -H "X-Metrics-Token: $METRICS_TOKEN" https://mari-production-5c60.up.railwa
 2. Common causes:
    - **Missing DB columns:** Schema/migration mismatch (check Prisma migration status)
    - **JWT_SECRET not set:** Server falls back to random secret that won't persist across restarts
-   - **DB unreachable:** Check `DATABASE_URL` and Railway PostgreSQL status
-3. Check Railway logs: **Railway Dashboard → Service → Logs**
+   - **DB unreachable:** Check `DATABASE_URL` and Neon PostgreSQL status
+3. Check deployment logs in your backend host dashboard (Render/Fly.io/etc.) → Service → Logs
 
 ### `/readyz` is 503
 - DB connectivity failure. Check:
-  - Railway PostgreSQL add-on status
+  - Neon PostgreSQL add-on status
   - `DATABASE_URL` environment variable
   - Connection pool exhaustion (check active connections)
 
@@ -49,7 +49,7 @@ curl -H "X-Metrics-Token: $METRICS_TOKEN" https://mari-production-5c60.up.railwa
   - `RATE_LIMIT_WINDOW_MS` (default: 900000 = 15 min)
 
 ### CORS errors in browser console
-- Verify `ALLOWED_ORIGINS` on Railway includes the Netlify URL
+- Verify `ALLOWED_ORIGINS` on the backend host includes the Netlify URL
 - Verify `CLIENT_URL` and `FRONTEND_URL` are set correctly
 
 ### Cookies not being set (login works but refresh fails)
@@ -69,22 +69,22 @@ curl -H "X-Metrics-Token: $METRICS_TOKEN" https://mari-production-5c60.up.railwa
 | Severity | Response Time | Action |
 |----------|--------------|--------|
 | P0 — Site down | 15 min | Page on-call, rollback if needed |
-| P1 — Auth broken | 30 min | Check `/health/auth-diag`, review Railway logs |
+| P1 — Auth broken | 30 min | Check `/health/auth-diag`, review deployment logs |
 | P2 — Feature broken | 4 hours | Investigate, hotfix if straightforward |
 | P3 — Cosmetic/minor | Next business day | Triage and schedule |
 
 ### Rollback Procedures
 
-**Railway (backend):**
-Railway Dashboard → Deployments → Click previous successful deploy → Redeploy
+**Backend API:**
+Backend host dashboard → Deployments → Click previous successful deploy → Redeploy
 
 **Netlify (frontend):**
 Netlify Dashboard → Deploys → Click previous deploy → Publish deploy
 
 **Database migration rollback:**
 ```bash
-# Via Railway CLI
-railway run npx prisma migrate resolve --rolled-back <MIGRATION_NAME>
+# Run via your backend host's shell or locally with DIRECT_DATABASE_URL set
+npx prisma migrate resolve --rolled-back <MIGRATION_NAME>
 ```
 
 ---
@@ -105,15 +105,13 @@ railway run npx prisma migrate resolve --rolled-back <MIGRATION_NAME>
 ## Useful Commands
 
 ```bash
-# Check Railway service logs
-railway logs --service athena-api
+# Check backend API service logs (in your provider's dashboard or CLI)
+# Render:    render logs --service <id>
+# Fly.io:    flyctl logs -a <app>
 
-# Run Prisma migration status
-railway run npx prisma migrate status
-
-# Open Railway shell
-railway shell
+# Run Prisma migration status (locally with DIRECT_DATABASE_URL set, or via host shell)
+npx prisma migrate status
 
 # Check DB connectivity
-railway run npx prisma db execute --stdin <<< "SELECT 1;"
+npx prisma db execute --stdin <<< "SELECT 1;"
 ```

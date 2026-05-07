@@ -64,7 +64,7 @@ npx playwright show-report
 |-------------|----------|-----|---------|
 | Local dev | Local PostgreSQL | `localhost:5000` | Developer testing |
 | CI (GitHub Actions) | Ephemeral PostgreSQL | In-memory | Automated on PR |
-| Staging | Railway staging DB | Railway staging URL | Pre-production validation |
+| Staging | Neon staging DB | staging API URL | Pre-production validation |
 
 ---
 

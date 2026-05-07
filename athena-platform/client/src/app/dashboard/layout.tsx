@@ -113,11 +113,17 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[2000] focus:rounded-lg focus:bg-slate-950 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white dark:focus:bg-white dark:focus:text-slate-950"
+      >
+        Skip to dashboard content
+      </a>
       {/* Mobile menu overlay */}
       {isMobileMenuOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
@@ -125,13 +131,13 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-transform duration-300 lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-slate-200 bg-white shadow-xl shadow-slate-950/5 transition-all duration-300 dark:border-slate-800 dark:bg-slate-950 lg:translate-x-0 lg:shadow-none',
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
           !isSidebarOpen && 'lg:w-20'
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex h-18 items-center justify-between border-b border-slate-200 px-4 dark:border-slate-800">
           <Link href="/dashboard" className="flex items-center space-x-2">
             <Image src="/logo.svg" alt="ATHENA" width={32} height={32} className="rounded-lg flex-shrink-0" />
             {isSidebarOpen && (
@@ -140,14 +146,15 @@ export default function DashboardLayout({
           </Link>
           <button
             onClick={() => setIsMobileMenuOpen(false)}
-            className="lg:hidden p-2 text-gray-500 hover:text-gray-700"
+            className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 lg:hidden dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            aria-label="Close menu"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-4 px-2">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 scrollbar-thin">
           <ul className="space-y-1">
             {modeNavigation[mode].map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
@@ -156,10 +163,10 @@ export default function DashboardLayout({
                   <Link
                     href={item.href}
                     className={cn(
-                      'flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors',
+                      'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
                       isActive
-                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
+                        : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
                     )}
                   >
                     <item.icon className="w-5 h-5 flex-shrink-0" />
@@ -176,7 +183,7 @@ export default function DashboardLayout({
                 Mode
               </div>
             )}
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
               {([
                 { key: 'social', label: 'Social' },
                 { key: 'professional', label: 'Career' },
@@ -186,10 +193,10 @@ export default function DashboardLayout({
                   key={item.key}
                   onClick={() => setMode(item.key)}
                   className={cn(
-                    'flex-1 rounded-full px-3 py-1.5 text-xs font-semibold transition border',
+                    'rounded-md px-2.5 py-1.5 text-xs font-semibold transition',
                     mode === item.key
-                      ? 'bg-primary-500 text-white border-primary-500'
-                      : 'bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
+                      ? 'bg-white text-slate-950 shadow-sm dark:bg-slate-800 dark:text-white'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
                   )}
                 >
                   {isSidebarOpen ? item.label : item.label.charAt(0)}
@@ -216,10 +223,10 @@ export default function DashboardLayout({
                     <Link
                       href={item.href}
                       className={cn(
-                        'flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors relative',
+                        'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
                         isActive
-                          ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
-                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                          ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
+                          : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
                       )}
                     >
                       <div className="relative">
@@ -239,8 +246,8 @@ export default function DashboardLayout({
 
         {/* Upgrade CTA */}
         {isSidebarOpen && user?.subscriptionTier === 'FREE' && (
-          <div className="p-4 border-t border-gray-200 dark:border-gray-800">
-            <div className="bg-gradient-to-br from-primary-500 to-secondary-500 rounded-lg p-4 text-white">
+          <div className="border-t border-slate-200 p-4 dark:border-slate-800">
+            <div className="rounded-lg bg-slate-950 p-4 text-white dark:bg-white dark:text-slate-950">
               <div className="flex items-center space-x-2 mb-2">
                 <Crown className="w-5 h-5" />
                 <span className="font-semibold">Upgrade to Pro</span>
@@ -250,7 +257,7 @@ export default function DashboardLayout({
               </p>
               <Link
                 href="/dashboard/settings/billing"
-                className="block w-full bg-white text-primary-600 text-center py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition"
+                className="block w-full rounded-lg bg-white py-2 text-center text-sm font-semibold text-slate-950 transition hover:bg-slate-100 dark:bg-slate-950 dark:text-white dark:hover:bg-slate-800"
               >
                 Upgrade Now
               </Link>
@@ -259,36 +266,38 @@ export default function DashboardLayout({
         )}
 
         {/* User profile */}
-        <div className="border-t border-gray-200 dark:border-gray-800 p-4">
+        <div className="border-t border-slate-200 p-4 dark:border-slate-800">
           <div className="relative">
             <button
               onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="flex items-center space-x-3 w-full p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+              className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
+              aria-expanded={isProfileOpen}
+              aria-label="Open account menu"
             >
-              <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 dark:text-primary-400 font-semibold">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-100 font-semibold text-primary-700 dark:bg-primary-900 dark:text-primary-200">
                 {user ? getInitials(user.firstName, user.lastName) : '?'}
               </div>
               {isSidebarOpen && (
                 <>
                   <div className="flex-1 text-left">
-                    <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                       {user ? getFullName(user.firstName, user.lastName) : 'Guest'}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                       {user?.email}
                     </div>
                   </div>
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                  <ChevronDown className="h-4 w-4 text-slate-400" />
                 </>
               )}
             </button>
 
             {/* Profile dropdown */}
             {isProfileOpen && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-900 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1">
+              <div className="absolute bottom-full left-0 right-0 mb-2 rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-950/10 dark:border-slate-700 dark:bg-slate-900">
                 <Link
                   href={`/dashboard/profile/${user?.id}`}
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                   onClick={() => setIsProfileOpen(false)}
                 >
                   <User className="w-4 h-4" />
@@ -296,19 +305,19 @@ export default function DashboardLayout({
                 </Link>
                 <Link
                   href="/dashboard/settings"
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                   onClick={() => setIsProfileOpen(false)}
                 >
                   <Settings className="w-4 h-4" />
                   <span>Settings</span>
                 </Link>
-                <hr className="my-1 border-gray-200 dark:border-gray-700" />
+                <hr className="my-1 border-slate-200 dark:border-slate-700" />
                 <button
                   onClick={() => {
                     setIsProfileOpen(false);
                     logout();
                   }}
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-800 w-full"
+                  className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <LogOut className="w-4 h-4" />
                   <span>Sign out</span>
@@ -320,40 +329,43 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <div className={cn('lg:pl-64 transition-all', !isSidebarOpen && 'lg:pl-20')}>
+      <div className={cn('transition-all lg:pl-72', !isSidebarOpen && 'lg:pl-20')}>
         {/* Top navbar */}
-        <header className="sticky top-0 z-30 h-16 bg-white/80 dark:bg-gray-950/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
-          <div className="flex items-center justify-between h-full px-4 sm:px-6">
-            <div className="flex items-center space-x-4">
+        <header className="sticky top-0 z-30 h-16 border-b border-slate-200 bg-white/85 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/85">
+          <div className="flex h-full items-center justify-between px-4 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
               <button
                 onClick={() => setIsMobileMenuOpen(true)}
-                className="lg:hidden p-2 text-gray-500 hover:text-gray-700"
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 lg:hidden dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                aria-label="Open menu"
               >
                 <Menu className="w-5 h-5" />
               </button>
               <button
                 onClick={toggleSidebar}
-                className="hidden lg:block p-2 text-gray-500 hover:text-gray-700"
+                className="hidden rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 lg:block dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                aria-label="Collapse sidebar"
               >
                 <Menu className="w-5 h-5" />
               </button>
 
               {/* Search */}
-              <div className="hidden sm:block relative">
+              <label className="relative hidden sm:block">
+                <span className="sr-only">Search ATHENA</span>
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="text"
                   placeholder="Search jobs, people, companies..."
-                  className="w-80 pl-10 pr-4 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-[min(26rem,42vw)] rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-transparent focus:ring-2 focus:ring-primary-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
-              </div>
+              </label>
             </div>
 
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* Create post button */}
               <Link
                 href="/dashboard/create-post"
-                className="hidden sm:flex items-center space-x-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition"
+                className="hidden items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:flex dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
               >
                 <PenSquare className="w-4 h-4" />
                 <span className="text-sm font-medium">Post</span>
@@ -363,7 +375,7 @@ export default function DashboardLayout({
               <button
                 type="button"
                 onClick={toggleTheme}
-                className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                 aria-label="Toggle theme"
                 title="Toggle theme"
               >
@@ -379,7 +391,8 @@ export default function DashboardLayout({
               {/* Notifications */}
               <Link
                 href="/dashboard/notifications"
-                className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+                className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                aria-label="Notifications"
               >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
@@ -392,7 +405,8 @@ export default function DashboardLayout({
               {/* Messages */}
               <Link
                 href="/dashboard/messages"
-                className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+                className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                aria-label="Messages"
               >
                 <MessageSquare className="w-5 h-5" />
                 {unreadMessageCount > 0 && (
@@ -406,7 +420,7 @@ export default function DashboardLayout({
         </header>
 
         {/* Page content */}
-        <main className="min-h-[calc(100vh-4rem)]">{children}</main>
+        <main id="main-content" className="min-h-[calc(100vh-4rem)]">{children}</main>
       </div>
     </div>
   );

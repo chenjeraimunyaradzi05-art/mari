@@ -124,7 +124,7 @@ Messaging, groups, events, feed, search, gamification, privacy, safety, and audi
 - AI services: Python and FastAPI
 - Mobile: React Native with Expo
 - Infrastructure: Docker, Terraform, AWS
-- Deployment: Netlify frontend, Railway backend
+- Deployment: Netlify frontend, backend API
 - Payments: Stripe with support for regional payment method strategy
 
 ## Strategic Thesis

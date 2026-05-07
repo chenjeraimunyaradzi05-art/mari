@@ -9,7 +9,6 @@ out/
 build/
 dist/
 *.tsbuildinfo
-.nixpacks/
 
 # Environment files
 .env
@@ -43,6 +42,7 @@ test-results/
 # OS
 Thumbs.db
 .DS_Store
+*.lnk
 
 # Prisma
 prisma/*.db
@@ -76,5 +76,3 @@ google-service-account.json
 # Local Netlify folder
 .netlify
 
-# Railway
-.railway/

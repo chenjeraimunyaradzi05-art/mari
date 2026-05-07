@@ -8,7 +8,7 @@
 > multi-region infrastructure. The **current** deployment uses:
 >
 > - **Frontend:** `https://athena-empress.netlify.app` (Netlify, auto-SSL)
-> - **API:** `https://mari-production-5c60.up.railway.app` (Railway, auto-SSL)
+> - **API:** `https://api.your-domain.com` (Node container host, auto-SSL via the host or Cloudflare)
 >
 > For the current setup, see [DEPLOY.md](../../../DEPLOY.md) and [NETLIFY_SETUP.md](../../../NETLIFY_SETUP.md).
 

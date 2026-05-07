@@ -9,30 +9,36 @@
  *
  * It also runs Prisma migrations before starting the server, eliminating
  * the need for shell-level command chaining (which can fail silently on
- * some container runtimes like Railway).
+ * some container runtimes).
  */
 
 import { execSync } from 'node:child_process';
 import * as http from 'node:http';
 
-// Immediately log so Railway always sees output
 console.log('[ATHENA] start.ts — bootstrapping server...');
 console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
 console.log(`[ATHENA] node ${process.version}, pid ${process.pid}`);
 
 // ── Run Prisma migrations ──────────────────────────────────────────────
 // This replaces the shell `prisma migrate deploy && node dist/start.js`
-// pattern, which can silently fail on Railway's container runtime.
+// pattern, which can silently fail on some container runtimes.
 try {
+  const migrationDatabaseUrl =
+    process.env.DIRECT_DATABASE_URL || process.env.DATABASE_DIRECT_URL || process.env.DIRECT_URL;
+  const migrationEnv = migrationDatabaseUrl
+    ? { ...process.env, DATABASE_URL: migrationDatabaseUrl }
+    : process.env;
+
   console.log('[ATHENA] Running prisma migrate deploy...');
   execSync('npx prisma migrate deploy', {
+    env: migrationEnv,
     stdio: 'inherit',
-    timeout: 60_000, // 60 s safety net
+    timeout: 180_000,
   });
   console.log('[ATHENA] Prisma migrations complete.');
 } catch (migrationErr: any) {
   // Log but do NOT exit — the server should still start so /health can
-  // report status and we can diagnose via Railway logs.
+  // report status and we can diagnose via deploy logs.
   console.error('[ATHENA] Prisma migration failed (server will still start):', migrationErr.message);
 }
 
@@ -66,8 +72,8 @@ async function bootstrap() {
     console.error('[ATHENA] FATAL — index.js crashed during load:');
     console.error(err);
 
-    // Start a minimal health server so Railway healthcheck passes
-    // and we can see the error in the deploy logs
+    // Start a minimal health server so deploy health checks can surface
+    // the startup error instead of leaving the container silent.
     const PORT = process.env.PORT || 5000;
     const errorMessage = err instanceof Error ? err.message : String(err);
 

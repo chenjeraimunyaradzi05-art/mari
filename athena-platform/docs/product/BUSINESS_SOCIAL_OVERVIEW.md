@@ -128,7 +128,8 @@ ATHENA's engagement model is intended to support daily return behavior rather th
 | Mobile | React Native with Expo |
 | Infrastructure | Docker, Terraform, AWS |
 | Web Hosting | Netlify |
-| Backend Hosting | Railway |
+| Backend Hosting | Node container host (Render / Fly.io / AWS App Runner) |
+| Database | Neon PostgreSQL |
 | Payments | Stripe |
 | Auth | 15-minute JWT access token with rotating 7-day HttpOnly refresh cookie |
 

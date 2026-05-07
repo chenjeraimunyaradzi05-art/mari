@@ -2,7 +2,7 @@
 const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
-  // Enable standalone output for Docker/Railway deployments only.
+  // Enable standalone output for Docker deployments only.
   // Netlify's @netlify/plugin-nextjs manages output automatically.
   ...(process.env.NETLIFY ? {} : { output: 'standalone' }),
   // Security headers (DNS_SSL_CONFIGURATION.md §6)

@@ -15,8 +15,7 @@ const stripe = process.env.STRIPE_SECRET_KEY
   : null;
 const isProduction =
   process.env.NODE_ENV === 'production' ||
-  process.env.VERCEL_ENV === 'production' ||
-  process.env.RAILWAY_ENVIRONMENT === 'production';
+  process.env.VERCEL_ENV === 'production';
 const allowStripeSimulation = process.env.ALLOW_STRIPE_SIMULATION === 'true';
 
 // Formation fee amounts in cents by business type

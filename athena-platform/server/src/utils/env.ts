@@ -14,6 +14,27 @@ interface EnvValidation {
   errorMessage?: string;
 }
 
+const isPostgresConnectionString = (value: string) =>
+  value.startsWith('postgres://') || value.startsWith('postgresql://');
+
+const isNeonConnectionString = (value: string) => {
+  try {
+    return new URL(value).hostname.endsWith('.neon.tech');
+  } catch {
+    return value.includes('.neon.tech');
+  }
+};
+
+const hasSearchParam = (value: string, param: string, expected?: string) => {
+  try {
+    const url = new URL(value);
+    const actual = url.searchParams.get(param);
+    return expected === undefined ? actual !== null : actual === expected;
+  } catch {
+    return expected === undefined ? value.includes(`${param}=`) : value.includes(`${param}=${expected}`);
+  }
+};
+
 const ENV_VALIDATIONS: EnvValidation[] = [
   // Critical security
   {
@@ -26,7 +47,7 @@ const ENV_VALIDATIONS: EnvValidation[] = [
   {
     name: 'DATABASE_URL',
     required: true,
-    validator: (v) => v.startsWith('postgres://') || v.startsWith('postgresql://'),
+    validator: isPostgresConnectionString,
     errorMessage: 'DATABASE_URL must be a valid PostgreSQL connection string',
   },
   // Stripe (required for payments)
@@ -95,6 +116,38 @@ export function validateEnvironment(): ValidationResult {
       } else {
         warnings.push(message);
       }
+    }
+  }
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl && isNeonConnectionString(databaseUrl)) {
+    if (!hasSearchParam(databaseUrl, 'sslmode', 'require')) {
+      const message = 'Neon DATABASE_URL should include sslmode=require';
+      if (isProd) {
+        errors.push(message);
+      } else {
+        warnings.push(message);
+      }
+    }
+
+    if (!hasSearchParam(databaseUrl, 'channel_binding', 'require')) {
+      warnings.push('Neon DATABASE_URL should include channel_binding=require when available');
+    }
+
+    const host = (() => {
+      try {
+        return new URL(databaseUrl).hostname;
+      } catch {
+        return databaseUrl;
+      }
+    })();
+
+    const directUrl =
+      process.env.DIRECT_DATABASE_URL || process.env.DATABASE_DIRECT_URL || process.env.DIRECT_URL;
+    if (host.includes('-pooler.') && !directUrl) {
+      warnings.push(
+        'Set DIRECT_DATABASE_URL to the unpooled Neon connection string for Prisma migrations'
+      );
     }
   }
 

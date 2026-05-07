@@ -112,14 +112,14 @@ function JobsContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_40%,#ffffff_100%)] px-4 py-8 text-slate-900 dark:bg-[linear-gradient(180deg,#020617_0%,#0f172a_42%,#111827_100%)] dark:text-slate-100">
+    <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="container mx-auto max-w-7xl">
-        <div className="mb-8 rounded-[2rem] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur dark:border-white/10 dark:bg-slate-900/75 dark:shadow-[0_24px_80px_rgba(2,6,23,0.35)]">
+        <div className="mb-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-4 py-1.5 text-sm font-medium text-sky-700 dark:border-sky-400/20 dark:bg-sky-400/10 dark:text-sky-200">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-700 dark:border-sky-400/20 dark:bg-sky-400/10 dark:text-sky-200">
                 <Briefcase className="h-4 w-4" />
-                Career moves, curated with a dark-first public shell
+                Careers intelligence
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-slate-950 dark:text-white sm:text-4xl">
                 Explore roles without losing momentum.
@@ -131,7 +131,7 @@ function JobsContent() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/40">
                 <div className="text-sm font-semibold text-slate-950 dark:text-white">
                   Search
                 </div>
@@ -139,7 +139,7 @@ function JobsContent() {
                   Keyword, role, company
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/40">
                 <div className="text-sm font-semibold text-slate-950 dark:text-white">
                   Filter
                 </div>
@@ -147,12 +147,12 @@ function JobsContent() {
                   Type, city, remote
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-4 dark:border-white/10 dark:bg-white/5">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/40">
                 <div className="text-sm font-semibold text-slate-950 dark:text-white">
-                  Fallback
+                  Resilient
                 </div>
                 <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Spotlight roles stay visible
+                  Spotlight roles stay available
                 </div>
               </div>
             </div>
@@ -161,7 +161,7 @@ function JobsContent() {
 
         <div className="flex flex-col gap-8 md:flex-row">
           <aside className="w-full flex-shrink-0 space-y-6 md:w-64">
-            <div className="rounded-[1.5rem] border border-slate-200/80 bg-white/90 p-6 shadow-sm dark:border-white/10 dark:bg-slate-900/75">
+            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <h3 className="mb-4 flex items-center gap-2 font-semibold">
                 <Filter className="h-4 w-4" /> Filters
               </h3>
@@ -205,7 +205,7 @@ function JobsContent() {
           </aside>
 
           <div className="flex-1">
-            <div className="mb-6 rounded-[1.5rem] border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-white/10 dark:bg-slate-900/75">
+            <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <form onSubmit={handleSearch} className="flex flex-col gap-4 md:flex-row">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -230,7 +230,7 @@ function JobsContent() {
             </div>
 
             {usingFallbackData && loadMessage && (
-              <div className="mb-6 rounded-[1.5rem] border border-amber-200 bg-amber-50/90 p-5 text-amber-950 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100">
+              <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-5 text-amber-950 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100">
                 <div className="flex items-start gap-3">
                   <WifiOff className="mt-0.5 h-5 w-5 flex-shrink-0" />
                   <div>
@@ -256,9 +256,9 @@ function JobsContent() {
                     Found {total} {usingFallbackData ? 'spotlight roles' : 'jobs'}
                   </div>
                   {usingFallbackData && (
-                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                    <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                       <Sparkles className="h-3.5 w-3.5" />
-                      Curated fallback mode
+                      Curated spotlight mode
                     </div>
                   )}
                 </div>
@@ -266,7 +266,7 @@ function JobsContent() {
                 {jobs.length > 0 ? (
                   jobs.map((job) => <JobCard key={job.id} job={job} />)
                 ) : (
-                  <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/90 py-12 text-center dark:border-white/15 dark:bg-slate-900/70">
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-white py-12 text-center dark:border-slate-700 dark:bg-slate-900">
                     <h3 className="text-lg font-medium text-gray-900 dark:text-white">
                       No jobs found
                     </h3>

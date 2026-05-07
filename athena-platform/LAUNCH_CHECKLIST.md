@@ -48,7 +48,10 @@
 
 ---
 
-## 2. Backend Deployment (Render/Railway)
+## 2. Backend Deployment (Node container host)
+
+> The Express API runs anywhere a Node 20 container can run (Render, Fly.io, AWS App Runner, etc.).
+> The bundled `Dockerfile` is the source of truth — no host-specific config required.
 
 ### 2.1 Environment Variables
 Copy from `.env.production.example` and configure:

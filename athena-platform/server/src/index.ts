@@ -521,7 +521,6 @@ export { app, httpServer };
  * Also called directly when this file is the entry point (require.main === module).
  */
 export async function startServer() {
-  // Early log so Railway shows something immediately
   console.log('[ATHENA] Starting server process...');
   console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
 
@@ -539,7 +538,7 @@ export async function startServer() {
 
   // Ensure DB connection with retry/backoff
   try {
-    await connectWithRetry(6, 500);
+    await connectWithRetry(8, 750);
     logger.info('Database connected');
   } catch (err) {
     logger.error('Failed to connect to database after retries', { err });

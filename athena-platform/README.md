@@ -161,20 +161,34 @@ npm run e2e
 
 ## 🚢 Deployment
 
-### Backend (Railway)
+### Backend API (Node container host)
 
-1. Connect your GitHub repository
+The Express API ships with a multi-stage `Dockerfile` and is portable across any
+container host (Render, Fly.io, AWS App Runner, your own VM, etc.).
+
+1. Connect your GitHub repository on the host of your choice
 2. Set root directory to `athena-platform/server`
-3. Railway auto-detects `Dockerfile` / `nixpacks.toml`
-4. Entry point: `node dist/start.js` (runs Prisma migrations then boots server)
-5. Add environment variables from `server/.env.railway`
+3. Use the bundled `Dockerfile` (no extra build config required)
+4. Entry point: `node dist/start.js` (runs Prisma migrations then boots the server)
+5. Set the env vars from [`server/.env.production.example`](./server/.env.production.example)
+   (at minimum: `DATABASE_URL`, `DIRECT_DATABASE_URL`, `JWT_SECRET`, `CLIENT_URL`,
+   `ALLOWED_ORIGINS`, `TRUST_PROXY=true`)
 
 ### Frontend (Netlify)
 
 1. Connect your GitHub repository
 2. Set base directory to `athena-platform/client`
 3. `@netlify/plugin-nextjs` handles SSR, API routes, and middleware automatically
-4. Add environment variables: `NEXT_PUBLIC_API_URL` = Railway backend URL
+4. Add environment variables: `NEXT_PUBLIC_API_URL` (backend API URL),
+   `NEXT_PUBLIC_APP_URL` (this Netlify site's URL),
+   `NEXT_PUBLIC_SOCKET_URL` (defaults to `NEXT_PUBLIC_API_URL`)
+
+### Database (Neon)
+
+- Use Neon's pooled URL for `DATABASE_URL` (hostname includes `-pooler`).
+- Use Neon's direct/unpooled URL for `DIRECT_DATABASE_URL` (used by Prisma migrations).
+- Migrations run automatically on every deploy from `start.ts`.
+- Netlify users can provision Neon directly via the official Neon integration.
 
 See [DEPLOY.md](./DEPLOY.md) for the complete deployment guide.
 

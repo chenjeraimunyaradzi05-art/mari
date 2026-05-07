@@ -1,5 +1,5 @@
 const DEFAULT_PUBLIC_APP_URL = 'https://athena-empress.netlify.app';
-const DEFAULT_BACKEND_API_URL = 'https://mari-production-5c60.up.railway.app';
+const DEFAULT_BACKEND_API_URL = 'https://api.athena.app';
 
 const STATIC_PUBLIC_ENV = {
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
@@ -90,8 +90,7 @@ export function getBackendApiUrl(): string {
       'API_URL',
       'BACKEND_URL',
       'NEXT_PRIVATE_API_URL',
-      'RAILWAY_PUBLIC_DOMAIN',
-      'RAILWAY_URL',
+      'DEPLOY_URL',
       'NEXT_PUBLIC_API_URL',
     ]) ?? (isProductionLike() ? DEFAULT_BACKEND_API_URL : 'http://localhost:5000')
   );

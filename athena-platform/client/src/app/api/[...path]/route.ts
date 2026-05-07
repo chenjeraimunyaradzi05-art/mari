@@ -140,7 +140,7 @@ function buildFallbackResponse(pathname: string, searchParams: URLSearchParams) 
 
 /**
  * Catch-all API proxy – forwards any /api/* request that does NOT have
- * a more-specific Next.js route handler to the Railway backend.
+ * a more-specific Next.js route handler to the configured backend.
  *
  * Specific handlers (e.g. app/api/auth/login/route.ts) always take
  * priority over this catch-all in Next.js App Router routing.

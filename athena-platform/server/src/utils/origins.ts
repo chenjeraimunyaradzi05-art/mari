@@ -13,7 +13,7 @@ export function getAllowedOrigins(): string[] {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const platformOrigins = [process.env.NETLIFY_URL, process.env.RAILWAY_URL].filter(
+  const platformOrigins = [process.env.NETLIFY_URL, process.env.DEPLOY_URL].filter(
     (origin): origin is string => Boolean(origin)
   );
 
@@ -41,8 +41,7 @@ export function isCorsOriginAllowed(origin: string | undefined): boolean {
   }
 
   if (arePreviewOriginsEnabled()) {
-    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
-        /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
+    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin)) {
       return true;
     }
   }

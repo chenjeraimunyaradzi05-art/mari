@@ -1,222 +1,275 @@
 # ATHENA Platform — Deployment Guide
 
-## Architecture
+This is the canonical deployment guide for the ATHENA Platform. The current
+production stack is:
 
-```
-┌──────────────────┐       ┌──────────────────────────────┐
-│   Netlify CDN    │──────▶│  Railway (Express API)       │
-│  (Next.js SSR)   │ /api  │  + PostgreSQL  + Redis       │
-│  Port: 443       │ proxy │  Port: dynamic (Railway)     │
-└──────────────────┘       └──────────────────────────────┘
-athena-empress.netlify.app  mari-production-5c60.up.railway.app
+- **Frontend:** [Netlify](https://www.netlify.com) (Next.js 14 via `@netlify/plugin-nextjs`)
+- **Database:** [Neon](https://neon.tech) Serverless Postgres
+  (provisionable directly from the Netlify Neon integration)
+- **Backend API:** the Express server in `athena-platform/server/` ships with a
+  multi-stage `Dockerfile` and runs on any Node 20 container host (Render,
+  Fly.io, AWS App Runner, your own VM, etc.)
+- **Realtime:** Socket.IO is hosted alongside the backend API
+- **Cache / queues:** Redis (managed: Upstash, Redis Cloud) — optional
+- **Object storage:** S3-compatible bucket — optional, only needed for uploads
+
+```text
+┌──────────────────────────┐       ┌────────────────────────────────────┐
+│ Netlify CDN + Functions  │──────▶│  Backend API (Express + Socket.IO) │
+│ Next.js 14 SSR / ISR     │ /api  │  + optional Redis + optional S3    │
+│ athena-empress.netlify.  │ proxy │  Container host (Render/Fly.io/…)  │
+│ app                      │       └────────────────┬───────────────────┘
+└──────────────────────────┘                        │
+                                                    ▼
+                                       ┌──────────────────────────┐
+                                       │  Neon Serverless Postgres │
+                                       │  (pooled + direct URLs)   │
+                                       └──────────────────────────┘
 ```
 
-- **Frontend (Netlify):** Next.js 14 App Router → `https://athena-empress.netlify.app`
-- **Backend (Railway):** Express + Prisma + Socket.IO → `https://mari-production-5c60.up.railway.app`
-- **Database:** PostgreSQL 16 (Railway add-on)
-- **Cache/Queue:** Redis 7 (Railway add-on)
+> Socket.IO and `/uploads/*` are served by the backend host — Netlify does
+> not proxy them. The client uses `NEXT_PUBLIC_SOCKET_URL` (defaults to
+> `NEXT_PUBLIC_API_URL`).
 
 ---
 
-## 1. Railway — Backend API
+## 1. Database — Neon
 
-### 1.1 Setup
+1. Create a project at [console.neon.tech](https://console.neon.tech) (or
+   provision Neon from your Netlify site's **Integrations** tab).
+2. Copy both connection strings from the Neon dashboard:
+   - **Pooled** (hostname includes `-pooler`) — used at runtime
+   - **Direct** (no pooler) — used by Prisma migrations
+3. Set the env vars on the backend host:
 
-1. Create a new Railway project at [railway.app](https://railway.app)
-2. Add a **PostgreSQL** database service (auto-provides `DATABASE_URL`)
-3. Add a **Redis** service (auto-provides `REDIS_URL`)
-4. Add a new service from your GitHub repo
-5. Set **Root Directory** to `athena-platform/server`
-6. Railway will auto-detect `railway.json` and `nixpacks.toml`
+   ```bash
+   DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx-pooler.region.aws.neon.tech/athena_prod?sslmode=require&channel_binding=require&connect_timeout=15&pool_timeout=15"
+   DIRECT_DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx.region.aws.neon.tech/athena_prod?sslmode=require&channel_binding=require&connect_timeout=15"
+   ```
 
-### 1.2 Required Environment Variables
+4. Migrations run automatically on every deploy from `start.ts` (`prisma migrate deploy`).
 
-Set these in **Railway → Service → Variables:**
+> If you used the Netlify Neon integration, a `NETLIFY_DATABASE_URL` is also
+> exposed to the frontend; you do **not** need to forward it to the backend —
+> the backend always reads `DATABASE_URL`/`DIRECT_DATABASE_URL` from its own
+> host's environment.
+
+---
+
+## 2. Backend API — Container host
+
+The `athena-platform/server/Dockerfile` is the source of truth. Any host that
+can build a Dockerfile and inject env vars will work. Two concrete examples:
+
+### 2.1 Render (Docker Web Service)
+
+1. Create a new **Web Service** at [dashboard.render.com](https://dashboard.render.com).
+2. Connect the repo, select **Docker** as the runtime.
+3. Set **Root Directory** to `athena-platform/server`.
+4. Health check path: `/health`.
+5. Add the env vars listed in §2.3 below.
+
+### 2.2 Fly.io (`fly launch` from `athena-platform/server`)
+
+```bash
+cd athena-platform/server
+flyctl launch --copy-config --no-deploy   # generates fly.toml
+flyctl secrets set DATABASE_URL='...' DIRECT_DATABASE_URL='...' \
+                   JWT_SECRET='...' CLIENT_URL='...' ALLOWED_ORIGINS='...'
+flyctl deploy
+```
+
+### 2.3 Required env vars
+
+Full template: [`server/.env.production.example`](./server/.env.production.example)
 
 | Variable | Description | Example |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | *auto-set by Railway add-on* |
-| `REDIS_URL` | Redis connection string | *auto-set by Railway add-on* |
-| `JWT_SECRET` | 32+ char secret for auth tokens | Generate: `openssl rand -hex 32` |
-| `NODE_ENV` | Must be `production` | `production` |
+| `DATABASE_URL` | Neon pooled URL | see §1 |
+| `DIRECT_DATABASE_URL` | Neon direct URL (Prisma migrations) | see §1 |
+| `JWT_SECRET` | 32+ char random secret | `openssl rand -hex 32` |
+| `NODE_ENV` | `production` | `production` |
 | `CLIENT_URL` | Netlify frontend URL | `https://athena-empress.netlify.app` |
-| `FRONTEND_URL` | Same as CLIENT_URL | `https://athena-empress.netlify.app` |
-| `ALLOWED_ORIGINS` | CORS origins (comma-separated) | `https://athena-empress.netlify.app` |
-| `TRUST_PROXY` | Behind Railway load balancer | `true` |
-| `APP_URL` | This service's public URL | `https://mari-production-5c60.up.railway.app` |
+| `FRONTEND_URL` | Same as `CLIENT_URL` | `https://athena-empress.netlify.app` |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins | `https://athena-empress.netlify.app` |
+| `TRUST_PROXY` | Behind a load balancer | `true` |
+| `APP_URL` | This service's public URL | `https://api.your-domain.com` |
 
-> **Full template:** See `server/.env.railway` for all variables with descriptions.
-
-### 1.3 Optional Environment Variables
+### 2.4 Optional env vars
 
 | Variable | Service | Notes |
 |---|---|---|
-| `STRIPE_SECRET_KEY` | Stripe | `sk_live_...` or `sk_test_...` |
+| `STRIPE_SECRET_KEY` | Stripe | `sk_live_...` |
 | `STRIPE_WEBHOOK_SECRET` | Stripe | `whsec_...` |
-| `OPENAI_API_KEY` | OpenAI | For AI features (career coach, resume optimizer) |
-| `SENDGRID_API_KEY` | SendGrid | For transactional email |
+| `OPENAI_API_KEY` | OpenAI | AI features (career coach, resume optimizer) |
+| `SENDGRID_API_KEY` | SendGrid | Transactional email |
 | `SENDGRID_FROM_EMAIL` | SendGrid | e.g. `noreply@athena.com` |
-| `AWS_ACCESS_KEY_ID` | AWS S3 | For file uploads |
-| `AWS_SECRET_ACCESS_KEY` | AWS S3 | For file uploads |
-| `AWS_REGION` | AWS S3 | e.g. `ap-southeast-2` |
-| `S3_BUCKET` | AWS S3 | Upload bucket name |
-| `SENTRY_DSN` | Sentry | Error tracking |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS S3 | File uploads |
+| `AWS_REGION` / `S3_BUCKET` | AWS S3 | File uploads |
+| `REDIS_URL` | Upstash / Redis Cloud | Caching / sessions / queues |
+| `SENTRY_DSN` | Sentry | Backend error tracking |
 | `DV_ENCRYPTION_KEY` | DV-Safe | 64 hex chars: `openssl rand -hex 32` |
 | `ENABLE_WORKERS` | BullMQ | Set `true` to enable background jobs |
 | `METRICS_TOKEN` | Prometheus | Protect `/metrics` endpoint |
 
-### 1.4 Build & Deploy
-
-Railway auto-deploys from GitHub on every push to `main`. The pipeline:
-
-1. **Build**: Dockerfile multi-stage (deps → builder → production)
-2. **Start**: `node dist/start.js` (migrations run inside `start.ts` via `execSync`)
-3. **Health check**: `GET /health` (300s timeout)
-4. **Restart policy**: on failure, up to 10 retries
-
-### 1.5 Verify
+### 2.5 Verify
 
 ```bash
-curl https://mari-production-5c60.up.railway.app/health
-# ✅ {"status":"healthy","timestamp":"...","version":"1.0.0"}
+curl https://api.your-domain.com/health
+# {"status":"healthy","timestamp":"...","version":"1.0.0"}
 
-curl https://mari-production-5c60.up.railway.app/readyz
-# ✅ {"status":"ready","database":"connected"}
+curl https://api.your-domain.com/readyz
+# {"status":"ready","database":"connected"}
+
+curl https://api.your-domain.com/health/auth-diag
+# 12-point auth dependency check
 ```
 
 ---
 
-## 2. Netlify — Frontend
+## 3. Frontend — Netlify
 
-### 2.1 Setup
+### 3.1 Setup
 
-1. Connect your GitHub repo at [app.netlify.com](https://app.netlify.com)
-2. Set **Base directory** to `athena-platform/client`
-3. Build command and plugins are auto-detected from `netlify.toml`
-4. The `@netlify/plugin-nextjs` handles SSR, ISR, middleware, and API routes
+1. At [app.netlify.com](https://app.netlify.com) connect the GitHub repo.
+2. Set **Base directory** to `athena-platform/client`.
+3. Build command and plugins are auto-detected from `client/netlify.toml`.
+4. The `@netlify/plugin-nextjs` plugin handles SSR, ISR, middleware, and route handlers.
 
-### 2.2 Required Environment Variables
+### 3.2 Required env vars
 
 Set in **Netlify Dashboard → Site Settings → Environment Variables:**
 
 | Variable | Value |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | `https://mari-production-5c60.up.railway.app` |
+| `NEXT_PUBLIC_API_URL` | `https://api.your-domain.com` |
 | `NEXT_PUBLIC_APP_URL` | This site's URL, e.g. `https://athena-empress.netlify.app` |
+| `NEXT_PUBLIC_SOCKET_URL` | Defaults to `NEXT_PUBLIC_API_URL` if unset |
 
-> **⚠️ Critical:** Without `NEXT_PUBLIC_API_URL`, all API calls return 503. The `netlify.toml` proxies `/api/*`, `/uploads/*`, and `/socket.io/*` to this URL.
+> ⚠️ Without `NEXT_PUBLIC_API_URL`, all API calls will fail. The middleware
+> rewrites non-auth `/api/*` to this URL; auth and uploads use Next.js route
+> handlers so cookies/streams are forwarded correctly.
 
-### 2.3 Optional Environment Variables
+### 3.3 Optional env vars
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN for frontend error tracking |
-| `SENTRY_ORG` | Sentry org for source map uploads |
-| `SENTRY_PROJECT` | Sentry project name |
-| `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics key |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (`pk_live_...`) |
-| `NEXT_PUBLIC_ENABLE_AI_FEATURES` | Enable AI features (`true` / `false`) |
-| `NEXT_PUBLIC_MAINTENANCE_MODE` | Enable maintenance page (`true` / `false`) |
+| `NEXT_PUBLIC_SENTRY_DSN` | Frontend Sentry DSN |
+| `SENTRY_ORG` / `SENTRY_PROJECT` | For source-map upload during build |
+| `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `pk_live_...` |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Google Identity Services client ID |
+| `NEXT_PUBLIC_ENABLE_AI_FEATURES` | `true` / `false` |
+| `NEXT_PUBLIC_MAINTENANCE_MODE` | `true` / `false` |
 
-> **Full template:** See `client/.env.netlify` for all variables with descriptions.
+> Full template: [`client/.env.netlify`](./client/.env.netlify).
 
-### 2.4 Deploy
+### 3.4 Deploy
 
-After setting env vars, trigger a deploy:
-
-**Netlify Dashboard → Deploys → Trigger Deploy → Deploy site**
-
-Netlify auto-deploys on every push to `main`.
+Netlify auto-deploys on every push to `main`. To trigger manually: **Deploys
+→ Trigger Deploy → Deploy site**. There is also an opt-in
+`.github/workflows/netlify-deploy.yml` workflow if you'd rather drive the
+deploy from GitHub Actions (requires `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`).
 
 ---
 
-## 3. Pre-Flight Checklist
+## 4. Pre-flight checklist
 
-### Railway (Backend)
-- [ ] PostgreSQL add-on attached (`DATABASE_URL` auto-set)
-- [ ] Redis add-on attached (`REDIS_URL` auto-set)
-- [ ] `NODE_ENV=production` set
-- [ ] `JWT_SECRET` set (32+ chars, generated with `openssl rand -hex 32`)
-- [ ] `CLIENT_URL` / `FRONTEND_URL` / `ALLOWED_ORIGINS` set to Netlify URL
-- [ ] `TRUST_PROXY=true` set
-- [ ] `APP_URL` set to `https://mari-production-5c60.up.railway.app`
-- [ ] Deploy succeeds and `/health` returns 200
+### Neon
+- [ ] Project created, both pooled + direct URLs captured
+- [ ] `DATABASE_URL` (pooled) and `DIRECT_DATABASE_URL` set on backend host
 
-### Netlify (Frontend)
-- [ ] `NEXT_PUBLIC_API_URL` set to `https://mari-production-5c60.up.railway.app`
+### Backend host (Render / Fly.io / your VM)
+- [ ] `JWT_SECRET` set (32+ chars from `openssl rand -hex 32`)
+- [ ] `NODE_ENV=production`, `TRUST_PROXY=true`
+- [ ] `CLIENT_URL` / `FRONTEND_URL` / `ALLOWED_ORIGINS` set to the Netlify URL
+- [ ] `APP_URL` set to the backend's public URL
+- [ ] `/health` returns 200
+- [ ] `/readyz` returns 200 and `database: connected`
+
+### Netlify
+- [ ] `NEXT_PUBLIC_API_URL` set to the backend's public URL
 - [ ] `NEXT_PUBLIC_APP_URL` set to this Netlify site's URL
-- [ ] Deploy succeeds and site loads
+- [ ] Site builds and loads
 
-### Integration
-- [ ] Registration flow works (creates user in Railway DB)
-- [ ] Login flow works (JWT issued, dashboard loads)
-- [ ] No CORS errors in browser console
-- [ ] API proxy works (`/api/health` returns Railway health response)
+### Integration smoke test
+- [ ] Registration creates a user in Neon
+- [ ] Verification email link works (or check `pending` state on `/verify-email`)
+- [ ] Login issues a JWT and the dashboard loads
+- [ ] No CORS errors in the browser console
+- [ ] `/api/health` from the Netlify site returns the backend's health JSON
 
-### Optional Services
-- [ ] Stripe webhook: `https://mari-production-5c60.up.railway.app/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.*`, `invoice.*`)
+### Optional
+- [ ] Stripe webhook: `https://api.your-domain.com/api/webhooks/stripe`
+      (events: `checkout.session.completed`, `customer.subscription.*`, `invoice.*`)
 - [ ] SendGrid sender verified
-- [ ] S3 bucket created + IAM credentials set
-- [ ] Sentry DSN set (both Railway + Netlify)
-- [ ] `DV_ENCRYPTION_KEY` set (64 hex chars) if DV-Safe features needed
+- [ ] S3 bucket + IAM credentials configured
+- [ ] Sentry DSNs set on both backend host and Netlify
+- [ ] `DV_ENCRYPTION_KEY` set if DV-Safe features are needed
 
 ---
 
-## 4. Monitoring
+## 5. Monitoring
 
 | Endpoint | Purpose | Auth |
 |---|---|---|
 | `GET /health` | Basic health check | None |
-| `GET /livez` | Kubernetes/Railway liveness probe | None |
-| `GET /readyz` | Readiness probe (checks DB) | None |
-| `GET /metrics` | Prometheus metrics | `METRICS_TOKEN` (Bearer or `X-Metrics-Token` header) |
+| `GET /livez` | Liveness probe | None |
+| `GET /readyz` | Readiness (checks DB) | None |
+| `GET /health/auth-diag` | 12-point auth dependency check | None |
+| `GET /metrics` | Prometheus metrics | `METRICS_TOKEN` (Bearer or `X-Metrics-Token`) |
 
 ---
 
-## 5. Database
+## 6. Database operations
 
 ### Migrations (automatic)
-Migrations run automatically on every deploy via `execSync` inside `start.ts` before the server boots.
+`start.ts` runs `prisma migrate deploy` before booting the server, using
+`DIRECT_DATABASE_URL` if available, otherwise `DATABASE_URL`.
 
-### Seed Data (manual, optional)
+### Seed data (manual, optional)
 ```bash
-# Via Railway CLI
-railway run npx ts-node prisma/seed.ts
-
-# Or via Railway shell
-railway shell
 npx ts-node prisma/seed.ts
 ```
 
 ### Backup
 ```bash
-# Via Railway CLI
-railway run pg_dump $DATABASE_URL > backup_$(date +%Y%m%d).sql
+pg_dump $DIRECT_DATABASE_URL > backup_$(date +%Y%m%d).sql
+```
+
+> Neon also provides point-in-time restore from the console — prefer that
+> over manual `pg_dump` for production.
+
+---
+
+## 7. Rollback
+
+### Backend host
+Most container hosts retain previous deployments — redeploy the previous
+successful image from the host's dashboard (Render → **Deploys**, Fly.io →
+`flyctl releases` + `flyctl deploy --image <previous>`).
+
+### Netlify
+**Netlify Dashboard → Deploys → Click previous deploy → Publish deploy.**
+
+### Database migration
+```bash
+# Locally with DIRECT_DATABASE_URL set, or via the host's shell
+npx prisma migrate resolve --rolled-back <MIGRATION_NAME>
 ```
 
 ---
 
-## 6. Rollback
+## 8. Troubleshooting
 
-### Railway
-Railway keeps previous deployments. To rollback:
-**Railway Dashboard → Deployments → Click previous successful deploy → Redeploy**
-
-### Netlify
-**Netlify Dashboard → Deploys → Click previous deploy → Publish deploy**
-
----
-
-## 7. Troubleshooting
-
-| Issue | Solution |
+| Issue | Fix |
 |---|---|
-| API returns 503 on Netlify | Set `NEXT_PUBLIC_API_URL` in Netlify env vars, then redeploy |
-| CORS errors | Add Netlify domain to `ALLOWED_ORIGINS` on Railway |
-| DB connection fails | Check `DATABASE_URL` format: `postgresql://user:pass@host:port/db` |
-| Redis errors (non-fatal) | Redis is optional — app works without it (caching disabled) |
-| Prisma migration fails | Check DB is accessible and `DATABASE_URL` is correct |
-| Socket.IO not connecting | Ensure `ALLOWED_ORIGINS` includes Netlify domain |
-| Health check fails | Check Railway logs — `start.ts` logs boot errors visibly |
-| Build timeout | Increase build timeout in Railway settings (default 15min) |
-| `JWT_SECRET` warning | Set `JWT_SECRET` — random fallback won't persist across restarts |
+| Frontend API calls return 503 | `NEXT_PUBLIC_API_URL` is unset or wrong on Netlify; redeploy after fixing |
+| CORS errors in browser console | Add the Netlify domain to `ALLOWED_ORIGINS` on the backend host |
+| `/readyz` returns 503 | Check `DATABASE_URL` and Neon project status; check pool exhaustion |
+| Redis errors (non-fatal) | Redis is optional — caching/queues are skipped when `REDIS_URL` is unset |
+| Prisma migration fails | Use `DIRECT_DATABASE_URL` (unpooled) for migrations, not the pooled URL |
+| Socket.IO not connecting | Set `NEXT_PUBLIC_SOCKET_URL` to the backend's public URL |
+| Health check fails on first deploy | Inspect backend host logs — `start.ts` prints the failing step |
+| `JWT_SECRET` warning at boot | Set `JWT_SECRET`; the random fallback won't survive restarts |
+| Auth flow returns 500 | Hit `GET /health/auth-diag` — it identifies which of the 12 auth dependencies failed |

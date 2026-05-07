@@ -8,7 +8,7 @@
   NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
   # Set NEXT_PUBLIC_API_URL in Netlify Dashboard Environment Variables
-  # Example: NEXT_PUBLIC_API_URL = "https://server-production-1849.up.railway.app"
+  # Example: NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
 
 # Enable Next.js runtime - REQUIRED for Next.js 14 on Netlify
 [[plugins]]

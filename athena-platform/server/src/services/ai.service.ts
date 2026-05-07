@@ -9,8 +9,7 @@ class AiService {
   constructor() {
     this.isProduction =
       process.env.NODE_ENV === 'production' ||
-      process.env.VERCEL_ENV === 'production' ||
-      process.env.RAILWAY_ENVIRONMENT === 'production';
+      process.env.VERCEL_ENV === 'production';
     this.allowSimulation = process.env.AI_ALLOW_SIMULATION === 'true';
 
     // Prefer the specific AI_ vars if available, fallback to generic OPENAI_API_KEY

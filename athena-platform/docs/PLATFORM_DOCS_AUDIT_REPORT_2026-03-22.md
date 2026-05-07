@@ -116,7 +116,7 @@ This is enough to count as implemented architecture, but not enough to count as 
 
 There is meaningful operational documentation for:
 
-- Railway
+- container backend host (Render / Fly.io / etc.)
 - Netlify
 - launch checklists
 - production deployment
@@ -211,13 +211,13 @@ Assessment:
 
 ### 6. Deployment automation is internally inconsistent
 
-The deployment docs mostly point to **Railway + Netlify**, but the repo contains competing automation targets.
+The deployment docs mostly point to **backend API + Netlify**, but the repo contains competing automation targets.
 
 Observed conflicts:
 
 - `athena-platform/.github/workflows/web.yml` deploys via **Vercel**
-- root workflows deploy via **Railway** and **Netlify**
-- some deployment docs still mention old root-level `railway.toml` / `railway.json` / `nixpacks.toml` even though those root files are no longer present
+- root workflows deploy via **Netlify** (`.github/workflows/netlify-deploy.yml`); the backend container host is configured directly in its own dashboard (no GitHub Actions deploy step today)
+- (resolved 2026-05-08) deployment docs were rewritten to drop the old root-level Railway/Nixpacks references; the backend now ships as a portable `Dockerfile` only
 
 Assessment:
 
@@ -231,7 +231,7 @@ Examples:
 - `docs/api/API_OVERVIEW.md` documents `POST /api/auth/verify-email`, but server code implements `GET /api/auth/verify-email`
 - `client/src/app/api/health/route.ts` proxies to `${API_URL}/api/health`, while the backend exposes `/health` and `/health/*`, not `/api/health`
 - `docs/runbooks/TESTING.md` references `src/__tests__/validation.test.ts`, which does not exist
-- `DEPLOYMENT_GUIDE.md` references root `railway.toml`, but current root-level Railway metadata files are absent
+- (resolved 2026-05-08) `DEPLOYMENT_GUIDE.md` was rewritten around Netlify + Neon + a host-neutral container backend; no root-level platform metadata is required
 
 Assessment:
 
@@ -264,7 +264,7 @@ These are generally useful and grounded in real files, though some line referenc
 
 - `DEPLOYMENT_GUIDE.md`
 - `NETLIFY_SETUP.md`
-- `RAILWAY_SETUP.md`
+- `NEON_SETUP.md`
 - `athena-platform/DEPLOY.md`
 - `athena-platform/LAUNCH_CHECKLIST.md`
 - `athena-platform/docs/api/API_OVERVIEW.md`
@@ -405,7 +405,7 @@ The platform is best described as:
 - `DEPLOYMENT_GUIDE.md`
 - `MOBILE_BUILD_GUIDE.md`
 - `NETLIFY_SETUP.md`
-- `RAILWAY_SETUP.md`
+- `NEON_SETUP.md`
 
 ### Deployment stub docs
 

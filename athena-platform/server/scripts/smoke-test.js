@@ -6,7 +6,7 @@
  *
  * Usage:
  *   node scripts/smoke-test.js
- *   node scripts/smoke-test.js --base https://mari-production-5c60.up.railway.app
+ *   node scripts/smoke-test.js --base https://api.your-domain.com
  */
 
 function getArg(name, fallback) {

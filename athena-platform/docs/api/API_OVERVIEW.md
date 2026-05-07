@@ -1,6 +1,6 @@
 # API Overview
 
-**Base URL:** `https://mari-production-5c60.up.railway.app`  
+**Base URL:** `https://api.your-domain.com`  
 **Stack:** Express + TypeScript + Prisma ORM + PostgreSQL  
 **Auth:** JWT Bearer tokens (access) + HttpOnly cookies (refresh)
 

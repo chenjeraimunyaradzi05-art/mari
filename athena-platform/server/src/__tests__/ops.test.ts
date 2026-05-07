@@ -13,7 +13,7 @@ describe('ops endpoints', () => {
   const originalDebugSecret = process.env.DEBUG_SECRET;
   const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
   const originalNetlifyUrl = process.env.NETLIFY_URL;
-  const originalRailwayUrl = process.env.RAILWAY_URL;
+  const originalDeployUrl = process.env.DEPLOY_URL;
   const originalCorsAllowPreviewOrigins = process.env.CORS_ALLOW_PREVIEW_ORIGINS;
 
   afterEach(() => {
@@ -48,10 +48,10 @@ describe('ops endpoints', () => {
       process.env.NETLIFY_URL = originalNetlifyUrl;
     }
 
-    if (originalRailwayUrl === undefined) {
-      delete process.env.RAILWAY_URL;
+    if (originalDeployUrl === undefined) {
+      delete process.env.DEPLOY_URL;
     } else {
-      process.env.RAILWAY_URL = originalRailwayUrl;
+      process.env.DEPLOY_URL = originalDeployUrl;
     }
 
     if (originalCorsAllowPreviewOrigins === undefined) {
@@ -95,10 +95,10 @@ describe('ops endpoints', () => {
     delete process.env.CORS_ALLOW_PREVIEW_ORIGINS;
     delete process.env.ALLOWED_ORIGINS;
     delete process.env.NETLIFY_URL;
-    delete process.env.RAILWAY_URL;
+    delete process.env.DEPLOY_URL;
 
     expect(isCorsOriginAllowed('https://preview-demo.netlify.app')).toBe(false);
-    expect(isCorsOriginAllowed('https://preview-demo.up.railway.app')).toBe(false);
+    expect(isCorsOriginAllowed('https://api-preview.athena.example')).toBe(false);
   });
 
   it('allows explicitly configured production origins', () => {
