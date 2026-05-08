@@ -1,7 +1,7 @@
 /**
  * Safety Center Page
- * UK Online Safety Act Compliance
- * Phase 4: UK/EU Market Launch
+ * Australia-specific Resources
+ * Phase 4: ANZ Market Launch
  */
 
 import { Shield, AlertTriangle, Lock, Eye, Phone, Heart, Users, BookOpen, ExternalLink, MessageCircle } from 'lucide-react';
@@ -10,50 +10,48 @@ import { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Safety Center | ATHENA',
-  description: 'Resources and tools to help you stay safe on ATHENA. Learn about our safety features, reporting tools, and external support resources.',
+  description: 'Resources and tools to help you stay safe on ATHENA. Learn about our safety features, reporting tools, and external support resources for Australia.',
 };
 
 const SAFETY_RESOURCES = [
   {
-    title: 'National Domestic Abuse Helpline (UK)',
-    description: 'Free 24-hour support for anyone experiencing domestic abuse',
-    phone: '0808 2000 247',
-    website: 'https://www.nationaldahelpline.org.uk',
-    region: 'UK',
+    title: '1800RESPECT',
+    description: 'Free 24/7 confidential support for anyone experiencing domestic violence or sexual assault',
+    phone: '1800 737 732',
+    website: 'https://www.1800respect.org.au',
+    region: 'AU',
   },
   {
-    title: "Samaritans",
-    description: '24/7 emotional support for anyone in distress',
-    phone: '116 123',
-    website: 'https://www.samaritans.org',
-    region: 'UK',
+    title: 'Lifeline Australia',
+    description: '24/7 crisis support and suicide prevention service',
+    phone: '13 11 14',
+    website: 'https://www.lifeline.org.au',
+    region: 'AU',
   },
   {
-    title: 'CEOP (Child Exploitation and Online Protection)',
-    description: 'Report child sexual exploitation or abuse',
-    website: 'https://www.ceop.police.uk/ceop-reporting/',
-    region: 'UK',
+    title: 'eSafety Commissioner',
+    description: 'Report cyberbullying, online abuse, and harmful content online',
+    website: 'https://www.esafety.gov.au',
+    region: 'AU',
   },
   {
-    title: 'Action Fraud (UK)',
-    description: 'Report fraud and cyber crime',
-    phone: '0300 123 2040',
-    website: 'https://www.actionfraud.police.uk',
-    region: 'UK',
+    title: 'ACORN (Australian Cybercrime Online Reporting Network)',
+    description: 'Report cybercrime, fraud, and scams',
+    website: 'https://www.acorn.gov.au',
+    region: 'AU',
   },
   {
-    title: 'Revenge Porn Helpline',
-    description: 'Support for victims of intimate image abuse',
-    phone: '0345 6000 459',
-    website: 'https://revengepornhelpline.org.uk',
-    region: 'UK',
+    title: 'Australian Scams Alerts',
+    description: 'Information and tips about avoiding online scams and fraud',
+    website: 'https://www.scamwatch.gov.au',
+    region: 'AU',
   },
   {
-    title: 'Stop Hate UK',
-    description: 'Report hate crime and get support',
-    phone: '0800 138 1625',
-    website: 'https://www.stophateuk.org',
-    region: 'UK',
+    title: 'Kids Helpline',
+    description: 'Free confidential support for young people aged 5-25',
+    phone: '1800 551 800',
+    website: 'https://www.kidshelpline.com.au',
+    region: 'AU',
   },
 ];
 
@@ -88,18 +86,18 @@ export default function SafetyCenterPage() {
               </p>
               <div className="flex flex-wrap gap-4">
                 <a
-                  href="tel:999"
+                  href="tel:000"
                   className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                 >
                   <Phone className="w-4 h-4 mr-2" />
-                  Call 999 (UK)
+                  Call 000 (Australia)
                 </a>
                 <a
                   href="tel:112"
                   className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                 >
                   <Phone className="w-4 h-4 mr-2" />
-                  Call 112 (EU)
+                  Call 112 (Intl. from mobile)
                 </a>
               </div>
             </div>
