@@ -278,14 +278,14 @@ export default function SafetyCenterPage() {
             </p>
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="bg-white dark:bg-gray-800 rounded-lg p-4">
-                <h4 className="font-semibold text-gray-900 dark:text-white">Mind</h4>
+                <h4 className="font-semibold text-gray-900 dark:text-white">Beyond Blue</h4>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Mental health support and information</p>
-                <a href="tel:03001233393" className="text-pink-600 dark:text-pink-400 text-sm">0300 123 3393</a>
+                <a href="tel:1300224636" className="text-pink-600 dark:text-pink-400 text-sm">1300 22 4636</a>
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-lg p-4">
-                <h4 className="font-semibold text-gray-900 dark:text-white">Anxiety UK</h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Support for anxiety disorders</p>
-                <a href="tel:03444775774" className="text-pink-600 dark:text-pink-400 text-sm">0344 477 5774</a>
+                <h4 className="font-semibold text-gray-900 dark:text-white">SANE Australia</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Support for mental illness and anxiety</p>
+                <a href="tel:1800187263" className="text-pink-600 dark:text-pink-400 text-sm">1800 18 7263</a>
               </div>
             </div>
           </div>
