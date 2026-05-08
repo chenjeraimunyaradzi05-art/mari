@@ -5,7 +5,7 @@
 
 [build]
   command = "npm ci --legacy-peer-deps && npm run build"
-  # publish directory is handled automatically by @netlify/plugin-nextjs
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
