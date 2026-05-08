@@ -197,6 +197,39 @@ export const sessionService = {
   },
 
   /**
+   * Detect refresh-token reuse: if a token belongs to a *revoked* session,
+   * treat it as a compromise and revoke every active session for that user.
+   * Returns the affected userId (or null if no revoked match was found).
+   */
+  async detectRefreshTokenReuse(refreshToken: string): Promise<string | null> {
+    const hashedRefreshToken = hashOpaqueToken(refreshToken);
+    const revoked =
+      (await prisma.session.findFirst({
+        where: { refreshToken: hashedRefreshToken, revokedAt: { not: null } },
+        select: { userId: true, id: true },
+      })) ||
+      (await prisma.session.findFirst({
+        where: { refreshToken, revokedAt: { not: null } },
+        select: { userId: true, id: true },
+      }));
+
+    if (!revoked) return null;
+
+    const result = await prisma.session.updateMany({
+      where: { userId: revoked.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    logger.warn('Refresh-token reuse detected — all sessions revoked', {
+      userId: revoked.userId,
+      revokedSessionId: revoked.id,
+      sessionsRevoked: result.count,
+    });
+
+    return revoked.userId;
+  },
+
+  /**
    * Cleanup expired sessions (runs periodically)
    */
   async cleanupExpiredSessions() {

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
-import { UnauthorizedError } from './errorHandler';
+import { ForbiddenError, UnauthorizedError } from './errorHandler';
 import { verifyToken } from '../utils/jwt';
 import { sessionService } from '../services/session.service';
 
@@ -119,7 +119,7 @@ export const requireRole = (...roles: string[]) => {
     }
 
     if (!roles.includes(req.user.role)) {
-      return next(UnauthorizedError('Insufficient permissions'));
+      return next(ForbiddenError('Insufficient permissions'));
     }
 
     next();

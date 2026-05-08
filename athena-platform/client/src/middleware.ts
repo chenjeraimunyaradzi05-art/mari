@@ -5,7 +5,9 @@ const registry = require('../i18n.registry.js');
 
 // Routes that require authentication
 const protectedRoutes = [
+  '/admin',
   '/dashboard',
+  '/employer/organizations',
   '/onboarding',
   '/settings',
 ];

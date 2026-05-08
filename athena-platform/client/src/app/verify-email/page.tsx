@@ -72,7 +72,7 @@ function VerifyEmailContent() {
 
     const verifyEmail = async () => {
       try {
-        const response = await api.get(`/auth/verify-email?token=${token}`);
+        const response = await api.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
         setStatus('success');
         setMessage(response.data.message || 'Email verified successfully!');
       } catch (error: any) {

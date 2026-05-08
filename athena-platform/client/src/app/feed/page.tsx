@@ -302,7 +302,6 @@ export default function FeedPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="container mx-auto max-w-6xl px-4 py-8">
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Feed */}
           <div className="lg:col-span-2 space-y-6">
@@ -312,6 +311,13 @@ export default function FeedPage() {
                 <div className="flex items-center gap-2 text-primary-600">
                   <Sparkles className="h-5 w-5" />
                   <span className="text-sm font-semibold uppercase tracking-wider">Social</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
+                    </span>
+                    Live
+                  </span>
                 </div>
                 <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Your Feed</h1>
               </div>
@@ -484,6 +490,5 @@ export default function FeedPage() {
           </div>
         </div>
       </div>
-    </div>
   );
 }

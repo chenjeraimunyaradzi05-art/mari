@@ -42,10 +42,11 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     const hasStoredAuth = Boolean(window.localStorage.getItem('athena-auth'));
     const shouldBootstrapSession =
       hasStoredAuth ||
-      pathname.startsWith('/dashboard') ||
       pathname.startsWith('/admin') ||
-      pathname.startsWith('/employer') ||
-      pathname.startsWith('/onboarding');
+      pathname.startsWith('/dashboard') ||
+      pathname.startsWith('/employer/organizations') ||
+      pathname.startsWith('/onboarding') ||
+      pathname.startsWith('/settings');
 
     if (!shouldBootstrapSession) {
       setLoading(false);

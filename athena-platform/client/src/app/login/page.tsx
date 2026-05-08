@@ -20,6 +20,7 @@ import {
 import Image from 'next/image';
 import { useAuth } from '@/lib/hooks';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
+import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email'),
@@ -244,7 +245,7 @@ function LoginContent() {
               </div>
             </div>
 
-            <div className="mt-6 grid grid-cols-2 gap-4">
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <GoogleSignInButton
                 mode="login"
                 onError={(message) => setServerError(message)}
@@ -252,15 +253,16 @@ function LoginContent() {
                   router.replace(safeRedirect);
                 }}
               />
-              <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">
-                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M22.675 0h-21.35C.593 0 0 .593 0 1.326v21.348C0 23.407.593 24 1.326 24h11.495v-9.294H9.692v-3.622h3.129V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.794.715-1.794 1.763v2.312h3.587l-.467 3.622h-3.12V24h6.116C23.407 24 24 23.407 24 22.674V1.326C24 .593 23.407 0 22.675 0z" />
-                </svg>
-                Facebook Soon
-              </button>
+              <FacebookSignInButton
+                mode="login"
+                onError={(message) => setServerError(message)}
+                onSuccess={() => {
+                  router.replace(safeRedirect);
+                }}
+              />
             </div>
             <p className="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
-              Google sign-in is live. Facebook sign-in is still being finalized for launch.
+              We only ever request the minimum: your name, email, and avatar.
             </p>
           </div>
 

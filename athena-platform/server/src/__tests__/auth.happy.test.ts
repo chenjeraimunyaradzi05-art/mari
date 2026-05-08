@@ -65,6 +65,7 @@ jest.mock('../utils/prisma', () => {
           if (email === TEST_USER.email) {
             return {
               ...TEST_USER,
+              emailVerified: true,
               passwordHash: 'hashed-password',
               avatar: null,
             };
@@ -160,7 +161,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     }
   });
 
-  it('POST /api/auth/register returns 201 and tokens', async () => {
+  it('POST /api/auth/register returns 201 and requires email verification', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .send({
@@ -174,11 +175,9 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
 
     expect(res.body).toHaveProperty('success', true);
     expect(res.body?.data?.user?.email).toBe('new.user@example.com');
-    expect(typeof res.body?.data?.accessToken).toBe('string');
-    expect(res.body.data.accessToken.length).toBeGreaterThan(10);
-    expect(typeof res.body?.data?.expiresIn).toBe('number');
-    expect(res.body.data.expiresIn).toBeGreaterThan(0);
-    expect(getSetCookieHeader(res)).toContain('refreshToken=');
+    expect(res.body?.data?.verificationRequired).toBe(true);
+    expect(res.body?.data?.accessToken).toBeUndefined();
+    expect(getSetCookieHeader(res)).not.toContain('refreshToken=');
   });
 
   it('POST /api/auth/login returns 200 and tokens', async () => {
@@ -215,10 +214,17 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
   });
 
   it('POST /api/auth/refresh rejects cookie-based refresh without a trusted origin', async () => {
-    await request(app)
-      .post('/api/auth/refresh')
-      .set('Cookie', ['refreshToken=refresh_token_test_1'])
-      .expect(403);
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      await request(app)
+        .post('/api/auth/refresh')
+        .set('Cookie', ['refreshToken=refresh_token_test_1'])
+        .expect(403);
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   it('POST /api/auth/refresh accepts cookie-based refresh from a trusted origin', async () => {
@@ -249,9 +255,9 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
       .expect(201);
 
     expect(res.body).toHaveProperty('success', true);
-    expect(typeof res.body?.data?.accessToken).toBe('string');
-    expect(typeof res.body?.data?.expiresIn).toBe('number');
-    expect(getSetCookieHeader(res)).toContain('refreshToken=');
+    expect(res.body?.data?.verificationRequired).toBe(true);
+    expect(res.body?.data?.accessToken).toBeUndefined();
+    expect(getSetCookieHeader(res)).not.toContain('refreshToken=');
   });
 
   it('GET /api/auth/me returns 200 for an active access-token session', async () => {

@@ -111,6 +111,9 @@ Full template: [`server/.env.production.example`](./server/.env.production.examp
 | `DV_ENCRYPTION_KEY` | DV-Safe | 64 hex chars: `openssl rand -hex 32` |
 | `ENABLE_WORKERS` | BullMQ | Set `true` to enable background jobs |
 | `METRICS_TOKEN` | Prometheus | Protect `/metrics` endpoint |
+| `GOOGLE_CLIENT_ID` | Google Sign-In | Web OAuth client ID (must match `NEXT_PUBLIC_GOOGLE_CLIENT_ID`) |
+| `FACEBOOK_APP_ID` | Facebook Sign-In | App ID (must match `NEXT_PUBLIC_FACEBOOK_APP_ID`) |
+| `FACEBOOK_APP_SECRET` | Facebook Sign-In | App secret — server builds the app access token and validates tokens via `debug_token` |
 
 ### 2.5 Verify
 
@@ -158,7 +161,8 @@ Set in **Netlify Dashboard → Site Settings → Environment Variables:**
 | `SENTRY_ORG` / `SENTRY_PROJECT` | For source-map upload during build |
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `pk_live_...` |
-| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Google Identity Services client ID |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Google Identity Services client ID (must match `GOOGLE_CLIENT_ID` on the backend) |
+| `NEXT_PUBLIC_FACEBOOK_APP_ID` | Facebook App ID (must match `FACEBOOK_APP_ID` on the backend) |
 | `NEXT_PUBLIC_ENABLE_AI_FEATURES` | `true` / `false` |
 | `NEXT_PUBLIC_MAINTENANCE_MODE` | `true` / `false` |
 

@@ -12,12 +12,9 @@ export const metadata: Metadata = {
   keywords: ['careers', 'women', 'empowerment', 'jobs', 'mentorship', 'networking', 'education'],
   authors: [{ name: 'ATHENA' }],
   manifest: '/manifest.json',
+  // Favicon + apple-touch icons are auto-detected from app/icon.svg and app/apple-icon.svg.
+  // The public/logo.png stays available as a fallback raster icon.
   icons: {
-    icon: [
-      { url: '/icon.svg', type: 'image/svg+xml' },
-      { url: '/logo.png', type: 'image/png', sizes: '512x512' },
-    ],
-    apple: '/logo.png',
     shortcut: '/logo.png',
   },
   openGraph: {
@@ -49,7 +46,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#020617',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fff1f2' },
+    { media: '(prefers-color-scheme: dark)', color: '#1b0713' },
+  ],
 };
 
 const themeBootScript = `

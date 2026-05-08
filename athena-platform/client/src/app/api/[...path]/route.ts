@@ -187,6 +187,7 @@ async function proxy(request: NextRequest) {
       'connection',
       'keep-alive',
       'content-encoding',
+      'set-cookie',
     ]);
     upstream.headers.forEach((value, key) => {
       if (!skip.has(key.toLowerCase())) {

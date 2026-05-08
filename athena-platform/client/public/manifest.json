@@ -4,8 +4,8 @@
   "description": "The Career SuperApp - Your all-in-one platform for professional growth, networking, and opportunities",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#020617",
+  "background_color": "#fff1f2",
+  "theme_color": "#f43f5e",
   "orientation": "portrait-primary",
   "scope": "/",
   "lang": "en",
@@ -13,7 +13,7 @@
   "categories": ["business", "education", "social", "productivity"],
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "/logo.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

@@ -227,7 +227,7 @@ const limiter = rateLimit({
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks') || req.path === '/api/auth/refresh',
+  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
   validate: { xForwardedForHeader: false },
 });
 
@@ -236,6 +236,17 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 10 : 100, // relaxed in dev
   message: { success: false, message: 'Too many login attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+});
+
+// Lenient limiter just for /refresh — high enough not to interfere with
+// active sessions, low enough to cap leaked-token replay loops.
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: process.env.NODE_ENV === 'production' ? 30 : 300,
+  message: { success: false, message: 'Too many refresh requests, please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
@@ -256,6 +267,7 @@ if (rateLimitEnabled) {
   // Apply stricter limits to auth endpoints
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
+  app.use('/api/auth/refresh', refreshLimiter);
   app.use('/api/auth/forgot-password', passwordResetLimiter);
   app.use('/api/auth/resend-verification', passwordResetLimiter);
   app.use('/api/auth/reset-password', passwordResetLimiter);
