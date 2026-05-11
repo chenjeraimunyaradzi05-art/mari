@@ -1,19 +1,22 @@
 export function getAllowedOrigins(): string[] {
   const fallbackOrigins = [
     process.env.CLIENT_URL || 'http://localhost:3000',
+    process.env.FRONTEND_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.URL,
     'http://localhost:3001',
     'http://localhost:3002',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
     'http://127.0.0.1:3002',
-  ];
+  ].filter((origin): origin is string => Boolean(origin));
 
   const envOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const platformOrigins = [process.env.NETLIFY_URL, process.env.DEPLOY_URL].filter(
+  const platformOrigins = [process.env.NETLIFY_URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL].filter(
     (origin): origin is string => Boolean(origin)
   );
 

@@ -36,6 +36,22 @@ NPM_FLAGS=--legacy-peer-deps
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx (if using Stripe)
 ```
 
+For Neon-backed deploys, use the script instead of pasting database secrets into files:
+
+```bash
+$env:NETLIFY_AUTH_TOKEN="your-netlify-token"
+$env:NETLIFY_SITE_ID="your-netlify-site-id"
+$env:NEON_DATABASE_URL="postgresql://USER:PASSWORD@ep-example-pooler.region.aws.neon.tech/athena_prod?sslmode=require&channel_binding=require&connect_timeout=15&pool_timeout=15"
+$env:NEON_DIRECT_DATABASE_URL="postgresql://USER:PASSWORD@ep-example.region.aws.neon.tech/athena_prod?sslmode=require&channel_binding=require&connect_timeout=15"
+npm run netlify:link-neon
+```
+
+To sync Neon and deploy in one command:
+
+```bash
+npm run netlify:deploy
+```
+
 ### Step 4: Install Next.js Plugin
 1. Go to Site Settings → Build & deploy → Plugins
 2. Search for "@netlify/plugin-nextjs"
@@ -143,6 +159,8 @@ netlify deploy --prod
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key |
 | `NEXT_PUBLIC_POSTHOG_KEY` | No | PostHog analytics key |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Sentry error tracking |
+| `DATABASE_URL` | Yes for Netlify functions | Pooled Neon PostgreSQL URL; synced as a secret by `npm run netlify:link-neon` |
+| `DIRECT_DATABASE_URL` | Yes for Prisma | Direct Neon PostgreSQL URL for migrations/schema tooling; synced as a secret by `npm run netlify:link-neon` |
 
 ## Re-Authorizing GitHub Connection
 

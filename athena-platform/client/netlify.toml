@@ -15,6 +15,9 @@
   # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
   #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
   #   NEXT_PUBLIC_APP_URL = "https://YOUR-APP.netlify.app"
+  # Neon secrets are synced by running from the repo root:
+  #   npm run netlify:link-neon
+  # with NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID, NEON_DATABASE_URL, and NEON_DIRECT_DATABASE_URL.
   # -------------------------------------------------------
 
 # Enable Next.js runtime (handles SSR, ISR, API routes, middleware)
@@ -44,10 +47,13 @@
     X-Frame-Options = "SAMEORIGIN"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     X-XSS-Protection = "1; mode=block"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(self)"
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
     X-DNS-Prefetch-Control = "on"
+    X-Permitted-Cross-Domain-Policies = "none"
 
 # ===========================================
 # CACHING

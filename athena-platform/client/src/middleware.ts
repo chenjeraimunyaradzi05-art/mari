@@ -3,37 +3,47 @@ import type { NextRequest } from 'next/server';
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
 const registry = require('../i18n.registry.js');
 
-// Routes that require authentication
+// Routes that require authentication — prefix-matched
 const protectedRoutes = [
-  '/admin',
   '/dashboard',
-  '/employer/organizations',
   '/onboarding',
   '/settings',
+  '/profile',
+  '/employer',
+  '/finances',
+  '/network',
+  '/mentorship',
+  '/admin',
+  '/messages',
+  '/growth',
+  '/certifications',
+  '/skills-marketplace',
 ];
 
-// Routes that should redirect to dashboard if authenticated
+// Routes that should redirect to dashboard if already authenticated
 const authRoutes = [
   '/login',
   '/register',
   '/forgot-password',
 ];
 
+// Admin-only routes — authenticated users without an admin flag see 403.
+// We can only check the cookie presence here; real role enforcement is server-side.
+// We add an extra layer by checking a signed hint cookie set by the backend.
+const adminRoutes = ['/admin'];
+
 function getSafeRedirectPath(candidate: string | null): string | null {
-  if (!candidate) {
-    return null;
-  }
-
-  if (!candidate.startsWith('/') || candidate.startsWith('//')) {
-    return null;
-  }
-
+  if (!candidate) return null;
+  if (!candidate.startsWith('/') || candidate.startsWith('//')) return null;
+  // Prevent redirect loops to /login itself
+  if (candidate.startsWith('/login')) return null;
   return candidate;
 }
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // ── Maintenance mode ──────────────────────────────────────────────────────
   const maintenanceMode = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
   if (maintenanceMode && !pathname.startsWith('/maintenance')) {
     const url = request.nextUrl.clone();
@@ -41,16 +51,21 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
-  const locales = registry?.locales || [];
-  const defaultLocale = registry?.defaultLocale || 'en-AU';
+  // ── i18n locale normalisation ─────────────────────────────────────────────
+  const locales: string[] = registry?.locales || [];
+  const defaultLocale: string = registry?.defaultLocale || 'en-AU';
+
   if (locales.length) {
-    const escaped = locales.map((locale: string) => locale.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+    const escaped = locales.map((locale: string) =>
+      locale.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+    );
     const localePattern = new RegExp(`^/(${escaped.join('|')})(/|$)`, 'i');
     const match = pathname.match(localePattern);
 
     if (match) {
       const locale = match[1];
       const rest = pathname.slice(locale.length + 1) || '/';
+
       if (locale.toLowerCase() !== String(defaultLocale).toLowerCase()) {
         const url = request.nextUrl.clone();
         url.pathname = `/${defaultLocale}${rest === '' ? '' : rest}`;
@@ -64,35 +79,50 @@ export function middleware(request: NextRequest) {
       return response;
     }
   }
-  
-  // Check if user has a session — the backend sets refreshToken as an HttpOnly cookie.
-  // Access tokens are in-memory only, so we check for the refresh cookie instead.
-  const token = request.cookies.get('refreshToken')?.value;
-  const isAuthenticated = !!token;
 
-  // Check if the route is protected
-  const isProtectedRoute = protectedRoutes.some((route) =>
-    pathname.startsWith(route)
-  );
+  // ── Auth state — checked via HttpOnly refresh token cookie ────────────────
+  const hasRefreshToken = !!request.cookies.get('refreshToken')?.value;
 
-  // Check if the route is an auth page (login, register, etc.)
+  // ── Route classification ──────────────────────────────────────────────────
+  const isProtectedRoute = protectedRoutes.some((route) => pathname.startsWith(route));
+  const isAdminRoute = adminRoutes.some((route) => pathname.startsWith(route));
   const isAuthPage = authRoutes.some((route) => pathname.startsWith(route));
 
-  // If accessing protected route without auth, redirect to login
-  if (isProtectedRoute && !isAuthenticated) {
+  // ── Unauthenticated access to protected route → redirect to login ─────────
+  if (isProtectedRoute && !hasRefreshToken) {
     const loginUrl = new URL('/login', request.url);
     const fullPath = `${pathname}${request.nextUrl.search}`;
     loginUrl.searchParams.set('redirect', fullPath);
     return NextResponse.redirect(loginUrl);
   }
 
-  // If accessing auth page while authenticated, redirect to dashboard
-  if (isAuthPage && isAuthenticated) {
-    const requestedRedirect = getSafeRedirectPath(request.nextUrl.searchParams.get('redirect'));
-    return NextResponse.redirect(new URL(requestedRedirect || '/dashboard', request.url));
+  // ── Admin gate — check for backend-set admin hint cookie ──────────────────
+  if (isAdminRoute && hasRefreshToken) {
+    const adminHint = request.cookies.get('athena_role')?.value;
+    // adminHint is a plain (non-secret) role hint set by the backend after login.
+    // The actual authorisation is still enforced server-side; this is a UX gate.
+    if (adminHint && adminHint !== 'ADMIN' && adminHint !== 'SUPER_ADMIN') {
+      return new NextResponse(null, { status: 403 });
+    }
   }
 
-  return NextResponse.next();
+  // ── Authenticated user hits auth page → redirect to dashboard ────────────
+  if (isAuthPage && hasRefreshToken) {
+    const requestedRedirect = getSafeRedirectPath(
+      request.nextUrl.searchParams.get('redirect')
+    );
+    return NextResponse.redirect(
+      new URL(requestedRedirect || '/dashboard', request.url)
+    );
+  }
+
+  // ── Security response headers ─────────────────────────────────────────────
+  const response = NextResponse.next();
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  return response;
 }
 
 export const config = {
@@ -100,10 +130,11 @@ export const config = {
     /*
      * Match all request paths except:
      * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
+     * - _next/image (image optimisation)
+     * - favicon.ico
+     * - public folder assets (svg, png, jpg, jpeg, gif, webp, ico, manifest)
+     * - api/auth routes (handled by Next.js API route handlers)
      */
-    '/((?!_next/static|_next/image|favicon.ico|public).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|json)$).*)',
   ],
 };

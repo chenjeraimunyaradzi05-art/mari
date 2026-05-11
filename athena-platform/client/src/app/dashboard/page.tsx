@@ -55,8 +55,9 @@ export default function DashboardPage() {
 
   return (
     <div className="page-shell space-y-6">
-      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <section className="bg-aurora relative overflow-hidden rounded-2xl border border-primary-100/60 shadow-lg dark:border-primary-900/30">
+        <div aria-hidden="true" className="cyber-grid pointer-events-none absolute inset-0 opacity-50" />
+        <div className="relative grid gap-0 lg:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="p-6 sm:p-8">
             <div className="kicker">Command center</div>
             <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -80,7 +81,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/dashboard/ai" className="btn-primary">
+              <Link href="/dashboard/ai" className="btn-primary glow-primary">
                 <Sparkles className="h-4 w-4" />
                 Open AI coach
               </Link>
@@ -91,7 +92,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="border-t border-slate-200 bg-slate-50 p-6 dark:border-slate-800 dark:bg-slate-950/40 lg:border-l lg:border-t-0">
+          <div className="glass-panel border-t border-white/20 p-6 backdrop-blur dark:border-white/5 lg:border-l lg:border-t-0">
             <div className="flex items-center justify-between">
               <div>
                 <div className="kicker">Next best actions</div>
@@ -101,10 +102,13 @@ export default function DashboardPage() {
             </div>
             <div className="mt-5 space-y-3">
               {momentumSteps.map((step) => (
-                <div key={step.label} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <div key={step.label} className="metric-card-futuristic">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold text-slate-900 dark:text-white">{step.label}</span>
-                    <span className="text-sm font-semibold text-primary-700 dark:text-primary-300">{step.value}</span>
+                    <span className="text-sm font-semibold gradient-text-cyber">{step.value}</span>
+                  </div>
+                  <div className="progress-athena mt-3">
+                    <div className="progress-athena-fill" style={{ width: step.value.includes('%') ? step.value : '68%' }} />
                   </div>
                   <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{step.hint}</p>
                 </div>
@@ -116,12 +120,12 @@ export default function DashboardPage() {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {quickActions.map((action) => (
-          <Link key={action.name} href={action.href} className="panel group p-4 transition hover:-translate-y-0.5 hover:shadow-md">
+          <Link key={action.name} href={action.href} className="card-lift panel group p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-50 to-purple-50 text-primary-600 dark:from-primary-900/40 dark:to-purple-900/30 dark:text-primary-300">
                 <action.icon className="h-5 w-5" />
               </div>
-              <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-slate-900 dark:group-hover:text-white" />
+              <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-primary-600 dark:group-hover:text-primary-300" />
             </div>
             <div className="mt-4 font-semibold text-slate-950 dark:text-white">{action.name}</div>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{action.detail}</p>
@@ -131,14 +135,16 @@ export default function DashboardPage() {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.name} className="metric-card">
+          <div key={stat.name} className="metric-card-futuristic">
             <div className="flex items-center justify-between">
               <div className="text-sm text-slate-500 dark:text-slate-400">{stat.name}</div>
-              <stat.icon className="h-4 w-4 text-slate-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary-50 to-purple-50 dark:from-primary-900/30 dark:to-purple-900/20">
+                <stat.icon className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+              </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl font-semibold text-slate-950 dark:text-white">{stat.value}</span>
-              <span className={stat.change.startsWith('-') ? 'text-sm font-medium text-red-600' : 'text-sm font-medium text-primary-600'}>
+              <span className="text-3xl font-bold text-slate-950 dark:text-white">{stat.value}</span>
+              <span className={stat.change.startsWith('-') ? 'text-sm font-semibold text-red-500' : 'text-sm font-semibold text-emerald-500'}>
                 {stat.change}
               </span>
             </div>
@@ -167,7 +173,7 @@ export default function DashboardPage() {
             </div>
           ) : recommendations?.jobs?.length ? (
             <div className="mt-5 divide-y divide-slate-200 dark:divide-slate-800">
-              {recommendations.jobs.slice(0, 4).map((job: any) => (
+              {recommendations.jobs.slice(0, 4).map((job: { id: string; title: string; location?: string; matchScore?: number; organization?: { name?: string } }) => (
                 <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="group flex items-start gap-4 py-4">
                   <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
                     <Briefcase className="h-5 w-5 text-slate-500" />
@@ -220,7 +226,7 @@ export default function DashboardPage() {
             </div>
           ) : applications?.length ? (
             <div className="mt-5 space-y-3">
-              {applications.slice(0, 4).map((application: any) => (
+              {applications.slice(0, 4).map((application: { id: string; status: string; createdAt: string; job?: { title?: string } }) => (
                 <div key={application.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
@@ -269,7 +275,7 @@ export default function DashboardPage() {
             </div>
           ) : feedData?.posts?.length ? (
             <div className="mt-5 divide-y divide-slate-200 dark:divide-slate-800">
-              {feedData.posts.slice(0, 3).map((post: any) => (
+              {feedData.posts.slice(0, 3).map((post: { id: string; content?: string; createdAt: string; author?: { firstName?: string; lastName?: string } }) => (
                 <Link key={post.id} href={`/dashboard/community/post/${post.id}`} className="flex items-start gap-4 py-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-100 font-semibold text-primary-700 dark:bg-primary-900 dark:text-primary-200">
                     {post.author?.firstName?.charAt(0)}

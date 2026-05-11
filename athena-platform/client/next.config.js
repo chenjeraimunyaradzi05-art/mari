@@ -1,10 +1,30 @@
 /** @type {import('next').NextConfig} */
 const { withSentryConfig } = require('@sentry/nextjs');
 
+const isProduction = process.env.NODE_ENV === 'production';
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'self'",
+  "form-action 'self'",
+  `script-src 'self' 'unsafe-inline'${isProduction ? '' : " 'unsafe-eval'"} https:`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' http: https: ws: wss:",
+  "media-src 'self' blob: https:",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+].join('; ');
+
 const nextConfig = {
   // Enable standalone output for Docker deployments only.
   // Netlify's @netlify/plugin-nextjs manages output automatically.
   ...(process.env.NETLIFY ? {} : { output: 'standalone' }),
+  turbopack: {
+    root: __dirname,
+  },
   // Security headers (DNS_SSL_CONFIGURATION.md §6)
   async headers() {
     return [
@@ -18,6 +38,9 @@ const nextConfig = {
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self), interest-cohort=()' },
+          { key: 'Content-Security-Policy', value: contentSecurityPolicy },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
+          { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
         ],
       },
     ];

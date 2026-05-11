@@ -50,6 +50,13 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     validator: isPostgresConnectionString,
     errorMessage: 'DATABASE_URL must be a valid PostgreSQL connection string',
   },
+  {
+    name: 'DIRECT_DATABASE_URL',
+    required: true,
+    productionOnly: true,
+    validator: isPostgresConnectionString,
+    errorMessage: 'DIRECT_DATABASE_URL must be a valid PostgreSQL connection string',
+  },
   // Stripe (required for payments)
   {
     name: 'STRIPE_SECRET_KEY',
@@ -142,12 +149,34 @@ export function validateEnvironment(): ValidationResult {
       }
     })();
 
-    const directUrl =
-      process.env.DIRECT_DATABASE_URL || process.env.DATABASE_DIRECT_URL || process.env.DIRECT_URL;
+    const directUrl = process.env.DIRECT_DATABASE_URL;
     if (host.includes('-pooler.') && !directUrl) {
-      warnings.push(
-        'Set DIRECT_DATABASE_URL to the unpooled Neon connection string for Prisma migrations'
-      );
+      const message = 'Set DIRECT_DATABASE_URL to the unpooled Neon connection string for Prisma migrations';
+      if (isProd) {
+        errors.push(message);
+      } else {
+        warnings.push(message);
+      }
+    }
+
+    if (directUrl && isNeonConnectionString(directUrl)) {
+      if (!hasSearchParam(directUrl, 'sslmode', 'require')) {
+        const message = 'Neon DIRECT_DATABASE_URL should include sslmode=require';
+        if (isProd) {
+          errors.push(message);
+        } else {
+          warnings.push(message);
+        }
+      }
+
+      try {
+        const directHost = new URL(directUrl).hostname;
+        if (directHost.includes('-pooler.')) {
+          warnings.push('DIRECT_DATABASE_URL should use the unpooled Neon hostname, not the pooled hostname');
+        }
+      } catch {
+        // The format validator reports malformed URLs separately.
+      }
     }
   }
 

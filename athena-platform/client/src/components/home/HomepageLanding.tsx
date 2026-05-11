@@ -12,6 +12,7 @@ import {
   Command,
   Compass,
   Crown,
+  Database,
   DollarSign,
   Facebook,
   FileText,
@@ -67,6 +68,12 @@ const commandSignals = [
   { label: 'Mentor fit', value: '8 new', icon: Users, tone: 'text-sky-300' },
   { label: 'Skills gap', value: '3 tasks', icon: BookOpen, tone: 'text-amber-300' },
   { label: 'Trust state', value: 'clear', icon: ShieldCheck, tone: 'text-rose-300' },
+];
+
+const liveRails = [
+  { label: 'Database', value: 'Neon linked', detail: 'Pooled runtime, direct migrations', icon: Database },
+  { label: 'Deployment', value: 'Netlify ready', detail: 'Scripted env sync and production build', icon: Rocket },
+  { label: 'Security', value: 'Prod audit clean', detail: 'Patched dependencies and stricter headers', icon: ShieldCheck },
 ];
 
 const intelligenceCards = [
@@ -307,6 +314,32 @@ function SocialFeedPreview() {
   );
 }
 
+function LiveOpsRail() {
+  return (
+    <div className="relative mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
+      <div className="grid gap-3 rounded-lg border border-slate-900/10 bg-white/75 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/55 md:grid-cols-3">
+        {liveRails.map((item) => (
+          <div
+            key={item.label}
+            className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-white dark:bg-white dark:text-slate-950">
+              <item.icon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                {item.label}
+              </div>
+              <div className="mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white">{item.value}</div>
+              <div className="truncate text-xs text-slate-600 dark:text-slate-300">{item.detail}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function HomepageLanding() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
@@ -382,9 +415,9 @@ export default function HomepageLanding() {
       </nav>
 
       <main>
-        {/* Hero — now theme-aware */}
-        <section className="relative overflow-hidden bg-feminine-hero">
-          <div className="pointer-events-none absolute inset-0 bg-feminine-aurora opacity-80" aria-hidden="true" />
+        {/* Hero */}
+        <section className="relative overflow-hidden bg-aurora">
+          <div className="cyber-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden="true" />
           <div className="relative mx-auto grid min-h-[calc(100vh-5rem)] max-w-7xl items-center gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[minmax(0,1fr)_27rem] lg:px-8">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/60 bg-white/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-rose-700 shadow-sm backdrop-blur dark:border-rose-400/30 dark:bg-white/5 dark:text-rose-200">
@@ -408,6 +441,7 @@ export default function HomepageLanding() {
                   Start your workspace
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
+                <div className="hidden h-10 w-px bg-rose-200/60 dark:bg-rose-500/20 sm:block" />
                 <Link
                   href="/jobs"
                   className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white/70 px-5 py-3 text-sm font-semibold text-rose-700 backdrop-blur transition hover:bg-white dark:border-rose-400/30 dark:bg-white/5 dark:text-rose-200 dark:hover:bg-white/10"
@@ -447,6 +481,7 @@ export default function HomepageLanding() {
 
             <SignalPanel />
           </div>
+          <LiveOpsRail />
         </section>
 
         {/* Intelligence layer */}
