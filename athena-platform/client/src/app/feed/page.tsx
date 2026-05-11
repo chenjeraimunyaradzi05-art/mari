@@ -119,7 +119,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
   );
 
   return (
-    <article className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition">
+    <article className="card-lift glass-card rounded-xl p-5">
       {/* Author */}
       <div className="flex items-start justify-between mb-4">
         {post.author.profileHref ? (
@@ -129,8 +129,8 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         ) : (
           <div className="flex items-center gap-3">{authorContent}</div>
         )}
-        <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-          <MoreHorizontal className="w-5 h-5 text-gray-500" />
+        <button className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-700">
+          <MoreHorizontal className="h-5 w-5" />
         </button>
       </div>
 
@@ -160,7 +160,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       )}
 
       {/* Stats */}
-      <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 py-2 border-t border-b border-gray-100 dark:border-gray-700">
+      <div className="flex items-center justify-between border-b border-t border-slate-100 py-2 text-sm text-slate-500 dark:border-slate-700/50 dark:text-slate-400">
         <span>{likeCount} likes</span>
         <span>{post._count?.comments || 0} comments</span>
       </div>
@@ -225,7 +225,7 @@ function CreatePostBox() {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+    <div className="glass-card rounded-xl p-5">
       <div className="flex items-start gap-3">
         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-pink-500 flex items-center justify-center text-white font-semibold flex-shrink-0">
           {getInitials(user?.firstName, user?.lastName)}
@@ -237,7 +237,7 @@ function CreatePostBox() {
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 placeholder="Share a win, ask a question, or post a helpful resource..."
-                className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg resize-none focus:ring-2 focus:ring-primary-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                className="w-full resize-none rounded-xl border border-slate-200/80 bg-white/70 p-3 text-slate-800 backdrop-blur focus:border-transparent focus:ring-2 focus:ring-primary-500 dark:border-white/10 dark:bg-slate-800/60 dark:text-white"
                 rows={4}
                 autoFocus
               />
@@ -245,14 +245,14 @@ function CreatePostBox() {
                 <button
                   type="button"
                   onClick={() => setIsExpanded(false)}
-                  className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+                  className="rounded-lg px-4 py-2 text-slate-600 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!content.trim() || createPost.isPending}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
+                  className="rounded-lg bg-[linear-gradient(135deg,#f43f5e,#a855f7)] px-5 py-2 text-sm font-semibold text-white shadow-blossom transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {createPost.isPending ? 'Posting...' : 'Post'}
                 </button>
@@ -261,7 +261,7 @@ function CreatePostBox() {
           ) : (
             <button
               onClick={() => setIsExpanded(true)}
-              className="w-full text-left p-3 bg-gray-50 dark:bg-gray-700 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 transition"
+              className="w-full rounded-full border border-slate-200/60 bg-slate-50/70 p-3 text-left text-slate-500 backdrop-blur transition hover:bg-slate-100/80 dark:border-white/10 dark:bg-slate-700/50 dark:text-slate-400 dark:hover:bg-slate-700"
             >
               What&apos;s on your mind?
             </button>
@@ -301,7 +301,7 @@ export default function FeedPage() {
   const renderedPosts = isFallbackFeed ? FALLBACK_POSTS : posts;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-aurora">
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Feed */}
           <div className="lg:col-span-2 space-y-6">
@@ -377,17 +377,17 @@ export default function FeedPage() {
             {isLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 animate-pulse">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-700" />
+                  <div key={i} className="shimmer rounded-xl border border-white/20 bg-white/60 p-5 dark:border-white/10 dark:bg-slate-800/60">
+                    <div className="mb-4 flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-full bg-slate-200 dark:bg-slate-700" />
                       <div className="space-y-2">
-                        <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded" />
-                        <div className="h-3 w-24 bg-gray-200 dark:bg-gray-700 rounded" />
+                        <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+                        <div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <div className="h-4 w-full bg-gray-200 dark:bg-gray-700 rounded" />
-                      <div className="h-4 w-3/4 bg-gray-200 dark:bg-gray-700 rounded" />
+                      <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
                     </div>
                   </div>
                 ))}
@@ -399,22 +399,22 @@ export default function FeedPage() {
                 ))}
               </div>
             ) : (
-              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-8 text-center">
-                <Sparkles className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Your feed is empty</h3>
-                <p className="text-gray-600 dark:text-gray-400 mb-4">
+              <div className="glass-card rounded-xl p-8 text-center">
+                <Sparkles className="mx-auto mb-4 h-12 w-12 text-primary-400" />
+                <h3 className="mb-2 text-lg font-semibold text-slate-900 dark:text-white">Your feed is empty</h3>
+                <p className="mb-4 text-slate-600 dark:text-slate-400">
                   Start following people and join communities to see posts here.
                 </p>
                 <div className="flex justify-center gap-3">
-                  <Link 
-                    href="/community" 
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
+                  <Link
+                    href="/community"
+                    className="rounded-lg bg-[linear-gradient(135deg,#f43f5e,#a855f7)] px-4 py-2 text-sm font-semibold text-white shadow-blossom transition hover:-translate-y-0.5"
                   >
                     Explore Communities
                   </Link>
-                  <Link 
-                    href="/mentors" 
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                  <Link
+                    href="/mentors"
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     Find Mentors
                   </Link>
@@ -426,8 +426,8 @@ export default function FeedPage() {
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Quick Actions */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h3>
+            <div className="card-lift glass-card rounded-xl p-5">
+              <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Quick Actions</h3>
               <div className="space-y-2">
                 <Link 
                   href="/dashboard/community" 
@@ -454,9 +454,9 @@ export default function FeedPage() {
             </div>
 
             {/* Trending Topics */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-primary-600" />
+            <div className="card-lift glass-card rounded-xl p-5">
+              <h3 className="mb-4 flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
+                <TrendingUp className="h-5 w-5 text-primary-500" />
                 Trending Topics
               </h3>
               <div className="space-y-3">
@@ -473,7 +473,7 @@ export default function FeedPage() {
             </div>
 
             {/* Suggested Connections */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <div className="card-lift glass-card rounded-xl p-5">
               <h3 className="font-semibold text-gray-900 dark:text-white mb-4">People to Follow</h3>
               <div className="space-y-4">
                 <p className="text-sm text-gray-500 dark:text-gray-400">

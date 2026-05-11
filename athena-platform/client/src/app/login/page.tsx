@@ -109,27 +109,33 @@ function LoginContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 lg:grid lg:grid-cols-2">
+    <div className="relative min-h-screen bg-aurora lg:grid lg:grid-cols-2">
+      <div className="cyber-grid pointer-events-none absolute inset-0 opacity-30 lg:hidden" aria-hidden="true" />
       {/* Left side - Form */}
-      <div className="flex flex-col justify-center px-4 py-10 sm:px-6 lg:px-20 xl:px-24">
-        <div className="mx-auto w-full max-w-xl lg:max-w-lg">
-          <div className="flex items-center space-x-3 mb-8">
+      <div className="relative flex flex-col justify-center px-4 py-10 sm:px-6 lg:px-20 xl:px-24">
+        <div className="cyber-grid pointer-events-none absolute inset-0 hidden opacity-20 lg:block" aria-hidden="true" />
+        <div className="relative mx-auto w-full max-w-xl lg:max-w-lg">
+          <div className="mb-8 flex items-center space-x-3">
             <Image
               src="/logo.svg"
               alt="ATHENA"
               width={48}
               height={48}
-              className="rounded-lg"
+              className="rounded-xl shadow-blossom ring-1 ring-rose-200/60 dark:ring-rose-400/20"
               priority
             />
-            <span className="text-2xl font-bold gradient-text">ATHENA</span>
+            <span className="text-2xl font-bold gradient-text-cyber">ATHENA</span>
           </div>
 
-          <div className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700 dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-300">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-primary-200/70 bg-primary-50/80 px-3 py-1 text-xs font-semibold text-primary-700 backdrop-blur dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-300">
+            <span className="status-dot status-dot-online h-1.5 w-1.5" />
             Secure access to your career community
           </div>
 
-          <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-8 shadow-xl shadow-primary-100/40 dark:border-gray-800 dark:bg-gray-900 dark:shadow-none sm:p-10">
+          <div className="relative mt-6 overflow-hidden rounded-3xl border border-primary-100/60 bg-white/90 p-8 shadow-xl shadow-primary-100/30 backdrop-blur dark:border-white/10 dark:bg-slate-900/85 dark:shadow-black/40 sm:p-10">
+            <div className="progress-athena absolute left-0 top-0 right-0 h-[3px] rounded-none">
+              <div className="progress-athena-fill w-full" />
+            </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
               {isRegistrationRecovery ? 'Welcome to ATHENA' : 'Welcome back'}
             </h1>
@@ -140,97 +146,97 @@ function LoginContent() {
             </p>
 
             <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6">
-            {serverError && (
-              <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/30">
-                <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
-                <p className="text-sm text-red-700 dark:text-red-300">{serverError}</p>
-              </div>
-            )}
-
-            <div>
-              <label htmlFor="email" className="label">
-                Email
-              </label>
-              <input
-                {...register('email')}
-                type="email"
-                id="email"
-                className="input"
-                placeholder="you@example.com"
-                autoComplete="email"
-                aria-invalid={errors.email ? 'true' : 'false'}
-              />
-              {errors.email && (
-                <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+              {serverError && (
+                <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/30">
+                  <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
+                  <p className="text-sm text-red-700 dark:text-red-300">{serverError}</p>
+                </div>
               )}
-            </div>
 
-            <div>
-              <label htmlFor="password" className="label">
-                Password
-              </label>
-              <div className="relative">
+              <div>
+                <label htmlFor="email" className="label">
+                  Email
+                </label>
                 <input
-                  {...register('password')}
-                  type={showPassword ? 'text' : 'password'}
-                  id="password"
-                  className="input pr-10"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  aria-invalid={errors.password ? 'true' : 'false'}
+                  {...register('email')}
+                  type="email"
+                  id="email"
+                  className="input"
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  aria-invalid={errors.email ? 'true' : 'false'}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3"
+                {errors.email && (
+                  <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="password" className="label">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    {...register('password')}
+                    type={showPassword ? 'text' : 'password'}
+                    id="password"
+                    className="input pr-10"
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    aria-invalid={errors.password ? 'true' : 'false'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5 text-gray-400" />
+                    ) : (
+                      <Eye className="w-5 h-5 text-gray-400" />
+                    )}
+                  </button>
+                </div>
+                {errors.password && (
+                  <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                    Remember me
+                  </span>
+                </label>
+                <Link
+                  href="/forgot-password"
+                  className="text-sm text-primary-600 hover:text-primary-500"
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
-                  ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
-                  )}
-                </button>
+                  Forgot password?
+                </Link>
               </div>
-              {errors.password && (
-                <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
-              )}
-            </div>
 
-            <div className="flex items-center justify-between">
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
-                  Remember me
-                </span>
-              </label>
-              <Link
-                href="/forgot-password"
-                className="text-sm text-primary-600 hover:text-primary-500"
+              <button
+                type="submit"
+                disabled={isLoginPending}
+                className="glow-primary w-full rounded-xl bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#06b6d4_100%)] py-3 text-base font-semibold text-white shadow-blossom transition hover:-translate-y-0.5 hover:shadow-[0_16px_35px_-8px_rgba(244,63,94,0.5)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Forgot password?
-              </Link>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoginPending}
-              className="btn-primary w-full py-3 text-base"
-            >
-              {isLoginPending ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  Sign in
-                  <ArrowRight className="w-5 h-5 ml-2" />
-                </>
-              )}
-            </button>
+                {isLoginPending ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  <>
+                    Sign in
+                    <ArrowRight className="w-5 h-5 ml-2" />
+                  </>
+                )}
+              </button>
             </form>
 
             <div className="mt-8">
@@ -276,9 +282,11 @@ function LoginContent() {
         </div>
       </div>
 
-      {/* Right side - Image/Pattern */}
-      <div className="relative hidden overflow-hidden bg-athena-gradient lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
-        <div className="absolute inset-0 bg-black/20" />
+      {/* Right side - Futuristic panel */}
+      <div className="relative hidden overflow-hidden bg-[linear-gradient(135deg,#1a0a2e_0%,#0d1b3e_40%,#0a1628_100%)] lg:flex lg:flex-col lg:justify-center lg:px-14 xl:px-20">
+        <div className="cyber-grid absolute inset-0 opacity-30" aria-hidden="true" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_30%_20%,rgba(244,63,94,0.2)_0%,transparent_60%)]" aria-hidden="true" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_80%_80%,rgba(168,85,247,0.15)_0%,transparent_60%)]" aria-hidden="true" />
         <div className="relative z-10 max-w-xl text-white">
           <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-medium backdrop-blur">
             <ShieldCheck className="h-4 w-4" />
