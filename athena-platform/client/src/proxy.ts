@@ -40,7 +40,7 @@ function getSafeRedirectPath(candidate: string | null): string | null {
   return candidate;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ── Maintenance mode ──────────────────────────────────────────────────────

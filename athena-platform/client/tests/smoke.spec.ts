@@ -1,18 +1,14 @@
 import { test, expect } from '@playwright/test';
 
-test('homepage exposes theme toggle, launch matrix, and AI launcher', async ({ page }) => {
+test('homepage exposes futuristic launch console and production signals', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: /career superapp/i })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Dark' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Light' })).toBeVisible();
-  await expect(page.getByRole('link', { name: /open athena ai assistant/i })).toBeVisible();
-  await expect(page.getByRole('table')).toBeVisible();
-
-  const footerBackground = await page.locator('footer').evaluate((element) => {
-    return window.getComputedStyle(element).backgroundColor;
-  });
-  expect(footerBackground).not.toBe('rgb(255, 255, 255)');
+  await expect(page.getByRole('heading', { name: /career command center/i })).toBeVisible();
+  await expect(page.getByText(/ATHENA Signal Console/i)).toBeVisible();
+  await expect(page.getByText(/Neon linked/i)).toBeVisible();
+  await expect(page.getByText(/Netlify ready/i)).toBeVisible();
+  await expect(page.getByText(/Prod audit clean/i)).toBeVisible();
+  await expect(page.getByRole('link', { name: /start your workspace/i })).toBeVisible();
 });
 
 test('login page loads', async ({ page }) => {
@@ -42,7 +38,7 @@ test('jobs page shows spotlight fallback when live sync fails', async ({ page })
   await page.goto('/jobs');
 
   await expect(page.getByText(/live sync temporarily unavailable/i)).toBeVisible();
-  await expect(page.getByText(/curated fallback mode/i)).toBeVisible();
+  await expect(page.getByText(/curated spotlight mode/i)).toBeVisible();
   await expect(page.getByText(/product operations lead/i)).toBeVisible();
 });
 

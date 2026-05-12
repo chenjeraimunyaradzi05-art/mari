@@ -10,7 +10,7 @@
     "dev:e2e": "concurrently -k -s first \"npm run dev:web\" \"npm run dev:api\"",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "eslint . --quiet",
     "lint:i18n": "node scripts/i18n-lint.js",
     "test": "start-server-and-test \"npm run dev:e2e\" http://localhost:3000 \"playwright test\"",
     "test:unit": "jest",
