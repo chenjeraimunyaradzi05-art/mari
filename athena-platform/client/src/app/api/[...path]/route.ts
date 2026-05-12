@@ -154,7 +154,11 @@ async function proxy(request: NextRequest) {
 
   // Forward essential request headers
   const headers: Record<string, string> = {};
-  const forward = ['authorization', 'content-type', 'cookie', 'accept', 'x-request-id'];
+  // NOTE: Do NOT forward 'cookie' — the catch-all proxy handles public/anonymous
+  // API requests. Authenticated calls use Authorization bearer tokens. Forwarding
+  // raw cookies here would leak session credentials to the upstream backend for any
+  // request that hits this catch-all, creating a CSRF/session-fixation surface.
+  const forward = ['authorization', 'content-type', 'accept', 'x-request-id'];
   for (const key of forward) {
     const val = request.headers.get(key);
     if (val) headers[key] = val;

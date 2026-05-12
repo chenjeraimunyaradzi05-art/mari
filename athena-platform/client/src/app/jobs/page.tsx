@@ -112,17 +112,19 @@ function JobsContent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="container mx-auto max-w-7xl">
-        <div className="mb-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="relative min-h-screen bg-aurora px-4 py-8 text-slate-900 dark:text-slate-100">
+      <div aria-hidden="true" className="cyber-grid pointer-events-none absolute inset-0 opacity-20" />
+      <div className="relative container mx-auto max-w-7xl">
+        <div className="mb-8 overflow-hidden rounded-2xl border border-primary-100/60 bg-white/90 p-6 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-900/85">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-700 dark:border-sky-400/20 dark:bg-sky-400/10 dark:text-sky-200">
-                <Briefcase className="h-4 w-4" />
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-primary-200/70 bg-primary-50/80 px-3 py-1 text-xs font-semibold text-primary-700 backdrop-blur dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-300">
+                <span className="status-dot status-dot-online h-1.5 w-1.5" />
+                <Briefcase className="h-3.5 w-3.5" />
                 Careers intelligence
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-slate-950 dark:text-white sm:text-4xl">
-                Explore roles without losing momentum.
+                <span className="gradient-text-cyber">Explore roles</span> without losing momentum.
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300 sm:text-base">
                 Search open jobs, narrow by location and work style, and keep
@@ -131,37 +133,19 @@ function JobsContent() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/40">
-                <div className="text-sm font-semibold text-slate-950 dark:text-white">
-                  Search
+              {[{label:'Search',sub:'Keyword, role, company'},{label:'Filter',sub:'Type, city, remote'},{label:'Resilient',sub:'Spotlight roles stay available'}].map((item)=>(
+                <div key={item.label} className="metric-card-futuristic rounded-xl px-4 py-4">
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">{item.label}</div>
+                  <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.sub}</div>
                 </div>
-                <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Keyword, role, company
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/40">
-                <div className="text-sm font-semibold text-slate-950 dark:text-white">
-                  Filter
-                </div>
-                <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Type, city, remote
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/40">
-                <div className="text-sm font-semibold text-slate-950 dark:text-white">
-                  Resilient
-                </div>
-                <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Spotlight roles stay available
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-8 md:flex-row">
           <aside className="w-full flex-shrink-0 space-y-6 md:w-64">
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="glass-card rounded-xl p-6">
               <h3 className="mb-4 flex items-center gap-2 font-semibold">
                 <Filter className="h-4 w-4" /> Filters
               </h3>
@@ -205,7 +189,7 @@ function JobsContent() {
           </aside>
 
           <div className="flex-1">
-            <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-6 overflow-hidden rounded-xl border border-primary-100/50 bg-white/90 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-900/80">
               <form onSubmit={handleSearch} className="flex flex-col gap-4 md:flex-row">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />

@@ -60,33 +60,35 @@ const trustItems = [
 
 export default function MentorsMarketingPage() {
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <section className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/50">
+    <main className="relative min-h-screen bg-aurora text-slate-950 dark:text-white">
+      <div aria-hidden="true" className="cyber-grid pointer-events-none absolute inset-0 opacity-15" />
+      <section className="relative border-b border-primary-100/60 dark:border-white/10">
         <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:px-8">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-3 py-1.5 text-sm font-semibold text-primary-800 dark:border-primary-400/20 dark:bg-primary-400/10 dark:text-primary-200">
-              <Sparkles className="h-4 w-4" />
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-primary-200/70 bg-primary-50/80 px-3 py-1 text-xs font-semibold text-primary-700 backdrop-blur dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-300">
+              <span className="status-dot status-dot-online h-1.5 w-1.5" />
+              <Sparkles className="h-3.5 w-3.5" />
               Mentor intelligence
             </div>
-            <h1 className="mt-6 max-w-4xl text-4xl font-semibold leading-tight text-slate-950 sm:text-6xl dark:text-white">
-              Find mentors who make the next move feel possible.
+            <h1 className="mt-6 max-w-4xl text-4xl font-semibold leading-tight text-slate-950 dark:text-white sm:text-6xl">
+              Find mentors who make the <span className="gradient-text-cyber">next move</span> feel possible.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 dark:text-slate-300">
               ATHENA connects mentor discovery with your career goals, applications, learning path, and AI prep so each
               conversation turns into visible progress.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/dashboard/mentors" className="btn-primary">
+              <Link href="/dashboard/mentors" className="inline-flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,#f43f5e,#a855f7)] px-5 py-3 text-sm font-semibold text-white shadow-blossom transition hover:-translate-y-0.5">
                 Find a mentor
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link href="/dashboard/mentors/become-mentor" className="btn-outline">
+              <Link href="/dashboard/mentors/become-mentor" className="inline-flex items-center gap-2 rounded-xl border-2 border-primary-500 px-5 py-2.5 text-sm font-semibold text-primary-600 transition hover:bg-primary-50 dark:text-primary-300 dark:hover:bg-primary-950/40">
                 Become a mentor
               </Link>
             </div>
           </div>
 
-          <div className="panel p-5">
+          <div className="glass-card rounded-xl p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="kicker">Session readiness</div>
@@ -96,8 +98,8 @@ export default function MentorsMarketingPage() {
             </div>
             <div className="mt-5 space-y-3">
               {trustItems.map((item) => (
-                <div key={item} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                  <ShieldCheck className="h-4 w-4 text-primary-600" />
+                <div key={item} className="flex items-center gap-3 rounded-xl border border-primary-100/60 bg-white/60 p-3 text-sm text-slate-700 backdrop-blur dark:border-white/10 dark:bg-slate-800/40 dark:text-slate-300">
+                  <ShieldCheck className="h-4 w-4 flex-shrink-0 text-primary-600" />
                   {item}
                 </div>
               ))}
@@ -109,7 +111,7 @@ export default function MentorsMarketingPage() {
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="grid gap-4 md:grid-cols-3">
           {mentorModes.map((mode) => (
-            <div key={mode.title} className="panel p-5">
+            <div key={mode.title} className="metric-card-futuristic card-lift rounded-xl p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white">
                 <mode.icon className="h-5 w-5" />
               </div>
@@ -136,7 +138,7 @@ export default function MentorsMarketingPage() {
 
         <div className="mt-8 grid gap-4 lg:grid-cols-3">
           {featuredMentors.map((mentor) => (
-            <Link key={mentor.name} href="/dashboard/mentors" className="panel group p-5 transition hover:-translate-y-0.5 hover:shadow-md">
+            <div key={mentor.name} className="glass-card card-lift group rounded-xl p-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-950 font-semibold text-white dark:bg-white dark:text-slate-950">
                   {mentor.name.split(' ').map((part) => part[0]).join('')}
@@ -156,13 +158,13 @@ export default function MentorsMarketingPage() {
                 Open profile
                 <ArrowRight className="ml-1 h-4 w-4 transition group-hover:translate-x-0.5" />
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       </section>
 
       <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
-        <div className="grid gap-4 bg-slate-950 p-6 text-white md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="grid gap-4 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#1a0a2e,#0d1b3e)] p-6 text-white md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
           <div className="flex items-center gap-4">
             <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-slate-950">
               <Users className="h-5 w-5" />
