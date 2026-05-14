@@ -3,6 +3,7 @@
  * Main navigation structure for ATHENA mobile app
  */
 import React from 'react';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,10 +37,10 @@ import { SkillsMarketplaceScreen } from '../screens/SkillsMarketplaceScreen';
 
 // Types
 export type RootStackParamList = {
-  Auth: undefined;
-  Main: undefined;
+  Auth: NavigatorScreenParams<AuthStackParamList> | undefined;
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
   JobDetail: { jobId: string };
-  ChatDetail: { conversationId: string; participantName: string };
+  ChatDetail: { conversationId: string; participantName?: string };
   VideoComments: { videoId: string; title?: string };
   Notifications: undefined;
   Apprenticeships: undefined;

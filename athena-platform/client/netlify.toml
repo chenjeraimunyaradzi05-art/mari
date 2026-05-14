@@ -4,7 +4,7 @@
 # Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  command = "npm ci --legacy-peer-deps && npm run build"
+  command = "node ../../scripts/netlify-build.mjs"
   publish = ".next"
 
 [build.environment]
@@ -15,9 +15,10 @@
   # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
   #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
   #   NEXT_PUBLIC_APP_URL = "https://YOUR-APP.netlify.app"
-  # Neon secrets are synced by running from the repo root:
-  #   npm run netlify:link-neon
-  # with NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID, NEON_DATABASE_URL, and NEON_DIRECT_DATABASE_URL.
+  # Neon support:
+  #   Netlify Database provisions NETLIFY_DB_URL automatically when @netlify/database is installed.
+  #   Existing Neon deployments can provide NEON_DATABASE_URL / NEON_DIRECT_DATABASE_URL.
+  #   The build wrapper maps these values to DATABASE_URL / DIRECT_DATABASE_URL before Next builds.
   # -------------------------------------------------------
 
 # Enable Next.js runtime (handles SSR, ISR, API routes, middleware)

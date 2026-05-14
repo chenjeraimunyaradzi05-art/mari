@@ -16,12 +16,13 @@
     "test:unit": "jest",
     "test:unit:watch": "jest --watch",
     "e2e": "playwright test",
-    "netlify:link-neon": "node ../scripts/netlify-link-neon.mjs"
+    "netlify:link-neon": "node ../../scripts/netlify-link-neon.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.1.1",
     "@hookform/resolvers": "^3.3.3",
+    "@netlify/database": "^1.0.0",
     "@sentry/nextjs": "^10.35.0",
     "@tanstack/react-query": "^5.17.0",
     "@tiptap/core": "^2.27.2",

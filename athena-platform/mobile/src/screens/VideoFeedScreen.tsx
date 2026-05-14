@@ -302,7 +302,6 @@ export function VideoFeedScreen() {
         windowSize={5}
         maxToRenderPerBatch={3}
         removeClippedSubviews
-        getItemLayout={(_, index) => ({ length: VIDEO_HEIGHT, offset: VIDEO_HEIGHT * index, index })}
         getItemLayout={(_, index) => ({
           length: VIDEO_HEIGHT,
           offset: VIDEO_HEIGHT * index,

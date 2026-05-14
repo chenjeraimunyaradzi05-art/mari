@@ -313,6 +313,8 @@ export const useVideoFeedStore = create<VideoFeedStore>()(
   )
 );
 
+export const useVideoStore = useVideoFeedStore;
+
 // ============================================
 // SELECTORS
 // ============================================
@@ -328,3 +330,5 @@ export const selectHasPreviousVideo = (state: VideoFeedStore) =>
 
 export const selectVideoById = (videoId: string) => (state: VideoFeedStore) =>
   state.videos.find((v) => v.id === videoId);
+
+export const selectWatchedVideos = (state: VideoFeedStore) => state.watchHistory;

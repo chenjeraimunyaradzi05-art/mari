@@ -14,6 +14,8 @@ interface User {
   lastName: string;
   displayName?: string;
   avatar?: string;
+  headline?: string;
+  bio?: string;
   persona: string;
   preferredLocale?: string;
   preferredCurrency?: string;
