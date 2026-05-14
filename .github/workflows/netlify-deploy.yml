@@ -16,6 +16,9 @@ jobs:
   deploy:
     name: Deploy to Netlify
     runs-on: ubuntu-latest
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
     defaults:
       run:
         working-directory: athena-platform/client
@@ -31,17 +34,20 @@ jobs:
           cache: 'npm'
           cache-dependency-path: athena-platform/client/package-lock.json
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
-
       - name: Build application
-        run: npm run build
+        run: node ../../scripts/netlify-build.mjs
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_SOCKET_URL: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          NEON_DIRECT_DATABASE_URL: ${{ secrets.NEON_DIRECT_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
           NODE_ENV: production
 
       - name: Deploy to Netlify (Production)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && env.NETLIFY_AUTH_TOKEN != '' && env.NETLIFY_SITE_ID != ''
         uses: nwtgck/actions-netlify@v3
         with:
           publish-dir: 'athena-platform/client/.next'
@@ -49,11 +55,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           deploy-message: "Deploy from GitHub Actions - ${{ github.sha }}"
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ env.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ env.NETLIFY_SITE_ID }}
 
       - name: Deploy to Netlify (Preview)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && env.NETLIFY_AUTH_TOKEN != '' && env.NETLIFY_SITE_ID != ''
         uses: nwtgck/actions-netlify@v3
         with:
           publish-dir: 'athena-platform/client/.next'
@@ -61,5 +67,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           deploy-message: "Preview Deploy - PR #${{ github.event.pull_request.number }}"
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ env.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ env.NETLIFY_SITE_ID }}
+
+      - name: Skip Netlify deploy
+        if: env.NETLIFY_AUTH_TOKEN == '' || env.NETLIFY_SITE_ID == ''
+        run: echo "Skipping Netlify deploy because NETLIFY_AUTH_TOKEN or NETLIFY_SITE_ID is not configured."
