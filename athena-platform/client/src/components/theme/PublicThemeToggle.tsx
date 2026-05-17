@@ -50,7 +50,7 @@ export default function PublicThemeToggle() {
   }, [mounted, theme]);
 
   if (!mounted) {
-    return <div className="h-11 w-[7.5rem] rounded-full border border-slate-200/80 bg-white/70 dark:border-white/10 dark:bg-slate-900/70" />;
+    return <div className="h-9 w-[5rem] rounded-full border border-slate-200/80 bg-white/70 dark:border-white/10 dark:bg-slate-900/70" />;
   }
 
   return (
@@ -67,15 +67,16 @@ export default function PublicThemeToggle() {
             type="button"
             onClick={() => setTheme(option.id)}
             aria-pressed={isActive}
+            aria-label={`Switch to ${option.label.toLowerCase()} theme`}
             className={cn(
-              'inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition',
+              'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium transition',
               isActive
                 ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
                 : 'hover:bg-slate-100 hover:text-slate-950 dark:hover:bg-white/10 dark:hover:text-white'
             )}
           >
-            <option.icon className="h-4 w-4" />
-            <span>{option.label}</span>
+            <option.icon className="h-3.5 w-3.5" />
+            <span className="hidden xl:inline">{option.label}</span>
           </button>
         );
       })}

@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ArrowRight,
+  Bot,
   MessageSquare,
   Send,
-  Sparkles,
   X,
   Briefcase,
   GraduationCap,
@@ -82,20 +82,20 @@ export default function FloatingAIButton() {
           ref={panelRef}
           role="dialog"
           aria-modal="true"
-          aria-label="ATHENA AI assistant"
+          aria-label="ATHENA Concierge"
           className="mb-3 w-[20rem] origin-bottom-right overflow-hidden rounded-2xl border border-rose-200/60 bg-white shadow-[0_30px_60px_-15px_rgba(244,63,94,0.35)] animate-scale-in dark:border-rose-400/20 dark:bg-slate-900 sm:w-[22rem]"
         >
           <div className="relative bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] p-4 text-white">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 backdrop-blur">
-                  <Sparkles className="h-5 w-5" />
+                  <Bot className="h-5 w-5" />
                 </div>
                 <div>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/80">
-                    ATHENA AI
+                    ATHENA Concierge
                   </div>
-                  <div className="text-sm font-semibold">Your career copilot</div>
+                  <div className="text-sm font-semibold">Your career command guide</div>
                 </div>
               </div>
               <button
@@ -108,7 +108,7 @@ export default function FloatingAIButton() {
               </button>
             </div>
             <p className="mt-3 text-xs leading-5 text-white/90">
-              Ask about jobs, learning, mentors, or life momentum. I&apos;ll guide you to the next best step.
+              Ask about jobs, learning, mentors, safety, income, or momentum. I&apos;ll route you to the next best step.
             </p>
           </div>
 
@@ -176,11 +176,11 @@ export default function FloatingAIButton() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-label={open ? 'Close ATHENA AI assistant' : 'Open ATHENA AI assistant'}
+        aria-label={open ? 'Close ATHENA Concierge' : 'Open ATHENA Concierge'}
         className="group inline-flex items-center gap-3 rounded-full border border-white/20 bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] px-3 py-3 text-white shadow-[0_18px_40px_-12px_rgba(244,63,94,0.55)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_48px_-10px_rgba(244,63,94,0.6)] md:px-4"
       >
         <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white/20 backdrop-blur">
-          <Sparkles className="h-5 w-5" />
+          <Bot className="h-5 w-5" />
           {!open && (
             <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
@@ -190,10 +190,10 @@ export default function FloatingAIButton() {
         </span>
         <span className="hidden text-left sm:block">
           <span className="block text-[10px] font-semibold uppercase tracking-[0.24em] text-white/85">
-            ATHENA AI
+            ATHENA Concierge
           </span>
           <span className="mt-0.5 flex items-center gap-1 text-sm font-semibold">
-            {open ? 'Close' : 'Ask the copilot'}
+            {open ? 'Close' : 'Ask Concierge'}
             <MessageSquare className="h-4 w-4 text-white/90 transition group-hover:translate-x-0.5" />
           </span>
         </span>
