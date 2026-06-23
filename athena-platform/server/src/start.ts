@@ -14,19 +14,30 @@
 
 import { execSync } from 'node:child_process';
 import * as http from 'node:http';
+import dotenv from 'dotenv';
+import { applyDatabaseUrlDefaults } from './utils/database-url';
+
+dotenv.config();
+const databaseUrls = applyDatabaseUrlDefaults();
 
 console.log('[ATHENA] start.ts — bootstrapping server...');
 console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
 console.log(`[ATHENA] node ${process.version}, pid ${process.pid}`);
+if (databaseUrls.directDatabaseUrlWasDerived) {
+  console.warn('[ATHENA] DIRECT_DATABASE_URL was derived from DATABASE_URL for Prisma tooling.');
+}
 
 // ── Run Prisma migrations ──────────────────────────────────────────────
 // This replaces the shell `prisma migrate deploy && node dist/start.js`
 // pattern, which can silently fail on some container runtimes.
 try {
   const migrationDatabaseUrl =
-    process.env.DIRECT_DATABASE_URL || process.env.DATABASE_DIRECT_URL || process.env.DIRECT_URL;
+    databaseUrls.directDatabaseUrl ||
+    process.env.DIRECT_DATABASE_URL ||
+    process.env.DATABASE_DIRECT_URL ||
+    process.env.DIRECT_URL;
   const migrationEnv = migrationDatabaseUrl
-    ? { ...process.env, DATABASE_URL: migrationDatabaseUrl }
+    ? { ...process.env, DATABASE_URL: migrationDatabaseUrl, DIRECT_DATABASE_URL: migrationDatabaseUrl }
     : process.env;
 
   console.log('[ATHENA] Running prisma migrate deploy...');

@@ -5,6 +5,11 @@
  */
 
 import { logger } from './logger';
+import {
+  applyDatabaseUrlDefaults,
+  isNeonConnectionString,
+  isPostgresConnectionString,
+} from './database-url';
 
 interface EnvValidation {
   name: string;
@@ -13,17 +18,6 @@ interface EnvValidation {
   validator?: (value: string) => boolean;
   errorMessage?: string;
 }
-
-const isPostgresConnectionString = (value: string) =>
-  value.startsWith('postgres://') || value.startsWith('postgresql://');
-
-const isNeonConnectionString = (value: string) => {
-  try {
-    return new URL(value).hostname.endsWith('.neon.tech');
-  } catch {
-    return value.includes('.neon.tech');
-  }
-};
 
 const hasSearchParam = (value: string, param: string, expected?: string) => {
   try {
@@ -97,9 +91,19 @@ interface ValidationResult {
 }
 
 export function validateEnvironment(): ValidationResult {
+  const databaseUrls = applyDatabaseUrlDefaults();
   const isProd = process.env.NODE_ENV === 'production';
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  const directDatabaseUrlWasDerived =
+    databaseUrls.directDatabaseUrlWasDerived || process.env.ATHENA_DIRECT_DATABASE_URL_DERIVED === 'true';
+
+  if (directDatabaseUrlWasDerived && databaseUrls.databaseUrl && isNeonConnectionString(databaseUrls.databaseUrl)) {
+    warnings.push(
+      'DIRECT_DATABASE_URL was derived from DATABASE_URL. Set an explicit unpooled Neon DIRECT_DATABASE_URL in production.'
+    );
+  }
 
   for (const validation of ENV_VALIDATIONS) {
     const value = process.env[validation.name];

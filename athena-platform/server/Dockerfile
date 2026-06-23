@@ -31,6 +31,8 @@ COPY prisma ./prisma/
 RUN npm ci
 
 # Generate Prisma client
+ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/athena_dev
+ENV DIRECT_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/athena_dev
 RUN npx prisma generate
 
 # =====================

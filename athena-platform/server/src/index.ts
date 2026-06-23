@@ -508,9 +508,23 @@ initializeSocketHandlers(io);
 io.on('connection', (socket) => {
   logger.debug(`Basic socket connected: ${socket.id}`);
 
-  socket.on('join_room', (userId: string) => {
-    socket.join(userId);
-    logger.debug(`User ${userId} joined their room`);
+  socket.on('join_room', (requestedRoom: string) => {
+    const authenticatedSocket = socket as typeof socket & { userId?: string };
+    const ownUserRoom = authenticatedSocket.userId ? `user:${authenticatedSocket.userId}` : null;
+    const legacyOwnRoom = authenticatedSocket.userId;
+
+    if (!ownUserRoom || (requestedRoom !== ownUserRoom && requestedRoom !== legacyOwnRoom)) {
+      logger.warn('Rejected legacy socket room join', {
+        socketId: socket.id,
+        userId: authenticatedSocket.userId,
+        requestedRoom,
+      });
+      socket.emit('join_room:error', { message: 'Not authorized to join room' });
+      return;
+    }
+
+    socket.join(ownUserRoom);
+    logger.debug(`User ${authenticatedSocket.userId} joined their room`);
   });
 
   socket.on('disconnect', () => {

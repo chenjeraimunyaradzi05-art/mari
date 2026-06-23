@@ -217,7 +217,6 @@ Observed conflicts:
 
 - `athena-platform/.github/workflows/web.yml` deploys via **Vercel**
 - root workflows deploy via **Netlify** (`.github/workflows/netlify-deploy.yml`); the backend container host is configured directly in its own dashboard (no GitHub Actions deploy step today)
-- (resolved 2026-05-08) deployment docs were rewritten to drop the old root-level Railway/Nixpacks references; the backend now ships as a portable `Dockerfile` only
 
 Assessment:
 

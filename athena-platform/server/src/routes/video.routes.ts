@@ -3,6 +3,13 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import {
+  CONTENT_LIMITS,
+  normalizeOptionalUserText,
+  normalizeSafeUrl,
+  normalizeStringList,
+  normalizeUserText,
+} from '../utils/contentSafety';
 
 const router = Router();
 
@@ -70,7 +77,8 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       },
     });
 
-    if (!video || video.isHidden) {
+    const canViewUnpublished = req.user?.id === video?.authorId || req.user?.role === 'ADMIN';
+    if (!video || video.isHidden || (video.status !== 'PUBLISHED' && !canViewUnpublished)) {
       throw new ApiError(404, 'Video not found');
     }
 
@@ -88,8 +96,8 @@ router.post(
   authenticate,
   [
     body('videoUrl').isString().notEmpty().isLength({ max: 2048 }),
-    body('title').optional().isString().isLength({ max: 200 }),
-    body('description').optional().isString().isLength({ max: 5000 }),
+    body('title').optional().isString().isLength({ max: CONTENT_LIMITS.videoTitle }),
+    body('description').optional().isString().isLength({ max: CONTENT_LIMITS.videoDescription }),
     body('type').optional().isIn(['REEL', 'STORY', 'TUTORIAL', 'CAREER_STORY', 'MENTOR_TIP', 'LIVE_REPLAY']),
     body('thumbnailUrl').optional().isString().isLength({ max: 2048 }),
     body('duration').optional().isInt({ min: 1 }),
@@ -108,17 +116,34 @@ router.post(
       const created = await prisma.video.create({
         data: {
           authorId: req.user!.id,
-          title: req.body.title,
-          description: req.body.description,
+          title: normalizeOptionalUserText(req.body.title, {
+            field: 'title',
+            maxLength: CONTENT_LIMITS.videoTitle,
+            allowEmpty: true,
+          }),
+          description: normalizeOptionalUserText(req.body.description, {
+            field: 'description',
+            maxLength: CONTENT_LIMITS.videoDescription,
+            allowEmpty: true,
+          }),
           type: req.body.type,
           status: 'PUBLISHED',
-          videoUrl: req.body.videoUrl,
-          thumbnailUrl: req.body.thumbnailUrl,
+          videoUrl: normalizeSafeUrl(req.body.videoUrl, {
+            field: 'videoUrl',
+            allowRelativeUploads: true,
+          }),
+          thumbnailUrl: req.body.thumbnailUrl
+            ? normalizeSafeUrl(req.body.thumbnailUrl, { field: 'thumbnailUrl', allowRelativeUploads: true })
+            : undefined,
           duration: req.body.duration,
           aspectRatio: req.body.aspectRatio,
-          hashtags: req.body.hashtags || [],
-          mentionedUserIds: req.body.mentionedUserIds || [],
-          location: req.body.location,
+          hashtags: normalizeStringList(req.body.hashtags, 'hashtags', 20, 64),
+          mentionedUserIds: normalizeStringList(req.body.mentionedUserIds, 'mentionedUserIds', 50, 100),
+          location: normalizeOptionalUserText(req.body.location, {
+            field: 'location',
+            maxLength: 120,
+            allowEmpty: true,
+          }),
           publishedAt: new Date(),
         },
       });
@@ -137,8 +162,8 @@ router.patch(
   '/:id',
   authenticate,
   [
-    body('title').optional().isString().isLength({ max: 200 }),
-    body('description').optional().isString().isLength({ max: 5000 }),
+    body('title').optional().isString().isLength({ max: CONTENT_LIMITS.videoTitle }),
+    body('description').optional().isString().isLength({ max: CONTENT_LIMITS.videoDescription }),
     body('status').optional().isIn(['PROCESSING', 'PUBLISHED', 'HIDDEN', 'REMOVED']),
     body('type').optional().isIn(['REEL', 'STORY', 'TUTORIAL', 'CAREER_STORY', 'MENTOR_TIP', 'LIVE_REPLAY']),
     body('thumbnailUrl').optional().isString().isLength({ max: 2048 }),
@@ -163,18 +188,47 @@ router.patch(
         throw new ApiError(403, 'Not authorized');
       }
 
+      const data: any = {};
+
+      if (req.body.title !== undefined) {
+        data.title = normalizeOptionalUserText(req.body.title, {
+          field: 'title',
+          maxLength: CONTENT_LIMITS.videoTitle,
+          allowEmpty: true,
+        }) ?? null;
+      }
+      if (req.body.description !== undefined) {
+        data.description = normalizeOptionalUserText(req.body.description, {
+          field: 'description',
+          maxLength: CONTENT_LIMITS.videoDescription,
+          allowEmpty: true,
+        }) ?? null;
+      }
+      if (req.body.status !== undefined) data.status = req.body.status;
+      if (req.body.type !== undefined) data.type = req.body.type;
+      if (req.body.thumbnailUrl !== undefined) {
+        data.thumbnailUrl = normalizeSafeUrl(req.body.thumbnailUrl, {
+          field: 'thumbnailUrl',
+          allowRelativeUploads: true,
+        });
+      }
+      if (req.body.hashtags !== undefined) {
+        data.hashtags = normalizeStringList(req.body.hashtags, 'hashtags', 20, 64);
+      }
+      if (req.body.mentionedUserIds !== undefined) {
+        data.mentionedUserIds = normalizeStringList(req.body.mentionedUserIds, 'mentionedUserIds', 50, 100);
+      }
+      if (req.body.location !== undefined) {
+        data.location = normalizeOptionalUserText(req.body.location, {
+          field: 'location',
+          maxLength: 120,
+          allowEmpty: true,
+        }) ?? null;
+      }
+
       const updated = await prisma.video.update({
         where: { id },
-        data: {
-          title: req.body.title,
-          description: req.body.description,
-          status: req.body.status,
-          type: req.body.type,
-          thumbnailUrl: req.body.thumbnailUrl,
-          hashtags: req.body.hashtags,
-          mentionedUserIds: req.body.mentionedUserIds,
-          location: req.body.location,
-        },
+        data,
       });
 
       res.json({ success: true, data: updated });
@@ -191,7 +245,7 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const video = await prisma.video.findUnique({ where: { id } });
-    if (!video) {
+    if (!video || video.isHidden || video.status !== 'PUBLISHED') {
       throw new ApiError(404, 'Video not found');
     }
 
@@ -272,7 +326,10 @@ router.get('/:id/comments', optionalAuth, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/comments',
   authenticate,
-  [body('content').isString().notEmpty().isLength({ max: 2000 }).withMessage('Comment max 2000 characters'), body('parentId').optional().isString()],
+  [
+    body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.comment }).withMessage('Comment max 2000 characters'),
+    body('parentId').optional().isString().isLength({ max: 100 }),
+  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
@@ -282,16 +339,34 @@ router.post(
 
       const { id } = req.params;
       const video = await prisma.video.findUnique({ where: { id } });
-      if (!video) {
+      if (!video || video.isHidden || video.status !== 'PUBLISHED') {
         throw new ApiError(404, 'Video not found');
+      }
+
+      const parentId = typeof req.body.parentId === 'string' && req.body.parentId.trim()
+        ? req.body.parentId.trim()
+        : undefined;
+
+      if (parentId) {
+        const parent = await prisma.videoComment.findUnique({
+          where: { id: parentId },
+          select: { videoId: true, isHidden: true },
+        });
+
+        if (!parent || parent.videoId !== id || parent.isHidden) {
+          throw new ApiError(400, 'Invalid parent comment');
+        }
       }
 
       const comment = await prisma.videoComment.create({
         data: {
           videoId: id,
           authorId: req.user!.id,
-          content: req.body.content,
-          parentId: req.body.parentId,
+          content: normalizeUserText(req.body.content, {
+            field: 'content',
+            maxLength: CONTENT_LIMITS.comment,
+          }),
+          parentId,
         },
       });
 
@@ -314,7 +389,7 @@ router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const video = await prisma.video.findUnique({ where: { id } });
-    if (!video) {
+    if (!video || video.isHidden || video.status !== 'PUBLISHED') {
       throw new ApiError(404, 'Video not found');
     }
 
@@ -382,7 +457,7 @@ router.post(
 
       const { id } = req.params;
       const video = await prisma.video.findUnique({ where: { id } });
-      if (!video) {
+      if (!video || video.isHidden || video.status !== 'PUBLISHED') {
         throw new ApiError(404, 'Video not found');
       }
 
@@ -390,9 +465,13 @@ router.post(
         data: {
           videoId: id,
           userId: req.user?.id,
-          watchDuration: req.body.watchDuration,
-          completionPct: req.body.completionPct,
-          source: req.body.source,
+          watchDuration: Number(req.body.watchDuration),
+          completionPct: Number(req.body.completionPct),
+          source: normalizeOptionalUserText(req.body.source, {
+            field: 'source',
+            maxLength: 80,
+            allowEmpty: true,
+          }),
         },
       });
 

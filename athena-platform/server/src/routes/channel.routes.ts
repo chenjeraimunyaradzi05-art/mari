@@ -3,6 +3,13 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import {
+  CONTENT_LIMITS,
+  normalizeMediaUrls,
+  normalizeOptionalUserText,
+  normalizeSafeUrl,
+  normalizeUserText,
+} from '../utils/contentSafety';
 
 const router = Router();
 
@@ -19,7 +26,13 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const limit = parseLimit(req.query.limit, 20, 50);
     const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
-    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const search = typeof req.query.search === 'string'
+      ? normalizeOptionalUserText(req.query.search, {
+          field: 'search',
+          maxLength: 100,
+          allowEmpty: true,
+        })
+      : undefined;
     const type = typeof req.query.type === 'string' ? req.query.type : undefined;
 
     const where: any = {};
@@ -76,7 +89,7 @@ router.post(
   '/',
   authenticate,
   [
-    body('name').isString().notEmpty().isLength({ max: 100 }).withMessage('Channel name max 100 characters'),
+    body('name').isString().notEmpty().isLength({ max: CONTENT_LIMITS.channelName }).withMessage('Channel name max 100 characters'),
     body('type').isIn(['EMPLOYER_BROADCAST', 'MENTOR_BROADCAST', 'COMMUNITY_CHANNEL', 'EDUCATION_CHANNEL', 'CREATOR_CHANNEL']),
     body('description').optional().isString().isLength({ max: 2000 }).withMessage('Description max 2000 characters'),
     body('isPublic').optional().isBoolean(),
@@ -93,13 +106,24 @@ router.post(
 
       const created = await prisma.channel.create({
         data: {
-          name: req.body.name,
+          name: normalizeUserText(req.body.name, {
+            field: 'name',
+            maxLength: CONTENT_LIMITS.channelName,
+          }),
           type: req.body.type,
-          description: req.body.description,
+          description: normalizeOptionalUserText(req.body.description, {
+            field: 'description',
+            maxLength: CONTENT_LIMITS.channelDescription,
+            allowEmpty: true,
+          }),
           isPublic: req.body.isPublic ?? true,
           allowReplies: req.body.allowReplies ?? false,
-          avatarUrl: req.body.avatarUrl,
-          bannerUrl: req.body.bannerUrl,
+          avatarUrl: req.body.avatarUrl
+            ? normalizeSafeUrl(req.body.avatarUrl, { field: 'avatarUrl', allowRelativeUploads: true })
+            : undefined,
+          bannerUrl: req.body.bannerUrl
+            ? normalizeSafeUrl(req.body.bannerUrl, { field: 'bannerUrl', allowRelativeUploads: true })
+            : undefined,
           ownerId: req.user!.id,
           memberCount: 1,
           members: {
@@ -161,8 +185,8 @@ router.patch(
   '/:id',
   authenticate,
   [
-    body('name').optional().isString(),
-    body('description').optional().isString(),
+    body('name').optional().isString().isLength({ max: CONTENT_LIMITS.channelName }),
+    body('description').optional().isString().isLength({ max: CONTENT_LIMITS.channelDescription }),
     body('isPublic').optional().isBoolean(),
     body('allowReplies').optional().isBoolean(),
     body('avatarUrl').optional().isString(),
@@ -185,16 +209,40 @@ router.patch(
         throw new ApiError(403, 'Not authorized');
       }
 
+      const data: {
+        name?: string;
+        description?: string;
+        isPublic?: boolean;
+        allowReplies?: boolean;
+        avatarUrl?: string;
+        bannerUrl?: string;
+      } = {};
+
+      if (req.body.name !== undefined) {
+        data.name = normalizeUserText(req.body.name, {
+          field: 'name',
+          maxLength: CONTENT_LIMITS.channelName,
+        });
+      }
+      if (req.body.description !== undefined) {
+        data.description = normalizeOptionalUserText(req.body.description, {
+          field: 'description',
+          maxLength: CONTENT_LIMITS.channelDescription,
+          allowEmpty: true,
+        }) || '';
+      }
+      if (req.body.isPublic !== undefined) data.isPublic = req.body.isPublic;
+      if (req.body.allowReplies !== undefined) data.allowReplies = req.body.allowReplies;
+      if (req.body.avatarUrl !== undefined) {
+        data.avatarUrl = normalizeSafeUrl(req.body.avatarUrl, { field: 'avatarUrl', allowRelativeUploads: true });
+      }
+      if (req.body.bannerUrl !== undefined) {
+        data.bannerUrl = normalizeSafeUrl(req.body.bannerUrl, { field: 'bannerUrl', allowRelativeUploads: true });
+      }
+
       const updated = await prisma.channel.update({
         where: { id },
-        data: {
-          name: req.body.name,
-          description: req.body.description,
-          isPublic: req.body.isPublic,
-          allowReplies: req.body.allowReplies,
-          avatarUrl: req.body.avatarUrl,
-          bannerUrl: req.body.bannerUrl,
-        },
+        data,
       });
 
       res.json({ success: true, data: updated });
@@ -326,7 +374,10 @@ router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/messages',
   authenticate,
-  [body('content').isString().notEmpty().isLength({ max: 5000 }), body('mediaUrls').optional()],
+  [
+    body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.channelMessage }),
+    body('mediaUrls').optional().isArray({ max: 10 }),
+  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
@@ -357,8 +408,11 @@ router.post(
         data: {
           channelId: id,
           authorId: req.user!.id,
-          content: req.body.content,
-          mediaUrls: req.body.mediaUrls,
+          content: normalizeUserText(req.body.content, {
+            field: 'content',
+            maxLength: CONTENT_LIMITS.channelMessage,
+          }),
+          mediaUrls: normalizeMediaUrls(req.body.mediaUrls),
         },
       });
 

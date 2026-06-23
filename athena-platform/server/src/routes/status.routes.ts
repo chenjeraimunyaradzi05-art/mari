@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
+import { normalizeSafeUrl } from '../utils/contentSafety';
 
 const router = Router();
 
@@ -82,9 +83,10 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 router.post('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const type: StoryType = normalizeStoryType(req.body?.type);
-    const mediaUrl = typeof req.body?.mediaUrl === 'string' ? req.body.mediaUrl.trim() : '';
-
-    if (!mediaUrl) throw new ApiError(400, 'mediaUrl is required');
+    const mediaUrl = normalizeSafeUrl(req.body?.mediaUrl, {
+      field: 'mediaUrl',
+      allowRelativeUploads: true,
+    });
 
     const createdAt = new Date();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

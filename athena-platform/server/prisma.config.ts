@@ -1,12 +1,13 @@
 import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
+import { applyDatabaseUrlDefaults } from './src/utils/database-url';
 
-const datasourceUrl =
-  process.env.DIRECT_DATABASE_URL ||
-  process.env.DATABASE_DIRECT_URL ||
-  process.env.DIRECT_URL ||
-  process.env.DATABASE_URL ||
-  'postgresql://postgres:postgres@localhost:5432/athena_dev';
+const fallbackDatabaseUrl = 'postgresql://postgres:postgres@localhost:5432/athena_dev';
+const databaseUrls = applyDatabaseUrlDefaults();
+const datasourceUrl = databaseUrls.directDatabaseUrl || databaseUrls.databaseUrl || fallbackDatabaseUrl;
+
+process.env.DATABASE_URL ||= databaseUrls.databaseUrl || datasourceUrl;
+process.env.DIRECT_DATABASE_URL ||= datasourceUrl;
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',

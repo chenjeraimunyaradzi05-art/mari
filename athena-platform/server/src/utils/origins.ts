@@ -1,9 +1,13 @@
 export function getAllowedOrigins(): string[] {
-  const fallbackOrigins = [
-    process.env.CLIENT_URL || 'http://localhost:3000',
+  const configuredOrigins = [
+    process.env.CLIENT_URL,
     process.env.FRONTEND_URL,
     process.env.NEXT_PUBLIC_APP_URL,
     process.env.URL,
+  ].filter((origin): origin is string => Boolean(origin));
+
+  const localDevOrigins = [
+    'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
     'http://127.0.0.1:3000',
@@ -24,7 +28,8 @@ export function getAllowedOrigins(): string[] {
     new Set([
       ...envOrigins,
       ...platformOrigins,
-      ...(process.env.NODE_ENV === 'production' ? [] : fallbackOrigins),
+      ...configuredOrigins,
+      ...(process.env.NODE_ENV === 'production' ? [] : localDevOrigins),
     ])
   );
 }

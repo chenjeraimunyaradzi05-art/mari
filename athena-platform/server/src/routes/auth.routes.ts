@@ -678,7 +678,14 @@ router.post(
 router.post(
   '/google',
   [
-    body('credential').isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
+    body('credential').optional().isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
+    body('idToken').optional().isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
+    body().custom((value) => {
+      if (!value?.credential && !value?.idToken) {
+        throw new Error('Google credential required');
+      }
+      return true;
+    }),
     body('mode').optional().isIn(['login', 'register']),
     body('womanSelfAttested').optional().isBoolean(),
     body('inviteCode')
@@ -705,8 +712,9 @@ router.post(
         throw new ApiError(503, 'Google sign-in is not configured');
       }
 
+      const googleIdentityToken = String(req.body.credential || req.body.idToken);
       const googleResponse = await fetchWithTimeout(
-        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(String(req.body.credential))}`
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(googleIdentityToken)}`
       );
 
       if (!googleResponse.ok) {
