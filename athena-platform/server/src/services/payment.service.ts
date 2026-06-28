@@ -20,14 +20,28 @@ class PaymentService {
     }
   }
 
+  private requireStripe(feature: string): boolean {
+    if (this.isEnabled && this.stripe) {
+      return true;
+    }
+
+    const message = `${feature} requires STRIPE_SECRET_KEY`;
+    if (process.env.NODE_ENV === 'production') {
+      logger.error(message);
+      throw new Error(message);
+    }
+
+    logger.warn(`${message}; using development fallback`);
+    return false;
+  }
+
   async createCustomer(user: UserWithSubscription) {
-    if (!this.isEnabled || !this.stripe) {
-        // Return dummy ID if Stripe is not configured
-        return `cus_simulated_${user.id}`;
+    if (!this.requireStripe('Creating a Stripe customer')) {
+      return `cus_simulated_${user.id}`;
     }
 
     try {
-      const customer = await this.stripe.customers.create({
+      const customer = await this.stripe!.customers.create({
         email: user.email,
         name: `${user.firstName} ${user.lastName}`,
         metadata: {
@@ -59,8 +73,7 @@ class PaymentService {
   }
 
   async createCheckoutSession(userId: string, priceId: string, returnUrl: string) {
-    if (!this.isEnabled || !this.stripe) {
-      // Simulate a success URL for dev testing without Stripe
+    if (!this.requireStripe('Creating a checkout session')) {
       return { url: `${returnUrl}?session_id=simulated_session` };
     }
 
@@ -77,7 +90,7 @@ class PaymentService {
     }
 
     try {
-      const session = await this.stripe.checkout.sessions.create({
+      const session = await this.stripe!.checkout.sessions.create({
         customer: customerId,
         mode: 'subscription',
         payment_method_types: ['card'],
@@ -102,8 +115,8 @@ class PaymentService {
   }
 
   async createPortalSession(userId: string, returnUrl: string) {
-     if (!this.isEnabled || !this.stripe) {
-         return { url: returnUrl };
+     if (!this.requireStripe('Creating a billing portal session')) {
+       return { url: returnUrl };
      }
 
      const user = await prisma.user.findUnique({ 
@@ -114,7 +127,7 @@ class PaymentService {
      if (!user || !user.subscription?.stripeCustomerId) throw new Error('User or Stripe Customer not found');
 
      try {
-         const session = await this.stripe.billingPortal.sessions.create({
+         const session = await this.stripe!.billingPortal.sessions.create({
              customer: user.subscription.stripeCustomerId,
              return_url: returnUrl,
          });
@@ -138,7 +151,7 @@ class PaymentService {
 
       const hasStripeId = user.subscription?.stripeCustomerId;
 
-      if (!this.isEnabled || !this.stripe || !hasStripeId) {
+      if (!this.requireStripe('Reading Stripe subscription state') || !hasStripeId) {
           const tier = user.subscription?.tier || 'FREE';
           const isPro = tier !== 'FREE';
           
@@ -150,7 +163,7 @@ class PaymentService {
       }
 
       // If we have stripe, we might want to list subscriptions
-      const subscriptions = await this.stripe.subscriptions.list({
+      const subscriptions = await this.stripe!.subscriptions.list({
           customer: hasStripeId,
           status: 'active',
           limit: 1

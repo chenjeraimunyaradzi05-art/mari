@@ -244,6 +244,12 @@ export async function confirmFormationPayment(
       logger.error('Failed to verify payment', { error, paymentIntentId });
       throw new ApiError(500, 'Payment verification failed');
     }
+  } else if (isProduction && !allowStripeSimulation) {
+    logger.error('Stripe not configured in production for formation payment confirmation', {
+      registrationId,
+      paymentIntentId,
+    });
+    throw new ApiError(500, 'Payment verification is unavailable. Please contact support.');
   }
 
   return prisma.businessRegistration.update({

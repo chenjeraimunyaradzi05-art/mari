@@ -339,10 +339,10 @@ function BillingContent() {
               </div>
               <div>
                 <p className="font-medium text-gray-900 dark:text-white">
-                  •••• •••• •••• {subscription?.cardLast4 || '4242'}
+                  {subscription?.cardLast4 ? `•••• •••• •••• ${subscription.cardLast4}` : 'No saved payment method'}
                 </p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Expires {subscription?.cardExpiry || '12/25'}
+                  {subscription?.cardExpiry ? `Expires ${subscription.cardExpiry}` : 'Use the billing portal to add or update a card'}
                 </p>
               </div>
             </div>

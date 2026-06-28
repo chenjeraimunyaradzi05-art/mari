@@ -21,6 +21,36 @@ import { indexDocument, deleteDocument } from '../utils/opensearch';
 import { mlService } from './ml.service';
 import { sendEmail } from '../utils/email';
 
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+const VIDEO_PROCESSOR_URL = process.env.VIDEO_PROCESSOR_URL;
+
+function canSimulateWorker(feature: string): boolean {
+  if (!isProductionRuntime) return true;
+  return process.env.WORKER_ALLOW_SIMULATION === 'true' || process.env[`${feature}_ALLOW_SIMULATION`] === 'true';
+}
+
+async function callVideoProcessor<T>(path: string, payload: Record<string, any>): Promise<T> {
+  if (!VIDEO_PROCESSOR_URL) {
+    throw new Error('VIDEO_PROCESSOR_URL is required for production video processing');
+  }
+
+  const response = await fetch(`${VIDEO_PROCESSOR_URL.replace(/\/$/, '')}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Video processor request failed (${response.status})${body ? `: ${body.slice(0, 300)}` : ''}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 // ===========================================
 // REDIS CONNECTION FOR WORKERS
 // ===========================================
@@ -48,6 +78,23 @@ export const videoWorker = new Worker<VideoProcessingJob>(
     logger.info('Processing video', { jobId: job.id, videoId });
 
     try {
+      if (!canSimulateWorker('VIDEO_PROCESSING')) {
+        const result = await callVideoProcessor<{ outputs: Record<string, string> }>('/process', {
+          jobId: job.id,
+          videoId,
+          userId,
+          inputUrl,
+          options,
+        });
+        await job.updateProgress(100);
+        logger.info('Video processing completed by external processor', {
+          jobId: job.id,
+          videoId,
+          outputs: result.outputs,
+        });
+        return { success: true, outputs: result.outputs };
+      }
+
       // Update progress
       await job.updateProgress(10);
 

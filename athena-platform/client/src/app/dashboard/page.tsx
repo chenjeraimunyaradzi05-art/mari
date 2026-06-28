@@ -7,11 +7,17 @@ import {
   Bell,
   BookOpen,
   Briefcase,
+  Building2,
   Calendar,
   CheckCircle,
+  Compass,
   Clock,
+  DollarSign,
+  FileText,
   MessageSquare,
+  Radar,
   Search,
+  ShieldCheck,
   Sparkles,
   Target,
   TrendingUp,
@@ -36,6 +42,75 @@ const momentumSteps = [
   { label: 'Profile strength', value: '72%', hint: 'Add 3 skills to improve matches' },
   { label: 'Career focus', value: '4 lanes', hint: 'Jobs, mentors, learning, community' },
   { label: 'Weekly rhythm', value: '2 tasks', hint: 'Resume review and mentor outreach' },
+];
+
+const operatingSystemModules = [
+  {
+    title: 'Opportunity radar',
+    detail: 'Track roles, mentors, grants, and market signals before they scatter.',
+    href: '/dashboard/ai/opportunity-radar',
+    icon: Radar,
+    metric: '14 new signals',
+    gradient: 'from-rose-500 to-pink-500',
+  },
+  {
+    title: 'AI career studio',
+    detail: 'Shape resumes, interview answers, content, and career plans with context.',
+    href: '/dashboard/ai',
+    icon: Sparkles,
+    metric: '8 tools live',
+    gradient: 'from-fuchsia-500 to-purple-500',
+  },
+  {
+    title: 'Learning runway',
+    detail: 'Turn skill gaps into courses, credentials, and mentor-backed practice.',
+    href: '/dashboard/learn',
+    icon: BookOpen,
+    metric: '3 paths ready',
+    gradient: 'from-cyan-500 to-sky-500',
+  },
+  {
+    title: 'Finance OS',
+    detail: 'Money, tax, savings, accounting, grants, and business inventory in one lane.',
+    href: '/dashboard/finance',
+    icon: DollarSign,
+    metric: '5 hubs linked',
+    gradient: 'from-emerald-500 to-teal-500',
+  },
+  {
+    title: 'Formation suite',
+    detail: 'Move from idea to company structure, cofounder matching, and launch tasks.',
+    href: '/dashboard/formation',
+    icon: Building2,
+    metric: 'Launch-ready',
+    gradient: 'from-amber-500 to-orange-500',
+  },
+  {
+    title: 'Impact & trust',
+    detail: 'Safety, accessibility, Indigenous, migrant, and reporting programs stay visible.',
+    href: '/dashboard/impact',
+    icon: ShieldCheck,
+    metric: 'Protected',
+    gradient: 'from-indigo-500 to-blue-500',
+  },
+];
+
+const intelligenceSignals = [
+  {
+    label: 'Search focus',
+    detail: 'Product roles, women-led companies, remote friendly',
+    icon: Compass,
+  },
+  {
+    label: 'Business motion',
+    detail: 'One grant brief and one formation task are ready',
+    icon: FileText,
+  },
+  {
+    label: 'Network warmth',
+    detail: 'Two mentors overlap with your target sector',
+    icon: Users,
+  },
 ];
 
 export default function DashboardPage() {
@@ -150,6 +225,93 @@ export default function DashboardPage() {
             </div>
           </div>
         ))}
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="panel overflow-hidden">
+          <div className="border-b border-slate-200/80 bg-gradient-to-r from-white via-rose-50/60 to-cyan-50/60 p-5 dark:border-slate-800 dark:from-slate-900 dark:via-rose-950/20 dark:to-cyan-950/20">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="kicker">Platform OS</div>
+                <h2 className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">
+                  Everything that moves your career, business, and safety forward.
+                </h2>
+              </div>
+              <Link
+                href="/dashboard/search"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-primary-700 hover:text-primary-800 dark:text-primary-300"
+              >
+                Explore all modules
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
+            {operatingSystemModules.map((module) => (
+              <Link
+                key={module.title}
+                href={module.href}
+                className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-primary-400/30"
+              >
+                <div
+                  aria-hidden="true"
+                  className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${module.gradient}`}
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${module.gradient} text-white shadow-sm`}
+                  >
+                    <module.icon className="h-5 w-5" />
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    {module.metric}
+                  </span>
+                </div>
+                <h3 className="mt-4 font-semibold text-slate-950 dark:text-white">{module.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">{module.detail}</p>
+                <div className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary-700 dark:text-primary-300">
+                  Open module
+                  <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="kicker">Live intelligence</div>
+              <h2 className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Next signal</h2>
+            </div>
+            <Sparkles className="h-5 w-5 text-primary-500 dark:text-primary-300" />
+          </div>
+          <div className="mt-5 space-y-3">
+            {intelligenceSignals.map((signal) => (
+              <div
+                key={signal.label}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-primary-600 shadow-sm dark:bg-slate-900 dark:text-primary-300">
+                    <signal.icon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">{signal.label}</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{signal.detail}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <Link
+            href="/dashboard/ai/opportunities"
+            className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm font-semibold text-primary-800 transition hover:bg-primary-100 dark:border-primary-400/20 dark:bg-primary-400/10 dark:text-primary-200 dark:hover:bg-primary-400/15"
+          >
+            Review opportunity queue
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">

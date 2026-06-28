@@ -19,7 +19,7 @@ import {
   Mic,
   MicOff,
 } from 'lucide-react';
-import { useInterviewCoach } from '@/lib/hooks';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface Message {
@@ -54,8 +54,8 @@ export default function InterviewCoachPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
-
-  const { mutate: getCoaching, isPending } = useInterviewCoach();
+  const [isPending, setIsPending] = useState(false);
+  const [coachError, setCoachError] = useState<string | null>(null);
 
   const startSession = () => {
     if (!jobRole) return;
@@ -98,68 +98,51 @@ export default function InterviewCoachPage() {
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
 
-    // Simulate AI coaching response
-    getCoaching(
-      { question: messages[messages.length - 1]?.content || '', answer: input },
-      {
-        onSuccess: (data) => {
-          const feedbackMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: data.feedback || generateMockFeedback(),
-            feedback: data.analysis || {
-              rating: 4,
-              strengths: ['Clear structure', 'Good use of examples'],
-              improvements: ['Add more quantifiable results', 'Be more concise'],
-            },
-          };
+    setIsPending(true);
+    setCoachError(null);
 
-          const nextQuestion: Message = {
+    api
+      .post('/ai/interview-coach/feedback', {
+        question: messages[messages.length - 1]?.content || '',
+        answer: input,
+        jobRole,
+        interviewType,
+        difficulty,
+      })
+      .then((response) => {
+        const data = response.data?.data || {};
+        if (!data.feedback) {
+          setCoachError('The coach completed but did not return feedback.');
+          return;
+        }
+
+        const feedbackMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: data.feedback,
+          feedback: data.analysis,
+        };
+
+        const nextMessages: Message[] = [feedbackMessage];
+        if (data.nextQuestion) {
+          nextMessages.push({
             id: (Date.now() + 2).toString(),
             role: 'assistant',
-            content: data.nextQuestion || generateNextQuestion(),
-          };
+            content: data.nextQuestion,
+          });
+        }
 
-          setMessages((prev) => [...prev, feedbackMessage, nextQuestion]);
-        },
-        onError: () => {
-          // Fallback mock response
-          const feedbackMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: generateMockFeedback(),
-            feedback: {
-              rating: 4,
-              strengths: ['Clear structure', 'Good use of examples'],
-              improvements: ['Add more quantifiable results', 'Be more concise'],
-            },
-          };
-
-          const nextQuestion: Message = {
-            id: (Date.now() + 2).toString(),
-            role: 'assistant',
-            content: generateNextQuestion(),
-          };
-
-          setMessages((prev) => [...prev, feedbackMessage, nextQuestion]);
-        },
-      }
-    );
-  };
-
-  const generateMockFeedback = () => {
-    return "Good answer! You demonstrated clear problem-solving skills and provided a specific example. To make it even stronger, try to include more quantifiable results and connect your experience directly to the role you're applying for.";
-  };
-
-  const generateNextQuestion = () => {
-    const questions = [
-      "That's great context. Now, tell me about a time when you had to work with a difficult colleague or stakeholder. How did you manage that relationship?",
-      "Excellent. Can you describe a situation where you had to make a quick decision with limited information?",
-      "Good examples. How do you typically prioritize when you have multiple urgent tasks competing for your attention?",
-      "Interesting approach. Tell me about a project where you had to learn something new quickly. How did you approach the learning process?",
-      "Great insights. Can you share an example of when you received critical feedback and how you responded to it?",
-    ];
-    return questions[Math.floor(Math.random() * questions.length)];
+        setMessages((prev) => [...prev, ...nextMessages]);
+      })
+      .catch((error) => {
+        setCoachError(
+          error?.response?.data?.message ||
+            'Interview feedback is unavailable right now. Please try again later.'
+        );
+      })
+      .finally(() => {
+        setIsPending(false);
+      });
   };
 
   const toggleRecording = () => {
@@ -435,6 +418,12 @@ export default function InterviewCoachPage() {
                 <span>Analyzing your response...</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {coachError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+            {coachError}
           </div>
         )}
       </div>

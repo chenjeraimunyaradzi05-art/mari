@@ -7,6 +7,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api-fetch';
 import { useJobsStore } from '@/lib/stores/jobs.store';
 import type { 
   Job, 
@@ -39,21 +40,21 @@ export const jobsKeys = {
 const jobsApi = {
   // Jobs
   getJobs: async (): Promise<Job[]> => {
-    const response = await fetch('/api/employer/jobs', { credentials: 'include' });
+    const response = await apiFetch('/api/employer/jobs', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch jobs');
     const { data } = await response.json();
     return data;
   },
 
   getJob: async (id: string): Promise<Job> => {
-    const response = await fetch(`/api/employer/jobs/${id}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/employer/jobs/${id}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch job');
     const { data } = await response.json();
     return data;
   },
 
   createJob: async (data: Partial<Job>): Promise<Job> => {
-    const response = await fetch('/api/employer/jobs', {
+    const response = await apiFetch('/api/employer/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -65,7 +66,7 @@ const jobsApi = {
   },
 
   updateJob: async (id: string, data: Partial<Job>): Promise<Job> => {
-    const response = await fetch(`/api/employer/jobs/${id}`, {
+    const response = await apiFetch(`/api/employer/jobs/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -77,7 +78,7 @@ const jobsApi = {
   },
 
   deleteJob: async (id: string): Promise<void> => {
-    const response = await fetch(`/api/employer/jobs/${id}`, {
+    const response = await apiFetch(`/api/employer/jobs/${id}`, {
       method: 'DELETE',
       credentials: 'include',
     });
@@ -85,7 +86,7 @@ const jobsApi = {
   },
 
   publishJob: async (id: string): Promise<Job> => {
-    const response = await fetch(`/api/employer/jobs/${id}/publish`, {
+    const response = await apiFetch(`/api/employer/jobs/${id}/publish`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -95,7 +96,7 @@ const jobsApi = {
   },
 
   closeJob: async (id: string): Promise<Job> => {
-    const response = await fetch(`/api/employer/jobs/${id}/close`, {
+    const response = await apiFetch(`/api/employer/jobs/${id}/close`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -106,21 +107,21 @@ const jobsApi = {
 
   // Candidates
   getCandidates: async (jobId: string): Promise<Candidate[]> => {
-    const response = await fetch(`/api/employer/jobs/${jobId}/candidates`, { credentials: 'include' });
+    const response = await apiFetch(`/api/employer/jobs/${jobId}/candidates`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch candidates');
     const { data } = await response.json();
     return data;
   },
 
   getCandidate: async (id: string): Promise<Candidate> => {
-    const response = await fetch(`/api/employer/candidates/${id}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/employer/candidates/${id}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch candidate');
     const { data } = await response.json();
     return data;
   },
 
   updateCandidate: async (id: string, data: Partial<Candidate>): Promise<Candidate> => {
-    const response = await fetch(`/api/employer/candidates/${id}`, {
+    const response = await apiFetch(`/api/employer/candidates/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -132,7 +133,7 @@ const jobsApi = {
   },
 
   moveCandidate: async (candidateId: string, toStage: StageId): Promise<Candidate> => {
-    const response = await fetch(`/api/employer/candidates/${candidateId}/move`, {
+    const response = await apiFetch(`/api/employer/candidates/${candidateId}/move`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -144,7 +145,7 @@ const jobsApi = {
   },
 
   bulkMoveCandidates: async (candidateIds: string[], toStage: StageId): Promise<void> => {
-    const response = await fetch('/api/employer/candidates/bulk-move', {
+    const response = await apiFetch('/api/employer/candidates/bulk-move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -154,7 +155,7 @@ const jobsApi = {
   },
 
   bulkRejectCandidates: async (candidateIds: string[], reason?: string): Promise<void> => {
-    const response = await fetch('/api/employer/candidates/bulk-reject', {
+    const response = await apiFetch('/api/employer/candidates/bulk-reject', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -164,7 +165,7 @@ const jobsApi = {
   },
 
   addNote: async (candidateId: string, content: string): Promise<CandidateNote> => {
-    const response = await fetch(`/api/employer/candidates/${candidateId}/notes`, {
+    const response = await apiFetch(`/api/employer/candidates/${candidateId}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -177,7 +178,7 @@ const jobsApi = {
 
   // Interviews
   scheduleInterview: async (candidateId: string, interview: Omit<Interview, 'id' | 'candidateId'>): Promise<Interview> => {
-    const response = await fetch(`/api/employer/candidates/${candidateId}/interviews`, {
+    const response = await apiFetch(`/api/employer/candidates/${candidateId}/interviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -189,7 +190,7 @@ const jobsApi = {
   },
 
   updateInterview: async (candidateId: string, interviewId: string, data: Partial<Interview>): Promise<Interview> => {
-    const response = await fetch(`/api/employer/candidates/${candidateId}/interviews/${interviewId}`, {
+    const response = await apiFetch(`/api/employer/candidates/${candidateId}/interviews/${interviewId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -201,7 +202,7 @@ const jobsApi = {
   },
 
   submitFeedback: async (candidateId: string, interviewId: string, feedback: Interview['feedback']): Promise<Interview> => {
-    const response = await fetch(`/api/employer/candidates/${candidateId}/interviews/${interviewId}/feedback`, {
+    const response = await apiFetch(`/api/employer/candidates/${candidateId}/interviews/${interviewId}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

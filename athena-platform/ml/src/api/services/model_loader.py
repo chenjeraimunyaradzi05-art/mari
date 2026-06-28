@@ -13,6 +13,9 @@ from typing import Any, Dict, Optional
 import joblib
 
 
+PRODUCTION_ENV_NAMES = {"production", "prod"}
+
+
 class ModelLoader:
     """Singleton model loader for ML models."""
     
@@ -38,6 +41,8 @@ class ModelLoader:
         }
         
         base_path = Path(os.getenv("MODEL_PATH", "models"))
+        allow_placeholders = self._allow_placeholder_models()
+        missing_required_models = []
         
         for name, rel_path in model_configs.items():
             try:
@@ -46,16 +51,41 @@ class ModelLoader:
                     self._models[name] = joblib.load(model_path)
                     self._status[name] = True
                     print(f"  ✓ Loaded {name}")
-                else:
-                    # Create placeholder for development
+                elif allow_placeholders:
                     self._models[name] = self._create_placeholder_model(name)
                     self._status[name] = True
-                    print(f"  ⚠ Using placeholder for {name}")
+                    print(f"  ⚠ Using development placeholder for {name}")
+                else:
+                    self._status[name] = False
+                    missing_required_models.append(str(model_path))
+                    print(f"  ✗ Missing required model artifact for {name}: {model_path}")
             except Exception as e:
                 print(f"  ✗ Failed to load {name}: {e}")
                 self._status[name] = False
         
-        self._ready = True
+        self._ready = self.is_ready()
+
+        if missing_required_models:
+            raise RuntimeError(
+                "Missing ML model artifacts in production mode: "
+                + ", ".join(missing_required_models)
+            )
+
+    def _allow_placeholder_models(self) -> bool:
+        """Allow synthetic placeholder models only outside production by default."""
+        explicit = os.getenv("ATHENA_ALLOW_PLACEHOLDER_MODELS")
+        if explicit is not None:
+            return explicit.lower() in {"1", "true", "yes", "on"}
+
+        env_name = (
+            os.getenv("ATHENA_ENV")
+            or os.getenv("ENVIRONMENT")
+            or os.getenv("APP_ENV")
+            or os.getenv("NODE_ENV")
+            or "development"
+        ).lower()
+
+        return env_name not in PRODUCTION_ENV_NAMES
     
     def _create_placeholder_model(self, name: str) -> Any:
         """Create a placeholder model for development."""

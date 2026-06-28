@@ -17,6 +17,21 @@ const stripe = process.env.STRIPE_SECRET_KEY
 // Platform fee percentage (e.g., 15% of mentor/creator earnings)
 const PLATFORM_FEE_PERCENT = 15;
 
+function canUseMockStripe(feature: string): boolean {
+  if (stripe) {
+    return false;
+  }
+
+  const message = `${feature} requires STRIPE_SECRET_KEY`;
+  if (process.env.NODE_ENV === 'production') {
+    logger.error(message);
+    throw new ApiError(503, message);
+  }
+
+  logger.warn(`${message}; using development mock`);
+  return true;
+}
+
 export interface ConnectedAccountInput {
   userId: string;
   email: string;
@@ -49,8 +64,7 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
   accountId: string;
   onboardingUrl: string;
 }> {
-  if (!stripe) {
-    logger.warn('Stripe not configured, returning mock account');
+  if (canUseMockStripe('Creating a Stripe Connect account')) {
     return {
       accountId: `acct_mock_${input.userId}`,
       onboardingUrl: `${process.env.CLIENT_URL}/dashboard/payments/mock-onboarding`,
@@ -59,7 +73,7 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
 
   try {
     // Create the Express connected account
-    const account = await stripe.accounts.create({
+    const account = await stripe!.accounts.create({
       type: 'express',
       country: input.country,
       email: input.email,
@@ -84,7 +98,7 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
     });
 
     // Create the account onboarding link
-    const accountLink = await stripe.accountLinks.create({
+    const accountLink = await stripe!.accountLinks.create({
       account: account.id,
       refresh_url: `${process.env.CLIENT_URL}/dashboard/payments/refresh`,
       return_url: `${process.env.CLIENT_URL}/dashboard/payments/success`,
@@ -116,11 +130,11 @@ export async function getOnboardingLink(userId: string): Promise<string> {
     throw new ApiError(404, 'No connected account found');
   }
 
-  if (!stripe) {
+  if (canUseMockStripe('Creating a Stripe Connect onboarding link')) {
     return `${process.env.CLIENT_URL}/dashboard/payments/mock-onboarding`;
   }
 
-  const accountLink = await stripe.accountLinks.create({
+  const accountLink = await stripe!.accountLinks.create({
     account: user.stripeConnectAccountId,
     refresh_url: `${process.env.CLIENT_URL}/dashboard/payments/refresh`,
     return_url: `${process.env.CLIENT_URL}/dashboard/payments/success`,
@@ -152,8 +166,7 @@ export async function getAccountStatus(userId: string): Promise<{
     };
   }
 
-  if (!stripe) {
-    // Mock response for development
+  if (canUseMockStripe('Checking Stripe Connect account status')) {
     return {
       isOnboarded: true,
       payoutsEnabled: true,
@@ -162,7 +175,7 @@ export async function getAccountStatus(userId: string): Promise<{
   }
 
   try {
-    const account = await stripe.accounts.retrieve(user.stripeConnectAccountId);
+    const account = await stripe!.accounts.retrieve(user.stripeConnectAccountId);
 
     const isOnboarded = account.details_submitted || false;
     const payoutsEnabled = account.payouts_enabled || false;
@@ -219,8 +232,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
 
   const platformFee = Math.round(input.amount * (PLATFORM_FEE_PERCENT / 100));
 
-  if (!stripe) {
-    // Mock response for development
+  if (canUseMockStripe('Creating an escrow payment')) {
     const mockId = `pi_mock_${Date.now()}`;
     
     // Store mock escrow record
@@ -249,7 +261,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
 
   try {
     // Create payment intent with manual capture (escrow)
-    const paymentIntent = await stripe.paymentIntents.create({
+    const paymentIntent = await stripe!.paymentIntents.create({
       amount: input.amount,
       currency: input.currency,
       capture_method: 'manual', // Don't capture immediately - hold in escrow
@@ -320,8 +332,7 @@ export async function captureEscrowPayment(paymentIntentId: string): Promise<{
     throw new ApiError(400, `Cannot capture payment in ${escrow.status} status`);
   }
 
-  if (!stripe) {
-    // Mock capture
+  if (canUseMockStripe('Capturing an escrow payment')) {
     await prisma.escrowPayment.update({
       where: { paymentIntentId },
       data: { status: 'CAPTURED', capturedAt: new Date() },
@@ -334,7 +345,7 @@ export async function captureEscrowPayment(paymentIntentId: string): Promise<{
   }
 
   try {
-    const paymentIntent = await stripe.paymentIntents.capture(paymentIntentId);
+    const paymentIntent = await stripe!.paymentIntents.capture(paymentIntentId);
 
     await prisma.escrowPayment.update({
       where: { paymentIntentId },
@@ -372,7 +383,7 @@ export async function cancelEscrowPayment(
     throw new ApiError(400, 'Payment already canceled or refunded');
   }
 
-  if (!stripe) {
+  if (canUseMockStripe('Canceling an escrow payment')) {
     await prisma.escrowPayment.update({
       where: { paymentIntentId },
       data: { status: 'CANCELED', canceledAt: new Date(), cancelReason: reason },
@@ -384,7 +395,7 @@ export async function cancelEscrowPayment(
   try {
     // If captured, refund; if not captured, cancel
     if (escrow.status === 'CAPTURED') {
-      await stripe.refunds.create({
+      await stripe!.refunds.create({
         payment_intent: paymentIntentId,
         reason: 'requested_by_customer',
       });
@@ -396,7 +407,7 @@ export async function cancelEscrowPayment(
 
       return { status: 'refunded' };
     } else {
-      await stripe.paymentIntents.cancel(paymentIntentId);
+      await stripe!.paymentIntents.cancel(paymentIntentId);
 
       await prisma.escrowPayment.update({
         where: { paymentIntentId },
@@ -476,12 +487,12 @@ export async function getEarningsDashboard(userId: string): Promise<{
  * Initiate manual payout to connected account
  */
 export async function createPayout(input: PayoutInput): Promise<{ payoutId: string; status: string }> {
-  if (!stripe) {
+  if (canUseMockStripe('Creating a Stripe payout')) {
     return { payoutId: `po_mock_${Date.now()}`, status: 'pending' };
   }
 
   try {
-    const payout = await stripe.payouts.create(
+    const payout = await stripe!.payouts.create(
       {
         amount: input.amount,
         currency: input.currency,

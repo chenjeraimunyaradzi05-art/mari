@@ -25,6 +25,11 @@ import {
   Sun,
   Moon,
   Monitor,
+  Command,
+  DollarSign,
+  FileText,
+  ShieldCheck,
+  Target,
   type LucideIcon,
 } from 'lucide-react';
 import Image from 'next/image';
@@ -32,9 +37,42 @@ import { useAuth, useNotifications, useUnreadMessageCount } from '@/lib/hooks';
 import { useUIStore } from '@/lib/store';
 import { cn, getFullName, getInitials } from '@/lib/utils';
 import { trackEvent } from '@/lib/analytics';
+import GlobalSearchCommand from '@/components/search/GlobalSearchCommand';
 
-type AppMode = 'social' | 'professional' | 'learning';
+type AppMode = 'social' | 'professional' | 'learning' | 'business';
 type NavigationItem = { name: string; href: string; icon: LucideIcon };
+
+const appModes = ['social', 'professional', 'learning', 'business'] satisfies AppMode[];
+
+const isAppMode = (value: string | null): value is AppMode =>
+  Boolean(value && appModes.includes(value as AppMode));
+
+const modeMeta: Record<AppMode, { label: string; shortLabel: string; description: string; icon: LucideIcon }> = {
+  social: {
+    label: 'Social',
+    shortLabel: 'So',
+    description: 'Community, messages, creators',
+    icon: Users,
+  },
+  professional: {
+    label: 'Career',
+    shortLabel: 'Ca',
+    description: 'Jobs, mentors, companies',
+    icon: Briefcase,
+  },
+  learning: {
+    label: 'Learn',
+    shortLabel: 'Le',
+    description: 'Courses and cohorts',
+    icon: GraduationCap,
+  },
+  business: {
+    label: 'Business',
+    shortLabel: 'Bu',
+    description: 'Finance, grants, impact',
+    icon: Building2,
+  },
+};
 
 const modeNavigation: Record<AppMode, NavigationItem[]> = {
   social: [
@@ -55,6 +93,14 @@ const modeNavigation: Record<AppMode, NavigationItem[]> = {
     { name: 'Courses', href: '/dashboard/learn', icon: BookOpen },
     { name: 'Community', href: '/dashboard/community', icon: Users },
   ],
+  business: [
+    { name: 'Business OS', href: '/dashboard/finance', icon: DollarSign },
+    { name: 'Formation', href: '/dashboard/formation', icon: Building2 },
+    { name: 'Grants', href: '/dashboard/grants', icon: Target },
+    { name: 'Impact', href: '/dashboard/impact', icon: ShieldCheck },
+    { name: 'RFPs', href: '/dashboard/rfps', icon: FileText },
+    { name: 'AI Tools', href: '/dashboard/ai', icon: Sparkles },
+  ],
 };
 
 const secondaryNav = [
@@ -73,11 +119,12 @@ export default function DashboardLayout({
   const { isSidebarOpen, toggleSidebar, theme, setTheme } = useUIStore();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('social');
 
   useEffect(() => {
-    const savedMode = window.localStorage.getItem('athena-mode') as AppMode | null;
-    if (savedMode) {
+    const savedMode = window.localStorage.getItem('athena-mode');
+    if (isAppMode(savedMode)) {
       setMode(savedMode);
     }
   }, []);
@@ -95,6 +142,7 @@ export default function DashboardLayout({
 
   const unreadCount = notificationsData?.unreadCount || 0;
   const unreadMessageCount = unreadMessages ?? 0;
+  const ActiveModeIcon = modeMeta[mode].icon;
 
   const toggleTheme = () => {
     if (theme === 'dark') {
@@ -179,29 +227,38 @@ export default function DashboardLayout({
 
           <div className="mt-6 px-3">
             {isSidebarOpen && (
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                Mode
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Mode
+                </div>
+                <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary-600 dark:text-primary-300">
+                  <ActiveModeIcon className="h-3 w-3" />
+                  {modeMeta[mode].label}
+                </div>
               </div>
             )}
-            <div className="grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
-              {([
-                { key: 'social', label: 'Social' },
-                { key: 'professional', label: 'Career' },
-                { key: 'learning', label: 'Learn' },
-              ] as { key: AppMode; label: string }[]).map((item) => (
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
+              {appModes.map((key) => {
+                const item = modeMeta[key];
+                const ModeIcon = item.icon;
+                return (
                 <button
-                  key={item.key}
-                  onClick={() => setMode(item.key)}
+                  key={key}
+                  type="button"
+                  onClick={() => setMode(key)}
+                  title={item.description}
                   className={cn(
-                    'rounded-md px-2.5 py-1.5 text-xs font-semibold transition',
-                    mode === item.key
+                    'flex min-h-9 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition',
+                    mode === key
                       ? 'bg-white text-slate-950 shadow-sm dark:bg-slate-800 dark:text-white'
                       : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
                   )}
                 >
-                  {isSidebarOpen ? item.label : item.label.charAt(0)}
+                  <ModeIcon className="h-3.5 w-3.5" />
+                  {isSidebarOpen ? item.label : <span className="sr-only">{item.label}</span>}
                 </button>
-              ))}
+              );
+              })}
             </div>
           </div>
 
@@ -349,16 +406,18 @@ export default function DashboardLayout({
                 <Menu className="w-5 h-5" />
               </button>
 
-              {/* Search */}
-              <label className="relative hidden sm:block">
-                <span className="sr-only">Search ATHENA</span>
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search jobs, people, companies..."
-                  className="w-[min(26rem,42vw)] rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-transparent focus:ring-2 focus:ring-primary-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                />
-              </label>
+              <button
+                type="button"
+                onClick={() => setIsSearchOpen(true)}
+                className="relative hidden w-[min(30rem,46vw)] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-3 text-left text-sm text-slate-500 outline-none transition hover:border-primary-200 hover:bg-white hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-primary-400/40 dark:hover:bg-slate-900/80 dark:hover:text-slate-200 sm:flex"
+                aria-label="Open global search"
+              >
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <span className="min-w-0 flex-1 truncate">Search jobs, people, grants, learning...</span>
+                <span className="hidden items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-400 dark:border-slate-700 dark:bg-slate-950 md:inline-flex">
+                  <Command className="h-3 w-3" /> K
+                </span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
@@ -370,6 +429,15 @@ export default function DashboardLayout({
                 <PenSquare className="w-4 h-4" />
                 <span className="text-sm font-medium">Post</span>
               </Link>
+
+              <button
+                type="button"
+                onClick={() => setIsSearchOpen(true)}
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 sm:hidden dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                aria-label="Open search"
+              >
+                <Search className="h-5 w-5" />
+              </button>
 
               {/* Theme toggle */}
               <button
@@ -422,6 +490,7 @@ export default function DashboardLayout({
         {/* Page content */}
         <main id="main-content" className="min-h-[calc(100vh-4rem)]">{children}</main>
       </div>
+      <GlobalSearchCommand open={isSearchOpen} onOpenChange={setIsSearchOpen} />
     </div>
   );
 }

@@ -2,7 +2,22 @@
 
 import { useEffect, useMemo, useState, type ElementType } from 'react';
 import { Dialog } from '@headlessui/react';
-import { Search, Briefcase, Users, GraduationCap, PlayCircle, Sparkles, Building2, FileText, X } from 'lucide-react';
+import {
+  ArrowRight,
+  Briefcase,
+  Building2,
+  Command,
+  Compass,
+  DollarSign,
+  FileText,
+  GraduationCap,
+  PlayCircle,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  X,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { searchApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -32,6 +47,53 @@ const typeIcons: Record<ResultType, ElementType> = {
   company: Building2,
   unknown: Search,
 };
+
+const quickLaunches = [
+  {
+    label: 'Opportunity Radar',
+    description: 'Roles, companies, mentors, and market signals',
+    href: '/dashboard/ai/opportunity-radar',
+    icon: Compass,
+  },
+  {
+    label: 'AI Coach',
+    description: 'Resume, interview, strategy, and confidence help',
+    href: '/dashboard/ai/chat',
+    icon: Sparkles,
+  },
+  {
+    label: 'Finance OS',
+    description: 'Money, tax, accounting, savings, and inventory',
+    href: '/dashboard/finance',
+    icon: DollarSign,
+  },
+  {
+    label: 'Mentor Network',
+    description: 'Book guidance from trusted operators',
+    href: '/dashboard/mentors',
+    icon: Users,
+  },
+  {
+    label: 'Learning Paths',
+    description: 'Courses, providers, cohorts, and applications',
+    href: '/dashboard/learn',
+    icon: GraduationCap,
+  },
+  {
+    label: 'Trust & Safety',
+    description: 'Privacy, reports, verification, and AI trust',
+    href: '/dashboard/ai/trust',
+    icon: ShieldCheck,
+  },
+];
+
+const popularSearches = [
+  'remote product roles',
+  'women in AI mentors',
+  'grant-ready business plan',
+  'salary negotiation',
+  'cybersecurity course',
+];
 
 const mapResult = (result: any): ResultItem => {
   const type = (result.type as ResultType) || 'unknown';
@@ -85,6 +147,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
     const timeout = setTimeout(async () => {
       if (!query.trim()) {
         setResults([]);
+        setSuggestions([]);
         setIsLoading(false);
         return;
       }
@@ -118,48 +181,132 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
     }, {});
   }, [results]);
 
-  const handleSelect = (item: ResultItem) => {
+  const closeAndNavigate = (url: string) => {
     onOpenChange(false);
     setQuery('');
-    router.push(item.url);
+    router.push(url);
+  };
+
+  const submitSearch = () => {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return;
+    closeAndNavigate(`/dashboard/search?q=${encodeURIComponent(cleanQuery)}`);
+  };
+
+  const handleSelect = (item: ResultItem) => {
+    closeAndNavigate(item.url);
   };
 
   return (
     <Dialog open={open} onClose={onOpenChange} className="relative z-50">
-      <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
+      <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden="true" />
       <div className="fixed inset-0 flex items-start justify-center p-4 sm:p-6">
-        <Dialog.Panel className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-800">
-          <div className="flex items-center border-b border-gray-200 dark:border-gray-800 px-4 py-3">
-            <Search className="w-4 h-4 text-gray-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full bg-transparent px-3 text-sm text-gray-900 dark:text-white focus:outline-none"
-              placeholder="Search people, jobs, courses, mentors, videos..."
-              autoFocus
-            />
-            <button
-              onClick={() => onOpenChange(false)}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-              aria-label="Close search"
-            >
-              <X className="w-4 h-4" />
-            </button>
+        <Dialog.Panel className="mt-8 w-full max-w-2xl overflow-hidden rounded-2xl border border-rose-200/70 bg-white shadow-[0_30px_90px_-30px_rgba(244,63,94,0.55)] dark:border-rose-400/20 dark:bg-slate-950">
+          <div className="border-b border-slate-200 bg-gradient-to-r from-rose-50 via-white to-cyan-50 px-4 py-3 dark:border-slate-800 dark:from-rose-950/30 dark:via-slate-950 dark:to-cyan-950/20">
+            <Dialog.Title className="sr-only">Search ATHENA</Dialog.Title>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                <Command className="h-3.5 w-3.5" />
+                ATHENA Command
+              </div>
+              <button
+                onClick={() => onOpenChange(false)}
+                className="rounded-lg p-1.5 text-gray-400 transition hover:bg-white hover:text-gray-600 dark:hover:bg-slate-900 dark:hover:text-gray-200"
+                aria-label="Close search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:border-primary-300 focus-within:ring-2 focus-within:ring-primary-100 dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-primary-400/50 dark:focus-within:ring-primary-400/10">
+              <Search className="h-4 w-4 text-gray-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submitSearch();
+                  }
+                }}
+                className="w-full bg-transparent px-3 text-sm text-gray-900 outline-none dark:text-white"
+                placeholder="Search people, jobs, courses, mentors, videos..."
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={submitSearch}
+                disabled={!query.trim()}
+                className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-slate-950 px-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-40 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+              >
+                Search
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
           </div>
 
           <div className="max-h-[70vh] overflow-y-auto p-4">
             {isLoading && (
-              <div className="py-8 text-center text-sm text-gray-500">Searching...</div>
+              <div className="space-y-2 py-4">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="h-14 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-900" />
+                ))}
+              </div>
             )}
 
             {!isLoading && query.trim().length === 0 && (
-              <div className="py-6 text-center text-sm text-gray-500">
-                Type to search across Athena.
+              <div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {quickLaunches.map((item) => (
+                    <button
+                      key={item.href}
+                      type="button"
+                      onClick={() => closeAndNavigate(item.href)}
+                      className="group flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-primary-400/30"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary-50 to-cyan-50 text-primary-600 dark:from-primary-400/10 dark:to-cyan-400/10 dark:text-primary-300">
+                        <item.icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-slate-950 dark:text-white">{item.label}</span>
+                        <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{item.description}</span>
+                      </span>
+                      <ArrowRight className="mt-2 h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-primary-500" />
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-400">Popular searches</p>
+                  <div className="flex flex-wrap gap-2">
+                    {popularSearches.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        onClick={() => setQuery(suggestion)}
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-primary-400/30 dark:hover:bg-primary-400/10 dark:hover:text-primary-200"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
             {!isLoading && query.trim().length > 0 && results.length === 0 && (
-              <div className="py-6 text-center text-sm text-gray-500">No results found.</div>
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center dark:border-slate-700 dark:bg-slate-900/60">
+                <Search className="mx-auto h-8 w-8 text-slate-400" />
+                <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">No instant matches yet.</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Run a full search across the platform for &ldquo;{query.trim()}&rdquo;.
+                </p>
+                <button
+                  type="button"
+                  onClick={submitSearch}
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                >
+                  Open full results
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
             )}
 
             {Object.entries(grouped).map(([group, items]) => (

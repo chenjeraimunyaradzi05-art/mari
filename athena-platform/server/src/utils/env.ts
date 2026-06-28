@@ -39,6 +39,13 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     errorMessage: 'JWT_SECRET must be at least 32 characters for security',
   },
   {
+    name: 'DV_ENCRYPTION_KEY',
+    required: true,
+    productionOnly: true,
+    validator: (v) => /^[0-9a-fA-F]{64}$/.test(v),
+    errorMessage: 'DV_ENCRYPTION_KEY must be a 64-character hex key',
+  },
+  {
     name: 'DATABASE_URL',
     required: true,
     validator: isPostgresConnectionString,

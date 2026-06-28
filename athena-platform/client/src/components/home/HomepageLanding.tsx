@@ -154,6 +154,7 @@ const operatingLayers = [
     description: 'Search roles, compare opportunities, and build a shortlist without losing context.',
     icon: Compass,
     gradient: 'from-rose-500 to-orange-400',
+    href: '/jobs',
   },
   {
     eyebrow: 'Prepare',
@@ -161,6 +162,7 @@ const operatingLayers = [
     description: 'Use AI tools, learning paths, mentor feedback, and profile improvements together.',
     icon: Rocket,
     gradient: 'from-fuchsia-500 to-purple-500',
+    href: '/dashboard/ai',
   },
   {
     eyebrow: 'Connect',
@@ -168,6 +170,7 @@ const operatingLayers = [
     description: 'Move from isolated searching into communities, events, messages, and support loops.',
     icon: Heart,
     gradient: 'from-pink-500 to-rose-400',
+    href: '/network',
   },
 ];
 
@@ -233,6 +236,7 @@ const partnerCaseStudies = [
     outcome: 'Cohort filled 8 weeks',
     icon: DollarSign,
     gradient: 'from-emerald-500 to-teal-500',
+    href: '/finances',
   },
   {
     sector: 'Mining & Trades',
@@ -241,6 +245,7 @@ const partnerCaseStudies = [
     outcome: '280 verified leads',
     icon: Compass,
     gradient: 'from-amber-500 to-orange-500',
+    href: '/apprenticeships',
   },
   {
     sector: 'Education',
@@ -249,6 +254,7 @@ const partnerCaseStudies = [
     outcome: '3.4x quality lift',
     icon: GraduationCap,
     gradient: 'from-sky-500 to-cyan-500',
+    href: '/courses',
   },
 ];
 
@@ -259,6 +265,8 @@ const partnerCategories = [
     description: 'Sponsor financial literacy tracks, salary tools, and capital programmes for women in motion.',
     icon: DollarSign,
     gradient: 'from-emerald-500 to-teal-500',
+    href: '/contact-sales?intent=partnership&industry=banking',
+    routeHref: '/finances',
   },
   {
     label: 'Education & training',
@@ -266,6 +274,8 @@ const partnerCategories = [
     description: 'Co-publish learning paths, micro-credentials, and scholarship pipelines into your campuses.',
     icon: GraduationCap,
     gradient: 'from-sky-500 to-cyan-500',
+    href: '/contact-sales?intent=partnership&industry=education',
+    routeHref: '/courses',
   },
   {
     label: 'Mining & energy',
@@ -273,6 +283,8 @@ const partnerCategories = [
     description: 'Recruit underground-to-boardroom talent and showcase apprenticeships, safety culture, and ESG wins.',
     icon: Compass,
     gradient: 'from-amber-500 to-orange-500',
+    href: '/contact-sales?intent=partnership&industry=mining',
+    routeHref: '/apprenticeships',
   },
   {
     label: 'Trades & infrastructure',
@@ -280,6 +292,8 @@ const partnerCategories = [
     description: 'Promote apprenticeships, certifications, and field roles to women breaking into trades.',
     icon: Wand2,
     gradient: 'from-rose-500 to-pink-500',
+    href: '/contact-sales?intent=partnership&industry=trades',
+    routeHref: '/apprenticeships',
   },
   {
     label: 'Healthcare & wellness',
@@ -287,6 +301,8 @@ const partnerCategories = [
     description: 'Reach a verified audience for clinical roles, mental-health partnerships, and wellbeing benefits.',
     icon: Heart,
     gradient: 'from-fuchsia-500 to-purple-500',
+    href: '/contact-sales?intent=partnership&industry=healthcare',
+    routeHref: '/jobs?sector=healthcare',
   },
   {
     label: 'Tech & AI',
@@ -294,13 +310,36 @@ const partnerCategories = [
     description: 'Plug into AI tooling rails, developer programmes, and engineering hiring pipelines.',
     icon: Bot,
     gradient: 'from-indigo-500 to-blue-500',
+    href: '/contact-sales?intent=partnership&industry=technology',
+    routeHref: '/developers',
   },
 ];
 
 const lifeOsSignals = [
-  { label: 'Career routes', value: '16', detail: 'abilities synced', icon: Command },
-  { label: 'Concierge mode', value: 'Live', detail: 'next-step guidance', icon: Bot },
-  { label: 'Momentum loop', value: '1', detail: 'account, every track', icon: Zap },
+  { label: 'Career routes', value: '16', detail: 'abilities synced', icon: Command, href: '/dashboard' },
+  { label: 'Concierge mode', value: 'Live', detail: 'next-step guidance', icon: Bot, href: '/dashboard/ai/chat' },
+  { label: 'Momentum loop', value: '1', detail: 'account, every track', icon: Zap, href: '/dashboard/accelerator' },
+];
+
+const partnerStats = [
+  {
+    label: 'Verified members',
+    value: 'Women-led',
+    detail: 'Identity-checked, opt-in audience',
+    href: '/privacy-center',
+  },
+  {
+    label: 'Native formats',
+    value: 'Sponsored',
+    detail: 'Learning paths, events, job boosts',
+    href: '/admin/marketing/partnerships',
+  },
+  {
+    label: 'Performance',
+    value: 'Transparent',
+    detail: 'Reach, engagement, applications',
+    href: '/dashboard/finance',
+  },
 ];
 
 const conciergeActions = [
@@ -518,11 +557,86 @@ function HeroPhotoGallery() {
 
 function HeroCommandDeck() {
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
-      <HeroPhotoGallery />
-      <div className="grid gap-4">
-        <HeroSocialRail />
-        <SignalPanel />
+    <div className="space-y-4">
+      <HeroSocialRail />
+      <SignalPanel />
+    </div>
+  );
+}
+
+function HeroMomentumRibbon() {
+  return (
+    <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/[0.05]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-600 dark:text-rose-200">
+            Momentum lanes
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+            Choose a lane to dive deeper. Each tile links directly into the workspace surface it represents.
+          </p>
+        </div>
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:text-rose-600 dark:border-slate-700 dark:bg-white/5 dark:text-slate-200"
+        >
+          Open dashboard
+          <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {heroMomentumTiles.map((item) => (
+          <Link
+            key={item.label}
+            href={item.href}
+            className="group flex min-h-[6.5rem] items-start gap-3 rounded-xl border border-rose-200/60 bg-white/75 p-4 backdrop-blur transition hover:-translate-y-0.5 hover:border-rose-300 hover:bg-white dark:border-rose-400/20 dark:bg-white/5 dark:hover:bg-white/10"
+          >
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${item.gradient} text-white shadow-lg shadow-rose-500/15`}
+            >
+              <item.icon className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
+                {item.label}
+                <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-rose-500" />
+              </div>
+              <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">{item.detail}</div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HeroProgressPanel() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
+      <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/[0.05]">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-600 dark:text-rose-200">
+          Today&apos;s focus plan
+        </div>
+        <div className="mt-3 space-y-2">
+          {heroFocusPlan.map((item) => (
+            <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950/[0.03] px-3 py-2 text-sm dark:bg-white/[0.04]">
+              <span className="text-slate-600 dark:text-slate-300">{item.label}</span>
+              <span className="font-semibold text-slate-950 dark:text-white">{item.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl border border-amber-200/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.82),rgba(254,243,199,0.72))] p-4 shadow-sm backdrop-blur dark:border-amber-300/20 dark:bg-white/[0.05]">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-700 dark:text-amber-200">
+          Momentum score
+        </div>
+        <div className="mt-3 flex items-end gap-2">
+          <span className="text-4xl font-semibold text-slate-950 dark:text-white">92</span>
+          <span className="pb-1 text-sm font-semibold text-emerald-600 dark:text-emerald-300">+14%</span>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">
+          Higher fit score after profile, mentor, and learning signals connect.
+        </p>
       </div>
     </div>
   );
@@ -538,6 +652,7 @@ function HeroSocialRail() {
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-300 opacity-60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-300" />
+              <span className="sr-only">Live</span>
             </span>
             Community signal
           </div>
@@ -579,7 +694,8 @@ function HeroSocialRail() {
                 {post.badge}
               </span>
               <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
-                {post.pulse}
+                <span aria-hidden="true">{post.pulse}</span>
+                <span className="sr-only">Pulse signal</span>
               </span>
               <span className="inline-flex items-center gap-3">
                 <span className="inline-flex items-center gap-1">
@@ -648,6 +764,7 @@ function SocialFeedPreview() {
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-60" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
+            <span className="sr-only">Live</span>
           </span>
           <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-rose-200">
             Live community signal
@@ -663,8 +780,9 @@ function SocialFeedPreview() {
 
       <div className="space-y-3">
         {feedPreview.map((post) => (
-          <div
+          <Link
             key={post.name}
+            href="/feed"
             className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-lg dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-rose-400/20"
           >
             <div className="flex items-start gap-3">
@@ -683,7 +801,8 @@ function SocialFeedPreview() {
                     {post.badge}
                   </span>
                   <span className="rounded-full border border-cyan-300/40 bg-cyan-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-cyan-600 dark:border-cyan-400/30 dark:bg-cyan-500/15 dark:text-cyan-200">
-                    {post.pulse}
+                    <span aria-hidden="true">{post.pulse}</span>
+                    <span className="sr-only">Pulse signal</span>
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">{post.role}</div>
@@ -700,7 +819,7 @@ function SocialFeedPreview() {
                 </div>
               </div>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
     </div>
@@ -741,14 +860,20 @@ export default function HomepageLanding() {
           <div className="flex items-center gap-2">
             <div className="hidden items-center gap-1 sm:flex">
               {navStatusPills.map((pill) => (
-                <span
+                <dl
                   key={pill.label}
-                  className={`inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white/70 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-slate-700 backdrop-blur dark:border-white/10 dark:bg-white/10 dark:text-slate-200`}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white/70 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-slate-700 backdrop-blur dark:border-white/10 dark:bg-white/10 dark:text-slate-200"
+                  aria-label={`${pill.label} status`}
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-500" />
-                  <span className="uppercase text-[10px] text-slate-500 dark:text-slate-300">{pill.label}</span>
-                  <span className={`font-medium ${pill.tone}`}>{pill.value}</span>
-                </span>
+                  <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-500" aria-hidden="true" />
+                  <dt className="sr-only">{pill.label}</dt>
+                  <span className="uppercase text-[10px] text-slate-500 dark:text-slate-300" aria-hidden="true">
+                    {pill.label}
+                  </span>
+                  <dd className={`font-medium ${pill.tone}`} aria-live="polite">
+                    {pill.value}
+                  </dd>
+                </dl>
               ))}
             </div>
             <div className="hidden sm:block">
@@ -758,13 +883,17 @@ export default function HomepageLanding() {
             </div>
             <Link
               href="/login"
-              className="group inline-flex items-center gap-1.5 rounded-lg border border-rose-200/70 bg-white/85 px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:border-rose-400 hover:bg-white hover:text-rose-800 hover:shadow-[0_10px_24px_-12px_rgba(244,63,94,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:border-rose-400/30 dark:bg-white/5 dark:text-rose-100 dark:hover:bg-white/10 sm:text-sm"
+              className="group relative inline-flex items-center gap-2 overflow-hidden rounded-xl border border-rose-200/80 bg-white px-3.5 py-2 text-xs font-semibold text-slate-950 shadow-[0_14px_32px_-20px_rgba(15,23,42,0.65)] transition hover:-translate-y-0.5 hover:border-rose-300 hover:text-rose-700 hover:shadow-[0_18px_38px_-18px_rgba(244,63,94,0.48)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:border-rose-300/30 dark:bg-white/10 dark:text-white dark:hover:bg-white/15 sm:text-sm"
             >
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
+              <span
+                className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-rose-500 via-fuchsia-500 to-amber-400 opacity-80 transition group-hover:h-1"
+                aria-hidden="true"
+              />
+              <span className="relative flex h-6 w-6 items-center justify-center rounded-lg bg-rose-50 text-rose-600 transition group-hover:bg-rose-100 dark:bg-rose-400/15 dark:text-rose-100">
+                <ShieldCheck className="h-3.5 w-3.5" />
               </span>
-              Sign in
+              <span className="relative">Sign in</span>
+              <ArrowRight className="relative h-3.5 w-3.5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-rose-600" />
             </Link>
             <Link
               href="/register"
@@ -794,7 +923,7 @@ export default function HomepageLanding() {
         {/* Hero */}
         <section className="relative overflow-hidden bg-aurora">
           <div className="cyber-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden="true" />
-          <div className="relative mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] lg:px-8 xl:min-h-[calc(100vh-5rem)] xl:items-center">
+          <div className="relative mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:px-8 xl:min-h-[calc(100vh-5rem)] xl:items-center">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/60 bg-white/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-rose-700 shadow-sm backdrop-blur dark:border-rose-400/30 dark:bg-white/5 dark:text-rose-200">
                 <Globe2 className="h-3.5 w-3.5" />
@@ -808,91 +937,66 @@ export default function HomepageLanding() {
                 ATHENA connects jobs, mentors, learning, community, AI coaching, and earning pathways in one
                 intelligent workspace designed for women&apos;s whole lives.
               </p>
-
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
                   href="/register"
-                  className="inline-flex items-center justify-center rounded-xl bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] px-5 py-3 text-sm font-semibold text-white shadow-blossom transition hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-10px_rgba(244,63,94,0.55)]"
+                  className="inline-flex items-center justify-center rounded-xl bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] px-6 py-3 text-sm font-semibold text-white shadow-blossom transition hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-10px_rgba(244,63,94,0.55)]"
                 >
                   Start your workspace
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
-                <div className="hidden h-10 w-px bg-rose-200/60 dark:bg-rose-500/20 sm:block" />
                 <Link
                   href="/jobs"
-                  className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white/70 px-5 py-3 text-sm font-semibold text-rose-700 backdrop-blur transition hover:bg-white dark:border-rose-400/30 dark:bg-white/5 dark:text-rose-200 dark:hover:bg-white/10"
+                  className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white/80 px-6 py-3 text-sm font-semibold text-rose-700 backdrop-blur transition hover:bg-white dark:border-rose-400/30 dark:bg-white/5 dark:text-rose-200 dark:hover:bg-white/10"
                 >
                   Explore roles
                 </Link>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+                <span>Or jump straight to</span>
                 <Link
                   href="/feed"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-5 py-3 text-sm font-semibold text-slate-800 backdrop-blur transition hover:bg-white dark:border-slate-700 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:bg-white dark:border-slate-700 dark:bg-white/5 dark:text-slate-200"
                 >
-                  <Heart className="h-4 w-4 text-rose-500" />
+                  <Heart className="h-3.5 w-3.5 text-rose-500" />
                   Social feed
                 </Link>
                 <Link
                   href="/contact-sales?intent=partnership"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300/70 bg-emerald-50/70 px-5 py-3 text-sm font-semibold text-emerald-700 backdrop-blur transition hover:bg-emerald-50 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                  className="inline-flex items-center gap-1 rounded-full border border-emerald-300/70 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition hover:-translate-y-0.5 hover:bg-emerald-50 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200"
                 >
-                  <Gem className="h-4 w-4" />
+                  <Gem className="h-3.5 w-3.5" />
                   Brand partners
                 </Link>
               </div>
+            </div>
+            <HeroPhotoGallery />
+          </div>
+        </section>
 
-              <div className="mt-8 grid gap-3 sm:grid-cols-2">
-                {heroMomentumTiles.map((item) => (
-                  <Link
-                    key={item.label}
-                    href={item.href}
-                    className="group flex min-h-[6.75rem] items-start gap-3 rounded-xl border border-rose-200/60 bg-white/75 p-4 backdrop-blur transition hover:-translate-y-0.5 hover:border-rose-300 hover:bg-white dark:border-rose-400/15 dark:bg-white/5 dark:hover:bg-white/10"
-                  >
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${item.gradient} text-white shadow-lg shadow-rose-500/15`}
-                    >
-                      <item.icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
-                        {item.label}
-                        <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-rose-500" />
-                      </div>
-                      <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">{item.detail}</div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-
-              <div className="mt-3 grid gap-3 sm:grid-cols-[1.2fr_0.8fr]">
-                <div className="rounded-xl border border-slate-200/80 bg-white/75 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/[0.05]">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-600 dark:text-rose-200">
-                    Today&apos;s route
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {heroFocusPlan.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950/[0.03] px-3 py-2 text-sm dark:bg-white/[0.04]">
-                        <span className="text-slate-600 dark:text-slate-300">{item.label}</span>
-                        <span className="font-semibold text-slate-950 dark:text-white">{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-amber-200/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.82),rgba(254,243,199,0.72))] p-4 shadow-sm backdrop-blur dark:border-amber-300/20 dark:bg-none dark:bg-white/[0.05]">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-700 dark:text-amber-200">
-                    Momentum
-                  </div>
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className="text-4xl font-semibold text-slate-950 dark:text-white">92</span>
-                    <span className="pb-1 text-sm font-semibold text-emerald-600 dark:text-emerald-300">+14%</span>
-                  </div>
-                  <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                    Higher fit score after profile, mentor, and learning signals connect.
+        <section className="relative border-y border-slate-200/70 bg-white/80 backdrop-blur-sm dark:border-white/10 dark:bg-slate-950/60">
+          <div className="cyber-grid pointer-events-none absolute inset-0 opacity-20" aria-hidden="true" />
+          <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+            <div className="grid gap-10 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] xl:items-start">
+              <div className="space-y-6">
+                <div className="max-w-xl space-y-3">
+                  <div className="kicker">Command surface preview</div>
+                  <h2 className="text-2xl font-semibold text-slate-950 dark:text-white">
+                    Live social momentum and concierge guidance appear right after the hero.
+                  </h2>
+                  <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    We moved the interactive rail to a second beat so the headline breathes, while the operating system
+                    still opens within a single scroll.
                   </p>
                 </div>
+                <HeroCommandDeck />
+              </div>
+              <div className="space-y-6">
+                <HeroMomentumRibbon />
+                <HeroProgressPanel />
               </div>
             </div>
-
-            <HeroCommandDeck />
           </div>
         </section>
 
@@ -906,10 +1010,10 @@ export default function HomepageLanding() {
               Trusted by partners across
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {partnerCategories.map((category) => (
-                <Link
-                  key={category.industry}
-                  href={`/contact-sales?intent=partnership&industry=${category.industry}`}
+                  {partnerCategories.map((category) => (
+                    <Link
+                      key={category.industry}
+                      href={category.href}
                   className="group inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-rose-300 hover:text-rose-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-rose-400/40 dark:hover:text-rose-200"
                 >
                   <span
@@ -1007,19 +1111,23 @@ export default function HomepageLanding() {
 
                 <div className="mt-7 grid gap-3 sm:grid-cols-3">
                   {lifeOsSignals.map((signal) => (
-                    <div
+                    <Link
                       key={signal.label}
-                      className="rounded-lg border border-white/10 bg-white/[0.05] p-4 shadow-[0_18px_60px_-35px_rgba(244,63,94,0.8)] backdrop-blur"
+                      href={signal.href}
+                      className="group rounded-lg border border-white/10 bg-white/[0.05] p-4 shadow-[0_18px_60px_-35px_rgba(244,63,94,0.8)] backdrop-blur transition hover:-translate-y-0.5 hover:border-rose-300/35 hover:bg-white/[0.08]"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <signal.icon className="h-5 w-5 text-rose-200" />
-                        <span className="font-mono text-lg font-semibold text-white">{signal.value}</span>
+                        <span className="inline-flex items-center gap-2 font-mono text-lg font-semibold text-white">
+                          {signal.value}
+                          <ArrowRight className="h-3.5 w-3.5 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-rose-200" />
+                        </span>
                       </div>
                       <div className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                         {signal.label}
                       </div>
                       <div className="mt-1 text-sm text-slate-200">{signal.detail}</div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
 
@@ -1174,19 +1282,26 @@ export default function HomepageLanding() {
               </p>
 
               <div className="mt-8 grid gap-6 sm:grid-cols-3">
-                {operatingLayers.map((layer) => (
-                  <div key={layer.title} className="border-l-2 border-rose-300/70 pl-5 dark:border-rose-400/40">
+                  {operatingLayers.map((layer) => (
+                  <Link
+                    key={layer.title}
+                    href={layer.href}
+                    className="group border-l-2 border-rose-300/70 pl-5 transition hover:-translate-y-0.5 hover:border-rose-500 dark:border-rose-400/40 dark:hover:border-rose-200"
+                  >
                     <div
-                      className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${layer.gradient} text-white shadow-lg`}
+                      className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${layer.gradient} text-white shadow-lg transition group-hover:scale-105`}
                     >
                       <layer.icon className="h-5 w-5" strokeWidth={2.25} />
                     </div>
                     <div className="mt-4 text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-700 dark:text-rose-300">
                       {layer.eyebrow}
                     </div>
-                    <h3 className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">{layer.title}</h3>
+                    <h3 className="mt-1 flex items-center gap-2 text-xl font-semibold text-slate-950 dark:text-white">
+                      {layer.title}
+                      <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-rose-600" />
+                    </h3>
                     <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{layer.description}</p>
-                  </div>
+                  </Link>
                 ))}
               </div>
 
@@ -1287,22 +1402,22 @@ export default function HomepageLanding() {
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
-                  href="/business"
+                  href="/admin/marketing/partnerships"
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-800 transition hover:bg-white dark:border-slate-700 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
                 >
                   <Building2 className="h-4 w-4" />
-                  Business hub
+                  Partnership hub
                 </Link>
               </div>
             </div>
 
             <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {partnerCategories.map((category) => (
-                <Link
-                  key={category.industry}
-                  href={`/contact-sales?intent=partnership&industry=${category.industry}`}
-                  className="panel group relative overflow-hidden p-5 transition hover:-translate-y-1 hover:border-rose-200 hover:shadow-md dark:hover:border-rose-400/30"
-                >
+                {partnerCategories.map((category) => (
+                  <Link
+                    key={category.industry}
+                    href={category.href}
+                    className="panel group relative overflow-hidden p-5 transition hover:-translate-y-1 hover:border-rose-200 hover:shadow-md dark:hover:border-rose-400/30"
+                  >
                   <div
                     aria-hidden="true"
                     className={`pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-gradient-to-br ${category.gradient} opacity-0 blur-2xl transition duration-500 group-hover:opacity-40`}
@@ -1319,9 +1434,14 @@ export default function HomepageLanding() {
                   </div>
                   <h3 className="relative mt-5 text-lg font-semibold text-slate-950 dark:text-white">{category.label}</h3>
                   <p className="relative mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{category.description}</p>
-                  <div className="relative mt-4 flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-300">
-                    Discuss the partnership
-                    <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                  <div className="relative mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold">
+                    <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-300">
+                      Discuss partnership
+                      <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-white/10 dark:text-slate-300">
+                      Route: {category.routeHref.replace(/\?.*$/, '')}
+                    </span>
                   </div>
                 </Link>
               ))}
@@ -1377,67 +1497,150 @@ export default function HomepageLanding() {
               </div>
             </div>
 
-            <div className="mt-12">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <div className="kicker">Partner stories</div>
-                  <h3 className="mt-2 max-w-2xl text-2xl font-semibold text-slate-950 dark:text-white">
-                    Real outcomes from sectors already on ATHENA.
-                  </h3>
-                </div>
-                <Link
-                  href="/business"
-                  className="inline-flex items-center gap-1 text-sm font-semibold text-rose-600 dark:text-rose-300"
-                >
-                  Read the business hub
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-              <div className="mt-6 grid gap-4 md:grid-cols-3">
-                {partnerCaseStudies.map((story) => (
-                  <article
-                    key={story.attribution}
-                    className="panel relative flex h-full flex-col overflow-hidden p-5"
+            <div className="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-start">
+              <div className="space-y-6 rounded-3xl bg-slate-950 p-8 text-white shadow-[0_45px_120px_-60px_rgba(15,23,42,0.85)]">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-200">
+                      Partner stories
+                    </div>
+                    <h3 className="mt-3 max-w-2xl text-2xl font-semibold">
+                      Real outcomes from sectors already on ATHENA.
+                    </h3>
+                  </div>
+                  <Link
+                    href="/admin/marketing/partnerships"
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-rose-200 transition hover:text-white"
                   >
-                    <div
-                      aria-hidden="true"
-                      className={`absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br ${story.gradient} opacity-20 blur-2xl`}
-                    />
-                    <div className="flex items-center justify-between">
+                    Open partnership hub
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {partnerCaseStudies.map((story) => (
+                    <Link
+                      key={story.attribution}
+                      href={story.href}
+                      className="relative flex h-full flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.06] p-5 backdrop-blur"
+                    >
                       <div
-                        className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${story.gradient} text-white shadow`}
-                      >
-                        <story.icon className="h-5 w-5" strokeWidth={2.25} />
+                        aria-hidden="true"
+                        className={`absolute -right-12 -top-14 h-32 w-32 rounded-full bg-gradient-to-br ${story.gradient} opacity-30 blur-2xl`}
+                      />
+                      <div className="relative flex items-center justify-between">
+                        <div
+                          className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${story.gradient} text-white shadow-[0_18px_45px_-22px_rgba(244,63,94,0.65)]`}
+                        >
+                          <story.icon className="h-5 w-5" strokeWidth={2.25} />
+                        </div>
+                        <span className="rounded-full border border-emerald-300/40 bg-emerald-400/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">
+                          {story.outcome}
+                        </span>
                       </div>
-                      <span className="rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-                        {story.outcome}
-                      </span>
-                    </div>
-                    <p className="relative mt-4 flex-1 text-sm leading-6 text-slate-700 dark:text-slate-200">
-                      &ldquo;{story.quote}&rdquo;
-                    </p>
-                    <div className="relative mt-4 border-t border-slate-200/70 pt-3 text-xs dark:border-white/10">
-                      <div className="font-semibold text-slate-950 dark:text-white">{story.attribution}</div>
-                      <div className="text-slate-500 dark:text-slate-400">{story.sector}</div>
-                    </div>
-                  </article>
-                ))}
+                      <p className="relative flex-1 text-sm leading-6 text-slate-200">
+                        &ldquo;{story.quote}&rdquo;
+                      </p>
+                      <div className="relative border-t border-white/10 pt-3 text-xs text-slate-300">
+                        <div className="font-semibold text-white">{story.attribution}</div>
+                        <div className="flex items-center gap-1">
+                          {story.sector}
+                          <ArrowRight className="h-3 w-3 text-slate-400" />
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               </div>
+              <form
+                className="rounded-3xl border border-slate-200/70 bg-white/85 p-6 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-950/70"
+                action="/contact-sales"
+                method="get"
+                aria-labelledby="partner-briefing-title"
+              >
+                <input type="hidden" name="intent" value="partnership" />
+                <div className="space-y-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-300">
+                    Briefing request
+                  </div>
+                  <h3 id="partner-briefing-title" className="text-xl font-semibold text-slate-950 dark:text-white">
+                    Seed your partnership conversation now.
+                  </h3>
+                  <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    Pick a format and jurisdiction so our partnerships team can route you to the right rail instantly.
+                  </p>
+                </div>
+                <div className="mt-6 space-y-4">
+                  <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-300" htmlFor="partner-format">
+                    Preferred format
+                  </label>
+                  <select
+                    id="partner-format"
+                    name="format"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-rose-500 dark:focus:ring-rose-500/30"
+                    defaultValue="learning"
+                  >
+                    <option value="learning">Sponsored learning track</option>
+                    <option value="hiring">Featured hiring sprint</option>
+                    <option value="creator">Native creator drop</option>
+                    <option value="capital">Capital & grants spotlight</option>
+                    <option value="event">Amplify an event</option>
+                  </select>
+                  <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-300" htmlFor="partner-jurisdiction">
+                    Jurisdiction
+                  </label>
+                  <select
+                    id="partner-jurisdiction"
+                    name="jurisdiction"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-rose-500 dark:focus:ring-rose-500/30"
+                  >
+                    <option value="commonwealth">Commonwealth (Federal)</option>
+                    <option value="nsw">New South Wales</option>
+                    <option value="vic">Victoria</option>
+                    <option value="qld">Queensland</option>
+                    <option value="wa">Western Australia</option>
+                    <option value="intl">Outside Australia</option>
+                  </select>
+                  <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-300" htmlFor="partner-email">
+                    Work email (optional)
+                  </label>
+                  <input
+                    id="partner-email"
+                    name="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-rose-500 dark:focus:ring-rose-500/30"
+                    autoComplete="email"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#22d3ee_100%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_20px_45px_-18px_rgba(244,63,94,0.6)] transition hover:-translate-y-0.5 hover:shadow-[0_26px_60px_-20px_rgba(168,85,247,0.55)]"
+                >
+                  Send briefing request
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+                <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                  You&apos;ll land on the partnership intake form with these filters pre-filled.
+                </p>
+              </form>
             </div>
 
             <div className="mt-12 grid gap-3 rounded-2xl border border-slate-200/80 bg-white/80 p-5 backdrop-blur dark:border-white/10 dark:bg-white/[0.05] sm:grid-cols-3">
-              {[
-                { label: 'Verified members', value: 'Women-led', detail: 'Identity-checked, opt-in audience' },
-                { label: 'Native formats', value: 'Sponsored', detail: 'Learning paths, events, job boosts' },
-                { label: 'Performance', value: 'Transparent', detail: 'Reach, engagement, applications' },
-              ].map((stat) => (
-                <div key={stat.label} className="rounded-xl border border-slate-200/60 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+              {partnerStats.map((stat) => (
+                <Link
+                  key={stat.label}
+                  href={stat.href}
+                  className="group rounded-xl border border-slate-200/60 bg-white/70 p-4 transition hover:-translate-y-0.5 hover:border-rose-200 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-rose-400/30"
+                >
                   <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
                     {stat.label}
                   </div>
-                  <div className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">{stat.value}</div>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-lg font-semibold text-slate-950 dark:text-white">
+                    {stat.value}
+                    <ArrowRight className="h-3.5 w-3.5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-rose-600" />
+                  </div>
                   <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">{stat.detail}</div>
-                </div>
+                </Link>
               ))}
             </div>
           </div>
@@ -1541,7 +1744,7 @@ export default function HomepageLanding() {
                 <li><Link href="/impact" className="hover:text-rose-600 dark:hover:text-rose-300">Impact</Link></li>
                 <li><Link href="/careers" className="hover:text-rose-600 dark:hover:text-rose-300">Careers</Link></li>
                 <li><Link href="/press" className="hover:text-rose-600 dark:hover:text-rose-300">Press</Link></li>
-                <li><Link href="/business" className="hover:text-rose-600 dark:hover:text-rose-300">Partners & advertising</Link></li>
+                <li><Link href="/admin/marketing/partnerships" className="hover:text-rose-600 dark:hover:text-rose-300">Partners & advertising</Link></li>
                 <li><Link href="/contact" className="hover:text-rose-600 dark:hover:text-rose-300">Contact</Link></li>
               </ul>
             </div>

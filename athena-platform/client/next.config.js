@@ -25,7 +25,7 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
-  // Security headers (DNS_SSL_CONFIGURATION.md §6)
+  // Security headers tracked in ATHENA_MEGA_IMPLEMENTATION_PLAN.md.
   async headers() {
     return [
       {

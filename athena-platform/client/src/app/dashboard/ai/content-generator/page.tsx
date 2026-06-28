@@ -76,91 +76,36 @@ export default function ContentGeneratorPage() {
   const [copied, setCopied] = useState(false);
   const [variations, setVariations] = useState<string[]>([]);
   const [selectedVariation, setSelectedVariation] = useState(0);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   const { mutate: generateContent, isPending } = useContentGenerator();
 
   const handleGenerate = () => {
     if (!topic.trim()) return;
+    setGenerationError(null);
 
     generateContent(
       { type: contentType, topic, tone, context: additionalContext },
       {
         onSuccess: (data) => {
-          setGeneratedContent(data.content || generateMockContent());
+          const content = data?.content || '';
+          setGeneratedContent(content);
           setVariations(data.variations || []);
           setSelectedVariation(0);
+          if (!content) {
+            setGenerationError('The generator completed but did not return content.');
+          }
         },
-        onError: () => {
-          setGeneratedContent(generateMockContent());
+        onError: (error: any) => {
+          setGeneratedContent('');
           setVariations([]);
+          setGenerationError(
+            error?.response?.data?.message ||
+              'Content generation is unavailable right now. Please try again later.'
+          );
         },
       }
     );
-  };
-
-  const generateMockContent = () => {
-    const mockContents: Record<string, string> = {
-      linkedin: `🚀 Exciting news to share!
-
-I recently had a transformative experience that reminded me why I love what I do.
-
-${topic}
-
-Here's what I learned:
-
-1️⃣ The power of persistence - Every setback is a setup for a comeback
-2️⃣ Community matters - Surround yourself with people who lift you up
-3️⃣ Growth is continuous - There's always room to learn and improve
-
-What's one lesson that shaped your career journey? I'd love to hear your stories! 👇
-
-#CareerGrowth #Leadership #ProfessionalDevelopment`,
-
-      twitter: `Thread 🧵
-
-${topic}
-
-Here's what I learned:
-
-1/ First, understand that success rarely happens overnight. It's the small, consistent actions that compound over time.
-
-2/ Second, your network is your net worth. Invest in genuine relationships, not just connections.
-
-3/ Third, embrace failure as feedback. Every setback teaches you something valuable.
-
-4/ Finally, bet on yourself. You're capable of more than you think.
-
-What would you add to this list?`,
-
-      bio: `${topic.split(' ').slice(0, 3).join(' ')} professional with a passion for driving meaningful impact. I specialize in transforming challenges into opportunities and building high-performing teams.
-
-With experience spanning multiple industries, I bring a unique perspective to every project. I believe in the power of collaboration, continuous learning, and leading with empathy.
-
-When I'm not working, you'll find me mentoring aspiring professionals, exploring new ideas, or advocating for diversity in the workplace.`,
-
-      email: `Subject: ${topic}
-
-Hi [Name],
-
-I hope this message finds you well. I wanted to reach out regarding ${topic}.
-
-I've been following your work and believe there's a great opportunity for us to collaborate. Your expertise in this area aligns perfectly with what we're trying to achieve.
-
-Would you be open to a brief 15-minute call next week to explore this further? I'm flexible on timing and happy to work around your schedule.
-
-Looking forward to hearing from you.
-
-Best regards,
-[Your Name]`,
-
-      pitch: `I help ${topic} by combining strategic thinking with hands-on execution. In my career, I've consistently delivered results that exceed expectations - from leading cross-functional teams to launching products that delight users.
-
-What sets me apart is my ability to see the big picture while never losing sight of the details. I'm passionate about creating impact and always eager to take on new challenges.
-
-Let's connect and explore how I can bring value to your team.`,
-    };
-
-    return mockContents[contentType] || mockContents.linkedin;
   };
 
   const copyToClipboard = () => {
@@ -306,15 +251,18 @@ Let's connect and explore how I can bring value to your team.`,
         <div className="space-y-4">
           {!generatedContent && !isPending ? (
             <div className="card h-full flex flex-col items-center justify-center text-center py-12">
-              <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mb-4">
+              <div className={cn(
+                'w-16 h-16 rounded-full flex items-center justify-center mb-4',
+                generationError ? 'bg-red-100 dark:bg-red-900/30' : 'bg-primary-100 dark:bg-primary-900/30'
+              )}>
                 <Sparkles className="w-8 h-8 text-primary-500" />
               </div>
               <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                Ready to Create
+                {generationError ? 'Generation Failed' : 'Ready to Create'}
               </h3>
               <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                Select a content type, enter your topic, and let AI craft the
-                perfect message for you
+                {generationError ||
+                  'Select a content type, enter your topic, and let AI craft the perfect message for you'}
               </p>
             </div>
           ) : isPending ? (

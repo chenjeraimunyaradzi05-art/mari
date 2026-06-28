@@ -41,6 +41,7 @@ interface Opportunity {
 export default function OpportunityRadarPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     minMatch: 70,
     remoteOnly: false,
@@ -51,74 +52,68 @@ export default function OpportunityRadarPage() {
 
   const handleScan = () => {
     setIsScanning(true);
+    setScanError(null);
     
     scanOpportunities(
       { filters },
       {
         onSuccess: (data) => {
-          setOpportunities(data.opportunities || mockOpportunities);
+          const normalized = Array.isArray(data?.opportunities)
+            ? data.opportunities
+            : Array.isArray(data?.jobs)
+              ? data.jobs.map((job: any) => ({
+                  id: job.id,
+                  title: job.title,
+                  company: job.organization?.name || 'Independent employer',
+                  companyLogo: job.organization?.logo || undefined,
+                  location: [
+                    job.city,
+                    job.state,
+                    job.country,
+                  ].filter(Boolean).join(', ') || 'Location not specified',
+                  salary: {
+                    min: job.showSalary ? job.salaryMin || 0 : 0,
+                    max: job.showSalary ? job.salaryMax || job.salaryMin || 0 : 0,
+                  },
+                  type: job.type,
+                  matchScore: job.matchScore || 0,
+                  matchReasons: job.matchedSkills?.length
+                    ? job.matchedSkills.map((skill: string) => `Matches ${skill}`)
+                    : ['Profile and role requirements are aligned'],
+                  skills: job.skills?.map((item: any) => item.skill?.name).filter(Boolean) || [],
+                  postedAt: job.publishedAt
+                    ? new Date(job.publishedAt).toLocaleDateString()
+                    : new Date(job.createdAt).toLocaleDateString(),
+                }))
+              : [];
+          setOpportunities(normalized);
           setIsScanning(false);
         },
-        onError: () => {
-          // Fallback to mock data
-          setOpportunities(mockOpportunities);
+        onError: (error: any) => {
+          setScanError(
+            error?.response?.data?.message ||
+              'Opportunity scan is unavailable right now. Please try again later.'
+          );
+          setOpportunities([]);
           setIsScanning(false);
         },
       }
     );
   };
 
-  // Mock data for demonstration
-  const mockOpportunities: Opportunity[] = [
-    {
-      id: '1',
-      title: 'Senior Product Manager',
-      company: 'TechCorp',
-      location: 'Sydney, Australia (Remote)',
-      salary: { min: 150000, max: 180000 },
-      type: 'FULL_TIME',
-      matchScore: 95,
-      matchReasons: ['5+ years PM experience', 'SaaS background', 'Leadership skills'],
-      skills: ['Product Strategy', 'Agile', 'User Research', 'SQL'],
-      postedAt: '2 hours ago',
-    },
-    {
-      id: '2',
-      title: 'Head of Product',
-      company: 'StartupXYZ',
-      location: 'Melbourne, Australia',
-      salary: { min: 200000, max: 250000 },
-      type: 'FULL_TIME',
-      matchScore: 88,
-      matchReasons: ['Strategic thinking', 'Team management', 'Growth experience'],
-      skills: ['Product Leadership', 'Roadmapping', 'OKRs', 'Stakeholder Management'],
-      postedAt: '1 day ago',
-    },
-    {
-      id: '3',
-      title: 'Product Lead - AI/ML',
-      company: 'InnovateTech',
-      location: 'Remote (APAC)',
-      salary: { min: 170000, max: 200000 },
-      type: 'FULL_TIME',
-      matchScore: 82,
-      matchReasons: ['AI interest', 'Technical background', 'B2B experience'],
-      skills: ['AI Products', 'Machine Learning', 'Data Analytics', 'API Design'],
-      postedAt: '3 days ago',
-    },
-    {
-      id: '4',
-      title: 'Product Manager - Growth',
-      company: 'GrowthCo',
-      location: 'Sydney, Australia (Hybrid)',
-      salary: { min: 130000, max: 150000 },
-      type: 'FULL_TIME',
-      matchScore: 78,
-      matchReasons: ['Analytics skills', 'A/B testing', 'User acquisition'],
-      skills: ['Growth Hacking', 'Analytics', 'Experimentation', 'Funnel Optimization'],
-      postedAt: '5 days ago',
-    },
-  ];
+  const visibleOpportunities = opportunities
+    .filter((opp) => opp.matchScore >= filters.minMatch)
+    .sort((a, b) => b.matchScore - a.matchScore);
+  const salaryRanges = visibleOpportunities.filter((opp) => opp.salary.min || opp.salary.max);
+  const averageSalary =
+    salaryRanges.length > 0
+      ? Math.round(
+          salaryRanges.reduce(
+            (sum, opp) => sum + ((opp.salary.min || opp.salary.max) + (opp.salary.max || opp.salary.min)) / 2,
+            0
+          ) / salaryRanges.length
+        )
+      : 0;
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -181,7 +176,7 @@ export default function OpportunityRadarPage() {
             <DollarSign className="w-5 h-5 text-purple-500" />
           </div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            $165k
+            {averageSalary > 0 ? formatSalary(averageSalary) : 'N/A'}
           </div>
           <div className="text-sm text-gray-500 dark:text-gray-400">
             Avg Salary
@@ -264,15 +259,15 @@ export default function OpportunityRadarPage() {
             <Radar className="w-8 h-8 text-primary-500" />
           </div>
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-            Ready to Find Your Next Opportunity
+            {scanError ? 'Scan Could Not Complete' : 'Ready to Find Your Next Opportunity'}
           </h3>
           <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
-            Click "Scan Opportunities" to discover jobs that match your skills,
-            experience, and career goals
+            {scanError ||
+              'Click "Scan Opportunities" to discover jobs that match your skills, experience, and career goals'}
           </p>
           <button onClick={handleScan} className="btn-primary">
             <Radar className="w-4 h-4 mr-2" />
-            Start Scanning
+            {scanError ? 'Try Again' : 'Start Scanning'}
           </button>
         </div>
       ) : isScanning || isPending ? (
@@ -299,10 +294,20 @@ export default function OpportunityRadarPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {opportunities
-            .filter((opp) => opp.matchScore >= filters.minMatch)
-            .sort((a, b) => b.matchScore - a.matchScore)
-            .map((opportunity) => (
+          {visibleOpportunities.length === 0 ? (
+            <div className="card text-center py-12">
+              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Filter className="w-8 h-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                No Matches With These Filters
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400">
+                Lower the minimum match score or broaden your scan settings.
+              </p>
+            </div>
+          ) : (
+            visibleOpportunities.map((opportunity) => (
               <div
                 key={opportunity.id}
                 className="card hover:border-primary-200 dark:hover:border-primary-800 transition"
@@ -365,7 +370,7 @@ export default function OpportunityRadarPage() {
                       <span className="font-semibold">{opportunity.matchScore}% Match</span>
                     </div>
                     <Link
-                      href={`/dashboard/jobs/${opportunity.id}`}
+                      href={opportunity.url || `/dashboard/jobs/${opportunity.id}`}
                       className="btn-primary text-sm flex items-center space-x-1"
                     >
                       <span>View Job</span>
@@ -414,7 +419,8 @@ export default function OpportunityRadarPage() {
                   </div>
                 </div>
               </div>
-            ))}
+            ))
+          )}
         </div>
       )}
 

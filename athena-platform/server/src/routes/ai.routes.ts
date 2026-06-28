@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { NextFunction, Response, Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest, requirePremium } from '../middleware/auth';
@@ -33,8 +33,62 @@ const router = Router();
 // ===========================================
 // OPPORTUNITY RADAR - Personalized Job Matches
 // ===========================================
-router.get('/opportunity-radar', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+function getPostedLabel(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+  if (diffHours < 1) return 'Just now';
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+
+  return date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatJobLocation(job: {
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  isRemote?: boolean;
+}): string {
+  const base = [job.city, job.state, job.country].filter(Boolean).join(', ') || 'Location not specified';
+  return job.isRemote ? `${base} (Remote)` : base;
+}
+
+function normalizeOpportunity(job: any) {
+  const skills = (job.skills || []).map((jobSkill: any) => jobSkill.skill?.name).filter(Boolean);
+  const matchedSkills = Array.isArray(job.matchedSkills) ? job.matchedSkills : [];
+  const matchReasons = [
+    ...matchedSkills.map((skill: string) => `Matches ${skill}`),
+    ...(job.aiInsight ? [job.aiInsight] : []),
+  ].slice(0, 4);
+
+  return {
+    id: job.id,
+    title: job.title,
+    company: job.organization?.name || 'Independent employer',
+    companyLogo: job.organization?.logo || null,
+    location: formatJobLocation(job),
+    salary: {
+      min: job.showSalary ? job.salaryMin || 0 : 0,
+      max: job.showSalary ? job.salaryMax || job.salaryMin || 0 : 0,
+    },
+    type: job.type,
+    matchScore: job.matchScore,
+    matchReasons: matchReasons.length > 0 ? matchReasons : ['Profile and role requirements are aligned'],
+    skills,
+    postedAt: getPostedLabel(job.publishedAt || job.createdAt),
+    url: `/dashboard/jobs/${job.id}`,
+  };
+}
+
+async function opportunityRadarHandler(req: AuthRequest, res: Response, next: NextFunction) {
   try {
+    const filters = req.method === 'POST' ? req.body?.filters || {} : req.query || {};
+    const minMatch = Number(filters.minMatch ?? 0);
+    const remoteOnly = filters.remoteOnly === true || filters.remoteOnly === 'true';
+    const includePartTime = filters.includePartTime === true || filters.includePartTime === 'true';
+
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
       include: {
@@ -51,14 +105,22 @@ router.get('/opportunity-radar', authenticate, requirePremium, async (req: AuthR
 
     // Get matching jobs based on user profile
     const skills = user.skills.map(us => us.skill.name);
+    const jobSignals: any[] = [];
+
+    if (user.headline) {
+      jobSignals.push({ title: { contains: user.headline, mode: 'insensitive' } });
+    }
+
+    if (skills.length > 0) {
+      jobSignals.push({ skills: { some: { skill: { name: { in: skills } } } } });
+    }
     
     const matchingJobs = await prisma.job.findMany({
       where: {
         status: 'ACTIVE',
-        OR: [
-          { title: { contains: user.headline || '', mode: 'insensitive' } },
-          { skills: { some: { skill: { name: { in: skills } } } } },
-        ],
+        ...(remoteOnly ? { isRemote: true } : {}),
+        ...(includePartTime ? {} : { type: { not: 'PART_TIME' } }),
+        ...(jobSignals.length > 0 ? { OR: jobSignals } : {}),
       },
       include: {
         organization: {
@@ -68,6 +130,7 @@ router.get('/opportunity-radar', authenticate, requirePremium, async (req: AuthR
           include: { skill: true },
         },
       },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: 20,
     });
 
@@ -107,12 +170,15 @@ router.get('/opportunity-radar', authenticate, requirePremium, async (req: AuthR
     const finalJobs = [
         ...enrichedTopJobs,
         ...jobsWithScores.slice(3, 10)
-    ];
+    ].filter((job) => !Number.isFinite(minMatch) || job.matchScore >= minMatch);
+
+    const opportunities = finalJobs.map(normalizeOpportunity);
 
     res.json({
       success: true,
       data: {
         jobs: finalJobs,
+        opportunities,
         totalMatches: matchingJobs.length,
         scanDate: new Date(),
       },
@@ -120,7 +186,10 @@ router.get('/opportunity-radar', authenticate, requirePremium, async (req: AuthR
   } catch (error) {
     next(error);
   }
-});
+}
+
+router.get('/opportunity-radar', authenticate, requirePremium, opportunityRadarHandler);
+router.post('/opportunity-radar', authenticate, requirePremium, opportunityRadarHandler);
 
 // ===========================================
 // RESUME OPTIMIZER
@@ -199,6 +268,31 @@ router.post('/interview-coach', authenticate, requirePremium, async (req: AuthRe
         jobTitle: job.title,
         company: job.organization?.name
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/interview-coach/feedback', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+  try {
+    const { question, answer, jobRole, interviewType, difficulty } = req.body;
+
+    if (!question || !answer) {
+      throw new ApiError(400, 'Question and answer are required');
+    }
+
+    const data = await aiService.evaluateInterviewAnswer({
+      question,
+      answer,
+      jobRole,
+      interviewType,
+      difficulty,
+    });
+
+    res.json({
+      success: true,
+      data,
     });
   } catch (error) {
     next(error);

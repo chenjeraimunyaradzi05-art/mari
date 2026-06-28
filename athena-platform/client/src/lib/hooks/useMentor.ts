@@ -7,6 +7,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api-fetch';
 import { useMentorStore } from '@/lib/stores/mentor.store';
 import type { 
   Session, 
@@ -49,21 +50,21 @@ const mentorApi = {
     if (params?.startDate) searchParams.set('startDate', params.startDate.toISOString());
     if (params?.endDate) searchParams.set('endDate', params.endDate.toISOString());
     
-    const response = await fetch(`/api/mentor/sessions?${searchParams}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentor/sessions?${searchParams}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch sessions');
     const { data } = await response.json();
     return data;
   },
 
   getSession: async (id: string): Promise<Session> => {
-    const response = await fetch(`/api/mentor/sessions/${id}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentor/sessions/${id}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch session');
     const { data } = await response.json();
     return data;
   },
 
   createSession: async (data: Omit<Session, 'id'>): Promise<Session> => {
-    const response = await fetch('/api/mentor/sessions', {
+    const response = await apiFetch('/api/mentor/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -75,7 +76,7 @@ const mentorApi = {
   },
 
   updateSession: async (id: string, data: Partial<Session>): Promise<Session> => {
-    const response = await fetch(`/api/mentor/sessions/${id}`, {
+    const response = await apiFetch(`/api/mentor/sessions/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -87,7 +88,7 @@ const mentorApi = {
   },
 
   cancelSession: async (id: string, reason?: string): Promise<void> => {
-    const response = await fetch(`/api/mentor/sessions/${id}/cancel`, {
+    const response = await apiFetch(`/api/mentor/sessions/${id}/cancel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -97,7 +98,7 @@ const mentorApi = {
   },
 
   completeSession: async (id: string, notes?: string): Promise<void> => {
-    const response = await fetch(`/api/mentor/sessions/${id}/complete`, {
+    const response = await apiFetch(`/api/mentor/sessions/${id}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -107,7 +108,7 @@ const mentorApi = {
   },
 
   rescheduleSession: async (id: string, newDate: Date, newStartTime: string, newEndTime: string): Promise<Session> => {
-    const response = await fetch(`/api/mentor/sessions/${id}/reschedule`, {
+    const response = await apiFetch(`/api/mentor/sessions/${id}/reschedule`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -120,14 +121,14 @@ const mentorApi = {
 
   // Availability
   getAvailability: async (): Promise<TimeSlot[]> => {
-    const response = await fetch('/api/mentor/availability', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/availability', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch availability');
     const { data } = await response.json();
     return data;
   },
 
   saveAvailability: async (slots: TimeSlot[]): Promise<TimeSlot[]> => {
-    const response = await fetch('/api/mentor/availability', {
+    const response = await apiFetch('/api/mentor/availability', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -140,21 +141,21 @@ const mentorApi = {
 
   // Mentees
   getMentees: async (): Promise<Mentee[]> => {
-    const response = await fetch('/api/mentor/mentees', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/mentees', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch mentees');
     const { data } = await response.json();
     return data;
   },
 
   getMentee: async (id: string): Promise<Mentee> => {
-    const response = await fetch(`/api/mentor/mentees/${id}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentor/mentees/${id}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch mentee');
     const { data } = await response.json();
     return data;
   },
 
   updateMentee: async (id: string, data: Partial<Mentee>): Promise<Mentee> => {
-    const response = await fetch(`/api/mentor/mentees/${id}`, {
+    const response = await apiFetch(`/api/mentor/mentees/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -167,21 +168,21 @@ const mentorApi = {
 
   // Earnings
   getEarnings: async (range: string): Promise<EarningsData[]> => {
-    const response = await fetch(`/api/mentor/earnings?range=${range}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentor/earnings?range=${range}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch earnings');
     const { data } = await response.json();
     return data;
   },
 
   getTransactions: async (): Promise<Transaction[]> => {
-    const response = await fetch('/api/mentor/transactions', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/transactions', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch transactions');
     const { data } = await response.json();
     return data;
   },
 
   getStats: async (): Promise<MentorStats> => {
-    const response = await fetch('/api/mentor/stats', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/stats', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch stats');
     const { data } = await response.json();
     return data;
@@ -189,14 +190,14 @@ const mentorApi = {
 
   // Payouts
   getPayoutMethods: async (): Promise<PayoutMethod[]> => {
-    const response = await fetch('/api/mentor/payout-methods', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/payout-methods', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch payout methods');
     const { data } = await response.json();
     return data;
   },
 
   addPayoutMethod: async (method: Omit<PayoutMethod, 'id'>): Promise<PayoutMethod> => {
-    const response = await fetch('/api/mentor/payout-methods', {
+    const response = await apiFetch('/api/mentor/payout-methods', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -208,7 +209,7 @@ const mentorApi = {
   },
 
   requestPayout: async (amount: number, methodId: string): Promise<Transaction> => {
-    const response = await fetch('/api/mentor/payouts', {
+    const response = await apiFetch('/api/mentor/payouts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
