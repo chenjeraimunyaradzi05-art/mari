@@ -98,7 +98,7 @@ import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
 
 // Import services
 import { initializeSocketHandlers } from './services/socket.service';
-// import { initializeOpenSearch } from './utils/opensearch'; // Disabled - needs OpenSearch
+import { initializeOpenSearch, isOpenSearchEnabled } from './utils/opensearch';
 import { presenceService } from './services/presence.service';
 // Workers are dynamically imported to avoid Redis connection when disabled
 // import { startAllWorkers, stopAllWorkers } from './services/workers.service';
@@ -119,25 +119,45 @@ app.disable('x-powered-by');
 // Graceful shutdown flag
 let isShuttingDown = false;
 
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+
+async function startBackgroundWorkersIfEnabled(): Promise<void> {
+  if (process.env.ENABLE_WORKERS !== 'true') {
+    return;
+  }
+
+  try {
+    const { startAllWorkers } = await import('./services/workers.service');
+    await startAllWorkers();
+  } catch (err) {
+    logger.error('Failed to start background workers', err);
+    if (isProductionRuntime) {
+      throw err;
+    }
+  }
+}
+
+async function initializeSearchIfConfigured(): Promise<void> {
+  if (!isOpenSearchEnabled()) {
+    logger.info('OpenSearch disabled; Prisma search fallback is active');
+    return;
+  }
+
+  const connected = await initializeOpenSearch();
+  if (!connected && isProductionRuntime && process.env.OPENSEARCH_ENABLED === 'true') {
+    throw new Error('OpenSearch is enabled but could not be initialized');
+  }
+}
+
 // ===========================================
 // INITIALIZE SERVICES
 // ===========================================
 
-// Initialize OpenSearch for full-text search (disabled)
-// initializeOpenSearch();
-
 // Note: OpenSearch sync is handled via Prisma middleware extension
 // See: prisma client extensions or use queueSearchIndexing in services
-
-// Initialize background workers (video processing, notifications, etc.)
-// Disabled by default - requires Redis. Set ENABLE_WORKERS=true to enable
-if (process.env.ENABLE_WORKERS === 'true') {
-  import('./services/workers.service').then(({ startAllWorkers }) => {
-    startAllWorkers().catch((err: Error) => {
-      logger.error('Failed to start background workers', err);
-    });
-  });
-}
 
 function logCorsRejection(origin: string | undefined) {
   logger.warn('CORS rejected origin', { origin, allowedOrigins: getAllowedOrigins() });
@@ -562,6 +582,8 @@ export async function startServer() {
   // Initialize Sentry now that secrets/DSN may be available
   initSentry();
 
+  await initializeSearchIfConfigured();
+
   // Ensure DB connection with retry/backoff
   try {
     await connectWithRetry(8, 750);
@@ -571,6 +593,8 @@ export async function startServer() {
     // Don't exit — let the server start so /health and /readyz can report status.
     // /readyz will return 503 if DB is unreachable.
   }
+
+  await startBackgroundWorkersIfEnabled();
 
   const PORT = process.env.PORT || 5000;
 

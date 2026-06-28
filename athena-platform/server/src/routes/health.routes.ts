@@ -39,7 +39,7 @@ interface ComponentHealth {
 
 interface LaunchReadinessCheck {
   key: string;
-  category: 'core' | 'security' | 'payments' | 'media' | 'ai' | 'observability' | 'workers' | 'email';
+  category: 'core' | 'security' | 'payments' | 'media' | 'ai' | 'observability' | 'workers' | 'email' | 'search';
   required: boolean;
   ok: boolean;
   message: string;
@@ -270,6 +270,13 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
   const workerSimulationAllowed =
     process.env.WORKER_ALLOW_SIMULATION === 'true' ||
     process.env.VIDEO_PROCESSING_ALLOW_SIMULATION === 'true';
+  const pushSimulationAllowed =
+    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
+    process.env.PUSH_NOTIFICATION_ALLOW_SIMULATION === 'true';
+  const dataExportSimulationAllowed =
+    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
+    process.env.DATA_EXPORT_ALLOW_SIMULATION === 'true';
+  const openSearchEnabled = process.env.OPENSEARCH_ENABLED === 'true' || isConfiguredEnv('OPENSEARCH_NODE');
 
   const checks: LaunchReadinessCheck[] = [
     envCheck('DATABASE_URL', 'core', true),
@@ -300,12 +307,25 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     envCheck('VIDEO_PROCESSOR_URL', 'media', production && !videoSimulationAllowed, 'Production video processor is not configured'),
     anyEnvCheck('AI_PROVIDER_KEY', ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'], 'ai', production, 'AI provider key is not configured'),
     envCheck('ML_SERVICE_URL', 'ai', production, 'ML service URL is not configured'),
+    envCheck('OPENSEARCH_NODE', 'search', openSearchEnabled, 'OpenSearch is enabled but OPENSEARCH_NODE is not configured'),
     envCheck('REDIS_URL', 'workers', production || workersEnabled, 'Redis is required for production queues/workers'),
     envCheck(
       'VIDEO_PROCESSOR_URL',
       'workers',
       workersEnabled && production && !workerSimulationAllowed,
       'Video worker needs VIDEO_PROCESSOR_URL when simulation is disabled'
+    ),
+    envCheck(
+      'PUSH_NOTIFICATION_PROVIDER_URL',
+      'workers',
+      workersEnabled && production && !pushSimulationAllowed,
+      'Push worker needs PUSH_NOTIFICATION_PROVIDER_URL when simulation is disabled'
+    ),
+    envCheck(
+      'DATA_EXPORT_PROCESSOR_URL',
+      'workers',
+      workersEnabled && production && !dataExportSimulationAllowed,
+      'Data export worker needs DATA_EXPORT_PROCESSOR_URL when simulation is disabled'
     ),
   ];
 

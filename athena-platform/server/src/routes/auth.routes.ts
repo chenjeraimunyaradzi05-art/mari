@@ -42,6 +42,8 @@ const PERSONA_VALUES = [
   'GOVERNMENT_NGO',
 ];
 
+type AuthEmailContext = Record<string, string | undefined>;
+
 type InviteCodeRecord = {
   id: string;
   usesCount: number;
@@ -51,6 +53,41 @@ type InviteCodeRecord = {
 // Helper: Generate secure token
 function generateSecureToken(): string {
   return crypto.randomBytes(32).toString('hex');
+}
+
+async function requireAuthEmailDelivery(
+  sendTask: () => Promise<boolean>,
+  failureMessage: string,
+  context: AuthEmailContext
+): Promise<void> {
+  try {
+    const sent = await sendTask();
+    if (!sent) {
+      logger.error('Required auth email was not accepted by the email provider', context);
+      throw new ApiError(503, failureMessage);
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    logger.error('Required auth email failed', { ...context, error });
+    throw new ApiError(503, failureMessage);
+  }
+}
+
+function sendBestEffortAuthEmail(
+  label: string,
+  sendTask: () => Promise<boolean>,
+  context: AuthEmailContext
+): void {
+  sendTask()
+    .then((sent) => {
+      if (!sent) {
+        logger.warn(`${label} was not accepted by the email provider`, context);
+      }
+    })
+    .catch((error) => logger.error(`${label} failed`, { ...context, error }));
 }
 
 function sanitizeName(raw: unknown, fallback = ''): string {
@@ -302,11 +339,10 @@ async function handleVerifyEmailToken(
   }
 
   // Welcome email is best-effort — never block verification on email delivery.
-  sendWelcomeEmail(
-    verificationToken.user.email,
-    verificationToken.user.firstName
-  ).catch((err) =>
-    logger.error('Failed to send welcome email after email verification', { error: err })
+  sendBestEffortAuthEmail(
+    'Welcome email after email verification',
+    () => sendWelcomeEmail(verificationToken.user.email, verificationToken.user.firstName),
+    { userId: verificationToken.userId, email: verificationToken.user.email }
   );
 
   res.json({
@@ -529,8 +565,11 @@ router.post(
         });
       }
 
-      // Send verification email (async, don't block response)
-      sendVerificationEmail(email, firstName, verificationToken).catch((err) => logger.error('Failed to send verification email', { error: err }));
+      await requireAuthEmailDelivery(
+        () => sendVerificationEmail(email, firstName, verificationToken),
+        'Verification email could not be sent. Please try resending verification later.',
+        { userId: user.id, email }
+      );
 
       res.status(201).json({
         success: true,
@@ -916,8 +955,10 @@ router.post(
           WHERE "id" = ${user.id}
         `;
 
-        sendWelcomeEmail(email, firstName).catch((err) =>
-          logger.error('Failed to send welcome email after Google sign-up', { error: err })
+        sendBestEffortAuthEmail(
+          'Welcome email after Google sign-up',
+          () => sendWelcomeEmail(email, firstName),
+          { userId: user.id, email }
         );
 
         created = true;
@@ -1203,8 +1244,10 @@ router.post(
           WHERE "id" = ${fbUser.id}
         `;
 
-        sendWelcomeEmail(fbEmail, fbFirstName).catch((err) =>
-          logger.error('Failed to send welcome email after Facebook sign-up', { error: err })
+        sendBestEffortAuthEmail(
+          'Welcome email after Facebook sign-up',
+          () => sendWelcomeEmail(fbEmail, fbFirstName),
+          { userId: fbUser.id, email: fbEmail }
         );
 
         fbCreated = true;
@@ -1470,8 +1513,17 @@ router.post(
           },
         });
 
-        // Send password reset email
-        await sendPasswordResetEmail(email, user.firstName, resetToken);
+        // Send password reset email. Keep the public response generic to avoid account enumeration.
+        const sent = await sendPasswordResetEmail(email, user.firstName, resetToken);
+        if (!sent) {
+          logger.error('Password reset email was not accepted by the email provider', {
+            userId: user.id,
+            email,
+          });
+          await prisma.verificationToken.deleteMany({
+            where: { userId: user.id, type: 'PASSWORD_RESET' },
+          });
+        }
       }
 
       res.json({
@@ -1590,7 +1642,7 @@ router.post(
 
     const email = String(req.body?.email || '').trim().toLowerCase();
     const successMessage =
-      'If an unverified account exists for that email, a new verification link has been sent.';
+      'If an unverified account exists for that email, a new verification link will be sent.';
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -1621,8 +1673,17 @@ router.post(
       },
     });
 
-    // Send verification email
-    await sendVerificationEmail(user.email, user.firstName, verificationToken);
+    // Send verification email. Keep the public response generic to avoid account enumeration.
+    const sent = await sendVerificationEmail(user.email, user.firstName, verificationToken);
+    if (!sent) {
+      logger.error('Resent verification email was not accepted by the email provider', {
+        userId: user.id,
+        email: user.email,
+      });
+      await prisma.verificationToken.deleteMany({
+        where: { userId: user.id, type: 'EMAIL_VERIFICATION' },
+      });
+    }
 
     res.json({
       success: true,

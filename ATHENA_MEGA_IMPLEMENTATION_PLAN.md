@@ -73,8 +73,8 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 ### P1 Product Completion
 
 1. Replace any remaining mock/fallback authenticated dashboard data outside creator dashboard, learning detail, and opportunity radar.
-2. Enable or formally remove OpenSearch initialization and sync.
-3. Enable background workers with a production Redis strategy.
+2. Operate OpenSearch if selected for launch; otherwise keep Prisma search fallback as the explicit launch scope.
+3. Provision Redis and worker provider endpoints, then intentionally enable background workers in production.
 4. Finish livestream schema and route enablement, or remove livestream routes from launch scope.
 5. Provide and operate the production video processor behind `VIDEO_PROCESSOR_URL`.
 6. Finish production push notification setup.
@@ -130,6 +130,18 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
   - Client production build passes with `npm run build`.
   - Server Jest passes with `npm test -- --runInBand --forceExit`: 26 suites, 120 tests.
   - Local dev servers started successfully on backend `http://localhost:5000` and frontend `http://localhost:3000`.
+- Hardened queue, worker, auth-email, and optional search behavior:
+  - `server/src/utils/queue.ts` no longer silently defaults production BullMQ usage to localhost Redis.
+  - `server/src/services/workers.service.ts` now waits for worker readiness, fails email jobs when the provider rejects a send, routes production push/data-export jobs through configured provider URLs unless simulation is explicitly allowed, and treats OpenSearch indexing as skipped only when OpenSearch is disabled.
+  - `server/src/index.ts` starts workers during the real startup sequence and fails production startup if enabled workers cannot start.
+  - `server/src/utils/opensearch.ts` makes OpenSearch opt-in, initializes it when configured, and exposes indexing success/failure.
+  - `server/src/routes/auth.routes.ts` now requires verification email delivery during registration and cleans up unusable reset/resend tokens when email delivery is rejected.
+  - `/health/launch-readiness` now distinguishes optional OpenSearch from required worker provider URLs.
+- Re-verified after the worker/auth/search batch:
+  - Server TypeScript build passes with `npm run build`.
+  - Server Jest passes with `npm test -- --runInBand --forceExit`: 26 suites, 120 tests.
+  - Backend `http://localhost:5000/health` returns healthy.
+  - Frontend `http://localhost:3000` returns HTTP 200.
 
 ## Launch Readiness Checklist
 
@@ -149,8 +161,10 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - [x] Block unsafe DV encryption fallback in production.
 - [x] Block formation payment confirmation without Stripe in production.
 - [x] Stop production email helper from returning success without SendGrid.
-- [ ] Enable workers intentionally in production.
-- [ ] Enable or de-scope OpenSearch.
+- [x] Harden worker startup and queue Redis requirements for production.
+- [x] Make OpenSearch optional launch scope explicit and initialize it when configured.
+- [x] Tighten auth email failure handling for registration, reset, and resend flows.
+- [ ] Provision Redis and provider URLs, then enable workers intentionally in production.
 - [x] De-scope livestream from launch by keeping routes unmounted until schema and streaming infrastructure are implemented.
 
 ### External Setup
