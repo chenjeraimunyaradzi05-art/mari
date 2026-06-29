@@ -20,7 +20,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
-import { getAppSiteUrl } from '@/lib/runtime-config';
+import { arePublicFallbacksEnabled, getAppSiteUrl } from '@/lib/runtime-config';
 import { findFallbackJob, isFallbackJobId } from '@/lib/public-fallbacks';
 
 export default function JobDetailsPage() {
@@ -34,10 +34,11 @@ export default function JobDetailsPage() {
     const fetchJob = async () => {
       try {
         const response = await jobApi.getById(params.id as string);
-        setJob(response.data.data);
+        const nextJob = response.data.data;
+        setJob(isFallbackJobId(nextJob?.id) && !arePublicFallbacksEnabled() ? null : nextJob);
       } catch (error) {
         console.error('Failed to fetch job:', error);
-        setJob(findFallbackJob(params.id as string));
+        setJob(arePublicFallbacksEnabled() ? findFallbackJob(params.id as string) : null);
       } finally {
         setLoading(false);
       }
@@ -226,10 +227,9 @@ export default function JobDetailsPage() {
               <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-800 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-100">
                 <CheckCircle className="h-5 w-5 flex-shrink-0" />
                 <div>
-                  <p className="font-semibold text-sm">Curated spotlight role</p>
+                  <p className="font-semibold text-sm">Demo spotlight role</p>
                   <p className="text-xs mt-1 opacity-90">
-                    This listing is part of the public fallback experience while
-                    live job sync reconnects.
+                    This listing is shown only when public demo fallbacks are explicitly enabled.
                   </p>
                 </div>
               </div>

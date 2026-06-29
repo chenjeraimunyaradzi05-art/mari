@@ -7,6 +7,8 @@ const STATIC_PUBLIC_ENV = {
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   NEXT_PUBLIC_SOCKET_URL: process.env.NEXT_PUBLIC_SOCKET_URL,
   NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+  NEXT_PUBLIC_ENABLE_DEMO_FALLBACKS: process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACKS,
+  NEXT_PUBLIC_ENABLE_PUBLIC_FALLBACKS: process.env.NEXT_PUBLIC_ENABLE_PUBLIC_FALLBACKS,
 } as const;
 
 function normalizeUrl(value?: string | null): string | null {
@@ -98,6 +100,22 @@ export function getBackendApiUrl(): string {
 
 export function getSocketOrigin(): string {
   return readFirst(['NEXT_PUBLIC_SOCKET_URL', 'NEXT_PUBLIC_WS_URL']) ?? getBackendApiUrl();
+}
+
+export function arePublicFallbacksEnabled(): boolean {
+  const publicValue =
+    STATIC_PUBLIC_ENV.NEXT_PUBLIC_ENABLE_PUBLIC_FALLBACKS ||
+    STATIC_PUBLIC_ENV.NEXT_PUBLIC_ENABLE_DEMO_FALLBACKS;
+
+  if (publicValue === 'true') {
+    return true;
+  }
+
+  if (typeof window === 'undefined') {
+    return process.env.ATHENA_ENABLE_PUBLIC_FALLBACKS === 'true';
+  }
+
+  return false;
 }
 
 export const APP_SITE_URL = getAppSiteUrl();

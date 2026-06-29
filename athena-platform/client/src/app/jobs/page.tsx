@@ -21,6 +21,7 @@ import {
   filterFallbackJobs,
   isFallbackJobId,
 } from '@/lib/public-fallbacks';
+import { arePublicFallbacksEnabled } from '@/lib/runtime-config';
 
 export default function JobsPage() {
   return (
@@ -40,6 +41,7 @@ function JobsContent() {
   const [page, setPage] = useState(1);
   const [usingFallbackData, setUsingFallbackData] = useState(false);
   const [loadMessage, setLoadMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const [location, setLocation] = useState(searchParams.get('loc') || '');
@@ -49,6 +51,7 @@ function JobsContent() {
   const fetchJobs = async () => {
     setLoading(true);
     setLoadMessage(null);
+    setLoadError(null);
 
     try {
       const response = await jobApi.search({
@@ -61,11 +64,12 @@ function JobsContent() {
       });
       const nextJobs = response.data.data as Job[];
       const fallbackMode =
-        Boolean(response.data.meta?.fallback) ||
-        nextJobs.some((job) => isFallbackJobId(job.id));
+        arePublicFallbacksEnabled() &&
+        (Boolean(response.data.meta?.fallback) ||
+          nextJobs.some((job) => isFallbackJobId(job.id)));
 
-      setJobs(nextJobs);
-      setTotal(response.data.pagination.total);
+      setJobs(fallbackMode ? nextJobs : nextJobs.filter((job) => !isFallbackJobId(job.id)));
+      setTotal(fallbackMode ? response.data.pagination.total : nextJobs.filter((job) => !isFallbackJobId(job.id)).length);
       setUsingFallbackData(fallbackMode);
       setLoadMessage(
         fallbackMode
@@ -75,19 +79,26 @@ function JobsContent() {
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
 
-      const fallbackJobs = filterFallbackJobs(FALLBACK_JOBS, {
-        search,
-        location,
-        type,
-        isRemote,
-      });
+      if (arePublicFallbacksEnabled()) {
+        const fallbackJobs = filterFallbackJobs(FALLBACK_JOBS, {
+          search,
+          location,
+          type,
+          isRemote,
+        });
 
-      setJobs(fallbackJobs);
-      setTotal(fallbackJobs.length);
-      setUsingFallbackData(true);
-      setLoadMessage(
-        'Live roles are reconnecting. Showing curated spotlight opportunities in the meantime.'
-      );
+        setJobs(fallbackJobs);
+        setTotal(fallbackJobs.length);
+        setUsingFallbackData(true);
+        setLoadMessage(
+          'Live roles are reconnecting. Showing curated spotlight opportunities in the meantime.'
+        );
+      } else {
+        setJobs([]);
+        setTotal(0);
+        setUsingFallbackData(false);
+        setLoadError('Live job listings are temporarily unavailable. Please try again shortly.');
+      }
     } finally {
       setLoading(false);
     }
@@ -133,7 +144,7 @@ function JobsContent() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              {[{label:'Search',sub:'Keyword, role, company'},{label:'Filter',sub:'Type, city, remote'},{label:'Resilient',sub:'Spotlight roles stay available'}].map((item)=>(
+              {[{label:'Search',sub:'Keyword, role, company'},{label:'Filter',sub:'Type, city, remote'},{label:'Live',sub:'Current roles from ATHENA'}].map((item)=>(
                 <div key={item.label} className="metric-card-futuristic rounded-xl px-4 py-4">
                   <div className="text-sm font-semibold text-slate-950 dark:text-white">{item.label}</div>
                   <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.sub}</div>
@@ -229,6 +240,18 @@ function JobsContent() {
               </div>
             )}
 
+            {!usingFallbackData && loadError && (
+              <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-5 text-red-950 shadow-sm dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-100">
+                <div className="flex items-start gap-3">
+                  <WifiOff className="mt-0.5 h-5 w-5 flex-shrink-0" />
+                  <div>
+                    <div className="font-semibold">Live jobs unavailable</div>
+                    <p className="mt-1 text-sm leading-6 opacity-90">{loadError}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <div className="flex justify-center py-12">
                 <LoadingSpinner />
@@ -255,7 +278,7 @@ function JobsContent() {
                       No jobs found
                     </h3>
                     <p className="mt-1 text-muted-foreground">
-                      Try adjusting your filters or search terms.
+                      {loadError || 'Try adjusting your filters or search terms.'}
                     </p>
                     <Button
                       variant="link"

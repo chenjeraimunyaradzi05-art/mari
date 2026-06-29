@@ -13,7 +13,7 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - Client production build passes with `npm run build`.
 - Server Jest passes with `npm test -- --runInBand --forceExit`: 26 suites, 120 tests.
 - The platform includes real web, server, mobile, ML, compliance, auth, jobs, mentor, community, finance, formation, analytics, and deployment scaffolding.
-- The product is not launch-complete because several integrations still use fallbacks, placeholders, disabled services, or external setup that cannot be completed from code alone.
+- The product is not launch-complete because several integrations still use disabled services, explicit demo modes, placeholders, or external setup that cannot be completed from code alone.
 
 ## What Is Implemented
 
@@ -72,7 +72,7 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 
 ### P1 Product Completion
 
-1. Replace any remaining mock/fallback authenticated dashboard data outside creator dashboard, learning detail, and opportunity radar.
+1. Continue replacing remaining mock/fallback authenticated dashboard data; the largest routed examples have been converted, but some studio/demo components still need audit.
 2. Operate OpenSearch if selected for launch; otherwise keep Prisma search fallback as the explicit launch scope.
 3. Provision Redis and worker provider endpoints, then intentionally enable background workers in production.
 4. Finish livestream schema and route enablement, or remove livestream routes from launch scope.
@@ -142,6 +142,16 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
   - Server Jest passes with `npm test -- --runInBand --forceExit`: 26 suites, 120 tests.
   - Backend `http://localhost:5000/health` returns healthy.
   - Frontend `http://localhost:3000` returns HTTP 200.
+- Gated public fallback/demo data and removed another mock dashboard source:
+  - `client/src/lib/runtime-config.ts` now exposes `arePublicFallbacksEnabled()`, defaulting public fallback data off unless `NEXT_PUBLIC_ENABLE_DEMO_FALLBACKS=true`, `NEXT_PUBLIC_ENABLE_PUBLIC_FALLBACKS=true`, or server-side `ATHENA_ENABLE_PUBLIC_FALLBACKS=true` is set.
+  - `client/src/app/api/[...path]/route.ts` no longer serves curated fallback jobs/feed/videos/search/health unless public fallbacks are explicitly enabled.
+  - Public jobs, job details, feed, and video feed pages now show honest unavailable/empty states instead of automatically swapping in fallback jobs, posts, or sample videos.
+  - `client/src/components/studios/formation/FormationDashboard.tsx` no longer initializes from fake TechVenture/cofounder/compliance data; it maps real formation registrations and marks cofounder/compliance sections as not connected.
+- Re-verified after public fallback gating:
+  - Client production build passes with `npm run build`.
+  - Backend `http://localhost:5000/health` returns healthy.
+  - Frontend `http://localhost:3000` returns HTTP 200.
+  - Frontend proxy `http://localhost:3000/api/jobs?limit=1` returns live backend data without `x-athena-fallback`.
 
 ## Launch Readiness Checklist
 
@@ -164,6 +174,8 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - [x] Harden worker startup and queue Redis requirements for production.
 - [x] Make OpenSearch optional launch scope explicit and initialize it when configured.
 - [x] Tighten auth email failure handling for registration, reset, and resend flows.
+- [x] Gate public fallback data behind explicit demo flags.
+- [x] Remove hardcoded formation studio mock business/cofounder/compliance data.
 - [ ] Provision Redis and provider URLs, then enable workers intentionally in production.
 - [x] De-scope livestream from launch by keeping routes unmounted until schema and streaming infrastructure are implemented.
 

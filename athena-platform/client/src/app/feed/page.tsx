@@ -27,6 +27,7 @@ import {
   isFallbackPostId,
   type PublicFallbackFeedPost,
 } from '@/lib/public-fallbacks';
+import { arePublicFallbacksEnabled } from '@/lib/runtime-config';
 
 interface Post {
   id: string;
@@ -297,8 +298,10 @@ export default function FeedPage() {
     posts?.some((post: PublicFallbackFeedPost) => isFallbackPostId(post.id))
   );
   const isFallbackFeed =
-    searchParams.get('demoFallback') === '1' || fallbackFromApi || Boolean(error);
+    arePublicFallbacksEnabled() &&
+    (searchParams.get('demoFallback') === '1' || fallbackFromApi || Boolean(error));
   const renderedPosts = isFallbackFeed ? FALLBACK_POSTS : posts;
+  const feedUnavailable = !isFallbackFeed && Boolean(error);
 
   return (
     <div className="min-h-screen bg-aurora">
@@ -373,6 +376,20 @@ export default function FeedPage() {
               </div>
             )}
 
+            {feedUnavailable && (
+              <div className="rounded-2xl border border-red-200 bg-red-50/90 p-5 text-red-950 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-100">
+                <div className="flex items-start gap-3">
+                  <WifiOff className="mt-0.5 h-5 w-5 flex-shrink-0" />
+                  <div>
+                    <div className="font-semibold">Live community posts are unavailable</div>
+                    <p className="mt-1 text-sm leading-6 opacity-90">
+                      We could not load the live feed right now. Please try again shortly.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Posts */}
             {isLoading ? (
               <div className="space-y-4">
@@ -403,7 +420,9 @@ export default function FeedPage() {
                 <Sparkles className="mx-auto mb-4 h-12 w-12 text-primary-400" />
                 <h3 className="mb-2 text-lg font-semibold text-slate-900 dark:text-white">Your feed is empty</h3>
                 <p className="mb-4 text-slate-600 dark:text-slate-400">
-                  Start following people and join communities to see posts here.
+                  {feedUnavailable
+                    ? 'The live feed could not be loaded right now.'
+                    : 'Start following people and join communities to see posts here.'}
                 </p>
                 <div className="flex justify-center gap-3">
                   <Link

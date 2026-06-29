@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { BACKEND_API_URL } from '@/lib/runtime-config';
+import { arePublicFallbacksEnabled, BACKEND_API_URL } from '@/lib/runtime-config';
 import {
   FALLBACK_JOBS,
   FALLBACK_POSTS,
@@ -18,6 +18,10 @@ function withFallbackHeaders(response: NextResponse) {
 }
 
 function buildFallbackResponse(pathname: string, searchParams: URLSearchParams) {
+  if (!arePublicFallbacksEnabled()) {
+    return null;
+  }
+
   if (pathname === '/api/health') {
     return withFallbackHeaders(NextResponse.json(getFallbackHealthPayload()));
   }

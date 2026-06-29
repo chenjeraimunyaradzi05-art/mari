@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { useVideoFeedStore, VideoItem } from '@/lib/stores/video.store';
 import { Skeleton } from '@/components/ui/loading';
 import { FALLBACK_VIDEOS } from '@/lib/public-fallbacks';
+import { arePublicFallbacksEnabled } from '@/lib/runtime-config';
 
 // Maps API response to Store Interface
 function mapApiToVideoItem(v: any): VideoItem {
@@ -49,6 +50,7 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
   } = useVideoFeedStore();
 
   const [loadingLocal, setLoadingLocal] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     useVideoFeedStore.setState({
@@ -57,6 +59,7 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
       hasMore: true,
     });
     setHasAttemptedInitialLoad(false);
+    setLoadError(null);
   }, [category]);
 
   // Fetch videos
@@ -64,6 +67,7 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
     if (loadingLocal || !hasMore) return;
     
     setLoadingLocal(true);
+    setLoadError(null);
     try {
       const response = await videoApi.getFeed({ page: pageNum, limit: 10, category });
       const payload = response.data?.data;
@@ -84,7 +88,12 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
     } catch (error) {
       console.error('Failed to fetch videos:', error);
       if (pageNum === 1) {
-        setFeed(FALLBACK_VIDEOS.map(mapApiToVideoItem));
+        if (arePublicFallbacksEnabled()) {
+          setFeed(FALLBACK_VIDEOS.map(mapApiToVideoItem));
+        } else {
+          setFeed([]);
+          setLoadError('Live videos are temporarily unavailable. Please try again shortly.');
+        }
         useVideoFeedStore.setState({ hasMore: false });
       }
     } finally {
@@ -171,6 +180,18 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
             <Skeleton className="h-[70vh] w-full rounded-2xl" />
             <Skeleton className="h-4 w-2/3" />
             <Skeleton className="h-4 w-1/2" />
+          </div>
+        </div>
+      )}
+      {feed.length === 0 && !loadingLocal && hasAttemptedInitialLoad && (
+        <div className="h-full w-full snap-start flex items-center justify-center bg-zinc-950 px-6 text-center text-white">
+          <div className="max-w-xs space-y-3">
+            <p className="text-lg font-semibold">
+              {loadError ? 'Videos unavailable' : 'No videos yet'}
+            </p>
+            <p className="text-sm text-zinc-400">
+              {loadError || 'There are no videos to show in this feed right now.'}
+            </p>
           </div>
         </div>
       )}
