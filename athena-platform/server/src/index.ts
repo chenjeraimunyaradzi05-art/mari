@@ -100,6 +100,7 @@ import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
 import { initializeSocketHandlers } from './services/socket.service';
 import { initializeOpenSearch, isOpenSearchEnabled } from './utils/opensearch';
 import { presenceService } from './services/presence.service';
+import { validateWorkerStartupConfiguration } from './utils/worker-config';
 // Workers are dynamically imported to avoid Redis connection when disabled
 // import { startAllWorkers, stopAllWorkers } from './services/workers.service';
 
@@ -126,6 +127,16 @@ const isProductionRuntime =
 
 async function startBackgroundWorkersIfEnabled(): Promise<void> {
   if (process.env.ENABLE_WORKERS !== 'true') {
+    return;
+  }
+
+  const workerConfig = validateWorkerStartupConfiguration();
+  if (!workerConfig.ok) {
+    const message = workerConfig.errors.join('; ');
+    logger.error('Worker startup configuration invalid', { message });
+    if (isProductionRuntime) {
+      throw new Error(message);
+    }
     return;
   }
 

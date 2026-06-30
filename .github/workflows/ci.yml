@@ -55,3 +55,13 @@ jobs:
         run: |
           cd athena-platform/server
           npm test --silent
+
+      - name: Run launch readiness validation
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          NODE_ENV: test
+        run: |
+          cd athena-platform/server
+          npm run validate:launch-readiness
+          npm run validate:auth-sessions

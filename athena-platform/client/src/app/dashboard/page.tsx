@@ -23,7 +23,7 @@ import {
   TrendingUp,
   Users,
 } from 'lucide-react';
-import { useAuth, useFeed, useJobRecommendations, useMyApplications } from '@/lib/hooks';
+import { useAuth, useFeed, useJobRecommendations, useMyApplications, useSavedJobs } from '@/lib/hooks';
 import {
   APPLICATION_STATUS_COLORS,
   APPLICATION_STATUS_LABELS,
@@ -38,19 +38,13 @@ const quickActions = [
   { name: 'Learn skills', href: '/dashboard/learn', icon: BookOpen, detail: 'Continue a path' },
 ];
 
-const momentumSteps = [
-  { label: 'Profile strength', value: '72%', hint: 'Add 3 skills to improve matches' },
-  { label: 'Career focus', value: '4 lanes', hint: 'Jobs, mentors, learning, community' },
-  { label: 'Weekly rhythm', value: '2 tasks', hint: 'Resume review and mentor outreach' },
-];
-
 const operatingSystemModules = [
   {
     title: 'Opportunity radar',
     detail: 'Track roles, mentors, grants, and market signals before they scatter.',
     href: '/dashboard/ai/opportunity-radar',
     icon: Radar,
-    metric: '14 new signals',
+    metric: 'Open',
     gradient: 'from-rose-500 to-pink-500',
   },
   {
@@ -58,7 +52,7 @@ const operatingSystemModules = [
     detail: 'Shape resumes, interview answers, content, and career plans with context.',
     href: '/dashboard/ai',
     icon: Sparkles,
-    metric: '8 tools live',
+    metric: 'Open',
     gradient: 'from-fuchsia-500 to-purple-500',
   },
   {
@@ -66,7 +60,7 @@ const operatingSystemModules = [
     detail: 'Turn skill gaps into courses, credentials, and mentor-backed practice.',
     href: '/dashboard/learn',
     icon: BookOpen,
-    metric: '3 paths ready',
+    metric: 'Open',
     gradient: 'from-cyan-500 to-sky-500',
   },
   {
@@ -74,7 +68,7 @@ const operatingSystemModules = [
     detail: 'Money, tax, savings, accounting, grants, and business inventory in one lane.',
     href: '/dashboard/finance',
     icon: DollarSign,
-    metric: '5 hubs linked',
+    metric: 'Open',
     gradient: 'from-emerald-500 to-teal-500',
   },
   {
@@ -82,7 +76,7 @@ const operatingSystemModules = [
     detail: 'Move from idea to company structure, cofounder matching, and launch tasks.',
     href: '/dashboard/formation',
     icon: Building2,
-    metric: 'Launch-ready',
+    metric: 'Open',
     gradient: 'from-amber-500 to-orange-500',
   },
   {
@@ -90,26 +84,8 @@ const operatingSystemModules = [
     detail: 'Safety, accessibility, Indigenous, migrant, and reporting programs stay visible.',
     href: '/dashboard/impact',
     icon: ShieldCheck,
-    metric: 'Protected',
+    metric: 'Open',
     gradient: 'from-indigo-500 to-blue-500',
-  },
-];
-
-const intelligenceSignals = [
-  {
-    label: 'Search focus',
-    detail: 'Product roles, women-led companies, remote friendly',
-    icon: Compass,
-  },
-  {
-    label: 'Business motion',
-    detail: 'One grant brief and one formation task are ready',
-    icon: FileText,
-  },
-  {
-    label: 'Network warmth',
-    detail: 'Two mentors overlap with your target sector',
-    icon: Users,
   },
 ];
 
@@ -118,14 +94,74 @@ export default function DashboardPage() {
   const searchParams = useSearchParams();
   const { data: recommendations, isLoading: loadingJobs } = useJobRecommendations();
   const { data: applications, isLoading: loadingApps } = useMyApplications();
+  const { data: savedJobs, isLoading: loadingSavedJobs } = useSavedJobs();
   const { data: feedData, isLoading: loadingFeed } = useFeed({ limit: 5 });
   const isNewWelcome = searchParams?.get('welcome') === 'new' || !user?.lastLoginAt;
+  const profileFields = [
+    user?.firstName,
+    user?.lastName,
+    user?.headline,
+    user?.city,
+    user?.country,
+    user?.profile?.aboutMe,
+  ];
+  const completedProfileFields = profileFields.filter(Boolean).length;
+  const profileProgress = Math.round((completedProfileFields / profileFields.length) * 100);
+  const applicationCount = applications?.length ?? 0;
+  const feedCount = feedData?.posts?.length ?? 0;
+  const jobMatchCount = recommendations?.jobs?.length ?? 0;
+  const savedJobCount = savedJobs?.length ?? 0;
+
+  const liveMomentumSteps = [
+    {
+      label: 'Profile basics',
+      value: `${profileProgress}%`,
+      hint: profileProgress >= 80 ? 'Your core profile is mostly complete' : 'Add skills, headline, and location to improve matches',
+      progress: profileProgress,
+    },
+    {
+      label: 'Applications',
+      value: String(applicationCount),
+      hint: applicationCount > 0 ? 'Track your active pipeline from applications' : 'Applications will appear after you apply to roles',
+      progress: Math.min(applicationCount * 20, 100),
+    },
+    {
+      label: 'Community feed',
+      value: String(feedCount),
+      hint: feedCount > 0 ? 'Recent updates are available from your network' : 'Follow people and groups to build your feed',
+      progress: Math.min(feedCount * 20, 100),
+    },
+  ];
+
+  const intelligenceSignals = [
+    {
+      label: 'Search focus',
+      detail: user?.currentJobTitle
+        ? `Profile target: ${user.currentJobTitle}`
+        : 'Add a target role or headline to sharpen recommendations',
+      icon: Compass,
+    },
+    {
+      label: 'Application motion',
+      detail: applicationCount > 0
+        ? `${applicationCount} application${applicationCount === 1 ? '' : 's'} in your pipeline`
+        : 'No applications have been submitted yet',
+      icon: FileText,
+    },
+    {
+      label: 'Recommendation pool',
+      detail: jobMatchCount > 0
+        ? `${jobMatchCount} role recommendation${jobMatchCount === 1 ? '' : 's'} returned`
+        : 'Complete your profile to unlock stronger recommendations',
+      icon: Users,
+    },
+  ];
 
   const stats = [
-    { name: 'Profile views', value: '234', change: '+12%', icon: Users },
-    { name: 'Search appearances', value: '1,432', change: '+8%', icon: Search },
-    { name: 'Applications', value: applications?.length || 0, change: '+3', icon: Briefcase },
-    { name: 'Saved jobs', value: '18', change: '-2', icon: CheckCircle },
+    { name: 'Job matches', value: jobMatchCount, helper: 'Live recommendations', icon: Search, isLoading: loadingJobs },
+    { name: 'Applications', value: applicationCount, helper: 'Submitted roles', icon: Briefcase, isLoading: loadingApps },
+    { name: 'Saved jobs', value: savedJobCount, helper: 'From your saved list', icon: CheckCircle, isLoading: loadingSavedJobs },
+    { name: 'Feed updates', value: feedCount, helper: 'Recent community posts', icon: Users, isLoading: loadingFeed },
   ];
 
   return (
@@ -176,14 +212,14 @@ export default function DashboardPage() {
               <TrendingUp className="h-5 w-5 text-primary-600 dark:text-primary-300" />
             </div>
             <div className="mt-5 space-y-3">
-              {momentumSteps.map((step) => (
+              {liveMomentumSteps.map((step) => (
                 <div key={step.label} className="metric-card-futuristic">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold text-slate-900 dark:text-white">{step.label}</span>
                     <span className="text-sm font-semibold gradient-text-cyber">{step.value}</span>
                   </div>
                   <div className="progress-athena mt-3">
-                    <div className="progress-athena-fill" style={{ width: step.value.includes('%') ? step.value : '68%' }} />
+                    <div className="progress-athena-fill" style={{ width: `${step.progress}%` }} />
                   </div>
                   <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{step.hint}</p>
                 </div>
@@ -217,11 +253,11 @@ export default function DashboardPage() {
                 <stat.icon className="h-4 w-4 text-primary-500 dark:text-primary-400" />
               </div>
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-slate-950 dark:text-white">{stat.value}</span>
-              <span className={stat.change.startsWith('-') ? 'text-sm font-semibold text-red-500' : 'text-sm font-semibold text-emerald-500'}>
-                {stat.change}
-              </span>
+            <div className="mt-3 space-y-1">
+              <div className="text-3xl font-bold text-slate-950 dark:text-white">
+                {stat.isLoading ? '...' : stat.value}
+              </div>
+              <div className="text-sm text-slate-500 dark:text-slate-400">{stat.helper}</div>
             </div>
           </div>
         ))}

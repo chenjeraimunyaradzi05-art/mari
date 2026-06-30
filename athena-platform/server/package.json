@@ -19,7 +19,9 @@
     "loadtest:websocket": "node scripts/loadtest-websocket.js",
     "launch:smoke": "node scripts/smoke-test.js",
     "launch:warm-cdn": "node scripts/warm-cdn.js",
-    "launch:incident": "node scripts/send-incident-notification.js"
+    "launch:incident": "node scripts/send-incident-notification.js",
+    "validate:launch-readiness": "node -r ts-node/register src/scripts/validate-launch-readiness.ts",
+    "validate:auth-sessions": "node -r ts-node/register src/scripts/validate-auth-session-routes.ts"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.971.0",

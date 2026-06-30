@@ -184,6 +184,33 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
   - `client/src/app/dashboard/community/page.tsx` had a stale duplicated tail with hardcoded events and leaderboard members after the component close; that dead JSX was removed and the live-wired community sidebar remains.
 - Re-verified after the educator/settings/community cleanup:
   - Client production build passes with `npm run build`.
+- Continued dashboard/auth cleanup:
+  - `client/src/app/dashboard/events/page.tsx` no longer anchors the calendar strip to a stale January 2026 fallback week before hydration; it now shows a loading strip until the current week is available.
+  - `client/src/app/dashboard/settings/security/page.tsx` no longer locally toggles 2FA, fabricates a current session when the backend returns none, calls nonexistent session routes, or leaves account deletion as a decorative button.
+  - `server/src/routes/auth.routes.ts` now provides `POST /api/auth/change-password` and `DELETE /api/auth/sessions/:sessionId`, including password verification, password policy enforcement, session ownership checks, and revocation of other active sessions after a password change.
+  - `client/src/app/dashboard/page.tsx` no longer displays fake profile views, search appearances, saved-job counts, growth deltas, hardcoded opportunity signal counts, or invented intelligence-signal copy; visible dashboard metrics now come from existing recommendations, applications, saved jobs, feed, and profile data.
+- Re-verified after the dashboard/auth cleanup:
+  - Server TypeScript build passes with `npm run build`.
+  - Client production build passes with `npm run build`.
+  - Targeted server auth Jest suites pass with `npm test -- --runInBand --forceExit src/__tests__/auth.test.ts src/__tests__/auth.happy.test.ts`: 2 suites, 12 tests.
+- Added CI-friendly validation hooks for launch readiness and auth/session flows so the server can enforce those gates locally and in automation.
+- Validation scripts now execute as real CLI gates:
+  - `server/src/scripts/validate-launch-readiness.ts` reports launch-readiness and worker configuration checks and exits non-zero on failure.
+  - `server/src/scripts/validate-auth-session-routes.ts` reports change-password and session-revocation route checks and exits non-zero on failure.
+  - Root `validate:server` and `ci:launch` scripts run those gates, and GitHub Actions runs them after the server test suite.
+  - `server/.env.example` now documents `VIDEO_ALLOW_SIMULATION` plus the production worker provider URL and simulation toggles.
+- Re-verified after the CI validation batch:
+  - `npm run validate:server` passes.
+  - Targeted server Jest suites pass with `npm test -- --runInBand --forceExit src/__tests__/worker-config.test.ts src/__tests__/launch-readiness-ci.test.ts src/__tests__/auth-session-gate.test.ts src/__tests__/auth.test.ts src/__tests__/auth.happy.test.ts`: 5 suites, 17 tests.
+  - Server TypeScript build passes with `npm run build`.
+  - Client production build passes with `npm run build`.
+  - Full server Jest passes with `npm test -- --runInBand --forceExit`: 29 suites, 125 tests.
+- Continued authenticated dashboard cleanup:
+  - `client/src/app/dashboard/learn/page.tsx` no longer shows fixed 12.5K student, 95% completion, 4.8 rating, default 5.0 rating, 2h 30m duration, 12-lesson, placeholder image, or unsupported category/level/sort metadata. Course filters now use the live course API fields, and catalog stats come from the current response.
+  - `client/src/app/dashboard/learn/my-courses/page.tsx` no longer shows a fabricated 7-day learning streak, fake hours watched/certificate counts, placeholder thumbnails, or nonexistent `/continue` and `/certificate` routes. It now renders live enrollment progress and provider/course metadata only.
+  - `client/src/app/dashboard/settings/notifications/page.tsx` now renders the persisted notification preference object from `/api/notifications/preferences`, saves the backend-supported `email`/`push`/`inApp` shape, and removes unsaved digest toggles plus local-only preference defaults.
+- Re-verified after the learning/notification cleanup:
+  - Client production build passes with `npm run build`.
 
 ## Launch Readiness Checklist
 
@@ -222,6 +249,13 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - [x] Remove hardcoded privacy center score/preferences/apps/export demo data.
 - [x] Remove hardcoded safety center security/session/activity/2FA/password demo data.
 - [x] Remove stale hardcoded community dashboard event/leaderboard JSX tail.
+- [x] Remove hardcoded dashboard home metric/signal counts.
+- [x] Remove stale dashboard events fallback week.
+- [x] Add real change-password and session-revoke auth routes for security settings.
+- [x] Align dashboard security settings with live session/auth routes.
+- [x] Add CI validation gates for launch readiness and auth/session route coverage.
+- [x] Remove hardcoded learning catalog/course-progress stats, ratings, durations, lessons, streaks, and certificate fallbacks.
+- [x] Align notification settings with persisted backend preferences instead of local-only defaults.
 - [ ] Provision Redis and provider URLs, then enable workers intentionally in production.
 - [x] De-scope livestream from launch by keeping routes unmounted until schema and streaming infrastructure are implemented.
 

@@ -12,7 +12,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { useAuth } from '@/lib/hooks';
+import { useAuth, useDeleteAccount } from '@/lib/hooks';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
@@ -26,9 +26,9 @@ type PasswordFormData = {
 
 type SessionItem = {
   id: string;
-  device?: string | null;
-  isCurrent?: boolean;
-  location?: string | null;
+  device: string;
+  isCurrent: boolean;
+  location: string;
   lastActive: string;
 };
 
@@ -38,7 +38,6 @@ export default function SecuritySettingsPage() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
   const {
     register,
@@ -51,11 +50,29 @@ export default function SecuritySettingsPage() {
   const newPassword = watch('newPassword');
 
   // Get active sessions
-  const { data: sessions } = useQuery({
+  const { data: sessions = [], isLoading: isLoadingSessions, isError: isSessionsError } = useQuery({
     queryKey: ['sessions'],
     queryFn: () => api.get('/auth/sessions'),
-    select: (response) => response.data.data,
+    select: (response) => {
+      const rawSessions = (response.data.data ?? []) as Array<{
+        id: string;
+        userAgent?: string | null;
+        ipAddress?: string | null;
+        createdAt?: string;
+        expiresAt?: string;
+        isCurrent?: boolean;
+      }>;
+
+      return rawSessions.map((session) => ({
+        id: session.id,
+        device: session.userAgent || 'Unknown device',
+        isCurrent: Boolean(session.isCurrent),
+        location: session.ipAddress ? `IP ${session.ipAddress}` : 'Unknown location',
+        lastActive: session.createdAt || session.expiresAt || new Date().toISOString(),
+      }));
+    },
   });
+  const deleteAccount = useDeleteAccount();
 
   // Change password mutation
   const changePassword = useMutation({
@@ -88,7 +105,7 @@ export default function SecuritySettingsPage() {
 
   // Revoke all sessions mutation
   const revokeAllSessions = useMutation({
-    mutationFn: () => api.delete('/auth/sessions'),
+    mutationFn: () => api.post('/auth/logout-all'),
     onSuccess: () => {
       toast.success('All sessions revoked. Please log in again.');
       logout();
@@ -171,8 +188,8 @@ export default function SecuritySettingsPage() {
                 {...register('newPassword', {
                   required: 'New password is required',
                   minLength: {
-                    value: 8,
-                    message: 'Password must be at least 8 characters',
+                    value: 12,
+                    message: 'Password must be at least 12 characters',
                   },
                   pattern: {
                     value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, 
@@ -255,27 +272,24 @@ export default function SecuritySettingsPage() {
               </p>
             </div>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={twoFactorEnabled}
-              onChange={() => setTwoFactorEnabled(!twoFactorEnabled)}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-          </label>
+          <button
+            type="button"
+            disabled
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-400 dark:border-gray-700"
+            title="Two-factor authentication setup is not connected yet"
+          >
+            Not connected
+          </button>
         </div>
-        {twoFactorEnabled && (
-          <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-            <div className="flex items-center space-x-2 text-yellow-700 dark:text-yellow-400">
-              <AlertTriangle className="w-5 h-5" />
-              <span className="font-medium">Setup required</span>
-            </div>
-            <p className="text-sm text-yellow-600 dark:text-yellow-500 mt-1">
-              Two-factor authentication setup will be available soon.
-            </p>
+        <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+          <div className="flex items-center space-x-2 text-yellow-700 dark:text-yellow-400">
+            <AlertTriangle className="w-5 h-5" />
+            <span className="font-medium">Setup unavailable</span>
           </div>
-        )}
+          <p className="text-sm text-yellow-600 dark:text-yellow-500 mt-1">
+            Two-factor authentication requires a live setup endpoint before it can change account security.
+          </p>
+        </div>
       </div>
 
       {/* Active Sessions */}
@@ -300,6 +314,7 @@ export default function SecuritySettingsPage() {
                 revokeAllSessions.mutate();
               }
             }}
+            disabled={sessions.length === 0 || revokeAllSessions.isPending}
             className="text-sm text-red-600 hover:text-red-700 font-medium"
           >
             Sign out all devices
@@ -307,7 +322,13 @@ export default function SecuritySettingsPage() {
         </div>
 
         <div className="space-y-4">
-          {sessions?.length > 0 ? (
+          {isLoadingSessions ? (
+            <div className="h-20 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+          ) : isSessionsError ? (
+            <div className="p-4 border border-red-200 bg-red-50 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300 rounded-lg">
+              Active sessions could not be loaded.
+            </div>
+          ) : sessions.length > 0 ? (
             sessions.map((session: SessionItem) => (
               <div
                 key={session.id}
@@ -339,6 +360,7 @@ export default function SecuritySettingsPage() {
                 {!session.isCurrent && (
                   <button
                     onClick={() => revokeSession.mutate(session.id)}
+                    disabled={revokeSession.isPending}
                     className="text-sm text-red-600 hover:text-red-700"
                   >
                     Revoke
@@ -347,21 +369,8 @@ export default function SecuritySettingsPage() {
               </div>
             ))
           ) : (
-            <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-              <div className="flex items-start space-x-3">
-                <Monitor className="w-5 h-5 text-gray-400 mt-0.5" />
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    This Device
-                    <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full">
-                      Current
-                    </span>
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Active now
-                  </p>
-                </div>
-              </div>
+            <div className="p-4 border border-dashed border-gray-200 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400 rounded-lg">
+              No active session records were returned.
             </div>
           )}
         </div>
@@ -390,8 +399,16 @@ export default function SecuritySettingsPage() {
               Permanently delete your account and all data
             </p>
           </div>
-          <button className="btn bg-red-600 text-white hover:bg-red-700 px-4 py-2">
-            Delete Account
+          <button
+            className="btn bg-red-600 text-white hover:bg-red-700 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={deleteAccount.isPending}
+            onClick={() => {
+              if (confirm('This permanently deletes your account and all associated data. Continue?')) {
+                deleteAccount.mutate();
+              }
+            }}
+          >
+            {deleteAccount.isPending ? 'Deleting...' : 'Delete Account'}
           </button>
         </div>
       </div>

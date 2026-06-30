@@ -1416,6 +1416,78 @@ router.post('/logout', async (req: Request, res: Response, next: NextFunction) =
 });
 
 // ===========================================
+// CHANGE PASSWORD
+// ===========================================
+router.post(
+  '/change-password',
+  authenticate,
+  [
+    body('currentPassword')
+      .isString()
+      .isLength({ min: 1, max: PASSWORD_MAX_LENGTH })
+      .withMessage('Current password is required'),
+    body('newPassword')
+      .isLength({ min: PASSWORD_MIN_LENGTH, max: PASSWORD_MAX_LENGTH })
+      .withMessage(`Password must be between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters`)
+      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/)
+      .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { id: true, passwordHash: true },
+      });
+
+      if (!user?.passwordHash) {
+        throw new ApiError(400, 'Password change is unavailable for this account');
+      }
+
+      const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
+      if (!isCurrentPasswordValid) {
+        throw new ApiError(401, 'Current password is incorrect');
+      }
+
+      const nextPasswordHash = await hashPassword(newPassword);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: nextPasswordHash },
+      });
+
+      const authHeader = req.headers.authorization;
+      const accessToken = authHeader?.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
+        : undefined;
+      const currentSession = accessToken
+        ? await sessionService.findActiveSessionByAccessToken(accessToken)
+        : null;
+
+      await prisma.session.updateMany({
+        where: {
+          userId: user.id,
+          revokedAt: null,
+          ...(currentSession ? { id: { not: currentSession.id } } : {}),
+        },
+        data: { revokedAt: new Date() },
+      });
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
 // GET CURRENT USER
 // ===========================================
 router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
@@ -1704,6 +1776,41 @@ router.get('/sessions', authenticate, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       data: sessions,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// REVOKE ACTIVE SESSION
+// ===========================================
+router.delete('/sessions/:sessionId', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const sessionId = req.params.sessionId?.trim();
+    if (!sessionId) {
+      throw new ApiError(400, 'Session id is required');
+    }
+
+    const session = await prisma.session.findFirst({
+      where: {
+        id: sessionId,
+        userId: req.user!.id,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+
+    if (!session) {
+      throw new ApiError(404, 'Session not found');
+    }
+
+    await sessionService.revokeSession(session.id);
+
+    res.json({
+      success: true,
+      message: 'Session revoked',
     });
   } catch (error) {
     next(error);
