@@ -126,38 +126,9 @@ interface SessionDetails {
 }
 
 interface SessionManagementProps {
-  session: SessionDetails;
+  session?: SessionDetails;
   className?: string;
 }
-
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_SESSION: SessionDetails = {
-  id: '1',
-  topic: 'Career Transition Strategy',
-  scheduledStart: new Date(2026, 0, 19, 14, 0),
-  duration: 60,
-  price: 150,
-  mentee: {
-    id: 'u1',
-    name: 'Alex Thompson',
-    avatar: '/avatars/alex.jpg',
-    bio: 'Product manager with 5 years experience looking to transition into tech leadership.',
-    goals: [
-      'Develop leadership skills',
-      'Build technical credibility',
-      'Expand professional network',
-    ],
-  },
-  agenda: [
-    'Review progress from last session',
-    'Discuss leadership opportunities at current company',
-    'Create action plan for next month',
-  ],
-  previousNotes: 'Alex is making good progress on the technical reading list. Still needs to work on visibility within the organization.',
-};
 
 // ============================================
 // COMPONENTS
@@ -738,7 +709,7 @@ function PostSessionView({
           <CardContent>
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
-                <p className="text-2xl font-bold">60</p>
+                <p className="text-2xl font-bold">{session.duration}</p>
                 <p className="text-sm text-muted-foreground">Minutes</p>
               </div>
               <div>
@@ -746,7 +717,7 @@ function PostSessionView({
                 <p className="text-sm text-muted-foreground">Earned</p>
               </div>
               <div>
-                <p className="text-2xl font-bold">12</p>
+                <p className="text-2xl font-bold">--</p>
                 <p className="text-sm text-muted-foreground">Total Sessions</p>
               </div>
             </div>
@@ -840,7 +811,26 @@ function PostSessionView({
 // MAIN COMPONENT
 // ============================================
 
-export function SessionManagement({ session = MOCK_SESSION, className }: SessionManagementProps) {
+export function SessionManagement({ session, className }: SessionManagementProps) {
+  if (!session) {
+    return (
+      <div className={cn('min-h-screen bg-zinc-100 p-4 dark:bg-zinc-950', className)}>
+        <Card className="mx-auto mt-24 max-w-lg">
+          <CardHeader>
+            <CardTitle>No session selected</CardTitle>
+            <CardDescription>
+              Open a live mentor booking to start a session room.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  return <SessionManagementExperience session={session} />;
+}
+
+function SessionManagementExperience({ session }: { session: SessionDetails }) {
   const [sessionState, setSessionState] = useState<SessionState>('lobby');
   const [isRecording, setIsRecording] = useState(false);
   const [participants, setParticipants] = useState<Participant[]>([

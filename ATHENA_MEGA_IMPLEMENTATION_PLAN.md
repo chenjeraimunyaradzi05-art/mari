@@ -153,6 +153,31 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
   - Frontend `http://localhost:3000` returns HTTP 200.
   - Frontend proxy `http://localhost:3000/api/jobs?limit=1` returns live backend data without `x-athena-fallback`.
 
+### 2026-06-29
+
+- Continued removing studio/demo data from authenticated surfaces:
+  - `client/src/lib/hooks/useMentor.ts` now reads mentor sessions from the live `/api/mentors/sessions?role=mentor` route, normalizes backend session statuses for the calendar UI, and routes confirm/cancel/complete actions through the current status endpoint.
+  - `client/src/components/studios/mentor/MentorCalendar.tsx` no longer ships January 2026 sample sessions or default availability slots; it starts from the current date and shows live loading, empty, and error states.
+  - `client/src/components/studios/formation/CofounderMatching.tsx` no longer ships invented co-founder profiles, random match simulation, or fake connection/view counts; it now reports that matching is not connected until a live endpoint exists.
+  - `client/src/components/studios/mentor/SessionManagement.tsx` no longer defaults to a fabricated mentor session and now requires a real session prop.
+  - `client/src/components/studios/events/EventsCalendar.tsx` now loads from `/api/events`, maps live registration/save state, and no longer ships hardcoded January/March 2026 event examples.
+  - `client/src/components/studios/mentor/EarningsDashboard.tsx` no longer ships fake revenue charts, payout methods, transaction history, withdrawal balances, or tax profile documents; unconnected earnings/payout/tax areas now show disabled controls and honest empty states.
+  - `client/src/components/studios/employer/JobsManagerKanban.tsx` no longer initializes to a fake job or fabricated applicant pipeline; it now starts empty with disabled controls until live jobs/applications are connected.
+  - `client/src/components/studios/employer/CandidateProfileViewer.tsx` no longer defaults to a fabricated candidate, sample resume/interview history, canned AI insights, or sample job requirements; it now requires live candidate data and shows an honest no-profile state otherwise.
+  - `client/src/components/studios/organization/OrganizationPage.tsx` no longer initializes a fake organization, generated team, sample jobs, company posts, or similar organizations; it now renders from passed live data and shows empty states when none is connected.
+  - `client/src/components/studios/community/CommunityGroupHome.tsx` no longer initializes a fake community, members, discussion posts, or events; it now renders from passed live data and shows disconnected states for posting, membership, messaging, and events.
+  - `client/src/components/studios/learner/BadgeWallet.tsx` no longer initializes fake earned credentials, issuer names, verification links, or 2025/2026 badge dates; it now accepts live badges and defaults to an honest no-credentials state with disconnected share/download/visibility controls.
+- Re-verified after the mentor/formation/events/earnings/employer/organization/community/badge-wallet studio cleanup:
+  - Client production build passes with `npm run build`.
+
+### 2026-06-30
+
+- Continued the learner studio cleanup:
+  - `client/src/components/studios/learner/StudentClassroomView.tsx` no longer bundles a Product Management sample course, named fake learners/instructors, canned Q&A, saved notes, or transcript copy; it now accepts live classroom data and renders loading, error, and no-course states when no course is connected.
+  - `client/src/components/studios/learner/SkillsAssessmentUI.tsx` no longer ships a JavaScript/React/Python/SQL demo catalog, canned quiz questions, fabricated topic scores, fake recommendations, or automatic badge claims; it now requires caller-provided skills/questions and only computes results from those live questions unless a submit handler returns a server result.
+- Re-verified after the learner classroom/assessment cleanup:
+  - Client production build passes with `npm run build`.
+
 ## Launch Readiness Checklist
 
 ### Code
@@ -176,6 +201,16 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - [x] Tighten auth email failure handling for registration, reset, and resend flows.
 - [x] Gate public fallback data behind explicit demo flags.
 - [x] Remove hardcoded formation studio mock business/cofounder/compliance data.
+- [x] Remove hardcoded mentor calendar, co-founder matching, and mentor session-room demo data.
+- [x] Remove hardcoded events studio demo calendar data.
+- [x] Remove hardcoded mentor earnings, payout, and tax dashboard demo data.
+- [x] Remove hardcoded employer applicant kanban job/candidate demo data.
+- [x] Remove hardcoded employer candidate profile demo data.
+- [x] Remove hardcoded organization profile/team/jobs/posts demo data.
+- [x] Remove hardcoded community group/member/post/event demo data.
+- [x] Remove hardcoded learner badge wallet credential demo data.
+- [x] Remove hardcoded learner classroom course/Q&A/notes/transcript demo data.
+- [x] Remove hardcoded learner skills assessment catalog/question/result demo data.
 - [ ] Provision Redis and provider URLs, then enable workers intentionally in production.
 - [x] De-scope livestream from launch by keeping routes unmounted until schema and streaming infrastructure are implemented.
 

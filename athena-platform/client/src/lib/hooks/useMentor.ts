@@ -43,80 +43,163 @@ export const mentorKeys = {
 // API FUNCTIONS
 // ============================================
 
+type RawMentorSession = Record<string, any>;
+
+async function readPayload<T>(response: Response): Promise<T> {
+  const payload = await response.json();
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return payload.data as T;
+  }
+  return payload as T;
+}
+
+function formatTime(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function normalizeSessionType(type?: string | null): SessionType {
+  const normalized = type?.toLowerCase();
+  if (normalized === 'audio' || normalized === 'chat') {
+    return normalized;
+  }
+  return 'video';
+}
+
+function normalizeSessionStatus(status?: string | null): SessionStatus {
+  switch (status) {
+    case 'CONFIRMED':
+    case 'confirmed':
+      return 'confirmed';
+    case 'IN_PROGRESS':
+    case 'in-progress':
+      return 'in-progress';
+    case 'COMPLETED':
+    case 'completed':
+      return 'completed';
+    case 'CANCELED':
+    case 'CANCELLED':
+    case 'cancelled':
+      return 'cancelled';
+    case 'NO_SHOW':
+    case 'no-show':
+      return 'no-show';
+    case 'REQUESTED':
+    case 'scheduled':
+    default:
+      return 'scheduled';
+  }
+}
+
+function toBackendSessionStatus(status: SessionStatus): 'CONFIRMED' | 'CANCELED' | 'COMPLETED' {
+  if (status === 'completed') return 'COMPLETED';
+  if (status === 'cancelled') return 'CANCELED';
+  return 'CONFIRMED';
+}
+
+function mapMentorSession(raw: RawMentorSession): Session {
+  const start = new Date(raw.scheduledAt ?? raw.date ?? Date.now());
+  const duration = Number(raw.durationMinutes ?? raw.duration ?? 60);
+  const end = new Date(start);
+  end.setMinutes(end.getMinutes() + duration);
+
+  const mentee = raw.mentee ?? {};
+  const menteeName =
+    raw.menteeName ||
+    mentee.displayName ||
+    [mentee.firstName, mentee.lastName].filter(Boolean).join(' ') ||
+    'Mentee';
+
+  return {
+    id: String(raw.id),
+    menteeId: String(raw.menteeId ?? mentee.id ?? ''),
+    menteeName,
+    menteeAvatar: raw.menteeAvatar ?? mentee.avatar ?? undefined,
+    date: start,
+    startTime: formatTime(start),
+    endTime: formatTime(end),
+    duration,
+    type: normalizeSessionType(raw.type ?? raw.sessionType),
+    status: normalizeSessionStatus(raw.status),
+    topic: raw.topic ?? raw.note ?? 'Mentorship session',
+    price: Number(raw.sessionAmount ?? raw.price ?? raw.amount ?? raw.mentorPayout ?? 0),
+    notes: raw.notes ?? raw.note ?? undefined,
+    meetingUrl: raw.meetingUrl ?? undefined,
+    recordingUrl: raw.recordingUrl ?? undefined,
+  };
+}
+
 const mentorApi = {
   // Sessions
   getSessions: async (params?: { startDate?: Date; endDate?: Date }): Promise<Session[]> => {
     const searchParams = new URLSearchParams();
+    searchParams.set('role', 'mentor');
     if (params?.startDate) searchParams.set('startDate', params.startDate.toISOString());
     if (params?.endDate) searchParams.set('endDate', params.endDate.toISOString());
     
-    const response = await apiFetch(`/api/mentor/sessions?${searchParams}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentors/sessions?${searchParams}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch sessions');
-    const { data } = await response.json();
-    return data;
+    const data = await readPayload<RawMentorSession[]>(response);
+    return Array.isArray(data) ? data.map(mapMentorSession) : [];
   },
 
   getSession: async (id: string): Promise<Session> => {
-    const response = await apiFetch(`/api/mentor/sessions/${id}`, { credentials: 'include' });
+    const response = await apiFetch('/api/mentors/sessions?role=mentor', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch session');
-    const { data } = await response.json();
-    return data;
+    const data = await readPayload<RawMentorSession[]>(response);
+    const session = Array.isArray(data) ? data.find((item) => item.id === id) : null;
+    if (!session) throw new Error('Session not found');
+    return mapMentorSession(session);
   },
 
   createSession: async (data: Omit<Session, 'id'>): Promise<Session> => {
-    const response = await apiFetch('/api/mentor/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) throw new Error('Failed to create session');
-    const { data: session } = await response.json();
-    return session;
+    void data;
+    throw new Error('Mentor studio session creation is not connected to the current booking endpoint');
   },
 
   updateSession: async (id: string, data: Partial<Session>): Promise<Session> => {
-    const response = await apiFetch(`/api/mentor/sessions/${id}`, {
+    if (!data.status) {
+      throw new Error('Only mentor session status updates are supported');
+    }
+
+    const response = await apiFetch(`/api/mentors/sessions/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ status: toBackendSessionStatus(data.status) }),
     });
     if (!response.ok) throw new Error('Failed to update session');
-    const { data: session } = await response.json();
-    return session;
+    const session = await readPayload<RawMentorSession>(response);
+    return mapMentorSession(session);
   },
 
   cancelSession: async (id: string, reason?: string): Promise<void> => {
-    const response = await apiFetch(`/api/mentor/sessions/${id}/cancel`, {
-      method: 'POST',
+    const response = await apiFetch(`/api/mentors/sessions/${id}/status`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ status: 'CANCELED', reason }),
     });
     if (!response.ok) throw new Error('Failed to cancel session');
   },
 
   completeSession: async (id: string, notes?: string): Promise<void> => {
-    const response = await apiFetch(`/api/mentor/sessions/${id}/complete`, {
-      method: 'POST',
+    const response = await apiFetch(`/api/mentors/sessions/${id}/status`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ status: 'COMPLETED', notes }),
     });
     if (!response.ok) throw new Error('Failed to complete session');
   },
 
   rescheduleSession: async (id: string, newDate: Date, newStartTime: string, newEndTime: string): Promise<Session> => {
-    const response = await apiFetch(`/api/mentor/sessions/${id}/reschedule`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ date: newDate, startTime: newStartTime, endTime: newEndTime }),
-    });
-    if (!response.ok) throw new Error('Failed to reschedule session');
-    const { data } = await response.json();
-    return data;
+    void id;
+    void newDate;
+    void newStartTime;
+    void newEndTime;
+    throw new Error('Mentor session rescheduling is not connected yet');
   },
 
   // Availability
@@ -232,7 +315,11 @@ export function useMentorSessions(params?: { startDate?: Date; endDate?: Date })
   const { setSessions, setLoading, setError } = useMentorStore();
 
   return useQuery({
-    queryKey: mentorKeys.sessions(),
+    queryKey: [
+      ...mentorKeys.sessions(),
+      params?.startDate?.toISOString() ?? null,
+      params?.endDate?.toISOString() ?? null,
+    ],
     queryFn: async () => {
       setLoading('sessions', true);
       try {

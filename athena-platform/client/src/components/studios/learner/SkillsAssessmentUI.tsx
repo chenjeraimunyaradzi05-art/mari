@@ -29,14 +29,12 @@ import {
   ArrowRight,
   RotateCcw,
   Share2,
-  Download,
   BookOpen,
   TrendingUp,
   Zap,
   Shield,
   Star,
   Play,
-  Pause,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -85,128 +83,24 @@ interface Skill {
   questions: number;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
+interface AssessmentSubmission {
+  skill: Skill;
+  questions: Question[];
+  answers: Record<string, string>;
+  timeTaken: number;
+}
 
-const MOCK_SKILLS: Skill[] = [
-  {
-    id: 'js',
-    name: 'JavaScript',
-    category: 'Programming',
-    icon: '🟨',
-    description: 'Test your knowledge of JavaScript fundamentals, ES6+, and best practices',
-    estimatedTime: 15,
-    questions: 20,
-  },
-  {
-    id: 'react',
-    name: 'React',
-    category: 'Frameworks',
-    icon: '⚛️',
-    description: 'Assess your React expertise including hooks, state management, and patterns',
-    estimatedTime: 20,
-    questions: 25,
-  },
-  {
-    id: 'python',
-    name: 'Python',
-    category: 'Programming',
-    icon: '🐍',
-    description: 'Evaluate your Python skills from basics to advanced concepts',
-    estimatedTime: 15,
-    questions: 20,
-  },
-  {
-    id: 'sql',
-    name: 'SQL',
-    category: 'Data',
-    icon: '🗃️',
-    description: 'Test your database querying skills and optimization knowledge',
-    estimatedTime: 12,
-    questions: 15,
-  },
-];
+interface SkillsAssessmentUIProps {
+  className?: string;
+  skills?: Skill[];
+  questionsBySkill?: Record<string, Question[]>;
+  isLoading?: boolean;
+  error?: string | null;
+  onSubmitAssessment?: (submission: AssessmentSubmission) => AssessmentResult | Promise<AssessmentResult>;
+}
 
-const MOCK_QUESTIONS: Question[] = [
-  {
-    id: '1',
-    text: 'What is the output of console.log(typeof null) in JavaScript?',
-    options: [
-      { id: 'a', text: '"null"' },
-      { id: 'b', text: '"object"' },
-      { id: 'c', text: '"undefined"' },
-      { id: 'd', text: '"number"' },
-    ],
-    correctAnswer: 'b',
-    difficulty: 'beginner',
-    explanation: 'In JavaScript, typeof null returns "object". This is a known bug that has been kept for backward compatibility.',
-    topic: 'Types',
-  },
-  {
-    id: '2',
-    text: 'Which of the following is NOT a valid way to create an array in JavaScript?',
-    options: [
-      { id: 'a', text: 'const arr = []' },
-      { id: 'b', text: 'const arr = new Array()' },
-      { id: 'c', text: 'const arr = Array.of(1, 2, 3)' },
-      { id: 'd', text: 'const arr = Array.create(1, 2, 3)' },
-    ],
-    correctAnswer: 'd',
-    difficulty: 'beginner',
-    explanation: 'Array.create() is not a valid method. Use [], new Array(), Array.of(), or Array.from() instead.',
-    topic: 'Arrays',
-  },
-  {
-    id: '3',
-    text: 'What does the spread operator (...) do when used with arrays?',
-    options: [
-      { id: 'a', text: 'Creates a deep copy of the array' },
-      { id: 'b', text: 'Creates a shallow copy and expands elements' },
-      { id: 'c', text: 'Removes all elements from the array' },
-      { id: 'd', text: 'Reverses the array' },
-    ],
-    correctAnswer: 'b',
-    difficulty: 'intermediate',
-    explanation: 'The spread operator creates a shallow copy and expands array elements. For deep copies, use structuredClone() or JSON methods.',
-    topic: 'ES6+',
-  },
-  {
-    id: '4',
-    text: 'What is the purpose of the useEffect hook in React?',
-    options: [
-      { id: 'a', text: 'To manage component state' },
-      { id: 'b', text: 'To handle side effects after render' },
-      { id: 'c', text: 'To create context providers' },
-      { id: 'd', text: 'To optimize rendering performance' },
-    ],
-    correctAnswer: 'b',
-    difficulty: 'intermediate',
-    explanation: 'useEffect is used to handle side effects like data fetching, subscriptions, or manually changing the DOM after the component renders.',
-    topic: 'React Hooks',
-  },
-  {
-    id: '5',
-    text: 'What is a closure in JavaScript?',
-    code: `function outer() {
-  let x = 10;
-  function inner() {
-    console.log(x);
-  }
-  return inner;
-}`,
-    options: [
-      { id: 'a', text: 'A function that returns another function' },
-      { id: 'b', text: 'A function that has access to its outer scope even after the outer function returns' },
-      { id: 'c', text: 'A way to make variables private' },
-      { id: 'd', text: 'All of the above' },
-    ],
-    correctAnswer: 'd',
-    difficulty: 'advanced',
-    explanation: 'Closures combine all these concepts: they return functions, maintain access to outer scope, and enable data privacy.',
-    topic: 'Closures',
-  },
-];
+const EMPTY_SKILLS: Skill[] = [];
+const EMPTY_QUESTIONS_BY_SKILL: Record<string, Question[]> = {};
 
 // ============================================
 // CONFIG
@@ -218,6 +112,45 @@ const DIFFICULTY_CONFIG: Record<Difficulty, { label: string; color: string; icon
   advanced: { label: 'Advanced', color: 'purple', icon: Trophy },
   expert: { label: 'Expert', color: 'yellow', icon: Shield },
 };
+
+function getLevelForScore(score: number): Difficulty {
+  if (score >= 90) return 'expert';
+  if (score >= 70) return 'advanced';
+  if (score >= 50) return 'intermediate';
+
+  return 'beginner';
+}
+
+function buildLocalResult({
+  questions,
+  answers,
+  timeTaken,
+}: AssessmentSubmission): AssessmentResult {
+  const correctAnswers = questions.filter(question => answers[question.id] === question.correctAnswer).length;
+  const score = questions.length > 0 ? Math.round((correctAnswers / questions.length) * 100) : 0;
+  const topics = new Map<string, { total: number; correct: number }>();
+
+  questions.forEach(question => {
+    const current = topics.get(question.topic) ?? { total: 0, correct: 0 };
+    current.total += 1;
+    current.correct += answers[question.id] === question.correctAnswer ? 1 : 0;
+    topics.set(question.topic, current);
+  });
+
+  return {
+    totalQuestions: questions.length,
+    correctAnswers,
+    score,
+    level: getLevelForScore(score),
+    timeTaken,
+    topicScores: Array.from(topics.entries()).map(([topic, totals]) => ({
+      topic,
+      score: Math.round((totals.correct / totals.total) * 100),
+    })),
+    badgeEarned: undefined,
+    recommendations: [],
+  };
+}
 
 // ============================================
 // COMPONENTS
@@ -240,6 +173,18 @@ function SkillSelection({
           Verify your skills and earn badges to showcase your expertise
         </p>
       </div>
+
+      {skills.length === 0 && (
+        <Card>
+          <CardContent className="p-8 text-center">
+            <Award className="mx-auto h-10 w-10 text-muted-foreground" />
+            <h2 className="mt-4 font-semibold">No live assessments connected</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Skills assessment requires a live skill catalog before learners can start.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {categories.map((category) => (
         <div key={category}>
@@ -286,13 +231,17 @@ function SkillSelection({
 
 function AssessmentIntro({
   skill,
+  availableQuestions,
   onStart,
   onBack,
 }: {
   skill: Skill;
+  availableQuestions: number;
   onStart: () => void;
   onBack: () => void;
 }) {
+  const canStart = availableQuestions > 0;
+
   return (
     <div className="max-w-2xl mx-auto">
       <Button variant="ghost" onClick={onBack} className="mb-6">
@@ -310,7 +259,7 @@ function AssessmentIntro({
           <div className="grid grid-cols-3 gap-4 text-center">
             <div className="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
               <Target className="h-6 w-6 mx-auto text-muted-foreground mb-2" />
-              <p className="font-semibold">{skill.questions}</p>
+              <p className="font-semibold">{availableQuestions}</p>
               <p className="text-sm text-muted-foreground">Questions</p>
             </div>
             <div className="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
@@ -356,16 +305,18 @@ function AssessmentIntro({
               <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
               <div className="text-sm">
                 <p className="font-medium text-yellow-800 dark:text-yellow-200">
-                  Before you begin
+                  {canStart ? 'Before you begin' : 'Assessment not connected'}
                 </p>
                 <p className="text-yellow-700 dark:text-yellow-300 mt-1">
-                  Make sure you have uninterrupted time. You can pause the assessment, but the timer will continue.
+                  {canStart
+                    ? 'Make sure you have uninterrupted time. You can pause the assessment, but the timer will continue.'
+                    : 'This skill is available in the catalog, but no live questions have been provided yet.'}
                 </p>
               </div>
             </div>
           </div>
 
-          <Button className="w-full" size="lg" onClick={onStart}>
+          <Button className="w-full" size="lg" onClick={onStart} disabled={!canStart}>
             <Play className="h-5 w-5 mr-2" />
             Start Assessment
           </Button>
@@ -513,6 +464,7 @@ function ResultsView({
   const levelConfig = DIFFICULTY_CONFIG[result.level];
   const LevelIcon = levelConfig.icon;
   const passed = result.score >= 70;
+  const badgeIssued = Boolean(result.badgeEarned);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -527,9 +479,11 @@ function ResultsView({
               <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
                 <Trophy className="h-10 w-10 text-emerald-600 dark:text-emerald-400" />
               </div>
-              <h2 className="text-2xl font-bold">Congratulations!</h2>
+              <h2 className="text-2xl font-bold">{badgeIssued ? 'Congratulations!' : 'Assessment Complete'}</h2>
               <p className="text-muted-foreground mt-1">
-                You've earned the {skill.name} badge
+                {badgeIssued
+                  ? `You've earned the ${skill.name} badge`
+                  : 'You met the passing score. Badge issuance is not connected for this assessment yet.'}
               </p>
             </>
           ) : (
@@ -629,12 +583,18 @@ function ResultsView({
         </CardHeader>
         <CardContent>
           <ul className="space-y-3">
-            {result.recommendations.map((rec, index) => (
-              <li key={index} className="flex items-start gap-3">
-                <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <span className="text-sm">{rec}</span>
+            {result.recommendations.length === 0 ? (
+              <li className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                No personalized recommendations were returned for this result.
               </li>
-            ))}
+            ) : (
+              result.recommendations.map((rec, index) => (
+                <li key={index} className="flex items-start gap-3">
+                  <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <span className="text-sm">{rec}</span>
+                </li>
+              ))
+            )}
           </ul>
         </CardContent>
       </Card>
@@ -662,13 +622,24 @@ function ResultsView({
 // MAIN COMPONENT
 // ============================================
 
-export function SkillsAssessmentUI({ className }: { className?: string }) {
+export function SkillsAssessmentUI({
+  className,
+  skills = EMPTY_SKILLS,
+  questionsBySkill = EMPTY_QUESTIONS_BY_SKILL,
+  isLoading = false,
+  error = null,
+  onSubmitAssessment,
+}: SkillsAssessmentUIProps) {
   const [state, setState] = useState<AssessmentState>('intro');
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [timeRemaining, setTimeRemaining] = useState(15 * 60); // 15 minutes
   const [result, setResult] = useState<AssessmentResult | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const selectedQuestions = selectedSkill ? questionsBySkill[selectedSkill.id] ?? [] : [];
 
   // Timer effect
   useEffect(() => {
@@ -689,20 +660,28 @@ export function SkillsAssessmentUI({ className }: { className?: string }) {
 
   const handleSelectSkill = (skill: Skill) => {
     setSelectedSkill(skill);
+    setAnswers({});
+    setCurrentQuestionIndex(0);
+    setResult(null);
+    setSubmitError(null);
   };
 
   const handleStartAssessment = () => {
+    if (!selectedSkill || selectedQuestions.length === 0) return;
+
     setState('in-progress');
     setTimeRemaining(selectedSkill!.estimatedTime * 60);
   };
 
   const handleAnswer = (answerId: string) => {
-    const question = MOCK_QUESTIONS[currentQuestionIndex];
+    const question = selectedQuestions[currentQuestionIndex];
+    if (!question) return;
+
     setAnswers({ ...answers, [question.id]: answerId });
   };
 
   const handleNext = () => {
-    if (currentQuestionIndex < MOCK_QUESTIONS.length - 1) {
+    if (currentQuestionIndex < selectedQuestions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
     } else {
       handleFinish();
@@ -715,36 +694,35 @@ export function SkillsAssessmentUI({ className }: { className?: string }) {
     }
   };
 
-  const handleFinish = () => {
-    // Calculate results
-    const correctCount = MOCK_QUESTIONS.filter(
-      q => answers[q.id] === q.correctAnswer
-    ).length;
-    const score = Math.round((correctCount / MOCK_QUESTIONS.length) * 100);
+  const handleFinish = async () => {
+    if (!selectedSkill || selectedQuestions.length === 0 || isSubmitting) return;
 
-    const mockResult: AssessmentResult = {
-      totalQuestions: MOCK_QUESTIONS.length,
-      correctAnswers: correctCount,
-      score,
-      level: score >= 90 ? 'expert' : score >= 70 ? 'advanced' : score >= 50 ? 'intermediate' : 'beginner',
-      timeTaken: (selectedSkill!.estimatedTime * 60) - timeRemaining,
-      topicScores: [
-        { topic: 'Types', score: 80 },
-        { topic: 'Arrays', score: 100 },
-        { topic: 'ES6+', score: 75 },
-        { topic: 'React Hooks', score: 60 },
-        { topic: 'Closures', score: 85 },
-      ],
-      badgeEarned: score >= 70 ? { name: `${selectedSkill!.name} Proficient`, level: score >= 90 ? 'expert' : 'advanced' } : undefined,
-      recommendations: [
-        'Review React Hooks documentation for useEffect best practices',
-        'Practice more ES6+ destructuring patterns',
-        'Take the advanced React course to improve your score',
-      ],
+    const submission: AssessmentSubmission = {
+      skill: selectedSkill,
+      questions: selectedQuestions,
+      answers,
+      timeTaken: (selectedSkill.estimatedTime * 60) - timeRemaining,
     };
 
-    setResult(mockResult);
-    setState('results');
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
+
+      const assessmentResult = onSubmitAssessment
+        ? await onSubmitAssessment(submission)
+        : buildLocalResult(submission);
+
+      setResult(assessmentResult);
+      setState('results');
+    } catch (submissionError) {
+      setSubmitError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : 'Assessment could not be submitted.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleRetake = () => {
@@ -759,32 +737,79 @@ export function SkillsAssessmentUI({ className }: { className?: string }) {
     setAnswers({});
     setCurrentQuestionIndex(0);
     setResult(null);
+    setSubmitError(null);
     setState('intro');
   };
+
+  if (isLoading) {
+    return (
+      <div className={cn('min-h-screen bg-zinc-50 dark:bg-zinc-950 py-8 px-4', className)}>
+        <div className="max-w-2xl mx-auto rounded-lg border bg-white p-6 text-center text-sm text-muted-foreground shadow-sm dark:bg-zinc-900">
+          Loading assessments...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={cn('min-h-screen bg-zinc-50 dark:bg-zinc-950 py-8 px-4', className)}>
+        <div className="max-w-2xl mx-auto rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+          <h2 className="font-semibold">Assessments unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('min-h-screen bg-zinc-50 dark:bg-zinc-950 py-8 px-4', className)}>
       {!selectedSkill ? (
-        <SkillSelection skills={MOCK_SKILLS} onSelect={handleSelectSkill} />
+        <SkillSelection skills={skills} onSelect={handleSelectSkill} />
       ) : state === 'intro' ? (
         <AssessmentIntro
           skill={selectedSkill}
+          availableQuestions={selectedQuestions.length}
           onStart={handleStartAssessment}
           onBack={handleBackToSkills}
         />
       ) : state === 'in-progress' ? (
-        <QuestionView
-          question={MOCK_QUESTIONS[currentQuestionIndex]}
-          questionNumber={currentQuestionIndex + 1}
-          totalQuestions={MOCK_QUESTIONS.length}
-          selectedAnswer={answers[MOCK_QUESTIONS[currentQuestionIndex].id] || null}
-          timeRemaining={timeRemaining}
-          onAnswer={handleAnswer}
-          onNext={handleNext}
-          onPrevious={handlePrevious}
-          onSkip={handleNext}
-          canGoPrevious={currentQuestionIndex > 0}
-        />
+        selectedQuestions[currentQuestionIndex] ? (
+          <div className="space-y-4">
+            {submitError && (
+              <div className="max-w-3xl mx-auto rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                {submitError}
+              </div>
+            )}
+            <QuestionView
+              question={selectedQuestions[currentQuestionIndex]}
+              questionNumber={currentQuestionIndex + 1}
+              totalQuestions={selectedQuestions.length}
+              selectedAnswer={answers[selectedQuestions[currentQuestionIndex].id] || null}
+              timeRemaining={timeRemaining}
+              onAnswer={handleAnswer}
+              onNext={handleNext}
+              onPrevious={handlePrevious}
+              onSkip={handleNext}
+              canGoPrevious={currentQuestionIndex > 0}
+            />
+            {isSubmitting && (
+              <div className="max-w-3xl mx-auto text-center text-sm text-muted-foreground">
+                Submitting assessment...
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="max-w-2xl mx-auto rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+            <h2 className="font-semibold">No questions connected</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This assessment cannot start until live questions are available.
+            </p>
+            <Button variant="outline" className="mt-4" onClick={handleBackToSkills}>
+              Back to skills
+            </Button>
+          </div>
+        )
       ) : result ? (
         <ResultsView
           result={result}
