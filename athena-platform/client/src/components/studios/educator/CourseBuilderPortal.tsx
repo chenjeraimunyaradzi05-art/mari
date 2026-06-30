@@ -13,7 +13,7 @@
  * - Preview and publish
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Plus,
@@ -98,7 +98,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 type LessonType = 'video' | 'article' | 'quiz' | 'assignment' | 'resource';
 type CourseStatus = 'draft' | 'review' | 'published' | 'archived';
 
-interface Lesson {
+export interface Lesson {
   id: string;
   title: string;
   type: LessonType;
@@ -109,7 +109,7 @@ interface Lesson {
   isComplete: boolean;
 }
 
-interface Module {
+export interface Module {
   id: string;
   title: string;
   description?: string;
@@ -117,7 +117,7 @@ interface Module {
   isExpanded: boolean;
 }
 
-interface Course {
+export interface Course {
   id: string;
   title: string;
   subtitle?: string;
@@ -146,136 +146,35 @@ interface Course {
   };
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
+interface CourseBuilderPortalProps {
+  className?: string;
+  initialCourse?: Course | null;
+  isLoading?: boolean;
+  error?: string | null;
+  onSaveCourse?: (course: Course) => void;
+  onPublishCourse?: (course: Course) => void;
+}
 
-const MOCK_COURSE: Course = {
-  id: '1',
-  title: 'Product Management Fundamentals',
-  subtitle: 'Learn to build products users love',
-  description: 'A comprehensive course covering all aspects of modern product management, from discovery to delivery.',
-  category: 'Business',
-  level: 'beginner',
-  language: 'English',
-  status: 'draft',
-  price: 49.99,
-  originalPrice: 99.99,
-  certificate: true,
-  createdAt: new Date(2025, 11, 1),
-  updatedAt: new Date(2026, 0, 18),
-  learningOutcomes: [
-    'Understand product management fundamentals',
-    'Create product roadmaps and strategies',
-    'Conduct user research effectively',
-    'Work with cross-functional teams',
-  ],
-  requirements: [
-    'No prior experience required',
-    'Basic understanding of business concepts',
-  ],
-  targetAudience: [
-    'Aspiring product managers',
-    'Career changers into tech',
-    'Entrepreneurs building products',
-  ],
-  stats: {
-    enrollments: 0,
-    completionRate: 0,
-    avgRating: 0,
-    reviews: 0,
-    revenue: 0,
-  },
-  modules: [
-    {
-      id: 'm1',
-      title: 'Introduction to Product Management',
-      description: 'Learn what product management is and why it matters',
-      isExpanded: true,
-      lessons: [
-        {
-          id: 'l1',
-          title: 'What is Product Management?',
-          type: 'video',
-          duration: 12,
-          isPreview: true,
-          isComplete: true,
-        },
-        {
-          id: 'l2',
-          title: 'The Product Manager Role',
-          type: 'video',
-          duration: 18,
-          isPreview: false,
-          isComplete: true,
-        },
-        {
-          id: 'l3',
-          title: 'Module Quiz',
-          type: 'quiz',
-          duration: 10,
-          isPreview: false,
-          isComplete: false,
-        },
-      ],
-    },
-    {
-      id: 'm2',
-      title: 'Product Discovery',
-      description: 'Learn how to find and validate product ideas',
-      isExpanded: false,
-      lessons: [
-        {
-          id: 'l4',
-          title: 'Understanding User Problems',
-          type: 'video',
-          duration: 15,
-          isPreview: false,
-          isComplete: false,
-        },
-        {
-          id: 'l5',
-          title: 'User Research Methods',
-          type: 'article',
-          duration: 8,
-          isPreview: false,
-          isComplete: false,
-        },
-        {
-          id: 'l6',
-          title: 'Competitive Analysis Template',
-          type: 'resource',
-          isPreview: false,
-          isComplete: false,
-        },
-      ],
-    },
-    {
-      id: 'm3',
-      title: 'Product Strategy',
-      description: 'Define your product vision and roadmap',
-      isExpanded: false,
-      lessons: [
-        {
-          id: 'l7',
-          title: 'Creating a Product Vision',
-          type: 'video',
-          duration: 20,
-          isPreview: false,
-          isComplete: false,
-        },
-        {
-          id: 'l8',
-          title: 'Roadmapping Assignment',
-          type: 'assignment',
-          duration: 30,
-          isPreview: false,
-          isComplete: false,
-        },
-      ],
-    },
-  ],
-};
+function createEmptyCourse(): Course {
+  const now = new Date();
+
+  return {
+    id: 'new-course',
+    title: 'Untitled course',
+    category: 'Uncategorized',
+    level: 'beginner',
+    language: 'English',
+    status: 'draft',
+    modules: [],
+    price: 0,
+    learningOutcomes: [],
+    requirements: [],
+    targetAudience: [],
+    certificate: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 // ============================================
 // CONFIG
