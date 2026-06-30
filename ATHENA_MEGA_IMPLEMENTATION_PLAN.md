@@ -177,6 +177,13 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
   - `client/src/components/studios/learner/SkillsAssessmentUI.tsx` no longer ships a JavaScript/React/Python/SQL demo catalog, canned quiz questions, fabricated topic scores, fake recommendations, or automatic badge claims; it now requires caller-provided skills/questions and only computes results from those live questions unless a submit handler returns a server result.
 - Re-verified after the learner classroom/assessment cleanup:
   - Client production build passes with `npm run build`.
+- Continued the educator/settings studio cleanup:
+  - `client/src/components/studios/educator/CourseBuilderPortal.tsx` no longer ships a Product Management course, sample modules, sample lessons, fake pricing, fabricated outcomes, or canned AI suggestions; it now accepts a live initial course or starts from an empty draft with disconnected save/publish/suggestion states.
+  - `client/src/components/studios/settings/PrivacyCenterDashboard.tsx` no longer ships fake privacy scores, enabled profile/communication preferences, connected OAuth apps, export sizes, or simulated data export progress; it now renders from live props and shows empty/disconnected states when account privacy data is absent.
+  - `client/src/components/studios/settings/SafetyCenterAccess.tsx` no longer ships fake security checks, active sessions, login activity, password age, 2FA QR secrets, manual setup codes, or backup codes; it now renders from live props and shows empty/disconnected states when security data is absent.
+  - `client/src/app/dashboard/community/page.tsx` had a stale duplicated tail with hardcoded events and leaderboard members after the component close; that dead JSX was removed and the live-wired community sidebar remains.
+- Re-verified after the educator/settings/community cleanup:
+  - Client production build passes with `npm run build`.
 
 ## Launch Readiness Checklist
 
@@ -211,6 +218,10 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - [x] Remove hardcoded learner badge wallet credential demo data.
 - [x] Remove hardcoded learner classroom course/Q&A/notes/transcript demo data.
 - [x] Remove hardcoded learner skills assessment catalog/question/result demo data.
+- [x] Remove hardcoded educator course-builder course/curriculum/AI suggestion demo data.
+- [x] Remove hardcoded privacy center score/preferences/apps/export demo data.
+- [x] Remove hardcoded safety center security/session/activity/2FA/password demo data.
+- [x] Remove stale hardcoded community dashboard event/leaderboard JSX tail.
 - [ ] Provision Redis and provider URLs, then enable workers intentionally in production.
 - [x] De-scope livestream from launch by keeping routes unmounted until schema and streaming infrastructure are implemented.
 
