@@ -42,6 +42,7 @@ jobs:
       - name: Apply schema to test DB
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: |
           cd athena-platform/server
           npx prisma db push --accept-data-loss
@@ -49,7 +50,18 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           NODE_ENV: test
         run: |
           cd athena-platform/server
           npm test --silent
+
+      - name: Run launch readiness validation
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          NODE_ENV: test
+        run: |
+          cd athena-platform/server
+          npm run validate:launch-readiness
+          npm run validate:auth-sessions

@@ -5,6 +5,11 @@
  */
 
 import { logger } from './logger';
+import {
+  applyDatabaseUrlDefaults,
+  isNeonConnectionString,
+  isPostgresConnectionString,
+} from './database-url';
 
 interface EnvValidation {
   name: string;
@@ -13,6 +18,16 @@ interface EnvValidation {
   validator?: (value: string) => boolean;
   errorMessage?: string;
 }
+
+const hasSearchParam = (value: string, param: string, expected?: string) => {
+  try {
+    const url = new URL(value);
+    const actual = url.searchParams.get(param);
+    return expected === undefined ? actual !== null : actual === expected;
+  } catch {
+    return expected === undefined ? value.includes(`${param}=`) : value.includes(`${param}=${expected}`);
+  }
+};
 
 const ENV_VALIDATIONS: EnvValidation[] = [
   // Critical security
@@ -24,10 +39,24 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     errorMessage: 'JWT_SECRET must be at least 32 characters for security',
   },
   {
+    name: 'DV_ENCRYPTION_KEY',
+    required: true,
+    productionOnly: true,
+    validator: (v) => /^[0-9a-fA-F]{64}$/.test(v),
+    errorMessage: 'DV_ENCRYPTION_KEY must be a 64-character hex key',
+  },
+  {
     name: 'DATABASE_URL',
     required: true,
-    validator: (v) => v.startsWith('postgres://') || v.startsWith('postgresql://'),
+    validator: isPostgresConnectionString,
     errorMessage: 'DATABASE_URL must be a valid PostgreSQL connection string',
+  },
+  {
+    name: 'DIRECT_DATABASE_URL',
+    required: true,
+    productionOnly: true,
+    validator: isPostgresConnectionString,
+    errorMessage: 'DIRECT_DATABASE_URL must be a valid PostgreSQL connection string',
   },
   // Stripe (required for payments)
   {
@@ -69,9 +98,19 @@ interface ValidationResult {
 }
 
 export function validateEnvironment(): ValidationResult {
+  const databaseUrls = applyDatabaseUrlDefaults();
   const isProd = process.env.NODE_ENV === 'production';
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  const directDatabaseUrlWasDerived =
+    databaseUrls.directDatabaseUrlWasDerived || process.env.ATHENA_DIRECT_DATABASE_URL_DERIVED === 'true';
+
+  if (directDatabaseUrlWasDerived && databaseUrls.databaseUrl && isNeonConnectionString(databaseUrls.databaseUrl)) {
+    warnings.push(
+      'DIRECT_DATABASE_URL was derived from DATABASE_URL. Set an explicit unpooled Neon DIRECT_DATABASE_URL in production.'
+    );
+  }
 
   for (const validation of ENV_VALIDATIONS) {
     const value = process.env[validation.name];
@@ -94,6 +133,60 @@ export function validateEnvironment(): ValidationResult {
         errors.push(message);
       } else {
         warnings.push(message);
+      }
+    }
+  }
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl && isNeonConnectionString(databaseUrl)) {
+    if (!hasSearchParam(databaseUrl, 'sslmode', 'require')) {
+      const message = 'Neon DATABASE_URL should include sslmode=require';
+      if (isProd) {
+        errors.push(message);
+      } else {
+        warnings.push(message);
+      }
+    }
+
+    if (!hasSearchParam(databaseUrl, 'channel_binding', 'require')) {
+      warnings.push('Neon DATABASE_URL should include channel_binding=require when available');
+    }
+
+    const host = (() => {
+      try {
+        return new URL(databaseUrl).hostname;
+      } catch {
+        return databaseUrl;
+      }
+    })();
+
+    const directUrl = process.env.DIRECT_DATABASE_URL;
+    if (host.includes('-pooler.') && !directUrl) {
+      const message = 'Set DIRECT_DATABASE_URL to the unpooled Neon connection string for Prisma migrations';
+      if (isProd) {
+        errors.push(message);
+      } else {
+        warnings.push(message);
+      }
+    }
+
+    if (directUrl && isNeonConnectionString(directUrl)) {
+      if (!hasSearchParam(directUrl, 'sslmode', 'require')) {
+        const message = 'Neon DIRECT_DATABASE_URL should include sslmode=require';
+        if (isProd) {
+          errors.push(message);
+        } else {
+          warnings.push(message);
+        }
+      }
+
+      try {
+        const directHost = new URL(directUrl).hostname;
+        if (directHost.includes('-pooler.')) {
+          warnings.push('DIRECT_DATABASE_URL should use the unpooled Neon hostname, not the pooled hostname');
+        }
+      } catch {
+        // The format validator reports malformed URLs separately.
       }
     }
   }

@@ -12,8 +12,10 @@ describe('ops endpoints', () => {
   const originalDiagnosticsToken = process.env.HEALTH_DIAGNOSTICS_TOKEN;
   const originalDebugSecret = process.env.DEBUG_SECRET;
   const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
+  const originalClientUrl = process.env.CLIENT_URL;
+  const originalFrontendUrl = process.env.FRONTEND_URL;
   const originalNetlifyUrl = process.env.NETLIFY_URL;
-  const originalRailwayUrl = process.env.RAILWAY_URL;
+  const originalDeployUrl = process.env.DEPLOY_URL;
   const originalCorsAllowPreviewOrigins = process.env.CORS_ALLOW_PREVIEW_ORIGINS;
 
   afterEach(() => {
@@ -42,16 +44,28 @@ describe('ops endpoints', () => {
       process.env.ALLOWED_ORIGINS = originalAllowedOrigins;
     }
 
+    if (originalClientUrl === undefined) {
+      delete process.env.CLIENT_URL;
+    } else {
+      process.env.CLIENT_URL = originalClientUrl;
+    }
+
+    if (originalFrontendUrl === undefined) {
+      delete process.env.FRONTEND_URL;
+    } else {
+      process.env.FRONTEND_URL = originalFrontendUrl;
+    }
+
     if (originalNetlifyUrl === undefined) {
       delete process.env.NETLIFY_URL;
     } else {
       process.env.NETLIFY_URL = originalNetlifyUrl;
     }
 
-    if (originalRailwayUrl === undefined) {
-      delete process.env.RAILWAY_URL;
+    if (originalDeployUrl === undefined) {
+      delete process.env.DEPLOY_URL;
     } else {
-      process.env.RAILWAY_URL = originalRailwayUrl;
+      process.env.DEPLOY_URL = originalDeployUrl;
     }
 
     if (originalCorsAllowPreviewOrigins === undefined) {
@@ -95,10 +109,10 @@ describe('ops endpoints', () => {
     delete process.env.CORS_ALLOW_PREVIEW_ORIGINS;
     delete process.env.ALLOWED_ORIGINS;
     delete process.env.NETLIFY_URL;
-    delete process.env.RAILWAY_URL;
+    delete process.env.DEPLOY_URL;
 
     expect(isCorsOriginAllowed('https://preview-demo.netlify.app')).toBe(false);
-    expect(isCorsOriginAllowed('https://preview-demo.up.railway.app')).toBe(false);
+    expect(isCorsOriginAllowed('https://api-preview.athena.example')).toBe(false);
   });
 
   it('allows explicitly configured production origins', () => {
@@ -108,5 +122,15 @@ describe('ops endpoints', () => {
 
     expect(isCorsOriginAllowed('https://app.athena.example')).toBe(true);
     expect(isCorsOriginAllowed('https://athena.netlify.app')).toBe(true);
+  });
+
+  it('allows configured frontend URLs in production', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.ALLOWED_ORIGINS;
+    process.env.CLIENT_URL = 'https://phenomenal-paprenjak-3b6ed6.netlify.app';
+    process.env.FRONTEND_URL = 'https://athena-empress.netlify.app';
+
+    expect(isCorsOriginAllowed('https://phenomenal-paprenjak-3b6ed6.netlify.app')).toBe(true);
+    expect(isCorsOriginAllowed('https://athena-empress.netlify.app')).toBe(true);
   });
 });

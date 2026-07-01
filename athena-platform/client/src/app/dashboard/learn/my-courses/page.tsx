@@ -7,11 +7,8 @@ import {
   Clock,
   Play,
   CheckCircle,
-  Trophy,
-  Target,
+  Building2,
   Calendar,
-  BarChart3,
-  Filter,
   Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -22,19 +19,83 @@ import { CardSkeleton } from '@/components/ui/loading';
 interface EnrolledCourse {
   id: string;
   title: string;
-  instructor: string;
-  image: string;
+  description?: string | null;
+  providerName?: string | null;
+  organization?: {
+    name?: string | null;
+    logo?: string | null;
+  } | null;
   progress: number;
-  totalLessons?: number;
-  completedLessons?: number;
-  totalHours?: number;
-  hoursWatched?: number;
+  durationMonths?: number | null;
+  studyMode?: unknown;
   lastAccessed?: string;
   category: string;
-  certificate?: boolean;
+  employmentRate?: number | null;
+  avgStartingSalary?: number | null;
 }
 
 type FilterType = 'all' | 'in-progress' | 'completed';
+
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+      }
+    } catch {
+      return [value];
+    }
+  }
+
+  return [];
+}
+
+function formatLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDuration(months?: number | null): string | null {
+  if (!months || months <= 0) return null;
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'}`;
+
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (remainingMonths === 0) return `${years} year${years === 1 ? '' : 's'}`;
+
+  return `${years}y ${remainingMonths}m`;
+}
+
+function providerNameFor(course: EnrolledCourse): string {
+  return course.organization?.name || course.providerName || 'Provider not listed';
+}
+
+function CourseArtwork({ course }: { course: EnrolledCourse }) {
+  const logo = course.organization?.logo;
+
+  if (logo) {
+    return (
+      <img
+        src={logo}
+        alt={providerNameFor(course)}
+        className="w-full h-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="h-full w-full bg-gradient-to-br from-primary-100 via-sky-100 to-emerald-100 dark:from-primary-900/40 dark:via-sky-900/30 dark:to-emerald-900/30 flex items-center justify-center">
+      <BookOpen className="h-10 w-10 text-primary-600 dark:text-primary-300" />
+    </div>
+  );
+}
 
 export default function MyCoursesPage() {
   const [filter, setFilter] = useState<FilterType>('all');
@@ -50,12 +111,16 @@ export default function MyCoursesPage() {
     return {
       id: course.id,
       title: course.title,
-      instructor: course.providerName || course.organization?.name || 'ATHENA',
-      image: '/images/course-placeholder.jpg',
+      description: course.description,
+      providerName: course.providerName,
+      organization: course.organization,
       progress,
+      durationMonths: course.durationMonths,
+      studyMode: course.studyMode,
       lastAccessed: lastAccessedIso ? new Date(lastAccessedIso).toISOString() : undefined,
-      category: course.type || 'Course',
-      certificate: progress >= 100,
+      category: course.type ? formatLabel(course.type) : 'Course',
+      employmentRate: course.employmentRate,
+      avgStartingSalary: course.avgStartingSalary,
     };
   });
 
@@ -68,20 +133,18 @@ export default function MyCoursesPage() {
     .filter(
       (course) =>
         course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        course.instructor.toLowerCase().includes(searchQuery.toLowerCase())
+        providerNameFor(course).toLowerCase().includes(searchQuery.toLowerCase())
     );
 
   const stats = {
     totalCourses: courses.length,
     inProgress: courses.filter((c) => c.progress > 0 && c.progress < 100).length,
     completed: courses.filter((c) => c.progress === 100).length,
-    totalHoursWatched: 0,
-    certificates: courses.filter((c) => c.certificate).length,
+    providers: new Set(courses.map(providerNameFor).filter((name) => name !== 'Provider not listed')).size,
   };
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           My Learning
@@ -91,8 +154,7 @@ export default function MyCoursesPage() {
         </p>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card text-center">
           <BookOpen className="w-8 h-8 text-primary-500 mx-auto mb-2" />
           <p className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -115,22 +177,14 @@ export default function MyCoursesPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">Completed</p>
         </div>
         <div className="card text-center">
-          <Clock className="w-8 h-8 text-purple-500 mx-auto mb-2" />
+          <Building2 className="w-8 h-8 text-purple-500 mx-auto mb-2" />
           <p className="text-2xl font-bold text-gray-900 dark:text-white">
-            {stats.totalHoursWatched.toFixed(1)}h
+            {stats.providers}
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Hours Watched</p>
-        </div>
-        <div className="card text-center">
-          <Trophy className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
-            {stats.certificates}
-          </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Certificates</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Providers</p>
         </div>
       </div>
 
-      {/* Filters & Search */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div className="flex items-center space-x-2">
           <button
@@ -180,7 +234,6 @@ export default function MyCoursesPage() {
         </div>
       </div>
 
-      {/* Course List */}
       {isLoading ? (
         <div className="space-y-4">
           <CardSkeleton />
@@ -194,7 +247,7 @@ export default function MyCoursesPage() {
             Unable to load your courses
           </h3>
           <p className="text-gray-500 dark:text-gray-400 mb-6">
-            Please try again. If you’re logged out, sign in first.
+            Please try again. If you're logged out, sign in first.
           </p>
           <Link href="/login" className="btn-primary">
             Go to Login
@@ -217,172 +270,110 @@ export default function MyCoursesPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredCourses.map((course) => (
-            <div
-              key={course.id}
-              className="card-hover flex flex-col md:flex-row md:items-center gap-4"
-            >
-              {/* Thumbnail */}
-              <Link
-                href={`/dashboard/learn/${course.id}`}
-                className="relative flex-shrink-0"
+          {filteredCourses.map((course) => {
+            const duration = formatDuration(course.durationMonths);
+            const modes = toStringList(course.studyMode);
+
+            return (
+              <div
+                key={course.id}
+                className="card-hover flex flex-col md:flex-row md:items-center gap-4"
               >
-                <img
-                  src={course.image}
-                  alt={course.title}
-                  className="w-full md:w-48 h-32 object-cover rounded-lg"
-                />
-                {course.progress === 100 ? (
-                  <div className="absolute inset-0 bg-green-500/80 rounded-lg flex items-center justify-center">
-                    <CheckCircle className="w-12 h-12 text-white" />
+                <Link
+                  href={`/dashboard/learn/${course.id}`}
+                  className="relative flex-shrink-0 overflow-hidden rounded-lg w-full md:w-48 h-32"
+                >
+                  <CourseArtwork course={course} />
+                  {course.progress === 100 ? (
+                    <div className="absolute inset-0 bg-green-500/80 flex items-center justify-center">
+                      <CheckCircle className="w-12 h-12 text-white" />
+                    </div>
+                  ) : (
+                    <div className="absolute bottom-2 left-2 right-2">
+                      <div className="bg-black/60 rounded-full px-3 py-1.5 text-white text-xs flex items-center space-x-2">
+                        <Play className="w-3 h-3" />
+                        <span>Continue</span>
+                      </div>
+                    </div>
+                  )}
+                </Link>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Link
+                        href={`/dashboard/learn/${course.id}`}
+                        className="font-medium text-gray-900 dark:text-white hover:text-primary-500"
+                      >
+                        {course.title}
+                      </Link>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {providerNameFor(course)}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="hidden md:block">
+                      {course.category}
+                    </Badge>
                   </div>
-                ) : (
-                  <div className="absolute bottom-2 left-2 right-2">
-                    <div className="bg-black/60 rounded-full px-3 py-1.5 text-white text-xs flex items-center space-x-2">
-                      <Play className="w-3 h-3" />
-                      <span>Continue</span>
+
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="text-gray-600 dark:text-gray-300">
+                        Progress
+                      </span>
+                      <span className="font-medium text-primary-500">
+                        {course.progress}%
+                      </span>
+                    </div>
+                    <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          'h-full rounded-full transition-all',
+                          course.progress === 100 ? 'bg-green-500' : 'bg-primary-500'
+                        )}
+                        style={{ width: `${course.progress}%` }}
+                      />
                     </div>
                   </div>
-                )}
-              </Link>
 
-              {/* Course Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <Link
-                      href={`/dashboard/learn/${course.id}`}
-                      className="font-medium text-gray-900 dark:text-white hover:text-primary-500"
-                    >
-                      {course.title}
-                    </Link>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {course.instructor}
-                    </p>
-                  </div>
-                  <Badge variant="secondary" className="hidden md:block">
-                    {course.category}
-                  </Badge>
-                </div>
-
-                {/* Progress */}
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-gray-600 dark:text-gray-300">
-                      {typeof course.completedLessons === 'number' && typeof course.totalLessons === 'number'
-                        ? `${course.completedLessons} of ${course.totalLessons} lessons`
-                        : 'Progress'}
-                    </span>
-                    <span className="font-medium text-primary-500">
-                      {course.progress}%
-                    </span>
-                  </div>
-                  <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={cn(
-                        'h-full rounded-full transition-all',
-                        course.progress === 100 ? 'bg-green-500' : 'bg-primary-500'
-                      )}
-                      style={{ width: `${course.progress}%` }}
-                    />
+                  <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-500 dark:text-gray-400">
+                    {duration && (
+                      <span className="flex items-center">
+                        <Clock className="w-4 h-4 mr-1" />
+                        {duration}
+                      </span>
+                    )}
+                    {modes.slice(0, 2).map((mode) => (
+                      <span key={mode}>{formatLabel(mode)}</span>
+                    ))}
+                    {course.lastAccessed && (
+                      <span className="flex items-center">
+                        <Calendar className="w-4 h-4 mr-1" />
+                        Last accessed {new Date(course.lastAccessed).toLocaleDateString()}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* Meta */}
-                <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-500 dark:text-gray-400">
-                  {typeof course.hoursWatched === 'number' && typeof course.totalHours === 'number' && (
-                    <span className="flex items-center">
-                      <Clock className="w-4 h-4 mr-1" />
-                      {course.hoursWatched.toFixed(1)}h / {course.totalHours}h
-                    </span>
-                  )}
-                  {course.lastAccessed && (
-                    <span className="flex items-center">
-                      <Calendar className="w-4 h-4 mr-1" />
-                      Last accessed {new Date(course.lastAccessed).toLocaleDateString()}
-                    </span>
-                  )}
-                  {course.certificate && (
-                    <span className="flex items-center text-green-500">
-                      <Trophy className="w-4 h-4 mr-1" />
-                      Certificate Earned
-                    </span>
-                  )}
+                <div className="flex md:flex-col items-center gap-2">
+                  <Link
+                    href={`/dashboard/learn/${course.id}`}
+                    className="btn-primary text-sm w-full md:w-auto"
+                  >
+                    {course.progress === 100 ? 'Review' : 'Continue'}
+                  </Link>
+                  <Link
+                    href={`/dashboard/learn/${course.id}`}
+                    className="btn-outline text-sm w-full md:w-auto"
+                  >
+                    View Details
+                  </Link>
                 </div>
               </div>
-
-              {/* Actions */}
-              <div className="flex md:flex-col items-center gap-2">
-                {course.progress === 100 ? (
-                  <>
-                    <Link
-                      href={`/dashboard/learn/${course.id}/certificate`}
-                      className="btn-primary text-sm w-full md:w-auto"
-                    >
-                      View Certificate
-                    </Link>
-                    <Link
-                      href={`/dashboard/learn/${course.id}`}
-                      className="btn-outline text-sm w-full md:w-auto"
-                    >
-                      Review
-                    </Link>
-                  </>
-                ) : (
-                  <>
-                    <Link
-                      href={`/dashboard/learn/${course.id}/continue`}
-                      className="btn-primary text-sm w-full md:w-auto"
-                    >
-                      Continue
-                    </Link>
-                    <Link
-                      href={`/dashboard/learn/${course.id}`}
-                      className="btn-outline text-sm w-full md:w-auto"
-                    >
-                      View Details
-                    </Link>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-
-      {/* Learning Streak */}
-      <div className="card bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center">
-              <Target className="w-6 h-6 text-primary-500" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white">
-                🔥 7 Day Learning Streak!
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                Keep it up! You're building great learning habits.
-              </p>
-            </div>
-          </div>
-          <div className="hidden md:flex items-center space-x-1">
-            {[1, 2, 3, 4, 5, 6, 7].map((day) => (
-              <div
-                key={day}
-                className={cn(
-                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
-                  day <= 7
-                    ? 'bg-primary-500 text-white'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-400'
-                )}
-              >
-                {day <= 7 ? '✓' : day}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

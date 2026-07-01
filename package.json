@@ -14,6 +14,10 @@
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
     "db:seed": "cd athena-platform/server && npm run db:seed",
     "db:migrate": "cd athena-platform/server && npx prisma migrate deploy",
-    "db:generate": "cd athena-platform/server && npx prisma generate"
+    "db:generate": "cd athena-platform/server && npx prisma generate",
+    "validate:server": "npm --prefix athena-platform/server run validate:launch-readiness && npm --prefix athena-platform/server run validate:auth-sessions",
+    "ci:launch": "npm --prefix athena-platform/server run build && npm run validate:server",
+    "netlify:link-neon": "node scripts/netlify-link-neon.mjs",
+    "netlify:deploy": "node scripts/netlify-link-neon.mjs --deploy"
   }
 }

@@ -24,6 +24,7 @@ import { useIdeaValidator } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 
 interface ValidationResult {
+  analysis?: string;
   overallScore: number;
   marketPotential: {
     score: number;
@@ -63,6 +64,7 @@ export default function IdeaValidatorPage() {
   const [category, setCategory] = useState('startup');
   const [targetMarket, setTargetMarket] = useState('');
   const [result, setResult] = useState<ValidationResult | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>([
     'market',
     'strengths',
@@ -73,76 +75,23 @@ export default function IdeaValidatorPage() {
 
   const handleValidate = () => {
     if (!idea.trim()) return;
+    setValidationError(null);
 
     validateIdea(
       { idea, category, targetMarket },
       {
         onSuccess: (data) => {
-          setResult(data || mockResult);
+          setResult(data || null);
         },
-        onError: () => {
-          setResult(mockResult);
+        onError: (error: any) => {
+          setResult(null);
+          setValidationError(
+            error?.response?.data?.message ||
+              'Idea validation is unavailable right now. Please try again later.'
+          );
         },
       }
     );
-  };
-
-  const mockResult: ValidationResult = {
-    overallScore: 78,
-    marketPotential: {
-      score: 82,
-      analysis:
-        'The market shows strong growth potential with an estimated TAM of $5.2B. Women-focused career platforms are gaining traction, with notable success from platforms like The Mom Project and Fairygodboss.',
-    },
-    feasibility: {
-      score: 75,
-      analysis:
-        'The idea is technically feasible with existing technologies. Key challenges include building AI capabilities and ensuring platform security. Estimated MVP timeline: 4-6 months.',
-    },
-    competition: {
-      score: 70,
-      analysis:
-        'Moderate competition exists but differentiation through AI-powered features and community focus creates clear market positioning.',
-      competitors: ['LinkedIn', 'The Mom Project', 'Fairygodboss', 'InHerSight'],
-    },
-    targetAudience: {
-      description: 'Professional women aged 25-45 seeking career advancement',
-      size: '15M+ in target markets',
-      demographics: [
-        'Mid-career professionals',
-        'Career changers',
-        'Working mothers',
-        'Women in tech',
-        'Entrepreneurs',
-      ],
-    },
-    strengths: [
-      'Addresses clear market need for women-focused career support',
-      'AI differentiation provides unique value proposition',
-      'Community-driven approach builds engagement and retention',
-      'Multiple revenue streams (subscriptions, mentorship, courses)',
-      'Strong alignment with DEI trends in corporate hiring',
-    ],
-    weaknesses: [
-      'Requires significant content and community investment',
-      'AI features need substantial development resources',
-      'Market education may be needed for premium features',
-      'Competition from established platforms with larger user bases',
-    ],
-    recommendations: [
-      'Focus initial MVP on core job matching and community features',
-      'Partner with women-led organizations for early user acquisition',
-      'Consider B2B channel for corporate diversity hiring programs',
-      'Build referral program to leverage community growth',
-      'Develop content strategy around career advancement topics',
-    ],
-    nextSteps: [
-      'Conduct user interviews with 20-30 target users',
-      'Create detailed competitive analysis',
-      'Develop MVP feature specification',
-      'Build financial projections and funding requirements',
-      'Identify potential strategic partners',
-    ],
   };
 
   const toggleSection = (section: string) => {
@@ -164,6 +113,15 @@ export default function IdeaValidatorPage() {
     if (score >= 60) return 'Moderate Potential';
     return 'Needs Work';
   };
+
+  const hasStructuredResult = Boolean(
+    result &&
+      typeof result.overallScore === 'number' &&
+      result.marketPotential &&
+      result.feasibility &&
+      result.competition &&
+      result.targetAudience
+  );
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -244,6 +202,12 @@ export default function IdeaValidatorPage() {
             />
           </div>
 
+          {validationError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+              {validationError}
+            </div>
+          )}
+
           {/* Validate Button */}
           <button
             onClick={handleValidate}
@@ -261,6 +225,24 @@ export default function IdeaValidatorPage() {
                 <span>Validate Idea</span>
               </>
             )}
+          </button>
+        </div>
+      ) : !hasStructuredResult ? (
+        <div className="space-y-6">
+          <div className="card">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Analysis
+            </h2>
+            <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">
+              {(result as any)?.analysis || JSON.stringify(result, null, 2)}
+            </p>
+          </div>
+          <button
+            onClick={() => setResult(null)}
+            className="btn-primary flex items-center space-x-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Validate Another Idea</span>
           </button>
         </div>
       ) : (

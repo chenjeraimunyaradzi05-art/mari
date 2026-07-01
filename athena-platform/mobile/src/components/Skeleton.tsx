@@ -13,7 +13,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // ============================================
 
 interface SkeletonProps {
-  width?: number | string;
+  width?: ViewStyle['width'];
   height?: number;
   borderRadius?: number;
   style?: ViewStyle;
@@ -72,7 +72,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
 export const SkeletonText: React.FC<{
   lines?: number;
   lineHeight?: number;
-  lastLineWidth?: number | string;
+  lastLineWidth?: ViewStyle['width'];
 }> = ({ lines = 3, lineHeight = 14, lastLineWidth = '60%' }) => {
   return (
     <View style={styles.textContainer}>
@@ -95,7 +95,7 @@ export const SkeletonAvatar: React.FC<{
 };
 
 export const SkeletonImage: React.FC<{
-  width?: number | string;
+  width?: ViewStyle['width'];
   height?: number;
   borderRadius?: number;
 }> = ({ width = '100%', height = 200, borderRadius = 8 }) => {
@@ -103,7 +103,7 @@ export const SkeletonImage: React.FC<{
 };
 
 export const SkeletonButton: React.FC<{
-  width?: number | string;
+  width?: ViewStyle['width'];
   height?: number;
 }> = ({ width = 120, height = 40 }) => {
   return <Skeleton width={width} height={height} borderRadius={20} />;

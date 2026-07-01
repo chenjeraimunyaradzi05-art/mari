@@ -4,68 +4,142 @@ import { useState } from 'react';
 import Link from 'next/link';
 import {
   Search,
-  Play,
   Clock,
   Users,
-  Star,
   BookOpen,
   Award,
   ChevronDown,
-  Filter,
   TrendingUp,
 } from 'lucide-react';
-import { useCourses, useAuth } from '@/lib/hooks';
+import { useCourses } from '@/lib/hooks';
 import { formatCurrency, cn } from '@/lib/utils';
 import { CardSkeleton } from '@/components/ui/loading';
 
-const categories = [
-  'All Categories',
-  'Leadership',
-  'Tech & Engineering',
-  'Product Management',
-  'Marketing',
-  'Finance',
-  'Entrepreneurship',
-  'Personal Development',
-  'Communication',
-  'Productivity',
+type CourseSummary = {
+  id: string;
+  title: string;
+  description?: string | null;
+  organization?: {
+    id?: string;
+    name?: string | null;
+    logo?: string | null;
+  } | null;
+  providerName?: string | null;
+  type?: string | null;
+  durationMonths?: number | null;
+  studyMode?: unknown;
+  cost?: number | null;
+  employmentRate?: number | null;
+  avgStartingSalary?: number | null;
+  featured?: boolean;
+};
+
+const courseTypes = [
+  { value: '', label: 'All Types' },
+  { value: 'degree', label: 'Degree' },
+  { value: 'diploma', label: 'Diploma' },
+  { value: 'certificate', label: 'Certificate' },
+  { value: 'bootcamp', label: 'Bootcamp' },
+  { value: 'short_course', label: 'Short Course' },
 ];
 
-const levels = [
-  { value: '', label: 'All Levels' },
-  { value: 'beginner', label: 'Beginner' },
-  { value: 'intermediate', label: 'Intermediate' },
-  { value: 'advanced', label: 'Advanced' },
+const studyModes = [
+  { value: '', label: 'All Modes' },
+  { value: 'online', label: 'Online' },
+  { value: 'part-time', label: 'Part Time' },
+  { value: 'full-time', label: 'Full Time' },
 ];
 
-const sortOptions = [
-  { value: 'popular', label: 'Most Popular' },
-  { value: 'rating', label: 'Highest Rated' },
-  { value: 'newest', label: 'Newest' },
-  { value: 'price_low', label: 'Price: Low to High' },
-  { value: 'price_high', label: 'Price: High to Low' },
-];
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+      }
+    } catch {
+      return [value];
+    }
+  }
+
+  return [];
+}
+
+function formatLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDuration(months?: number | null): string | null {
+  if (!months || months <= 0) return null;
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'}`;
+
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (remainingMonths === 0) return `${years} year${years === 1 ? '' : 's'}`;
+
+  return `${years}y ${remainingMonths}m`;
+}
+
+function providerNameFor(course: CourseSummary): string {
+  return course.organization?.name || course.providerName || 'Provider not listed';
+}
+
+function costLabelFor(course: CourseSummary): string {
+  if (typeof course.cost !== 'number') return 'Contact provider';
+  return course.cost === 0 ? 'Free' : formatCurrency(course.cost);
+}
+
+function CourseArtwork({ course }: { course: CourseSummary }) {
+  const providerLogo = course.organization?.logo;
+
+  if (providerLogo) {
+    return (
+      <img
+        src={providerLogo}
+        alt={providerNameFor(course)}
+        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+      />
+    );
+  }
+
+  return (
+    <div className="h-full w-full bg-gradient-to-br from-primary-100 via-sky-100 to-emerald-100 dark:from-primary-900/40 dark:via-sky-900/30 dark:to-emerald-900/30 flex items-center justify-center">
+      <BookOpen className="h-12 w-12 text-primary-600 dark:text-primary-300" />
+    </div>
+  );
+}
 
 export default function LearnPage() {
-  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All Categories');
-  const [selectedLevel, setSelectedLevel] = useState('');
-  const [sortBy, setSortBy] = useState('popular');
+  const [selectedType, setSelectedType] = useState('');
+  const [selectedStudyMode, setSelectedStudyMode] = useState('');
 
   const { data, isLoading } = useCourses({
     search: searchQuery,
-    category: selectedCategory !== 'All Categories' ? selectedCategory : undefined,
-    level: selectedLevel || undefined,
-    sortBy,
+    type: selectedType || undefined,
+    studyMode: selectedStudyMode || undefined,
   });
 
-  const featuredCourses = data?.courses?.filter((c: any) => c.featured)?.slice(0, 3) || [];
+  const courses = (data?.courses || []) as CourseSummary[];
+  const featuredCourses = courses.filter((course) => course.featured).slice(0, 3);
   const totalPages = data?.totalPages ?? 0;
+  const providerCount = new Set(courses.map(providerNameFor).filter((name) => name !== 'Provider not listed')).size;
+  const outcomeCount = courses.filter(
+    (course) =>
+      typeof course.employmentRate === 'number' ||
+      typeof course.avgStartingSalary === 'number'
+  ).length;
+  const freeCourseCount = courses.filter((course) => course.cost === 0).length;
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -97,7 +171,6 @@ export default function LearnPage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card bg-gradient-to-br from-primary-500 to-primary-600 text-white">
           <div className="flex items-center space-x-3">
@@ -116,8 +189,8 @@ export default function LearnPage() {
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">12.5K+</p>
-              <p className="text-sm text-white/80">Students</p>
+              <p className="text-2xl font-bold">{providerCount}</p>
+              <p className="text-sm text-white/80">Providers</p>
             </div>
           </div>
         </div>
@@ -127,43 +200,38 @@ export default function LearnPage() {
               <Award className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">95%</p>
-              <p className="text-sm text-white/80">Completion</p>
+              <p className="text-2xl font-bold">{outcomeCount}</p>
+              <p className="text-sm text-white/80">Outcome Listings</p>
             </div>
           </div>
         </div>
-        <div className="card bg-gradient-to-br from-purple-500 to-purple-600 text-white">
+        <div className="card bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-white/20 rounded-lg">
               <TrendingUp className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">4.8</p>
-              <p className="text-sm text-white/80">Avg Rating</p>
+              <p className="text-2xl font-bold">{freeCourseCount}</p>
+              <p className="text-sm text-white/80">Free Courses</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Featured Courses */}
       {featuredCourses.length > 0 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             Featured Courses
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {featuredCourses.map((course: any) => (
+            {featuredCourses.map((course) => (
               <Link
                 key={course.id}
                 href={`/dashboard/learn/${course.id}`}
                 className="card group hover:shadow-lg transition-all overflow-hidden"
               >
-                <div className="relative h-40 -mx-6 -mt-6 mb-4">
-                  <img
-                    src={course.thumbnailUrl || '/images/course-placeholder.jpg'}
-                    alt={course.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
+                <div className="relative h-40 -mx-6 -mt-6 mb-4 overflow-hidden">
+                  <CourseArtwork course={course} />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                   <div className="absolute bottom-3 left-3 right-3">
                     <span className="px-2 py-1 text-xs font-medium bg-primary-500 text-white rounded-full">
@@ -175,15 +243,14 @@ export default function LearnPage() {
                   {course.title}
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
-                  {course.description}
+                  {course.description || 'No description provided.'}
                 </p>
                 <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center text-yellow-500">
-                    <Star className="w-4 h-4 fill-current mr-1" />
-                    <span className="font-medium">{course.rating?.toFixed(1) || '5.0'}</span>
-                  </div>
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {providerNameFor(course)}
+                  </span>
                   <span className="font-semibold text-primary-600">
-                    {course.price === 0 ? 'Free' : formatCurrency(course.price)}
+                    {costLabelFor(course)}
                   </span>
                 </div>
               </Link>
@@ -192,7 +259,6 @@ export default function LearnPage() {
         </div>
       )}
 
-      {/* Search and Filters */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -207,13 +273,13 @@ export default function LearnPage() {
         <div className="flex gap-2 flex-wrap">
           <div className="relative">
             <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
               className="input pr-10 appearance-none"
             >
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
+              {courseTypes.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
                 </option>
               ))}
             </select>
@@ -221,27 +287,13 @@ export default function LearnPage() {
           </div>
           <div className="relative">
             <select
-              value={selectedLevel}
-              onChange={(e) => setSelectedLevel(e.target.value)}
+              value={selectedStudyMode}
+              onChange={(e) => setSelectedStudyMode(e.target.value)}
               className="input pr-10 appearance-none"
             >
-              {levels.map((level) => (
-                <option key={level.value} value={level.value}>
-                  {level.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          </div>
-          <div className="relative">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="input pr-10 appearance-none"
-            >
-              {sortOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              {studyModes.map((mode) => (
+                <option key={mode.value} value={mode.value}>
+                  {mode.label}
                 </option>
               ))}
             </select>
@@ -250,7 +302,6 @@ export default function LearnPage() {
         </div>
       </div>
 
-      {/* Courses Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isLoading ? (
           <>
@@ -261,97 +312,96 @@ export default function LearnPage() {
             <CardSkeleton />
             <CardSkeleton />
           </>
-        ) : data?.courses?.length ? (
-          data.courses.map((course: any) => (
-            <Link
-              key={course.id}
-              href={`/dashboard/learn/${course.id}`}
-              className="card group hover:shadow-lg transition-all overflow-hidden"
-            >
-              {/* Thumbnail */}
-              <div className="relative h-40 -mx-6 -mt-6 mb-4">
-                <img
-                  src={course.thumbnailUrl || '/images/course-placeholder.jpg'}
-                  alt={course.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                <div className="absolute bottom-3 left-3 flex items-center space-x-2">
-                  <span className="px-2 py-1 text-xs font-medium bg-gray-900/70 text-white rounded-full flex items-center">
-                    <Clock className="w-3 h-3 mr-1" />
-                    {course.duration || '2h 30m'}
-                  </span>
-                  <span className="px-2 py-1 text-xs font-medium bg-gray-900/70 text-white rounded-full flex items-center">
-                    <Play className="w-3 h-3 mr-1" />
-                    {course.lessonCount || 12} lessons
-                  </span>
-                </div>
-                {course.price === 0 && (
-                  <div className="absolute top-3 right-3">
-                    <span className="px-2 py-1 text-xs font-medium bg-green-500 text-white rounded-full">
-                      Free
-                    </span>
-                  </div>
-                )}
-              </div>
+        ) : courses.length ? (
+          courses.map((course) => {
+            const duration = formatDuration(course.durationMonths);
+            const modes = toStringList(course.studyMode);
+            const typeLabel = course.type ? formatLabel(course.type) : 'Course';
 
-              {/* Content */}
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <span className="px-2 py-0.5 text-xs font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded">
-                    {course.category || 'General'}
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-                    {course.level || 'All Levels'}
-                  </span>
-                </div>
-
-                <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 transition line-clamp-2">
-                  {course.title}
-                </h3>
-
-                <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
-                  {course.description}
-                </p>
-
-                {/* Instructor */}
-                <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                    {course.instructor?.avatarUrl ? (
-                      <img
-                        src={course.instructor.avatarUrl}
-                        alt={course.instructor.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-xs font-medium text-gray-500">
-                        {course.instructor?.name?.charAt(0) || 'A'}
-                      </div>
+            return (
+              <Link
+                key={course.id}
+                href={`/dashboard/learn/${course.id}`}
+                className="card group hover:shadow-lg transition-all overflow-hidden"
+              >
+                <div className="relative h-40 -mx-6 -mt-6 mb-4 overflow-hidden">
+                  <CourseArtwork course={course} />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                  <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-2">
+                    {duration && (
+                      <span className="px-2 py-1 text-xs font-medium bg-gray-900/70 text-white rounded-full flex items-center">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {duration}
+                      </span>
                     )}
+                    {modes.slice(0, 2).map((mode) => (
+                      <span
+                        key={mode}
+                        className="px-2 py-1 text-xs font-medium bg-gray-900/70 text-white rounded-full"
+                      >
+                        {formatLabel(mode)}
+                      </span>
+                    ))}
                   </div>
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    {course.instructor?.name || 'ATHENA Team'}
-                  </span>
+                  {course.cost === 0 && (
+                    <div className="absolute top-3 right-3">
+                      <span className="px-2 py-1 text-xs font-medium bg-green-500 text-white rounded-full">
+                        Free
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Footer */}
-                <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center space-x-3">
-                    <div className="flex items-center text-yellow-500">
-                      <Star className="w-4 h-4 fill-current mr-1" />
-                      <span className="text-sm font-medium">{course.rating?.toFixed(1) || '5.0'}</span>
-                    </div>
-                    <span className="text-sm text-gray-400">
-                      ({course.enrollmentCount || 0} students)
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <span className="px-2 py-0.5 text-xs font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded">
+                      {typeLabel}
                     </span>
                   </div>
-                  <span className="font-semibold text-gray-900 dark:text-white">
-                    {course.price === 0 ? 'Free' : formatCurrency(course.price)}
-                  </span>
+
+                  <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 transition line-clamp-2">
+                    {course.title}
+                  </h3>
+
+                  <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                    {course.description || 'No description provided.'}
+                  </p>
+
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                      {course.organization?.logo ? (
+                        <img
+                          src={course.organization.logo}
+                          alt={providerNameFor(course)}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-xs font-medium text-gray-500">
+                          {providerNameFor(course).charAt(0)}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {providerNameFor(course)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {typeof course.employmentRate === 'number'
+                        ? `${course.employmentRate}% employment`
+                        : typeof course.avgStartingSalary === 'number'
+                          ? `${formatCurrency(course.avgStartingSalary)} avg salary`
+                          : 'Outcomes not listed'}
+                    </div>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {costLabelFor(course)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))
+              </Link>
+            );
+          })
         ) : (
           <div className="col-span-full card text-center py-12">
             <BookOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
@@ -364,8 +414,8 @@ export default function LearnPage() {
             <button
               onClick={() => {
                 setSearchQuery('');
-                setSelectedCategory('All Categories');
-                setSelectedLevel('');
+                setSelectedType('');
+                setSelectedStudyMode('');
               }}
               className="btn-outline px-4 py-2"
             >
@@ -375,7 +425,6 @@ export default function LearnPage() {
         )}
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center space-x-2">
           {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => (

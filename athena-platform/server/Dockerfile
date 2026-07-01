@@ -31,6 +31,8 @@ COPY prisma ./prisma/
 RUN npm ci
 
 # Generate Prisma client
+ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/athena_dev
+ENV DIRECT_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/athena_dev
 RUN npx prisma generate
 
 # =====================
@@ -80,8 +82,7 @@ USER athena
 
 EXPOSE 5000
 
-# Railway provides its own healthcheck via railway.json (healthcheckPath: /health)
-# Do NOT add a Docker HEALTHCHECK — it conflicts with Railway's dynamic PORT.
+# Health checks are defined by the deployment platform. Keep this image portable.
 
 # Start via crash-safe wrapper (migrations run inside start.js)
 CMD ["node", "dist/start.js"]

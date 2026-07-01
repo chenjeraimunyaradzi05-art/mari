@@ -69,7 +69,11 @@ api.interceptors.response.use(
         if (!refreshPromise) {
           refreshPromise = axios
             .post(`${API_URL}/auth/refresh`, { refreshToken })
-            .then((response) => unwrapApiData(response.data))
+            .then((response) =>
+              unwrapApiData<{ accessToken: string; refreshToken?: string; expiresIn?: number }>(
+                response.data
+              )
+            )
             .finally(() => {
               refreshPromise = null;
             });

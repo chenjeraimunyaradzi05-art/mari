@@ -2,8 +2,14 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { ApiError } from '../middleware/errorHandler';
 
 const router = Router();
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+const allowPlaceholderAlgorithms = process.env.AI_ALGORITHMS_ALLOW_PLACEHOLDER === 'true';
 
 // Require authentication for all AI algorithm routes
 router.use(authenticate);
@@ -42,8 +48,14 @@ router.post('/career-compass/generate', async (req: Request, res: Response, next
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // In production, this would call the ML model
-    // For now, create a placeholder prediction
+    if (isProductionRuntime && !allowPlaceholderAlgorithms) {
+      throw new ApiError(
+        503,
+        'Career Compass generation is not configured for production. Connect the ML service or set AI_ALGORITHMS_ALLOW_PLACEHOLDER=true only for verification environments.'
+      );
+    }
+
+    // Development placeholder until the ML-backed generator is wired to this route.
     const prediction = await prisma.careerPrediction.create({
       data: {
         userId,

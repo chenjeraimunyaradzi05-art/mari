@@ -14,7 +14,7 @@
  * - Recovery options
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Shield,
@@ -78,14 +78,14 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 // TYPES
 // ============================================
 
-interface SecurityCheck {
+export interface SecurityCheck {
   id: string;
   label: string;
   status: 'passed' | 'warning' | 'failed';
   action?: string;
 }
 
-interface ActiveSession {
+export interface ActiveSession {
   id: string;
   device: string;
   deviceType: 'desktop' | 'laptop' | 'tablet' | 'mobile';
@@ -96,7 +96,7 @@ interface ActiveSession {
   isCurrent: boolean;
 }
 
-interface LoginActivity {
+export interface LoginActivity {
   id: string;
   type: 'success' | 'failed';
   device: string;
@@ -106,95 +106,63 @@ interface LoginActivity {
   reason?: string;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
+interface SafetyCenterAccessProps {
+  className?: string;
+  securityChecks?: SecurityCheck[];
+  activeSessions?: ActiveSession[];
+  loginActivity?: LoginActivity[];
+  securityScore?: number | null;
+  isTwoFactorEnabled?: boolean;
+  passwordLastChangedLabel?: string | null;
+  isLoading?: boolean;
+  error?: string | null;
+  onStartTwoFactorSetup?: () => void | Promise<void>;
+  onRevokeSession?: (sessionId: string) => void | Promise<void>;
+  onRevokeAllSessions?: () => void | Promise<void>;
+  onRequestPasswordChange?: () => void | Promise<void>;
+}
 
-const SECURITY_CHECKS: SecurityCheck[] = [
-  { id: 'password', label: 'Strong password', status: 'passed' },
-  { id: '2fa', label: 'Two-factor authentication', status: 'warning', action: 'Enable' },
-  { id: 'email', label: 'Email verified', status: 'passed' },
-  { id: 'phone', label: 'Phone number verified', status: 'failed', action: 'Verify' },
-  { id: 'recovery', label: 'Recovery email set', status: 'passed' },
-];
-
-const ACTIVE_SESSIONS: ActiveSession[] = [
-  {
-    id: '1',
-    device: 'Windows PC',
-    deviceType: 'desktop',
-    browser: 'Chrome 120',
-    location: 'Dubai, UAE',
-    ip: '192.168.1.xxx',
-    lastActive: new Date(),
-    isCurrent: true,
-  },
-  {
-    id: '2',
-    device: 'iPhone 15',
-    deviceType: 'mobile',
-    browser: 'Safari',
-    location: 'Dubai, UAE',
-    ip: '192.168.1.xxx',
-    lastActive: new Date(Date.now() - 3600000),
-    isCurrent: false,
-  },
-  {
-    id: '3',
-    device: 'MacBook Pro',
-    deviceType: 'laptop',
-    browser: 'Firefox 121',
-    location: 'Abu Dhabi, UAE',
-    ip: '10.0.0.xxx',
-    lastActive: new Date(Date.now() - 86400000),
-    isCurrent: false,
-  },
-];
-
-const LOGIN_ACTIVITY: LoginActivity[] = [
-  {
-    id: '1',
-    type: 'success',
-    device: 'Windows PC - Chrome',
-    location: 'Dubai, UAE',
-    ip: '192.168.1.xxx',
-    timestamp: new Date(),
-  },
-  {
-    id: '2',
-    type: 'success',
-    device: 'iPhone 15 - Safari',
-    location: 'Dubai, UAE',
-    ip: '192.168.1.xxx',
-    timestamp: new Date(Date.now() - 3600000),
-  },
-  {
-    id: '3',
-    type: 'failed',
-    device: 'Unknown device',
-    location: 'Moscow, Russia',
-    ip: '95.xxx.xxx.xxx',
-    timestamp: new Date(Date.now() - 7200000),
-    reason: 'Incorrect password',
-  },
-  {
-    id: '4',
-    type: 'success',
-    device: 'MacBook Pro - Firefox',
-    location: 'Abu Dhabi, UAE',
-    ip: '10.0.0.xxx',
-    timestamp: new Date(Date.now() - 86400000),
-  },
-];
+const EMPTY_SECURITY_CHECKS: SecurityCheck[] = [];
+const EMPTY_ACTIVE_SESSIONS: ActiveSession[] = [];
+const EMPTY_LOGIN_ACTIVITY: LoginActivity[] = [];
 
 // ============================================
 // COMPONENTS
 // ============================================
 
-function SecurityScoreCard() {
-  const score = 75;
-  const passedChecks = SECURITY_CHECKS.filter(c => c.status === 'passed').length;
-  const totalChecks = SECURITY_CHECKS.length;
+function SecurityScoreCard({
+  checks,
+  score,
+}: {
+  checks: SecurityCheck[];
+  score?: number | null;
+}) {
+  const passedChecks = checks.filter(c => c.status === 'passed').length;
+  const totalChecks = checks.length;
+  const derivedScore = totalChecks > 0 ? Math.round((passedChecks / totalChecks) * 100) : null;
+  const normalizedScore = score === null || score === undefined
+    ? derivedScore
+    : Math.max(0, Math.min(100, score));
+
+  if (normalizedScore === null) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
+              <Shield className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-lg">Security Score Unavailable</h3>
+              <p className="text-sm text-muted-foreground">
+                Live account security checks have not been connected yet.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -215,26 +183,32 @@ function SecurityScoreCard() {
                 r="48"
                 className={cn(
                   'fill-none',
-                  score >= 80 ? 'stroke-emerald-500' :
-                  score >= 60 ? 'stroke-yellow-500' : 'stroke-red-500'
+                  normalizedScore >= 80 ? 'stroke-emerald-500' :
+                  normalizedScore >= 60 ? 'stroke-yellow-500' : 'stroke-red-500'
                 )}
                 strokeWidth="10"
-                strokeDasharray={`${(score / 100) * 301} 301`}
+                strokeDasharray={`${(normalizedScore / 100) * 301} 301`}
                 strokeLinecap="round"
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-3xl font-bold">{score}</span>
+              <span className="text-3xl font-bold">{normalizedScore}</span>
               <span className="text-xs text-muted-foreground">/ 100</span>
             </div>
           </div>
           <div className="flex-1">
             <h3 className="font-semibold text-lg">Security Score</h3>
             <p className="text-sm text-muted-foreground mb-3">
-              {passedChecks} of {totalChecks} security checks passed
+              {totalChecks > 0
+                ? `${passedChecks} of ${totalChecks} security checks passed`
+                : 'No live security checks returned'}
             </p>
             <div className="space-y-2">
-              {SECURITY_CHECKS.map((check) => (
+              {checks.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                  Security checks will appear here when connected.
+                </div>
+              ) : checks.map((check) => (
                 <div key={check.id} className="flex items-center gap-2 text-sm">
                   {check.status === 'passed' ? (
                     <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -263,11 +237,13 @@ function SecurityScoreCard() {
   );
 }
 
-function TwoFactorSection() {
-  const [enabled, setEnabled] = useState(false);
-  const [setupDialog, setSetupDialog] = useState(false);
-  const [step, setStep] = useState(1);
-
+function TwoFactorSection({
+  enabled,
+  onStartSetup,
+}: {
+  enabled: boolean;
+  onStartSetup?: () => void | Promise<void>;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -293,8 +269,11 @@ function TwoFactorSection() {
 
             <div className="space-y-3">
               <div
-                className="flex items-center gap-4 p-4 border rounded-lg hover:bg-muted cursor-pointer"
-                onClick={() => setSetupDialog(true)}
+                className={cn(
+                  'flex items-center gap-4 p-4 border rounded-lg',
+                  onStartSetup ? 'hover:bg-muted cursor-pointer' : 'opacity-70'
+                )}
+                onClick={() => onStartSetup?.()}
               >
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                   <Smartphone className="h-5 w-5 text-primary" />
@@ -308,7 +287,7 @@ function TwoFactorSection() {
                 <Badge variant="outline">Recommended</Badge>
               </div>
 
-              <div className="flex items-center gap-4 p-4 border rounded-lg hover:bg-muted cursor-pointer">
+              <div className="flex items-center gap-4 p-4 border rounded-lg opacity-70">
                 <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
                   <Key className="h-5 w-5 text-muted-foreground" />
                 </div>
@@ -320,7 +299,7 @@ function TwoFactorSection() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 p-4 border rounded-lg hover:bg-muted cursor-pointer">
+              <div className="flex items-center gap-4 p-4 border rounded-lg opacity-70">
                 <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
                   <Mail className="h-5 w-5 text-muted-foreground" />
                 </div>
@@ -332,6 +311,13 @@ function TwoFactorSection() {
                 </div>
               </div>
             </div>
+
+            {!onStartSetup && (
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                Two-factor setup is not connected yet. Live setup should provide the QR secret
+                and backup codes from the server.
+              </div>
+            )}
           </>
         ) : (
           <div className="flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
@@ -349,98 +335,26 @@ function TwoFactorSection() {
             </Button>
           </div>
         )}
-
-        <Dialog open={setupDialog} onOpenChange={setSetupDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Set up Authenticator App</DialogTitle>
-              <DialogDescription>
-                {step === 1 && 'Scan the QR code with your authenticator app'}
-                {step === 2 && 'Enter the 6-digit code from your app'}
-                {step === 3 && 'Save your backup codes'}
-              </DialogDescription>
-            </DialogHeader>
-
-            {step === 1 && (
-              <div className="text-center py-4">
-                <div className="h-48 w-48 mx-auto bg-muted rounded-lg flex items-center justify-center">
-                  <QrCode className="h-24 w-24 text-muted-foreground" />
-                </div>
-                <p className="text-sm text-muted-foreground mt-4">
-                  Can&apos;t scan? Enter this code manually:
-                </p>
-                <code className="text-sm bg-muted px-2 py-1 rounded">
-                  ABCD-EFGH-IJKL-MNOP
-                </code>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="py-4">
-                <Label>Verification code</Label>
-                <Input
-                  placeholder="000000"
-                  className="text-center text-2xl tracking-widest mt-2"
-                  maxLength={6}
-                />
-              </div>
-            )}
-
-            {step === 3 && (
-              <div className="space-y-4">
-                <Alert>
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>Save these codes</AlertTitle>
-                  <AlertDescription>
-                    These backup codes can be used if you lose access to your authenticator app.
-                    Each code can only be used once.
-                  </AlertDescription>
-                </Alert>
-                <div className="grid grid-cols-2 gap-2 p-4 bg-muted rounded-lg font-mono text-sm">
-                  <div>XXXX-XXXX-1</div>
-                  <div>XXXX-XXXX-2</div>
-                  <div>XXXX-XXXX-3</div>
-                  <div>XXXX-XXXX-4</div>
-                  <div>XXXX-XXXX-5</div>
-                  <div>XXXX-XXXX-6</div>
-                </div>
-                <Button variant="outline" className="w-full">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Codes
-                </Button>
-              </div>
-            )}
-
-            <DialogFooter>
-              {step > 1 && (
-                <Button variant="outline" onClick={() => setStep(step - 1)}>
-                  Back
-                </Button>
-              )}
-              {step < 3 ? (
-                <Button onClick={() => setStep(step + 1)}>
-                  Continue
-                </Button>
-              ) : (
-                <Button onClick={() => {
-                  setEnabled(true);
-                  setSetupDialog(false);
-                  setStep(1);
-                }}>
-                  Done
-                </Button>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </CardContent>
     </Card>
   );
 }
 
-function ActiveSessionsSection() {
-  const [sessions, setSessions] = useState(ACTIVE_SESSIONS);
+function ActiveSessionsSection({
+  initialSessions,
+  onRevokeSession,
+  onRevokeAllSessions,
+}: {
+  initialSessions: ActiveSession[];
+  onRevokeSession?: (sessionId: string) => void | Promise<void>;
+  onRevokeAllSessions?: () => void | Promise<void>;
+}) {
+  const [sessions, setSessions] = useState(initialSessions);
   const [revokeDialog, setRevokeDialog] = useState<ActiveSession | null>(null);
+
+  useEffect(() => {
+    setSessions(initialSessions);
+  }, [initialSessions]);
 
   const getDeviceIcon = (type: string) => {
     switch (type) {
@@ -451,14 +365,22 @@ function ActiveSessionsSection() {
     }
   };
 
-  const handleRevoke = (sessionId: string) => {
+  const handleRevoke = async (sessionId: string) => {
+    if (!onRevokeSession) return;
+
+    await onRevokeSession(sessionId);
     setSessions(sessions.filter(s => s.id !== sessionId));
     setRevokeDialog(null);
   };
 
-  const handleRevokeAll = () => {
+  const handleRevokeAll = async () => {
+    if (!onRevokeAllSessions) return;
+
+    await onRevokeAllSessions();
     setSessions(sessions.filter(s => s.isCurrent));
   };
+
+  const hasOtherSessions = sessions.some(session => !session.isCurrent);
 
   return (
     <Card>
@@ -473,14 +395,24 @@ function ActiveSessionsSection() {
               Devices currently logged into your account
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={handleRevokeAll}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!onRevokeAllSessions || !hasOtherSessions}
+            title={onRevokeAllSessions ? undefined : 'Session revocation is not connected yet'}
+            onClick={handleRevokeAll}
+          >
             <LogOut className="h-4 w-4 mr-2" />
             Sign out all
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {sessions.map((session) => {
+        {sessions.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Live active sessions are not connected yet.
+          </div>
+        ) : sessions.map((session) => {
           const DeviceIcon = getDeviceIcon(session.deviceType);
           return (
             <div
@@ -519,7 +451,10 @@ function ActiveSessionsSection() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setRevokeDialog(session)}>
+                    <DropdownMenuItem
+                      disabled={!onRevokeSession}
+                      onClick={() => setRevokeDialog(session)}
+                    >
                       <LogOut className="h-4 w-4 mr-2" />
                       Sign out
                     </DropdownMenuItem>
@@ -553,7 +488,7 @@ function ActiveSessionsSection() {
   );
 }
 
-function LoginActivitySection() {
+function LoginActivitySection({ activities }: { activities: LoginActivity[] }) {
   return (
     <Card>
       <CardHeader>
@@ -568,7 +503,11 @@ function LoginActivitySection() {
       <CardContent>
         <ScrollArea className="h-[300px]">
           <div className="space-y-3">
-            {LOGIN_ACTIVITY.map((activity) => (
+            {activities.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                Live login activity is not connected yet.
+              </div>
+            ) : activities.map((activity) => (
               <div
                 key={activity.id}
                 className={cn(
@@ -625,11 +564,13 @@ function LoginActivitySection() {
   );
 }
 
-function PasswordSection() {
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [changeDialogOpen, setChangeDialogOpen] = useState(false);
-
+function PasswordSection({
+  passwordLastChangedLabel,
+  onRequestPasswordChange,
+}: {
+  passwordLastChangedLabel?: string | null;
+  onRequestPasswordChange?: () => void | Promise<void>;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -646,10 +587,15 @@ function PasswordSection() {
           <div>
             <p className="font-medium">Password</p>
             <p className="text-sm text-muted-foreground">
-              Last changed 30 days ago
+              {passwordLastChangedLabel ?? 'Password history is not connected yet'}
             </p>
           </div>
-          <Button variant="outline" onClick={() => setChangeDialogOpen(true)}>
+          <Button
+            variant="outline"
+            disabled={!onRequestPasswordChange}
+            title={onRequestPasswordChange ? undefined : 'Password change is not connected yet'}
+            onClick={() => onRequestPasswordChange?.()}
+          >
             Change password
           </Button>
         </div>
@@ -662,100 +608,6 @@ function PasswordSection() {
             lowercase, numbers, and symbols.
           </AlertDescription>
         </Alert>
-
-        <Dialog open={changeDialogOpen} onOpenChange={setChangeDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Change password</DialogTitle>
-              <DialogDescription>
-                Enter your current password and choose a new one
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Current password</Label>
-                <div className="relative">
-                  <Input
-                    type={showCurrentPassword ? 'text' : 'password'}
-                    placeholder="Enter current password"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0"
-                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                  >
-                    {showCurrentPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>New password</Label>
-                <div className="relative">
-                  <Input
-                    type={showNewPassword ? 'text' : 'password'}
-                    placeholder="Enter new password"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0"
-                    onClick={() => setShowNewPassword(!showNewPassword)}
-                  >
-                    {showNewPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Confirm new password</Label>
-                <Input
-                  type="password"
-                  placeholder="Confirm new password"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Password requirements:</p>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                    At least 12 characters
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <XCircle className="h-3 w-3 text-muted-foreground" />
-                    One uppercase letter
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <XCircle className="h-3 w-3 text-muted-foreground" />
-                    One number
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <XCircle className="h-3 w-3 text-muted-foreground" />
-                    One special character
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setChangeDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button>Update password</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </CardContent>
     </Card>
   );
@@ -765,7 +617,42 @@ function PasswordSection() {
 // MAIN COMPONENT
 // ============================================
 
-export function SafetyCenterAccess({ className }: { className?: string }) {
+export function SafetyCenterAccess({
+  className,
+  securityChecks = EMPTY_SECURITY_CHECKS,
+  activeSessions = EMPTY_ACTIVE_SESSIONS,
+  loginActivity = EMPTY_LOGIN_ACTIVITY,
+  securityScore = null,
+  isTwoFactorEnabled = false,
+  passwordLastChangedLabel = null,
+  isLoading = false,
+  error = null,
+  onStartTwoFactorSetup,
+  onRevokeSession,
+  onRevokeAllSessions,
+  onRequestPasswordChange,
+}: SafetyCenterAccessProps) {
+  if (isLoading) {
+    return (
+      <div className={cn('container mx-auto py-8', className)}>
+        <div className="rounded-lg border bg-white p-6 text-center text-sm text-muted-foreground shadow-sm dark:bg-zinc-900">
+          Loading safety center...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={cn('container mx-auto py-8', className)}>
+        <div className="rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+          <h2 className="font-semibold">Safety center unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn('container mx-auto py-8 space-y-8', className)}>
       {/* Header */}
@@ -780,7 +667,7 @@ export function SafetyCenterAccess({ className }: { className?: string }) {
       </div>
 
       {/* Security Score */}
-      <SecurityScoreCard />
+      <SecurityScoreCard checks={securityChecks} score={securityScore} />
 
       {/* Main Content */}
       <Tabs defaultValue="2fa" className="space-y-6">
@@ -792,19 +679,26 @@ export function SafetyCenterAccess({ className }: { className?: string }) {
         </TabsList>
 
         <TabsContent value="2fa">
-          <TwoFactorSection />
+          <TwoFactorSection enabled={isTwoFactorEnabled} onStartSetup={onStartTwoFactorSetup} />
         </TabsContent>
 
         <TabsContent value="sessions">
-          <ActiveSessionsSection />
+          <ActiveSessionsSection
+            initialSessions={activeSessions}
+            onRevokeSession={onRevokeSession}
+            onRevokeAllSessions={onRevokeAllSessions}
+          />
         </TabsContent>
 
         <TabsContent value="activity">
-          <LoginActivitySection />
+          <LoginActivitySection activities={loginActivity} />
         </TabsContent>
 
         <TabsContent value="password">
-          <PasswordSection />
+          <PasswordSection
+            passwordLastChangedLabel={passwordLastChangedLabel}
+            onRequestPasswordChange={onRequestPasswordChange}
+          />
         </TabsContent>
       </Tabs>
 

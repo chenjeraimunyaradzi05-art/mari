@@ -14,7 +14,7 @@
  * - Create event
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Calendar,
@@ -29,25 +29,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
-  Filter,
   Check,
   X,
   Share2,
   Bookmark,
   BookmarkCheck,
-  ExternalLink,
-  MoreHorizontal,
-  Bell,
   Globe,
   Lock,
   Building2,
-  User,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -65,21 +59,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { useEvents, useRegisterEvent, useSaveEvent, useUnregisterEvent, useUnsaveEvent } from '@/lib/hooks';
 
 // ============================================
 // TYPES
 // ============================================
 
 type EventType = 'webinar' | 'meetup' | 'workshop' | 'conference' | 'networking';
-type RSVPStatus = 'going' | 'interested' | 'not-going' | null;
+type RSVPStatus = 'going' | null;
+type EventFormat = 'virtual' | 'in-person' | 'hybrid';
 
 interface Event {
   id: string;
@@ -103,94 +91,8 @@ interface Event {
   tags: string[];
   coverImage?: string;
   rsvpStatus?: RSVPStatus;
+  isSaved: boolean;
 }
-
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_EVENTS: Event[] = [
-  {
-    id: '1',
-    title: 'React Server Components Deep Dive',
-    description: 'Join us for an in-depth exploration of React Server Components. We\'ll cover architecture, best practices, and real-world implementation patterns.',
-    type: 'webinar',
-    date: new Date(2026, 0, 25, 14, 0),
-    endDate: new Date(2026, 0, 25, 16, 0),
-    location: 'Online',
-    isOnline: true,
-    meetingUrl: 'https://meet.athena.app/rsc-deep-dive',
-    organizer: { id: '1', name: 'React Developers UAE', type: 'organization' },
-    attendees: 156,
-    maxAttendees: 300,
-    isPublic: true,
-    tags: ['React', 'JavaScript', 'Web Development'],
-    rsvpStatus: 'going',
-  },
-  {
-    id: '2',
-    title: 'Tech Networking Night - Dubai',
-    description: 'Monthly networking event for tech professionals in Dubai. Great opportunity to meet fellow developers, designers, and entrepreneurs.',
-    type: 'networking',
-    date: new Date(2026, 0, 28, 18, 0),
-    endDate: new Date(2026, 0, 28, 21, 0),
-    location: 'Dubai Internet City, Building 12',
-    isOnline: false,
-    organizer: { id: '2', name: 'TechVentures Inc', type: 'organization' },
-    attendees: 45,
-    maxAttendees: 100,
-    isPublic: true,
-    tags: ['Networking', 'Technology', 'Startups'],
-    rsvpStatus: 'interested',
-  },
-  {
-    id: '3',
-    title: 'Product Management Workshop',
-    description: 'Hands-on workshop covering product discovery, user research, and roadmap planning. Perfect for aspiring and junior PMs.',
-    type: 'workshop',
-    date: new Date(2026, 1, 5, 10, 0),
-    endDate: new Date(2026, 1, 5, 17, 0),
-    location: 'Athena Hub, Abu Dhabi',
-    isOnline: false,
-    organizer: { id: '3', name: 'Sarah Johnson', type: 'user' },
-    attendees: 28,
-    maxAttendees: 30,
-    isPublic: true,
-    tags: ['Product Management', 'Workshop', 'Career'],
-    rsvpStatus: null,
-  },
-  {
-    id: '4',
-    title: 'AI/ML Study Group - Weekly Session',
-    description: 'Weekly study group for machine learning enthusiasts. This week: Transformer architectures.',
-    type: 'meetup',
-    date: new Date(2026, 0, 22, 19, 0),
-    endDate: new Date(2026, 0, 22, 21, 0),
-    location: 'Online',
-    isOnline: true,
-    organizer: { id: '4', name: 'AI Community UAE', type: 'organization' },
-    attendees: 34,
-    isPublic: true,
-    tags: ['AI', 'Machine Learning', 'Study Group'],
-    rsvpStatus: null,
-  },
-  {
-    id: '5',
-    title: 'MENA Tech Conference 2026',
-    description: 'The largest tech conference in the MENA region. Two days of keynotes, workshops, and networking opportunities.',
-    type: 'conference',
-    date: new Date(2026, 2, 15, 9, 0),
-    endDate: new Date(2026, 2, 16, 18, 0),
-    location: 'Dubai World Trade Centre',
-    isOnline: false,
-    organizer: { id: '5', name: 'MENA Tech Association', type: 'organization' },
-    attendees: 2450,
-    maxAttendees: 5000,
-    isPublic: true,
-    tags: ['Conference', 'Technology', 'MENA', 'Startups'],
-    rsvpStatus: null,
-  },
-];
 
 const EVENT_TYPE_CONFIG: Record<EventType, { label: string; color: string }> = {
   webinar: { label: 'Webinar', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
@@ -224,6 +126,71 @@ const formatDateRange = (start: Date, end: Date) => {
   return `${start.toLocaleDateString('en', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 };
 
+function combineDateAndTime(dateValue: string | Date, timeValue?: string | null): Date {
+  const date = new Date(dateValue);
+  if (!timeValue) {
+    return date;
+  }
+
+  const [hours, minutes] = timeValue.split(':').map((part) => Number(part));
+  if (Number.isFinite(hours)) {
+    date.setHours(hours, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+  }
+  return date;
+}
+
+function addHours(date: Date, hours: number): Date {
+  const next = new Date(date);
+  next.setHours(next.getHours() + hours);
+  return next;
+}
+
+function normalizeEventType(type?: string): EventType {
+  const normalized = type?.toLowerCase();
+  if (
+    normalized === 'meetup' ||
+    normalized === 'workshop' ||
+    normalized === 'conference' ||
+    normalized === 'networking'
+  ) {
+    return normalized;
+  }
+  return 'webinar';
+}
+
+function normalizeEvent(raw: any): Event {
+  const type = normalizeEventType(raw.type);
+  const format = String(raw.format || 'virtual').toLowerCase() as EventFormat;
+  const date = combineDateAndTime(raw.date ?? new Date(), raw.startTime);
+  const endDate = raw.endTime ? combineDateAndTime(raw.date ?? date, raw.endTime) : addHours(date, 1);
+  const host = raw.host ?? {};
+
+  return {
+    id: String(raw.id),
+    title: raw.title || 'Untitled event',
+    description: raw.description || '',
+    type,
+    date,
+    endDate,
+    location: raw.location || (format === 'virtual' ? 'Online' : 'Location to be announced'),
+    isOnline: format !== 'in-person',
+    meetingUrl: raw.link,
+    organizer: {
+      id: String(raw.hostId || raw.organizationId || raw.id),
+      name: host.name || raw.hostName || 'ATHENA community',
+      avatar: host.avatar,
+      type: raw.organizationId ? 'organization' : 'user',
+    },
+    attendees: Number(raw.attendees ?? 0),
+    maxAttendees: typeof raw.maxAttendees === 'number' ? raw.maxAttendees : undefined,
+    isPublic: !raw.isPrivate,
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    coverImage: raw.image,
+    rsvpStatus: raw.isRegistered ? 'going' : null,
+    isSaved: Boolean(raw.isSaved),
+  };
+}
+
 // ============================================
 // COMPONENTS
 // ============================================
@@ -231,14 +198,15 @@ const formatDateRange = (start: Date, end: Date) => {
 function EventCard({
   event,
   onClick,
+  onSaveToggle,
   compact = false,
 }: {
   event: Event;
   onClick: () => void;
+  onSaveToggle: (event: Event) => void;
   compact?: boolean;
 }) {
   const typeConfig = EVENT_TYPE_CONFIG[event.type];
-  const [saved, setSaved] = useState(false);
 
   if (compact) {
     return (
@@ -268,6 +236,10 @@ function EventCard({
     <Card className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={onClick}>
       {/* Cover Image */}
       <div className="h-32 bg-gradient-to-r from-blue-500 to-purple-500 relative">
+        {event.coverImage && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={event.coverImage} alt="" className="h-full w-full object-cover" />
+        )}
         <Badge className={cn('absolute top-3 left-3', typeConfig.color)}>
           {typeConfig.label}
         </Badge>
@@ -282,10 +254,10 @@ function EventCard({
             className="shrink-0"
             onClick={(e) => {
               e.stopPropagation();
-              setSaved(!saved);
+              onSaveToggle(event);
             }}
           >
-            {saved ? (
+            {event.isSaved ? (
               <BookmarkCheck className="h-4 w-4 text-primary" />
             ) : (
               <Bookmark className="h-4 w-4" />
@@ -458,11 +430,13 @@ function EventDetailDialog({
   open,
   onClose,
   onRSVPChange,
+  onSaveToggle,
 }: {
   event: Event | null;
   open: boolean;
   onClose: () => void;
   onRSVPChange: (eventId: string, status: RSVPStatus) => void;
+  onSaveToggle: (event: Event) => void;
 }) {
   if (!event) return null;
 
@@ -570,8 +544,12 @@ function EventDetailDialog({
             <Button variant="outline" size="icon">
               <Share2 className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon">
-              <Bookmark className="h-4 w-4" />
+            <Button variant="outline" size="icon" onClick={() => onSaveToggle(event)}>
+              {event.isSaved ? (
+                <BookmarkCheck className="h-4 w-4 text-primary" />
+              ) : (
+                <Bookmark className="h-4 w-4" />
+              )}
             </Button>
           </div>
           <div className="flex gap-2">
@@ -585,12 +563,6 @@ function EventDetailDialog({
               </Button>
             ) : (
               <>
-                <Button
-                  variant="outline"
-                  onClick={() => onRSVPChange(event.id, 'interested')}
-                >
-                  Interested
-                </Button>
                 <Button onClick={() => onRSVPChange(event.id, 'going')}>
                   <Check className="h-4 w-4 mr-2" />
                   I'm Going
@@ -607,11 +579,13 @@ function EventDetailDialog({
 function UpcomingEventsSidebar({
   events,
   onEventClick,
+  onSaveToggle,
 }: {
   events: Event[];
   onEventClick: (event: Event) => void;
+  onSaveToggle: (event: Event) => void;
 }) {
-  const myEvents = events.filter(e => e.rsvpStatus === 'going' || e.rsvpStatus === 'interested');
+  const myEvents = events.filter(e => e.rsvpStatus === 'going');
 
   return (
     <Card>
@@ -625,6 +599,7 @@ function UpcomingEventsSidebar({
               key={event.id}
               event={event}
               onClick={() => onEventClick(event)}
+              onSaveToggle={onSaveToggle}
               compact
             />
           ))
@@ -643,12 +618,36 @@ function UpcomingEventsSidebar({
 // ============================================
 
 export function EventsCalendar({ className }: { className?: string }) {
-  const [events, setEvents] = useState<Event[]>(MOCK_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'calendar' | 'list'>('grid');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const {
+    data: rawEvents = [],
+    isLoading,
+    error,
+  } = useEvents({
+    type: typeFilter,
+    q: searchQuery || undefined,
+  });
+  const registerEvent = useRegisterEvent();
+  const unregisterEvent = useUnregisterEvent();
+  const saveEvent = useSaveEvent();
+  const unsaveEvent = useUnsaveEvent();
+
+  const events = useMemo(
+    () => (Array.isArray(rawEvents) ? rawEvents.map(normalizeEvent) : []),
+    [rawEvents]
+  );
+
+  useEffect(() => {
+    if (!selectedEvent) return;
+    const freshEvent = events.find((event) => event.id === selectedEvent.id);
+    if (freshEvent) {
+      setSelectedEvent(freshEvent);
+    }
+  }, [events, selectedEvent?.id]);
 
   const filteredEvents = events.filter(event => {
     const matchesType = typeFilter === 'all' || event.type === typeFilter;
@@ -663,11 +662,18 @@ export function EventsCalendar({ className }: { className?: string }) {
   };
 
   const handleRSVPChange = (eventId: string, status: RSVPStatus) => {
-    setEvents(events.map(e =>
-      e.id === eventId ? { ...e, rsvpStatus: status } : e
-    ));
-    if (selectedEvent?.id === eventId) {
-      setSelectedEvent({ ...selectedEvent, rsvpStatus: status });
+    if (status === 'going') {
+      registerEvent.mutate(eventId);
+    } else {
+      unregisterEvent.mutate(eventId);
+    }
+  };
+
+  const handleSaveToggle = (event: Event) => {
+    if (event.isSaved) {
+      unsaveEvent.mutate(event.id);
+    } else {
+      saveEvent.mutate(event.id);
     }
   };
 
@@ -679,7 +685,7 @@ export function EventsCalendar({ className }: { className?: string }) {
           <h1 className="text-3xl font-bold">Events</h1>
           <p className="text-muted-foreground">Discover and attend events in your community</p>
         </div>
-        <Button>
+        <Button disabled title="Event creation is not connected yet">
           <Plus className="h-4 w-4 mr-2" />
           Create Event
         </Button>
@@ -737,26 +743,41 @@ export function EventsCalendar({ className }: { className?: string }) {
       {/* Main Content */}
       <div className="grid lg:grid-cols-4 gap-6">
         <div className="lg:col-span-3">
-          {viewMode === 'grid' && (
+          {error && (
+            <Card className="mb-6 border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30">
+              <CardContent className="p-4 text-sm text-red-700 dark:text-red-300">
+                Events could not be loaded. Please try again shortly.
+              </CardContent>
+            </Card>
+          )}
+
+          {isLoading ? (
+            <Card>
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                Loading events...
+              </CardContent>
+            </Card>
+          ) : viewMode === 'grid' && filteredEvents.length > 0 && (
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredEvents.map(event => (
                 <EventCard
                   key={event.id}
                   event={event}
                   onClick={() => handleEventClick(event)}
+                  onSaveToggle={handleSaveToggle}
                 />
               ))}
             </div>
           )}
 
-          {viewMode === 'calendar' && (
+          {!isLoading && viewMode === 'calendar' && (
             <CalendarView
               events={filteredEvents}
               onEventClick={handleEventClick}
             />
           )}
 
-          {viewMode === 'list' && (
+          {!isLoading && viewMode === 'list' && filteredEvents.length > 0 && (
             <Card>
               <CardContent className="divide-y p-0">
                 {filteredEvents.map(event => (
@@ -807,7 +828,7 @@ export function EventsCalendar({ className }: { className?: string }) {
             </Card>
           )}
 
-          {filteredEvents.length === 0 && (
+          {!isLoading && filteredEvents.length === 0 && (
             <Card>
               <CardContent className="py-12 text-center">
                 <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -825,6 +846,7 @@ export function EventsCalendar({ className }: { className?: string }) {
           <UpcomingEventsSidebar
             events={events}
             onEventClick={handleEventClick}
+            onSaveToggle={handleSaveToggle}
           />
         </div>
       </div>
@@ -835,6 +857,7 @@ export function EventsCalendar({ className }: { className?: string }) {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onRSVPChange={handleRSVPChange}
+        onSaveToggle={handleSaveToggle}
       />
     </div>
   );

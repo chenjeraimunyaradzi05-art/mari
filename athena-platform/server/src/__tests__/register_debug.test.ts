@@ -22,7 +22,7 @@ jest.mock('../utils/password', () => ({
 }));
 
 jest.mock('../utils/prisma', () => {
-  const prisma = {
+  const prisma: any = {
     user: {
       findUnique: jest.fn(async ({ where }: any) => {
         if (where?.email) return null;
@@ -46,7 +46,7 @@ jest.mock('../utils/prisma', () => {
         maxUses: 1,
         isActive: true,
       })),
-      update: jest.fn(async () => ({})),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     verificationToken: {
       create: jest.fn(async () => ({})),
@@ -72,7 +72,13 @@ jest.mock('../utils/prisma', () => {
     },
     $queryRaw: jest.fn(async () => 1),
     $disconnect: jest.fn(async () => undefined),
-    $transaction: jest.fn(async (operations: unknown[]) => operations),
+    $transaction: jest.fn(async (operationsOrCallback: unknown): Promise<unknown> => {
+      if (typeof operationsOrCallback === 'function') {
+        return (operationsOrCallback as (tx: typeof prisma) => unknown)(prisma);
+      }
+
+      return operationsOrCallback;
+    }),
   };
 
   return { prisma };
@@ -81,13 +87,22 @@ jest.mock('../utils/prisma', () => {
 import { app } from '../index';
 import { prisma } from '../utils/prisma';
 
+function getSetCookieHeader(res: request.Response): string {
+  const header = res.headers['set-cookie'];
+  if (Array.isArray(header)) {
+    return header.join(';');
+  }
+
+  return header || '';
+}
+
 describe('registration flow (mocked prisma)', () => {
   it('registers a new user with a normalized email and invite code without a live database', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .send({
         email: 'DEBUG.USER@EXAMPLE.COM',
-        password: 'Password123',
+        password: 'Password123!',
         firstName: 'Debug',
         lastName: 'User',
         persona: 'mid_career',
@@ -99,10 +114,9 @@ describe('registration flow (mocked prisma)', () => {
     expect(res.body).toHaveProperty('success', true);
     expect(res.body?.data?.user?.email).toBe('debug.user@example.com');
     expect(res.body?.data?.user?.persona).toBe('MID_CAREER');
-    expect(typeof res.body?.data?.accessToken).toBe('string');
-    expect(typeof res.body?.data?.refreshToken).toBe('string');
-    expect(typeof res.body?.data?.expiresIn).toBe('number');
-    expect(res.body.data.expiresIn).toBeGreaterThan(0);
+    expect(res.body?.data?.verificationRequired).toBe(true);
+    expect(res.body?.data?.accessToken).toBeUndefined();
+    expect(getSetCookieHeader(res)).not.toContain('refreshToken=');
 
     expect(prisma.user.findUnique).toHaveBeenNthCalledWith(
       1,
@@ -113,13 +127,20 @@ describe('registration flow (mocked prisma)', () => {
         where: expect.objectContaining({ code: 'ATHENA-2026', isActive: true }),
       })
     );
-    expect(prisma.inviteCode.update).toHaveBeenCalledWith(
+    expect(prisma.inviteCode.updateMany).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
-        where: { id: 'invite_debug_1' },
+        where: expect.objectContaining({ id: 'invite_debug_1', isActive: true }),
         data: expect.objectContaining({
           usesCount: { increment: 1 },
-          isActive: false,
         }),
+      })
+    );
+    expect(prisma.inviteCode.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'invite_debug_1', usesCount: { gte: 1 } }),
+        data: { isActive: false },
       })
     );
     expect(prisma.verificationToken.create).toHaveBeenCalledWith(
@@ -129,13 +150,6 @@ describe('registration flow (mocked prisma)', () => {
         }),
       })
     );
-    expect(prisma.session.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          token: expect.stringMatching(/^[a-f0-9]{64}$/),
-          refreshToken: expect.stringMatching(/^[a-f0-9]{64}$/),
-        }),
-      })
-    );
+    expect(prisma.session.create).not.toHaveBeenCalled();
   });
 });

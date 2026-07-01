@@ -27,13 +27,10 @@ import {
   MapPin,
   Briefcase,
   GraduationCap,
-  Clock,
-  CheckCircle2,
   XCircle,
   MessageSquare,
   FileText,
   ExternalLink,
-  ChevronDown,
   Users,
   Eye,
   ThumbsUp,
@@ -41,7 +38,7 @@ import {
   Archive,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
@@ -60,26 +57,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Checkbox } from '@/components/ui/checkbox';
 
 // ============================================
 // TYPES
@@ -126,117 +113,24 @@ interface Job {
   totalApplicants: number;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_JOB: Job = {
-  id: '1',
-  title: 'Senior Product Manager',
-  department: 'Product',
-  location: 'San Francisco, CA (Hybrid)',
-  type: 'full-time',
-  postedAt: new Date(2026, 0, 5),
-  totalApplicants: 47,
-};
-
-const MOCK_CANDIDATES: Candidate[] = [
-  {
-    id: '1',
-    name: 'Sarah Chen',
-    avatar: '/avatars/sarah.jpg',
-    email: 'sarah.chen@email.com',
-    phone: '+1 (555) 123-4567',
-    location: 'San Francisco, CA',
-    currentRole: 'Product Manager',
-    currentCompany: 'TechCorp',
-    experience: 5,
-    education: 'MBA, Stanford University',
-    skills: ['Product Strategy', 'Agile', 'User Research', 'SQL', 'Figma'],
-    matchScore: 94,
-    appliedAt: new Date(2026, 0, 15),
-    lastActivity: new Date(2026, 0, 18),
-    rating: 5,
-    source: 'linkedin',
-  },
-  {
-    id: '2',
-    name: 'Alex Thompson',
-    avatar: '/avatars/alex.jpg',
-    email: 'alex.t@email.com',
-    location: 'Austin, TX',
-    currentRole: 'Senior Product Owner',
-    currentCompany: 'StartupXYZ',
-    experience: 7,
-    education: 'BS Computer Science, MIT',
-    skills: ['Product Management', 'Data Analysis', 'A/B Testing', 'Roadmapping'],
-    matchScore: 88,
-    appliedAt: new Date(2026, 0, 14),
-    lastActivity: new Date(2026, 0, 17),
-    rating: 4,
-    source: 'direct',
-  },
-  {
-    id: '3',
-    name: 'Maria Rodriguez',
-    email: 'maria.r@email.com',
-    location: 'New York, NY',
-    currentRole: 'Product Lead',
-    currentCompany: 'BigCo',
-    experience: 8,
-    skills: ['Product Vision', 'Team Leadership', 'Market Analysis'],
-    matchScore: 85,
-    appliedAt: new Date(2026, 0, 12),
-    lastActivity: new Date(2026, 0, 16),
-    source: 'referral',
-  },
-  {
-    id: '4',
-    name: 'James Wilson',
-    email: 'jwilson@email.com',
-    location: 'Seattle, WA',
-    currentRole: 'Product Manager',
-    experience: 4,
-    skills: ['Scrum', 'JIRA', 'Product Discovery'],
-    matchScore: 76,
-    appliedAt: new Date(2026, 0, 10),
-    lastActivity: new Date(2026, 0, 15),
-    source: 'indeed',
-  },
-  {
-    id: '5',
-    name: 'Emily Park',
-    avatar: '/avatars/emily.jpg',
-    email: 'emily.park@email.com',
-    location: 'Los Angeles, CA',
-    currentRole: 'Associate PM',
-    experience: 3,
-    skills: ['User Stories', 'Prototyping', 'Customer Research'],
-    matchScore: 72,
-    appliedAt: new Date(2026, 0, 8),
-    lastActivity: new Date(2026, 0, 14),
-    source: 'athena',
-  },
-];
-
-const INITIAL_STAGES: Stage[] = [
+const EMPTY_STAGES: Stage[] = [
   {
     id: 'applied',
     name: 'Applied',
     color: 'zinc',
-    candidates: MOCK_CANDIDATES.slice(0, 2),
+    candidates: [],
   },
   {
     id: 'screening',
     name: 'Screening',
     color: 'blue',
-    candidates: [MOCK_CANDIDATES[2]],
+    candidates: [],
   },
   {
     id: 'interview',
     name: 'Interview',
     color: 'yellow',
-    candidates: [MOCK_CANDIDATES[3]],
+    candidates: [],
   },
   {
     id: 'offer',
@@ -254,7 +148,7 @@ const INITIAL_STAGES: Stage[] = [
     id: 'rejected',
     name: 'Rejected',
     color: 'red',
-    candidates: [MOCK_CANDIDATES[4]],
+    candidates: [],
   },
 ];
 
@@ -442,7 +336,13 @@ function KanbanColumn({
               {stage.candidates.length}
             </Badge>
           </div>
-          <Button variant="ghost" size="icon" className="h-7 w-7">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            disabled
+            title="Adding candidates is not connected yet"
+          >
             <Plus className="h-4 w-4" />
           </Button>
         </div>
@@ -460,7 +360,7 @@ function KanbanColumn({
           ))}
           {stage.candidates.length === 0 && (
             <div className="text-center py-8 text-muted-foreground text-sm">
-              Drop candidates here
+              No candidates in this stage
             </div>
           )}
         </div>
@@ -523,11 +423,11 @@ function CandidateDetailSheet({
 
           {/* Quick Actions */}
           <div className="flex gap-2">
-            <Button className="flex-1">
+            <Button className="flex-1" disabled title="Interview scheduling is not connected yet">
               <Calendar className="h-4 w-4 mr-2" />
               Schedule Interview
             </Button>
-            <Button variant="outline" className="flex-1">
+            <Button variant="outline" className="flex-1" disabled title="Candidate email is not connected yet">
               <Mail className="h-4 w-4 mr-2" />
               Send Email
             </Button>
@@ -620,8 +520,10 @@ function CandidateDetailSheet({
             <TabsContent value="resume" className="mt-4">
               <div className="border-2 border-dashed rounded-lg p-8 text-center">
                 <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground mb-4">Resume preview</p>
-                <Button variant="outline">
+                <p className="text-muted-foreground mb-4">
+                  {candidate.resumeUrl ? 'Resume preview' : 'No resume file connected'}
+                </p>
+                <Button variant="outline" disabled={!candidate.resumeUrl}>
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Open Full Resume
                 </Button>
@@ -630,17 +532,19 @@ function CandidateDetailSheet({
 
             <TabsContent value="notes" className="mt-4">
               <div className="space-y-4">
-                <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">Interview Note</span>
-                    <span className="text-xs text-muted-foreground">Jan 16, 2026</span>
+                {candidate.notes && candidate.notes.length > 0 ? (
+                  candidate.notes.map((note, index) => (
+                    <div key={`${candidate.id}-note-${index}`} className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
+                      <span className="text-sm font-medium">Candidate Note</span>
+                      <p className="text-sm text-muted-foreground mt-2">{note}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg text-sm text-muted-foreground">
+                    No notes connected for this candidate.
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Strong communication skills. Has relevant experience in B2B SaaS.
-                    Schedule technical interview next.
-                  </p>
-                </div>
-                <Button variant="outline" className="w-full">
+                )}
+                <Button variant="outline" className="w-full" disabled title="Candidate notes are not connected yet">
                   <Plus className="h-4 w-4 mr-2" />
                   Add Note
                 </Button>
@@ -669,11 +573,20 @@ function CandidateDetailSheet({
 
           {/* Decision Actions */}
           <div className="flex gap-2 pt-4 border-t">
-            <Button variant="outline" className="flex-1 text-red-600 hover:text-red-700">
+            <Button
+              variant="outline"
+              className="flex-1 text-red-600 hover:text-red-700"
+              disabled
+              title="Application decisions are not connected yet"
+            >
               <ThumbsDown className="h-4 w-4 mr-2" />
               Reject
             </Button>
-            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700">
+            <Button
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+              disabled
+              title="Application decisions are not connected yet"
+            >
               <ThumbsUp className="h-4 w-4 mr-2" />
               Move Forward
             </Button>
@@ -684,7 +597,15 @@ function CandidateDetailSheet({
   );
 }
 
-function JobSelector({ job, jobs }: { job: Job; jobs: Job[] }) {
+function JobSelector({ job, jobs }: { job: Job | null; jobs: Job[] }) {
+  if (!job) {
+    return (
+      <Button variant="outline" className="w-[300px] justify-start" disabled>
+        No live jobs connected
+      </Button>
+    );
+  }
+
   return (
     <Select defaultValue={job.id}>
       <SelectTrigger className="w-[300px]">
@@ -711,7 +632,8 @@ function JobSelector({ job, jobs }: { job: Job; jobs: Job[] }) {
 // ============================================
 
 export function JobsManagerKanban({ className }: { className?: string }) {
-  const [stages, setStages] = useState<Stage[]>(INITIAL_STAGES);
+  const jobs: Job[] = [];
+  const [stages, setStages] = useState<Stage[]>(EMPTY_STAGES);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -760,6 +682,8 @@ export function JobsManagerKanban({ className }: { className?: string }) {
   };
 
   const totalCandidates = stages.reduce((sum, s) => sum + s.candidates.length, 0);
+  const hasCandidates = totalCandidates > 0;
+  const selectedJob = jobs[0] ?? null;
 
   return (
     <div className={cn('h-screen flex flex-col', className)}>
@@ -767,18 +691,23 @@ export function JobsManagerKanban({ className }: { className?: string }) {
       <div className="border-b p-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
-            <JobSelector job={MOCK_JOB} jobs={[MOCK_JOB]} />
+            <JobSelector job={selectedJob} jobs={jobs} />
             <Badge variant="outline" className="text-muted-foreground">
               <Users className="h-3 w-3 mr-1" />
               {totalCandidates} candidates
             </Badge>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              title="Bulk application actions are not connected yet"
+            >
               <Archive className="h-4 w-4 mr-2" />
               Bulk Actions
             </Button>
-            <Button size="sm">
+            <Button size="sm" disabled title="Adding candidates is not connected yet">
               <Plus className="h-4 w-4 mr-2" />
               Add Candidate
             </Button>
@@ -793,9 +722,10 @@ export function JobsManagerKanban({ className }: { className?: string }) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
+              disabled={!hasCandidates}
             />
           </div>
-          <Select defaultValue="all">
+          <Select defaultValue="all" disabled={!hasCandidates}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Source" />
             </SelectTrigger>
@@ -807,7 +737,7 @@ export function JobsManagerKanban({ className }: { className?: string }) {
               <SelectItem value="athena">Athena</SelectItem>
             </SelectContent>
           </Select>
-          <Select defaultValue="all">
+          <Select defaultValue="all" disabled={!hasCandidates}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Match Score" />
             </SelectTrigger>
@@ -818,7 +748,7 @@ export function JobsManagerKanban({ className }: { className?: string }) {
               <SelectItem value="50+">50%+ Match</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="icon" disabled={!hasCandidates}>
             <Filter className="h-4 w-4" />
           </Button>
         </div>

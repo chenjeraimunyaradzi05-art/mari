@@ -14,8 +14,8 @@ jobs:
         with:
           node-version: 20
       - name: Audit server
-        run: cd server && npm ci && npm audit --audit-level=high
+        run: cd athena-platform/server && npm ci && npm audit --audit-level=high
       - name: Audit client
-        run: cd client && npm ci && npm audit --audit-level=high
+        run: cd athena-platform/client && npm ci && npm audit --audit-level=high
       - name: Audit mobile
-        run: cd mobile && npm ci && npm audit --audit-level=high
+        run: cd athena-platform/mobile && npm ci && npm audit --audit-level=high

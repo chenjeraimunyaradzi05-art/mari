@@ -68,11 +68,11 @@ test.describe('User Journey: Registration to Persona Dashboard', () => {
     await dismissCookieBanner(page);
     await page.getByRole('button', { name: /create account/i }).click({ force: true });
     
-    // Expect redirect to persona dashboard after auth bootstrap
-    await expect(page).toHaveURL(/\/dashboard\/persona/, { timeout: 20000 });
-    
-    // Verify persona dashboard loaded
-    await expect(page.getByRole('heading', { name: /personality dashboards/i })).toBeVisible();
+    // Expect redirect into first-run onboarding after auth bootstrap
+    await expect(page).toHaveURL(/\/onboarding/, { timeout: 20000 });
+
+    // Verify the new-member welcome state loaded
+    await expect(page.getByRole('heading', { name: /welcome to athena/i })).toBeVisible();
   });
 
 });

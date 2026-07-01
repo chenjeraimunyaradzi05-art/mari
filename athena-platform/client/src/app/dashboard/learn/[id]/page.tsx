@@ -5,161 +5,97 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft,
-  Play,
-  Clock,
-  Users,
-  Star,
   Award,
-  BookOpen,
-  CheckCircle2,
-  Lock,
-  PlayCircle,
-  FileText,
-  Download,
-  Share2,
-  Heart,
-  ChevronDown,
-  ChevronUp,
-  Globe,
   BarChart,
-  MessageSquare,
+  BookOpen,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Download,
+  Globe,
+  Share2,
 } from 'lucide-react';
-import { useCourse, useEnrollCourse, useAuthStore } from '@/lib/hooks';
+import { useCourse, useEnrollCourse } from '@/lib/hooks';
 import { cn, formatCurrency } from '@/lib/utils';
 
-interface Module {
+interface CourseDetails {
   id: string;
   title: string;
-  duration: string;
-  lessons: Lesson[];
+  description: string;
+  providerName?: string | null;
+  organization?: {
+    id?: string;
+    name?: string | null;
+    logo?: string | null;
+  } | null;
+  type?: string | null;
+  durationMonths?: number | null;
+  studyMode?: unknown;
+  cost?: number | null;
+  fundingOptions?: unknown;
+  employmentRate?: number | null;
+  avgStartingSalary?: number | null;
+  intakeDates?: unknown;
+  enrollment?: {
+    id?: string;
+    progress?: number | null;
+  } | null;
+  isActive?: boolean;
 }
 
-interface Lesson {
-  id: string;
-  title: string;
-  duration: string;
-  type: 'video' | 'quiz' | 'reading' | 'exercise';
-  completed?: boolean;
-  locked?: boolean;
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+      }
+    } catch {
+      return [value];
+    }
+  }
+
+  return [];
+}
+
+function formatLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDuration(months?: number | null): string | null {
+  if (!months || months <= 0) return null;
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'}`;
+
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (remainingMonths === 0) return `${years} year${years === 1 ? '' : 's'}`;
+
+  return `${years}y ${remainingMonths}m`;
+}
+
+function formatDateList(value: unknown): string[] {
+  return toStringList(value).map((date) => {
+    const parsed = new Date(date);
+    return Number.isNaN(parsed.getTime())
+      ? date
+      : parsed.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  });
 }
 
 export default function CourseDetailPage() {
   const params = useParams();
   const courseId = params.id as string;
-  const { data: course, isLoading } = useCourse(courseId);
+  const { data: course, isLoading, error } = useCourse(courseId);
   const { mutate: enroll, isPending: isEnrolling } = useEnrollCourse();
-  const { user } = useAuthStore();
-  
-  const [expandedModules, setExpandedModules] = useState<string[]>(['1']);
+
   const [activeTab, setActiveTab] = useState('overview');
-
-  // Mock course data
-  const mockCourse = {
-    id: courseId,
-    title: 'Product Management Fundamentals',
-    description: 'Master the essential skills of product management. Learn how to identify customer needs, define product strategy, and lead cross-functional teams to deliver successful products.',
-    instructor: {
-      id: '1',
-      name: 'Sarah Chen',
-      avatar: null,
-      title: 'VP of Product at TechCorp',
-      bio: 'Former product leader at Google and Airbnb with 15+ years of experience.',
-      students: 12500,
-      courses: 8,
-      rating: 4.9,
-    },
-    thumbnail: null,
-    price: 199,
-    discountedPrice: 149,
-    duration: '12 hours',
-    level: 'INTERMEDIATE',
-    category: 'PRODUCT_MANAGEMENT',
-    language: 'English',
-    lastUpdated: '2024-01-15',
-    totalLessons: 42,
-    totalModules: 8,
-    enrolled: 4532,
-    rating: 4.8,
-    reviewCount: 876,
-    skills: ['Product Strategy', 'User Research', 'Roadmapping', 'Stakeholder Management', 'Agile', 'Analytics'],
-    includes: [
-      '12 hours of video content',
-      '42 lessons across 8 modules',
-      '15 downloadable resources',
-      'Certificate of completion',
-      'Lifetime access',
-      'Community access',
-    ],
-    isEnrolled: false,
-    progress: 0,
-  };
-
-  const mockModules: Module[] = [
-    {
-      id: '1',
-      title: 'Introduction to Product Management',
-      duration: '1h 20m',
-      lessons: [
-        { id: '1-1', title: 'What is Product Management?', duration: '15:00', type: 'video' },
-        { id: '1-2', title: 'The PM Role Across Companies', duration: '20:00', type: 'video' },
-        { id: '1-3', title: 'PM vs Other Roles', duration: '15:00', type: 'reading' },
-        { id: '1-4', title: 'Module Quiz', duration: '10:00', type: 'quiz' },
-      ],
-    },
-    {
-      id: '2',
-      title: 'Understanding Your Users',
-      duration: '2h 15m',
-      lessons: [
-        { id: '2-1', title: 'User Research Methods', duration: '25:00', type: 'video', locked: true },
-        { id: '2-2', title: 'Conducting User Interviews', duration: '30:00', type: 'video', locked: true },
-        { id: '2-3', title: 'Creating User Personas', duration: '20:00', type: 'video', locked: true },
-        { id: '2-4', title: 'Interview Exercise', duration: '45:00', type: 'exercise', locked: true },
-        { id: '2-5', title: 'Module Quiz', duration: '15:00', type: 'quiz', locked: true },
-      ],
-    },
-    {
-      id: '3',
-      title: 'Product Strategy & Vision',
-      duration: '2h 30m',
-      lessons: [
-        { id: '3-1', title: 'Defining Product Vision', duration: '30:00', type: 'video', locked: true },
-        { id: '3-2', title: 'Market Analysis', duration: '25:00', type: 'video', locked: true },
-        { id: '3-3', title: 'Competitive Analysis', duration: '25:00', type: 'video', locked: true },
-        { id: '3-4', title: 'Strategy Frameworks', duration: '35:00', type: 'reading', locked: true },
-        { id: '3-5', title: 'Building Your Strategy', duration: '35:00', type: 'exercise', locked: true },
-      ],
-    },
-  ];
-
-  const displayCourse = course || mockCourse;
-
-  const toggleModule = (moduleId: string) => {
-    setExpandedModules((prev) =>
-      prev.includes(moduleId)
-        ? prev.filter((id) => id !== moduleId)
-        : [...prev, moduleId]
-    );
-  };
-
-  const handleEnroll = () => {
-    enroll(courseId);
-  };
-
-  const getLessonIcon = (type: string) => {
-    switch (type) {
-      case 'video':
-        return PlayCircle;
-      case 'quiz':
-        return BarChart;
-      case 'reading':
-        return FileText;
-      case 'exercise':
-        return BookOpen;
-      default:
-        return PlayCircle;
-    }
-  };
 
   if (isLoading) {
     return (
@@ -173,9 +109,62 @@ export default function CourseDetailPage() {
     );
   }
 
+  const displayCourse = course as CourseDetails | undefined;
+
+  if (!displayCourse || error) {
+    return (
+      <div className="max-w-3xl mx-auto p-6 space-y-6">
+        <Link
+          href="/dashboard/learn"
+          className="inline-flex items-center text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Courses
+        </Link>
+        <div className="card text-center py-12">
+          <BookOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+            Course unavailable
+          </h1>
+          <p className="text-gray-500 dark:text-gray-400">
+            This course could not be found or is no longer active.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const studyModes = toStringList(displayCourse.studyMode);
+  const fundingOptions = toStringList(displayCourse.fundingOptions);
+  const intakeDates = formatDateList(displayCourse.intakeDates);
+  const duration = formatDuration(displayCourse.durationMonths);
+  const providerName = displayCourse.organization?.name || displayCourse.providerName || 'Provider not listed';
+  const typeLabel = displayCourse.type ? formatLabel(displayCourse.type) : 'Course';
+  const progress = displayCourse.enrollment?.progress ?? 0;
+  const isEnrolled = Boolean(displayCourse.enrollment);
+
+  const highlights = [
+    { label: 'Provider', value: providerName },
+    { label: 'Format', value: studyModes.map(formatLabel).join(', ') },
+    { label: 'Duration', value: duration },
+    {
+      label: 'Employment rate',
+      value: typeof displayCourse.employmentRate === 'number' ? `${displayCourse.employmentRate}%` : null,
+    },
+    {
+      label: 'Average starting salary',
+      value: typeof displayCourse.avgStartingSalary === 'number'
+        ? formatCurrency(displayCourse.avgStartingSalary)
+        : null,
+    },
+  ].filter((item) => item.value);
+
+  const handleEnroll = () => {
+    enroll(displayCourse.id);
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
-      {/* Back Button */}
       <Link
         href="/dashboard/learn"
         className="inline-flex items-center text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
@@ -185,61 +174,58 @@ export default function CourseDetailPage() {
       </Link>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Course Header */}
           <div className="card">
-            <div className="flex items-center space-x-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className="text-xs font-medium px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 rounded-full">
-                {displayCourse.category?.replace('_', ' ')}
+                {typeLabel}
               </span>
-              <span className="text-xs font-medium px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
-                {displayCourse.level}
-              </span>
+              {displayCourse.isActive === false && (
+                <span className="text-xs font-medium px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full">
+                  Inactive
+                </span>
+              )}
             </div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
               {displayCourse.title}
             </h1>
-            <p className="text-gray-600 dark:text-gray-300 mb-4">
+            <p className="text-gray-600 dark:text-gray-300 mb-5">
               {displayCourse.description}
             </p>
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
               <span className="flex items-center">
-                <Star className="w-4 h-4 text-yellow-500 mr-1" />
-                {displayCourse.rating} ({displayCourse.reviewCount} reviews)
+                <BookOpen className="w-4 h-4 mr-1" />
+                {providerName}
               </span>
-              <span className="flex items-center">
-                <Users className="w-4 h-4 mr-1" />
-                {displayCourse.enrolled?.toLocaleString()} students
-              </span>
-              <span className="flex items-center">
-                <Clock className="w-4 h-4 mr-1" />
-                {displayCourse.duration}
-              </span>
-              <span className="flex items-center">
-                <Globe className="w-4 h-4 mr-1" />
-                {displayCourse.language}
-              </span>
+              {duration && (
+                <span className="flex items-center">
+                  <Clock className="w-4 h-4 mr-1" />
+                  {duration}
+                </span>
+              )}
+              {studyModes.length > 0 && (
+                <span className="flex items-center">
+                  <Globe className="w-4 h-4 mr-1" />
+                  {studyModes.map(formatLabel).join(', ')}
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Video Preview */}
-          <div className="card p-0 overflow-hidden">
-            <div className="aspect-video bg-gray-900 flex items-center justify-center relative">
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-              <button className="w-20 h-20 bg-white/90 hover:bg-white rounded-full flex items-center justify-center transition z-10">
-                <Play className="w-10 h-10 text-primary-600 ml-1" />
-              </button>
-              <span className="absolute bottom-4 left-4 text-white font-medium">
-                Preview this course
-              </span>
+          <div className="card">
+            <div className="grid sm:grid-cols-2 gap-4">
+              {highlights.map((item) => (
+                <div key={item.label} className="rounded-lg border border-gray-100 dark:border-gray-700 p-4">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{item.label}</p>
+                  <p className="mt-1 font-semibold text-gray-900 dark:text-white">{item.value}</p>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Tabs */}
           <div className="border-b border-gray-200 dark:border-gray-700">
             <nav className="flex space-x-8">
-              {['overview', 'curriculum', 'instructor', 'reviews'].map((tab) => (
+              {['overview', 'curriculum', 'provider', 'outcomes'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -256,270 +242,163 @@ export default function CourseDetailPage() {
             </nav>
           </div>
 
-          {/* Tab Content */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              {/* What You'll Learn */}
               <div className="card">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                  What You'll Learn
+                  Course Summary
                 </h2>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {displayCourse.skills?.map((skill: string, i: number) => (
-                    <div key={i} className="flex items-start space-x-2">
-                      <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-700 dark:text-gray-300">{skill}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-gray-600 dark:text-gray-300">
+                  {displayCourse.description}
+                </p>
               </div>
 
-              {/* Course Includes */}
-              <div className="card">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                  This Course Includes
-                </h2>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {displayCourse.includes?.map((item: string, i: number) => (
-                    <div key={i} className="flex items-center space-x-2 text-gray-600 dark:text-gray-300">
-                      <CheckCircle2 className="w-4 h-4 text-primary-500" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
+              {fundingOptions.length > 0 && (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    Funding Options
+                  </h2>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {fundingOptions.map((item) => (
+                      <div key={item} className="flex items-center space-x-2 text-gray-600 dark:text-gray-300">
+                        <CheckCircle2 className="w-4 h-4 text-primary-500" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {intakeDates.length > 0 && (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    Intake Dates
+                  </h2>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {intakeDates.map((date) => (
+                      <div key={date} className="flex items-center space-x-2 text-gray-600 dark:text-gray-300">
+                        <Calendar className="w-4 h-4 text-primary-500" />
+                        <span>{date}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'curriculum' && (
-            <div className="card">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  Course Curriculum
-                </h2>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {displayCourse.totalModules} modules • {displayCourse.totalLessons} lessons • {displayCourse.duration}
-                </span>
-              </div>
-
-              <div className="space-y-4">
-                {mockModules.map((module) => (
-                  <div
-                    key={module.id}
-                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
-                  >
-                    <button
-                      onClick={() => toggleModule(module.id)}
-                      className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750"
-                    >
-                      <div className="flex items-center space-x-3">
-                        {expandedModules.includes(module.id) ? (
-                          <ChevronUp className="w-5 h-5 text-gray-400" />
-                        ) : (
-                          <ChevronDown className="w-5 h-5 text-gray-400" />
-                        )}
-                        <span className="font-medium text-gray-900 dark:text-white">
-                          {module.title}
-                        </span>
-                      </div>
-                      <span className="text-sm text-gray-500 dark:text-gray-400">
-                        {module.lessons.length} lessons • {module.duration}
-                      </span>
-                    </button>
-
-                    {expandedModules.includes(module.id) && (
-                      <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                        {module.lessons.map((lesson) => {
-                          const LessonIcon = getLessonIcon(lesson.type);
-                          return (
-                            <div
-                              key={lesson.id}
-                              className={cn(
-                                'flex items-center justify-between p-4',
-                                lesson.locked && 'opacity-60'
-                              )}
-                            >
-                              <div className="flex items-center space-x-3">
-                                <LessonIcon className="w-5 h-5 text-gray-400" />
-                                <span className="text-gray-700 dark:text-gray-300">
-                                  {lesson.title}
-                                </span>
-                              </div>
-                              <div className="flex items-center space-x-3">
-                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                  {lesson.duration}
-                                </span>
-                                {lesson.locked ? (
-                                  <Lock className="w-4 h-4 text-gray-400" />
-                                ) : (
-                                  <PlayCircle className="w-4 h-4 text-primary-500" />
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+            <div className="card text-center py-12">
+              <BookOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                Curriculum details are not published yet
+              </h2>
+              <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+                The current course API provides program-level details only. Lesson modules will appear here when the provider publishes them.
+              </p>
             </div>
           )}
 
-          {activeTab === 'instructor' && (
+          {activeTab === 'provider' && (
             <div className="card">
               <div className="flex items-start space-x-4">
-                <div className="w-20 h-20 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-2xl font-bold text-primary-600">
-                  {displayCourse.instructor?.name?.charAt(0) || 'I'}
+                <div className="w-16 h-16 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-xl font-bold text-primary-600">
+                  {providerName.charAt(0)}
                 </div>
-                <div className="flex-1">
+                <div>
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {displayCourse.instructor?.name}
+                    {providerName}
                   </h2>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {displayCourse.instructor?.title}
-                  </p>
-                  <div className="flex items-center space-x-4 mt-3 text-sm text-gray-500 dark:text-gray-400">
-                    <span className="flex items-center">
-                      <Star className="w-4 h-4 text-yellow-500 mr-1" />
-                      {displayCourse.instructor?.rating} rating
-                    </span>
-                    <span className="flex items-center">
-                      <Users className="w-4 h-4 mr-1" />
-                      {displayCourse.instructor?.students?.toLocaleString()} students
-                    </span>
-                    <span className="flex items-center">
-                      <BookOpen className="w-4 h-4 mr-1" />
-                      {displayCourse.instructor?.courses} courses
-                    </span>
-                  </div>
-                  <p className="mt-4 text-gray-600 dark:text-gray-300">
-                    {displayCourse.instructor?.bio}
+                  <p className="mt-2 text-gray-600 dark:text-gray-300">
+                    Provider profile details are not published for this course yet.
                   </p>
                 </div>
               </div>
             </div>
           )}
 
-          {activeTab === 'reviews' && (
+          {activeTab === 'outcomes' && (
             <div className="card">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Student Reviews
+                Outcomes
               </h2>
-              <div className="flex items-center space-x-6 mb-6">
-                <div className="text-center">
-                  <div className="text-4xl font-bold text-gray-900 dark:text-white">
-                    {displayCourse.rating}
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="rounded-lg border border-gray-100 dark:border-gray-700 p-4">
+                  <div className="flex items-center text-gray-500 dark:text-gray-400 mb-2">
+                    <BarChart className="w-4 h-4 mr-2" />
+                    Employment rate
                   </div>
-                  <div className="flex items-center justify-center mt-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className={cn(
-                          'w-4 h-4',
-                          star <= Math.floor(displayCourse.rating)
-                            ? 'text-yellow-500 fill-current'
-                            : 'text-gray-300'
-                        )}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {displayCourse.reviewCount} reviews
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {typeof displayCourse.employmentRate === 'number' ? `${displayCourse.employmentRate}%` : 'Not listed'}
                   </p>
                 </div>
-              </div>
-
-              {/* Sample Reviews */}
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="border-t border-gray-100 dark:border-gray-700 pt-4">
-                    <div className="flex items-start space-x-3">
-                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700" />
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            Student {i}
-                          </span>
-                          <div className="flex">
-                            {[1, 2, 3, 4, 5].map((star) => (
-                              <Star
-                                key={star}
-                                className="w-3 h-3 text-yellow-500 fill-current"
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                          Excellent course! The instructor explains concepts clearly and the
-                          practical exercises really helped me apply what I learned.
-                        </p>
-                      </div>
-                    </div>
+                <div className="rounded-lg border border-gray-100 dark:border-gray-700 p-4">
+                  <div className="flex items-center text-gray-500 dark:text-gray-400 mb-2">
+                    <Award className="w-4 h-4 mr-2" />
+                    Average starting salary
                   </div>
-                ))}
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {typeof displayCourse.avgStartingSalary === 'number'
+                      ? formatCurrency(displayCourse.avgStartingSalary)
+                      : 'Not listed'}
+                  </p>
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Sidebar */}
         <div className="lg:col-span-1">
           <div className="card sticky top-6">
-            {/* Price */}
             <div className="mb-6">
-              {displayCourse.discountedPrice ? (
-                <div className="flex items-center space-x-2">
-                  <span className="text-3xl font-bold text-gray-900 dark:text-white">
-                    {formatCurrency(displayCourse.discountedPrice)}
-                  </span>
-                  <span className="text-lg text-gray-500 line-through">
-                    {formatCurrency(displayCourse.price)}
-                  </span>
-                  <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                    {Math.round((1 - displayCourse.discountedPrice / displayCourse.price) * 100)}% off
-                  </span>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Course cost</p>
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                {typeof displayCourse.cost === 'number' ? formatCurrency(displayCourse.cost) : 'Contact provider'}
+              </p>
+            </div>
+
+            {isEnrolled ? (
+              <div className="space-y-3">
+                <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
                 </div>
-              ) : (
-                <span className="text-3xl font-bold text-gray-900 dark:text-white">
-                  {formatCurrency(displayCourse.price)}
-                </span>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{progress}% complete</p>
+                <button className="w-full btn-primary py-3 flex items-center justify-center space-x-2">
+                  <BookOpen className="w-5 h-5" />
+                  <span>Continue Learning</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleEnroll}
+                disabled={isEnrolling || displayCourse.isActive === false}
+                className="w-full btn-primary py-3 flex items-center justify-center space-x-2 disabled:opacity-60"
+              >
+                <Award className="w-5 h-5" />
+                <span>{isEnrolling ? 'Enrolling...' : 'Enroll Now'}</span>
+              </button>
+            )}
+
+            <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 space-y-3 text-sm text-gray-600 dark:text-gray-300">
+              {duration && (
+                <p className="flex items-center">
+                  <Clock className="w-4 h-4 mr-2 text-gray-400" />
+                  {duration}
+                </p>
+              )}
+              {studyModes.length > 0 && (
+                <p className="flex items-center">
+                  <Globe className="w-4 h-4 mr-2 text-gray-400" />
+                  {studyModes.map(formatLabel).join(', ')}
+                </p>
               )}
             </div>
 
-            {/* CTA Buttons */}
-            {displayCourse.isEnrolled ? (
-              <button className="w-full btn-primary py-3 flex items-center justify-center space-x-2">
-                <Play className="w-5 h-5" />
-                <span>Continue Learning</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={handleEnroll}
-                  disabled={isEnrolling}
-                  className="w-full btn-primary py-3 flex items-center justify-center space-x-2"
-                >
-                  <Award className="w-5 h-5" />
-                  <span>{isEnrolling ? 'Enrolling...' : 'Enroll Now'}</span>
-                </button>
-                <button className="w-full btn-outline py-3 mt-3 flex items-center justify-center space-x-2">
-                  <Heart className="w-5 h-5" />
-                  <span>Add to Wishlist</span>
-                </button>
-              </>
-            )}
-
-            <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">
-              30-day money-back guarantee
-            </p>
-
-            {/* Share */}
             <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 flex justify-center space-x-4">
-              <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+              <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Share course">
                 <Share2 className="w-5 h-5" />
               </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+              <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Download course information">
                 <Download className="w-5 h-5" />
               </button>
             </div>

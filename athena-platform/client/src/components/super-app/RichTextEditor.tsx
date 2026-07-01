@@ -52,6 +52,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { escapeHtml, sanitizeHtml } from '@/lib/utils/sanitize';
 
 // Note: This is a mock implementation without actual Tiptap dependency
 // In production, install: npm install @tiptap/react @tiptap/starter-kit @tiptap/extension-link etc.
@@ -83,6 +84,38 @@ interface EditorState {
   textAlign: 'left' | 'center' | 'right';
 }
 
+function normalizeLinkUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return trimmed;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeImageUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (/^data:image\/(?:png|gif|jpe?g|webp);base64,/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function RichTextEditor({
   content = '',
   onChange,
@@ -104,7 +137,7 @@ export function RichTextEditor({
   const [isUploading, setIsUploading] = useState(false);
   
   const [editorState, setEditorState] = useState<EditorState>({
-    html: content,
+    html: sanitizeHtml(content),
     text: '',
     isBold: false,
     isItalic: false,
@@ -120,16 +153,18 @@ export function RichTextEditor({
 
   // Initialize content
   useEffect(() => {
-    if (editorRef.current && content) {
-      editorRef.current.innerHTML = content;
+    if (editorRef.current) {
+      const safeContent = sanitizeHtml(content);
+      if (editorRef.current.innerHTML !== safeContent) {
+        editorRef.current.innerHTML = safeContent;
+        setEditorState((prev) => ({
+          ...prev,
+          html: safeContent,
+          text: editorRef.current?.textContent || '',
+        }));
+      }
     }
-  }, []);
-
-  const handleCommand = useCallback((command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    editorRef.current?.focus();
-    updateEditorState();
-  }, []);
+  }, [content]);
 
   const updateEditorState = useCallback(() => {
     setEditorState((prev) => ({
@@ -143,9 +178,15 @@ export function RichTextEditor({
     }));
   }, []);
 
+  const handleCommand = useCallback((command: string, value?: string) => {
+    document.execCommand(command, false, value);
+    editorRef.current?.focus();
+    updateEditorState();
+  }, [updateEditorState]);
+
   const handleInput = useCallback(() => {
     if (editorRef.current) {
-      const html = editorRef.current.innerHTML;
+      const html = sanitizeHtml(editorRef.current.innerHTML);
       const text = editorRef.current.textContent || '';
       setEditorState((prev) => ({ ...prev, html, text }));
       onChange?.(html);
@@ -181,9 +222,12 @@ export function RichTextEditor({
   }, [handleCommand]);
 
   const insertLink = useCallback(() => {
-    if (linkUrl) {
-      const text = linkText || linkUrl;
-      const html = `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${text}</a>`;
+    const safeUrl = normalizeLinkUrl(linkUrl);
+    if (safeUrl) {
+      const text = escapeHtml(linkText || safeUrl);
+      const html = sanitizeHtml(
+        `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${text}</a>`
+      );
       handleCommand('insertHTML', html);
     }
     setLinkDialogOpen(false);
@@ -192,8 +236,11 @@ export function RichTextEditor({
   }, [linkUrl, linkText, handleCommand]);
 
   const insertImage = useCallback(() => {
-    if (imageUrl) {
-      const html = `<img src="${imageUrl}" alt="${imageAlt}" class="max-w-full h-auto rounded-lg my-4" />`;
+    const safeUrl = normalizeImageUrl(imageUrl);
+    if (safeUrl) {
+      const html = sanitizeHtml(
+        `<img src="${escapeHtml(safeUrl)}" alt="${escapeHtml(imageAlt)}" class="max-w-full h-auto rounded-lg my-4" />`
+      );
       handleCommand('insertHTML', html);
     }
     setImageDialogOpen(false);
@@ -202,6 +249,13 @@ export function RichTextEditor({
   }, [imageUrl, imageAlt, handleCommand]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const html = e.clipboardData.getData('text/html');
+    if (html) {
+      e.preventDefault();
+      handleCommand('insertHTML', sanitizeHtml(html));
+      return;
+    }
+
     // Handle pasted images
     const items = e.clipboardData.items;
     for (const item of items) {
@@ -212,8 +266,13 @@ export function RichTextEditor({
           // In production, upload to server
           const reader = new FileReader();
           reader.onload = () => {
-            const html = `<img src="${reader.result}" alt="Pasted image" class="max-w-full h-auto rounded-lg my-4" />`;
-            handleCommand('insertHTML', html);
+            const dataUrl = typeof reader.result === 'string' ? normalizeImageUrl(reader.result) : null;
+            if (dataUrl) {
+              const html = sanitizeHtml(
+                `<img src="${escapeHtml(dataUrl)}" alt="Pasted image" class="max-w-full h-auto rounded-lg my-4" />`
+              );
+              handleCommand('insertHTML', html);
+            }
           };
           reader.readAsDataURL(file);
         }

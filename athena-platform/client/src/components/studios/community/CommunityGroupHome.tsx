@@ -18,8 +18,6 @@ import React, { useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Users,
-  Settings,
-  Bell,
   BellOff,
   Share2,
   MoreHorizontal,
@@ -29,14 +27,11 @@ import {
   MessageSquare,
   Heart,
   Bookmark,
-  Image as ImageIcon,
   Link2,
-  FileText,
   Calendar,
   Video,
   Pin,
   Flag,
-  Send,
   Search,
   Plus,
   ChevronRight,
@@ -45,13 +40,12 @@ import {
   Crown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,15 +53,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 // ============================================
@@ -117,108 +102,10 @@ interface CommunityEvent {
 }
 
 // ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_COMMUNITY: Community = {
-  id: '1',
-  name: 'React Developers UAE',
-  description: 'A community for React developers in the UAE. Share knowledge, ask questions, network with fellow developers, and stay updated with the latest React ecosystem news.',
-  isPublic: true,
-  memberCount: 2847,
-  postCount: 1523,
-  createdAt: new Date(2024, 0, 15),
-  rules: [
-    'Be respectful and professional',
-    'No spam or self-promotion without approval',
-    'Stay on topic - React and related technologies',
-    'No job postings outside the designated thread',
-    'Help others learn - we were all beginners once',
-  ],
-  admins: [
-    { id: '1', name: 'Ahmed Hassan', role: 'admin', joinedAt: new Date(2024, 0, 15) },
-    { id: '2', name: 'Sarah Chen', role: 'moderator', joinedAt: new Date(2024, 1, 1) },
-  ],
-};
-
-const MOCK_MEMBERS: Member[] = [
-  { id: '1', name: 'Ahmed Hassan', role: 'admin', joinedAt: new Date(2024, 0, 15) },
-  { id: '2', name: 'Sarah Chen', role: 'moderator', joinedAt: new Date(2024, 1, 1) },
-  { id: '3', name: 'Michael Brown', role: 'member', joinedAt: new Date(2024, 2, 10) },
-  { id: '4', name: 'Fatima Ali', role: 'member', joinedAt: new Date(2024, 3, 5) },
-  { id: '5', name: 'James Wilson', role: 'member', joinedAt: new Date(2024, 4, 20) },
-  { id: '6', name: 'Priya Patel', role: 'member', joinedAt: new Date(2024, 5, 8) },
-];
-
-const MOCK_POSTS: Post[] = [
-  {
-    id: '1',
-    author: MOCK_MEMBERS[0],
-    content: '📢 Welcome to our new members! Please introduce yourself in the comments. What brings you to React development?',
-    likes: 89,
-    comments: 45,
-    isPinned: true,
-    createdAt: new Date(Date.now() - 86400000),
-  },
-  {
-    id: '2',
-    author: MOCK_MEMBERS[2],
-    content: `Just finished migrating our app from CRA to Vite. The build times went from 45s to 3s! 🚀
-
-Here's what I learned during the process...`,
-    likes: 156,
-    comments: 32,
-    isPinned: false,
-    createdAt: new Date(Date.now() - 3600000 * 3),
-  },
-  {
-    id: '3',
-    author: MOCK_MEMBERS[3],
-    content: 'Has anyone tried React 19 yet? Curious about the new use() hook and Server Components improvements.',
-    likes: 67,
-    comments: 28,
-    isPinned: false,
-    createdAt: new Date(Date.now() - 3600000 * 8),
-  },
-  {
-    id: '4',
-    author: MOCK_MEMBERS[4],
-    content: 'Sharing my new React state management comparison article. Covers Zustand, Jotai, and Redux Toolkit.',
-    media: { type: 'link', url: 'https://example.com', title: 'React State Management in 2026' },
-    likes: 234,
-    comments: 41,
-    isPinned: false,
-    createdAt: new Date(Date.now() - 86400000 * 2),
-  },
-];
-
-const MOCK_EVENTS: CommunityEvent[] = [
-  {
-    id: '1',
-    title: 'React Meetup - Server Components Deep Dive',
-    description: 'Join us for an in-depth session on React Server Components',
-    date: new Date(Date.now() + 86400000 * 7),
-    attendees: 45,
-    isOnline: true,
-  },
-  {
-    id: '2',
-    title: 'Networking Night - Dubai Tech Hub',
-    description: 'In-person networking event for React developers',
-    date: new Date(Date.now() + 86400000 * 14),
-    attendees: 28,
-    isOnline: false,
-  },
-];
-
-// ============================================
 // COMPONENTS
 // ============================================
 
 function CommunityHeader({ community }: { community: Community }) {
-  const [isMember, setIsMember] = useState(true);
-  const [notificationsOn, setNotificationsOn] = useState(true);
-
   return (
     <div className="relative">
       {/* Cover */}
@@ -252,29 +139,18 @@ function CommunityHeader({ community }: { community: Community }) {
           </div>
 
           <div className="flex gap-2">
-            {isMember ? (
-              <>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setNotificationsOn(!notificationsOn)}
-                >
-                  {notificationsOn ? (
-                    <Bell className="h-4 w-4" />
-                  ) : (
-                    <BellOff className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button variant="outline" onClick={() => setIsMember(false)}>
-                  Joined
-                </Button>
-              </>
-            ) : (
-              <Button onClick={() => setIsMember(true)}>
-                <UserPlus className="h-4 w-4 mr-2" />
-                Join Group
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="icon"
+              disabled
+              title="Community notifications are not connected yet"
+            >
+              <BellOff className="h-4 w-4" />
+            </Button>
+            <Button disabled title="Community membership is not connected yet">
+              <UserPlus className="h-4 w-4 mr-2" />
+              Join Group
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
@@ -282,16 +158,16 @@ function CommunityHeader({ community }: { community: Community }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem>
+                <DropdownMenuItem disabled>
                   <Share2 className="h-4 w-4 mr-2" />
                   Share
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem disabled>
                   <Link2 className="h-4 w-4 mr-2" />
                   Copy link
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
+                <DropdownMenuItem disabled>
                   <Flag className="h-4 w-4 mr-2" />
                   Report
                 </DropdownMenuItem>
@@ -305,9 +181,6 @@ function CommunityHeader({ community }: { community: Community }) {
 }
 
 function CreatePostCard() {
-  const [content, setContent] = useState('');
-  const [isExpanded, setIsExpanded] = useState(false);
-
   return (
     <Card>
       <CardContent className="pt-6">
@@ -316,46 +189,14 @@ function CreatePostCard() {
             <AvatarFallback>ME</AvatarFallback>
           </Avatar>
           <div className="flex-1">
-            {isExpanded ? (
-              <div className="space-y-3">
-                <Textarea
-                  placeholder="Share something with the group..."
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  rows={4}
-                  autoFocus
-                />
-                <div className="flex items-center justify-between">
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="icon">
-                      <ImageIcon className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon">
-                      <Link2 className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon">
-                      <FileText className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" onClick={() => setIsExpanded(false)}>
-                      Cancel
-                    </Button>
-                    <Button disabled={!content.trim()}>
-                      <Send className="h-4 w-4 mr-2" />
-                      Post
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div
-                className="w-full text-left px-4 py-3 border rounded-full text-muted-foreground cursor-text hover:bg-muted"
-                onClick={() => setIsExpanded(true)}
-              >
-                Share something with the group...
-              </div>
-            )}
+            <Button
+              variant="outline"
+              className="w-full justify-start rounded-full text-muted-foreground"
+              disabled
+              title="Community posting is not connected yet"
+            >
+              Share something with the group...
+            </Button>
           </div>
         </div>
       </CardContent>
@@ -364,9 +205,6 @@ function CreatePostCard() {
 }
 
 function PostCard({ post }: { post: Post }) {
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
-
   const formatTime = (date: Date) => {
     const diff = Date.now() - date.getTime();
     const hours = Math.floor(diff / 3600000);
@@ -426,22 +264,23 @@ function PostCard({ post }: { post: Post }) {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setLiked(!liked)}
-                className={cn(liked && 'text-red-500')}
+                disabled
+                title="Post reactions are not connected yet"
               >
-                <Heart className={cn('h-4 w-4 mr-1', liked && 'fill-current')} />
-                {post.likes + (liked ? 1 : 0)}
+                <Heart className="h-4 w-4 mr-1" />
+                {post.likes}
               </Button>
-              <Button variant="ghost" size="sm">
+              <Button variant="ghost" size="sm" disabled title="Post comments are not connected yet">
                 <MessageSquare className="h-4 w-4 mr-1" />
                 {post.comments}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSaved(!saved)}
+                disabled
+                title="Post saving is not connected yet"
               >
-                <Bookmark className={cn('h-4 w-4', saved && 'fill-current')} />
+                <Bookmark className="h-4 w-4" />
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -450,11 +289,11 @@ function PostCard({ post }: { post: Post }) {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem>
+                  <DropdownMenuItem disabled>
                     <Share2 className="h-4 w-4 mr-2" />
                     Share
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem disabled>
                     <Flag className="h-4 w-4 mr-2" />
                     Report
                   </DropdownMenuItem>
@@ -481,38 +320,46 @@ function AboutSection({ community }: { community: Community }) {
 
         <div>
           <h4 className="font-medium mb-2">Group Rules</h4>
-          <ol className="space-y-2">
-            {community.rules.map((rule, i) => (
-              <li key={i} className="flex gap-2 text-sm">
-                <span className="font-medium text-muted-foreground">{i + 1}.</span>
-                <span>{rule}</span>
-              </li>
-            ))}
-          </ol>
+          {community.rules.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Group rules are not connected yet.</p>
+          ) : (
+            <ol className="space-y-2">
+              {community.rules.map((rule, i) => (
+                <li key={i} className="flex gap-2 text-sm">
+                  <span className="font-medium text-muted-foreground">{i + 1}.</span>
+                  <span>{rule}</span>
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
 
         <Separator />
 
         <div>
           <h4 className="font-medium mb-2">Admins & Moderators</h4>
-          <div className="space-y-2">
-            {community.admins.map((admin) => (
-              <div key={admin.id} className="flex items-center gap-3">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={admin.avatar} />
-                  <AvatarFallback>
-                    {admin.name.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1">
-                  <span className="text-sm font-medium">{admin.name}</span>
+          {community.admins.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Admin profiles are not connected yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {community.admins.map((admin) => (
+                <div key={admin.id} className="flex items-center gap-3">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={admin.avatar} />
+                    <AvatarFallback>
+                      {admin.name.split(' ').map(n => n[0]).join('')}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <span className="text-sm font-medium">{admin.name}</span>
+                  </div>
+                  <Badge variant="outline" className="text-xs capitalize">
+                    {admin.role}
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-xs capitalize">
-                  {admin.role}
-                </Badge>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -542,15 +389,21 @@ function MembersSection({ members }: { members: Member[] }) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
+            disabled={members.length === 0}
           />
         </div>
 
         <ScrollArea className="h-[400px]">
           <div className="space-y-2">
-            {filteredMembers.map((member) => (
+            {filteredMembers.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Member profiles are not connected yet.
+              </div>
+            ) : (
+              filteredMembers.map((member) => (
               <div
                 key={member.id}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted cursor-pointer"
+                className="flex items-center gap-3 p-3 rounded-lg"
               >
                 <Avatar>
                   <AvatarImage src={member.avatar} />
@@ -572,9 +425,12 @@ function MembersSection({ members }: { members: Member[] }) {
                     Joined {member.joinedAt.toLocaleDateString()}
                   </p>
                 </div>
-                <Button variant="outline" size="sm">Message</Button>
+                <Button variant="outline" size="sm" disabled title="Member messaging is not connected yet">
+                  Message
+                </Button>
               </div>
-            ))}
+              ))
+            )}
           </div>
         </ScrollArea>
       </CardContent>
@@ -588,7 +444,7 @@ function EventsSection({ events }: { events: CommunityEvent[] }) {
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>Upcoming Events</CardTitle>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" disabled title="Community event creation is not connected yet">
             <Plus className="h-4 w-4 mr-2" />
             Create Event
           </Button>
@@ -598,7 +454,7 @@ function EventsSection({ events }: { events: CommunityEvent[] }) {
         {events.map((event) => (
           <div
             key={event.id}
-            className="p-4 border rounded-lg hover:bg-muted cursor-pointer"
+            className="p-4 border rounded-lg"
           >
             <div className="flex items-start gap-4">
               <div className="text-center p-3 bg-primary/10 rounded-lg">
@@ -629,7 +485,7 @@ function EventsSection({ events }: { events: CommunityEvent[] }) {
                   </span>
                 </div>
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" disabled title="Community event RSVP is not connected yet">
                 <Check className="h-4 w-4 mr-2" />
                 Going
               </Button>
@@ -648,12 +504,40 @@ function EventsSection({ events }: { events: CommunityEvent[] }) {
   );
 }
 
+interface CommunityGroupHomeProps {
+  community?: Community | null;
+  members?: Member[];
+  posts?: Post[];
+  events?: CommunityEvent[];
+  className?: string;
+}
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
 
-export function CommunityGroupHome({ className }: { className?: string }) {
-  const community = MOCK_COMMUNITY;
+export function CommunityGroupHome({
+  community,
+  members = [],
+  posts = [],
+  events = [],
+  className,
+}: CommunityGroupHomeProps) {
+  if (!community) {
+    return (
+      <div className={cn('container mx-auto py-8', className)}>
+        <Card>
+          <CardContent className="py-16 text-center">
+            <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <h1 className="text-xl font-semibold">No community profile connected</h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              Community details will appear here once a live group is selected.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('container mx-auto py-8 space-y-6', className)}>
@@ -673,17 +557,25 @@ export function CommunityGroupHome({ className }: { className?: string }) {
 
             <TabsContent value="discussion" className="mt-6 space-y-4">
               <CreatePostCard />
-              {MOCK_POSTS.map((post) => (
-                <PostCard key={post.id} post={post} />
-              ))}
+              {posts.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                    Community posts are not connected yet.
+                  </CardContent>
+                </Card>
+              ) : (
+                posts.map((post) => (
+                  <PostCard key={post.id} post={post} />
+                ))
+              )}
             </TabsContent>
 
             <TabsContent value="events" className="mt-6">
-              <EventsSection events={MOCK_EVENTS} />
+              <EventsSection events={events} />
             </TabsContent>
 
             <TabsContent value="members" className="mt-6">
-              <MembersSection members={MOCK_MEMBERS} />
+              <MembersSection members={members} />
             </TabsContent>
 
             <TabsContent value="about" className="mt-6">
@@ -702,21 +594,27 @@ export function CommunityGroupHome({ className }: { className?: string }) {
             </CardHeader>
             <CardContent>
               <div className="flex -space-x-2">
-                {MOCK_MEMBERS.slice(0, 5).map((member) => (
+                {members.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    Active members are not connected yet.
+                  </div>
+                ) : (
+                  members.slice(0, 5).map((member) => (
                   <Avatar key={member.id} className="border-2 border-background">
                     <AvatarImage src={member.avatar} />
                     <AvatarFallback className="text-xs">
                       {member.name.split(' ').map(n => n[0]).join('')}
                     </AvatarFallback>
                   </Avatar>
-                ))}
-                {MOCK_MEMBERS.length > 5 && (
+                  ))
+                )}
+                {members.length > 5 && (
                   <div className="h-10 w-10 rounded-full bg-muted border-2 border-background flex items-center justify-center text-xs font-medium">
-                    +{MOCK_MEMBERS.length - 5}
+                    +{members.length - 5}
                   </div>
                 )}
               </div>
-              <Button variant="link" className="mt-2 px-0">
+              <Button variant="link" className="mt-2 px-0" disabled={members.length === 0}>
                 See all members
                 <ChevronRight className="h-4 w-4 ml-1" />
               </Button>

@@ -54,8 +54,6 @@ const eventTypes = [
   { value: 'meetup', label: 'Meetups' },
 ];
 
-const FALLBACK_WEEK_START = new Date('2026-01-05T00:00:00.000Z');
-
 export default function EventsPage() {
   const [selectedType, setSelectedType] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,8 +84,10 @@ export default function EventsPage() {
   const filteredEvents = events
     .filter((event) => !selectedDate || isSameDay(event.date, selectedDate));
 
-  const effectiveWeekStart = currentWeekStart ?? FALLBACK_WEEK_START;
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(effectiveWeekStart, i));
+  const effectiveWeekStart = currentWeekStart;
+  const weekDays = effectiveWeekStart
+    ? Array.from({ length: 7 }, (_, i) => addDays(effectiveWeekStart, i))
+    : [];
 
   const getEventCountForDay = (date: Date) => {
     return events.filter((event) => isSameDay(event.date, date)).length;
@@ -115,72 +115,82 @@ export default function EventsPage() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <button
-            onClick={() => setCurrentWeekStart(addDays(effectiveWeekStart, -7))}
+            onClick={() => effectiveWeekStart && setCurrentWeekStart(addDays(effectiveWeekStart, -7))}
+            disabled={!effectiveWeekStart}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
           <h3 className="font-medium text-gray-900 dark:text-white">
-            {format(effectiveWeekStart, 'MMMM yyyy')}
+            {effectiveWeekStart ? format(effectiveWeekStart, 'MMMM yyyy') : 'Loading calendar'}
           </h3>
           <button
-            onClick={() => setCurrentWeekStart(addDays(effectiveWeekStart, 7))}
+            onClick={() => effectiveWeekStart && setCurrentWeekStart(addDays(effectiveWeekStart, 7))}
+            disabled={!effectiveWeekStart}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
-        <div className="grid grid-cols-7 gap-2">
-          {weekDays.map((day) => {
-            const eventCount = getEventCountForDay(day);
-            const isSelected = selectedDate && isSameDay(day, selectedDate);
-            const isToday = isHydrated && isSameDay(day, new Date());
+        {!effectiveWeekStart ? (
+          <div className="grid grid-cols-7 gap-2">
+            {Array.from({ length: 7 }).map((_, index) => (
+              <div key={index} className="h-20 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-7 gap-2">
+            {weekDays.map((day) => {
+              const eventCount = getEventCountForDay(day);
+              const isSelected = selectedDate && isSameDay(day, selectedDate);
+              const isToday = isHydrated && isSameDay(day, new Date());
 
-            return (
-              <button
-                key={day.toISOString()}
-                onClick={() =>
-                  setSelectedDate(isSelected ? null : day)
-                }
-                className={cn(
-                  'flex flex-col items-center p-3 rounded-lg transition',
-                  isSelected
-                    ? 'bg-primary-500 text-white'
-                    : isToday
-                    ? 'bg-primary-100 dark:bg-primary-900/30'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                )}
-              >
-                <span
+              return (
+                <button
+                  key={day.toISOString()}
+                  onClick={() =>
+                    setSelectedDate(isSelected ? null : day)
+                  }
                   className={cn(
-                    'text-xs',
+                    'flex flex-col items-center p-3 rounded-lg transition',
                     isSelected
-                      ? 'text-white/80'
-                      : 'text-gray-500 dark:text-gray-400'
+                      ? 'bg-primary-500 text-white'
+                      : isToday
+                      ? 'bg-primary-100 dark:bg-primary-900/30'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                   )}
                 >
-                  {format(day, 'EEE')}
-                </span>
-                <span
-                  className={cn(
-                    'text-lg font-semibold',
-                    isSelected ? 'text-white' : 'text-gray-900 dark:text-white'
-                  )}
-                >
-                  {format(day, 'd')}
-                </span>
-                {eventCount > 0 && (
                   <span
                     className={cn(
-                      'w-1.5 h-1.5 rounded-full mt-1',
-                      isSelected ? 'bg-white' : 'bg-primary-500'
+                      'text-xs',
+                      isSelected
+                        ? 'text-white/80'
+                        : 'text-gray-500 dark:text-gray-400'
                     )}
-                  />
-                )}
-              </button>
-            );
-          })}
-        </div>
+                  >
+                    {format(day, 'EEE')}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-lg font-semibold',
+                      isSelected ? 'text-white' : 'text-gray-900 dark:text-white'
+                    )}
+                  >
+                    {format(day, 'd')}
+                  </span>
+                  {eventCount > 0 && (
+                    <span
+                      className={cn(
+                        'w-1.5 h-1.5 rounded-full mt-1',
+                        isSelected ? 'bg-white' : 'bg-primary-500'
+                      )}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Filters */}

@@ -41,85 +41,52 @@ export default function CareerPathPage() {
   const [yearsExperience, setYearsExperience] = useState(3);
   const [pathGenerated, setPathGenerated] = useState(false);
   const [milestones, setMilestones] = useState<CareerMilestone[]>([]);
+  const [pathError, setPathError] = useState<string | null>(null);
 
   const { mutate: generatePath, isPending } = useGenerateCareerPath();
 
   const handleGenerate = () => {
     if (!currentRole || !targetRole) return;
+    setPathError(null);
 
     generatePath(
       { currentRole, targetRole, yearsExperience },
       {
         onSuccess: (data) => {
-          setMilestones(data.milestones || mockMilestones);
+          const normalizedMilestones = Array.isArray(data?.milestones)
+            ? data.milestones.map((milestone: any, index: number) => ({
+                id: milestone.id || String(index + 1),
+                title: milestone.title || milestone.role || `Step ${index + 1}`,
+                level: milestone.timeframe || milestone.level || (index === 0 ? 'Current' : 'Next Step'),
+                salary: {
+                  min: milestone.salary?.min || milestone.salaryMin || 0,
+                  max: milestone.salary?.max || milestone.salaryMax || 0,
+                },
+                timeline: milestone.timeline || milestone.timeframe || 'Timeline not estimated',
+                skills: milestone.skills || milestone.skillsToAcquire || [],
+                description: milestone.description || milestone.action || '',
+                requirements: milestone.requirements || milestone.recommendedActions || [],
+                completed: index === 0,
+                current: index === 0,
+              }))
+            : [];
+          setMilestones(normalizedMilestones);
           setPathGenerated(true);
+          if (normalizedMilestones.length === 0) {
+            setPathError('The career path service completed but did not return milestones.');
+          }
         },
-        onError: () => {
-          setMilestones(mockMilestones);
-          setPathGenerated(true);
+        onError: (error: any) => {
+          setMilestones([]);
+          setPathGenerated(false);
+          setPathError(
+            error?.response?.data?.message ||
+              'Career path generation is unavailable right now. Please try again later.'
+          );
         },
       }
     );
   };
-
-  const mockMilestones: CareerMilestone[] = [
-    {
-      id: '1',
-      title: 'Product Manager',
-      level: 'Current Role',
-      salary: { min: 100000, max: 130000 },
-      timeline: 'Now',
-      skills: ['Roadmapping', 'User Research', 'Agile', 'Stakeholder Management'],
-      description: 'Your current position managing product development and strategy.',
-      requirements: ['3+ years PM experience', 'Track record of shipping products'],
-      completed: true,
-      current: true,
-    },
-    {
-      id: '2',
-      title: 'Senior Product Manager',
-      level: 'Next Step',
-      salary: { min: 140000, max: 170000 },
-      timeline: '1-2 years',
-      skills: ['Product Strategy', 'Data Analysis', 'Leadership', 'A/B Testing'],
-      description: 'Lead larger product initiatives and mentor junior PMs.',
-      requirements: ['5+ years PM experience', 'Proven business impact', 'Team leadership'],
-      completed: false,
-    },
-    {
-      id: '3',
-      title: 'Product Lead',
-      level: 'Growth Role',
-      salary: { min: 180000, max: 220000 },
-      timeline: '3-4 years',
-      skills: ['Team Management', 'Vision Setting', 'OKRs', 'Executive Communication'],
-      description: 'Manage a team of PMs and own a product area or business line.',
-      requirements: ['7+ years PM experience', 'Team of 3+ direct reports', 'P&L ownership'],
-      completed: false,
-    },
-    {
-      id: '4',
-      title: 'Director of Product',
-      level: 'Leadership',
-      salary: { min: 250000, max: 300000 },
-      timeline: '5-6 years',
-      skills: ['Org Design', 'Budget Management', 'Board Presentation', 'Strategic Planning'],
-      description: 'Lead multiple product teams and shape company strategy.',
-      requirements: ['10+ years experience', 'Managing managers', 'Business unit leadership'],
-      completed: false,
-    },
-    {
-      id: '5',
-      title: 'VP of Product',
-      level: 'Executive',
-      salary: { min: 350000, max: 450000 },
-      timeline: '7-10 years',
-      skills: ['Executive Leadership', 'M&A', 'Investor Relations', 'Company Vision'],
-      description: 'Own the entire product organization and be part of the executive team.',
-      requirements: ['15+ years experience', 'Executive presence', 'Industry recognition'],
-      completed: false,
-    },
-  ];
 
   if (!pathGenerated) {
     return (
@@ -200,6 +167,12 @@ export default function CareerPathPage() {
                 <span>25+</span>
               </div>
             </div>
+
+            {pathError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+                {pathError}
+              </div>
+            )}
 
             <button
               onClick={handleGenerate}
@@ -340,7 +313,13 @@ export default function CareerPathPage() {
 
           {/* Milestones */}
           <div className="space-y-8">
-            {milestones.map((milestone, index) => (
+            {milestones.length === 0 ? (
+              <div className="relative pl-16">
+                <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300">
+                  {pathError || 'No milestones were returned for this path yet.'}
+                </div>
+              </div>
+            ) : milestones.map((milestone, index) => (
               <div key={milestone.id} className="relative pl-16">
                 {/* Timeline Dot */}
                 <div
@@ -398,6 +377,7 @@ export default function CareerPathPage() {
                       </p>
 
                       {/* Skills */}
+                      {milestone.skills.length > 0 && (
                       <div className="mb-4">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Key Skills:
@@ -413,8 +393,10 @@ export default function CareerPathPage() {
                           ))}
                         </div>
                       </div>
+                      )}
 
                       {/* Requirements */}
+                      {milestone.requirements.length > 0 && (
                       <div>
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Requirements:
@@ -431,9 +413,11 @@ export default function CareerPathPage() {
                           ))}
                         </ul>
                       </div>
+                      )}
                     </div>
 
                     {/* Salary */}
+                    {(milestone.salary.min > 0 || milestone.salary.max > 0) && (
                     <div className="md:text-right">
                       <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
                         Salary Range
@@ -442,6 +426,7 @@ export default function CareerPathPage() {
                         {formatSalary(milestone.salary.min)} - {formatSalary(milestone.salary.max)}
                       </p>
                     </div>
+                    )}
                   </div>
 
                   {/* Action Buttons */}

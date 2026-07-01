@@ -14,7 +14,7 @@
  * - Data deletion request
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Shield,
@@ -82,7 +82,7 @@ import {
 // TYPES
 // ============================================
 
-interface PrivacySetting {
+export interface PrivacySetting {
   id: string;
   label: string;
   description: string;
@@ -90,7 +90,7 @@ interface PrivacySetting {
   category: string;
 }
 
-interface ConnectedApp {
+export interface ConnectedApp {
   id: string;
   name: string;
   logo?: string;
@@ -99,148 +99,68 @@ interface ConnectedApp {
   lastUsed?: Date;
 }
 
-interface DataCategory {
+export interface DataCategory {
   id: string;
   name: string;
   description: string;
   dataPoints: string[];
-  size: string;
+  size?: string;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
+interface CookiePreferences {
+  necessary: boolean;
+  analytics: boolean;
+  marketing: boolean;
+  preferences: boolean;
+}
 
-const PROFILE_VISIBILITY_SETTINGS: PrivacySetting[] = [
-  {
-    id: 'show-profile',
-    label: 'Public profile',
-    description: 'Allow anyone to view your basic profile',
-    enabled: true,
-    category: 'profile',
-  },
-  {
-    id: 'show-email',
-    label: 'Show email address',
-    description: 'Display your email on your public profile',
-    enabled: false,
-    category: 'profile',
-  },
-  {
-    id: 'show-location',
-    label: 'Show location',
-    description: 'Display your city/country on your profile',
-    enabled: true,
-    category: 'profile',
-  },
-  {
-    id: 'show-activity',
-    label: 'Show activity status',
-    description: 'Let others see when you&apos;re online',
-    enabled: true,
-    category: 'profile',
-  },
-  {
-    id: 'show-badges',
-    label: 'Show earned badges',
-    description: 'Display your verified credentials on your profile',
-    enabled: true,
-    category: 'profile',
-  },
-];
+interface PrivacyCenterDashboardProps {
+  className?: string;
+  profileVisibilitySettings?: PrivacySetting[];
+  communicationSettings?: PrivacySetting[];
+  connectedApps?: ConnectedApp[];
+  dataCategories?: DataCategory[];
+  privacyScore?: number | null;
+  isLoading?: boolean;
+  error?: string | null;
+  initialCookiePreferences?: Partial<CookiePreferences>;
+  onDisconnectApp?: (appId: string) => void | Promise<void>;
+  onRequestDataDownload?: (categoryIds: string[]) => void | Promise<void>;
+  onDeleteAccount?: () => void | Promise<void>;
+  onSaveCookiePreferences?: (preferences: CookiePreferences) => void | Promise<void>;
+}
 
-const COMMUNICATION_SETTINGS: PrivacySetting[] = [
-  {
-    id: 'email-marketing',
-    label: 'Marketing emails',
-    description: 'Receive updates about new features and promotions',
-    enabled: true,
-    category: 'communication',
-  },
-  {
-    id: 'email-notifications',
-    label: 'Email notifications',
-    description: 'Receive important notifications via email',
-    enabled: true,
-    category: 'communication',
-  },
-  {
-    id: 'push-notifications',
-    label: 'Push notifications',
-    description: 'Receive push notifications on your devices',
-    enabled: true,
-    category: 'communication',
-  },
-  {
-    id: 'sms-notifications',
-    label: 'SMS notifications',
-    description: 'Receive text messages for urgent updates',
-    enabled: false,
-    category: 'communication',
-  },
-];
-
-const CONNECTED_APPS: ConnectedApp[] = [
-  {
-    id: '1',
-    name: 'Google',
-    permissions: ['Sign in', 'Email address'],
-    connectedAt: new Date(2025, 6, 15),
-    lastUsed: new Date(2026, 0, 20),
-  },
-  {
-    id: '2',
-    name: 'LinkedIn',
-    permissions: ['Sign in', 'Profile info', 'Work history'],
-    connectedAt: new Date(2025, 8, 1),
-    lastUsed: new Date(2026, 0, 18),
-  },
-  {
-    id: '3',
-    name: 'GitHub',
-    permissions: ['Sign in', 'Public repositories'],
-    connectedAt: new Date(2025, 10, 10),
-    lastUsed: new Date(2026, 0, 15),
-  },
-];
-
-const DATA_CATEGORIES: DataCategory[] = [
-  {
-    id: 'profile',
-    name: 'Profile Information',
-    description: 'Your name, email, photo, and bio',
-    dataPoints: ['Name', 'Email', 'Phone', 'Profile photo', 'Bio', 'Location'],
-    size: '2.4 MB',
-  },
-  {
-    id: 'activity',
-    name: 'Activity Data',
-    description: 'Your courses, assessments, and learning history',
-    dataPoints: ['Course progress', 'Assessment results', 'Certificates', 'Badges'],
-    size: '15.7 MB',
-  },
-  {
-    id: 'connections',
-    name: 'Connections & Messages',
-    description: 'Your network and communication history',
-    dataPoints: ['Connections', 'Messages', 'Group memberships'],
-    size: '8.3 MB',
-  },
-  {
-    id: 'content',
-    name: 'Your Content',
-    description: 'Posts, comments, and uploads',
-    dataPoints: ['Posts', 'Comments', 'Reactions', 'Uploads'],
-    size: '124.5 MB',
-  },
-];
+const EMPTY_PRIVACY_SETTINGS: PrivacySetting[] = [];
+const EMPTY_CONNECTED_APPS: ConnectedApp[] = [];
+const EMPTY_DATA_CATEGORIES: DataCategory[] = [];
 
 // ============================================
 // COMPONENTS
 // ============================================
 
-function PrivacyScore() {
-  const score = 85; // Calculated based on settings
+function PrivacyScore({ score }: { score?: number | null }) {
+  if (score === null || score === undefined) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
+              <Shield className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-lg">Privacy Score Unavailable</h3>
+              <p className="text-sm text-muted-foreground">
+                Live privacy scoring has not been connected for this account.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const normalizedScore = Math.max(0, Math.min(100, score));
+  const scoreLabel = normalizedScore >= 80 ? 'Good standing' : normalizedScore >= 60 ? 'Needs review' : 'Needs attention';
 
   return (
     <Card>
@@ -261,22 +181,22 @@ function PrivacyScore() {
                 r="42"
                 className="stroke-emerald-500 fill-none"
                 strokeWidth="8"
-                strokeDasharray={`${(score / 100) * 264} 264`}
+                strokeDasharray={`${(normalizedScore / 100) * 264} 264`}
                 strokeLinecap="round"
               />
             </svg>
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-2xl font-bold">{score}</span>
+              <span className="text-2xl font-bold">{normalizedScore}</span>
             </div>
           </div>
           <div>
             <h3 className="font-semibold text-lg">Privacy Score</h3>
             <p className="text-sm text-muted-foreground">
-              Your privacy settings are well configured
+              Calculated from live privacy settings
             </p>
             <div className="flex items-center gap-1 mt-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              <span className="text-sm text-emerald-600 dark:text-emerald-400">Good standing</span>
+              <span className="text-sm text-emerald-600 dark:text-emerald-400">{scoreLabel}</span>
             </div>
           </div>
         </div>
@@ -285,8 +205,12 @@ function PrivacyScore() {
   );
 }
 
-function VisibilitySettings() {
-  const [settings, setSettings] = useState(PROFILE_VISIBILITY_SETTINGS);
+function VisibilitySettings({ initialSettings }: { initialSettings: PrivacySetting[] }) {
+  const [settings, setSettings] = useState(initialSettings);
+
+  useEffect(() => {
+    setSettings(initialSettings);
+  }, [initialSettings]);
 
   const toggleSetting = (id: string) => {
     setSettings(settings.map(s =>
@@ -306,7 +230,11 @@ function VisibilitySettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {settings.map((setting) => (
+        {settings.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Live profile visibility settings are not connected yet.
+          </div>
+        ) : settings.map((setting) => (
           <div key={setting.id} className="flex items-start justify-between gap-4">
             <div>
               <Label htmlFor={setting.id}>{setting.label}</Label>
@@ -324,8 +252,12 @@ function VisibilitySettings() {
   );
 }
 
-function CommunicationSettings() {
-  const [settings, setSettings] = useState(COMMUNICATION_SETTINGS);
+function CommunicationSettings({ initialSettings }: { initialSettings: PrivacySetting[] }) {
+  const [settings, setSettings] = useState(initialSettings);
+
+  useEffect(() => {
+    setSettings(initialSettings);
+  }, [initialSettings]);
 
   const toggleSetting = (id: string) => {
     setSettings(settings.map(s =>
@@ -345,7 +277,11 @@ function CommunicationSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {settings.map((setting) => (
+        {settings.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Live communication preferences are not connected yet.
+          </div>
+        ) : settings.map((setting) => (
           <div key={setting.id} className="flex items-start justify-between gap-4">
             <div>
               <Label htmlFor={setting.id}>{setting.label}</Label>
@@ -359,32 +295,49 @@ function CommunicationSettings() {
           </div>
         ))}
 
-        <Separator />
+        {settings.length > 0 && (
+          <>
+            <Separator />
 
-        <div>
-          <Label>Email frequency</Label>
-          <Select defaultValue="weekly">
-            <SelectTrigger className="mt-2">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="daily">Daily digest</SelectItem>
-              <SelectItem value="weekly">Weekly digest</SelectItem>
-              <SelectItem value="instant">Instant notifications</SelectItem>
-              <SelectItem value="none">None</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+            <div>
+              <Label>Email frequency</Label>
+              <Select>
+                <SelectTrigger className="mt-2">
+                  <SelectValue placeholder="No live preference selected" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily digest</SelectItem>
+                  <SelectItem value="weekly">Weekly digest</SelectItem>
+                  <SelectItem value="instant">Instant notifications</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function ConnectedAppsSection() {
-  const [apps, setApps] = useState(CONNECTED_APPS);
+function ConnectedAppsSection({
+  initialApps,
+  onDisconnectApp,
+}: {
+  initialApps: ConnectedApp[];
+  onDisconnectApp?: (appId: string) => void | Promise<void>;
+}) {
+  const [apps, setApps] = useState(initialApps);
   const [disconnectDialog, setDisconnectDialog] = useState<ConnectedApp | null>(null);
 
-  const handleDisconnect = (appId: string) => {
+  useEffect(() => {
+    setApps(initialApps);
+  }, [initialApps]);
+
+  const handleDisconnect = async (appId: string) => {
+    if (!onDisconnectApp) return;
+
+    await onDisconnectApp(appId);
     setApps(apps.filter(a => a.id !== appId));
     setDisconnectDialog(null);
   };
@@ -420,6 +373,8 @@ function ConnectedAppsSection() {
             <Button
               variant="outline"
               size="sm"
+              disabled={!onDisconnectApp}
+              title={onDisconnectApp ? undefined : 'App disconnection is not connected yet'}
               onClick={() => setDisconnectDialog(app)}
             >
               Disconnect
@@ -461,26 +416,25 @@ function ConnectedAppsSection() {
   );
 }
 
-function DataDownloadSection() {
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+function DataDownloadSection({
+  dataCategories,
+  onRequestDataDownload,
+}: {
+  dataCategories: DataCategory[];
+  onRequestDataDownload?: (categoryIds: string[]) => void | Promise<void>;
+}) {
+  const [isRequesting, setIsRequesting] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
-  const handleDownload = () => {
-    setDownloading(true);
-    // Simulate download progress
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 10;
-      setDownloadProgress(progress);
-      if (progress >= 100) {
-        clearInterval(interval);
-        setTimeout(() => {
-          setDownloading(false);
-          setDownloadProgress(0);
-        }, 1000);
-      }
-    }, 500);
+  const handleDownload = async () => {
+    if (!onRequestDataDownload || selectedCategories.length === 0) return;
+
+    try {
+      setIsRequesting(true);
+      await onRequestDataDownload(selectedCategories);
+    } finally {
+      setIsRequesting(false);
+    }
   };
 
   const toggleCategory = (id: string) => {
@@ -490,11 +444,6 @@ function DataDownloadSection() {
         : [...selectedCategories, id]
     );
   };
-
-  const totalSize = DATA_CATEGORIES
-    .filter(c => selectedCategories.includes(c.id))
-    .reduce((sum, c) => sum + parseFloat(c.size), 0)
-    .toFixed(1);
 
   return (
     <Card>
@@ -509,7 +458,11 @@ function DataDownloadSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-3">
-          {DATA_CATEGORIES.map((category) => (
+          {dataCategories.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              Live export categories are not connected yet.
+            </div>
+          ) : dataCategories.map((category) => (
             <div
               key={category.id}
               className={cn(
@@ -528,7 +481,7 @@ function DataDownloadSection() {
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <h4 className="font-medium">{category.name}</h4>
-                    <Badge variant="secondary">{category.size}</Badge>
+                    <Badge variant="secondary">{category.size ?? 'Size unavailable'}</Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-1">
                     {category.description}
@@ -546,30 +499,21 @@ function DataDownloadSection() {
           ))}
         </div>
 
-        {downloading ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span>Preparing your data...</span>
-              <span>{downloadProgress}%</span>
-            </div>
-            <Progress value={downloadProgress} />
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {selectedCategories.length > 0
-                ? `Selected: ${totalSize} MB`
-                : 'Select data categories to download'}
-            </p>
-            <Button
-              onClick={handleDownload}
-              disabled={selectedCategories.length === 0}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Download
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            {selectedCategories.length > 0
+              ? `${selectedCategories.length} categories selected`
+              : 'Select data categories to download'}
+          </p>
+          <Button
+            onClick={handleDownload}
+            disabled={!onRequestDataDownload || selectedCategories.length === 0 || isRequesting}
+            title={onRequestDataDownload ? undefined : 'Data export requests are not connected yet'}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {isRequesting ? 'Requesting...' : 'Request Export'}
+          </Button>
+        </div>
 
         <Alert>
           <Info className="h-4 w-4" />
@@ -583,9 +527,21 @@ function DataDownloadSection() {
   );
 }
 
-function DeleteAccountSection() {
+function DeleteAccountSection({ onDeleteAccount }: { onDeleteAccount?: () => void | Promise<void> }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!onDeleteAccount || confirmText !== 'DELETE') return;
+
+    try {
+      setIsDeleting(true);
+      await onDeleteAccount();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <Card className="border-destructive/50">
@@ -659,9 +615,11 @@ function DeleteAccountSection() {
               </Button>
               <Button
                 variant="destructive"
-                disabled={confirmText !== 'DELETE'}
+                disabled={!onDeleteAccount || confirmText !== 'DELETE' || isDeleting}
+                title={onDeleteAccount ? undefined : 'Account deletion is not connected yet'}
+                onClick={handleDelete}
               >
-                Permanently Delete
+                {isDeleting ? 'Deleting...' : 'Permanently Delete'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -671,13 +629,40 @@ function DeleteAccountSection() {
   );
 }
 
-function CookieSettings() {
-  const [cookies, setCookies] = useState({
-    necessary: true,
-    analytics: true,
-    marketing: false,
-    preferences: true,
-  });
+function CookieSettings({
+  initialPreferences,
+  onSaveCookiePreferences,
+}: {
+  initialPreferences?: Partial<CookiePreferences>;
+  onSaveCookiePreferences?: (preferences: CookiePreferences) => void | Promise<void>;
+}) {
+  const [cookies, setCookies] = useState<CookiePreferences>(() => ({
+    necessary: initialPreferences?.necessary ?? true,
+    analytics: initialPreferences?.analytics ?? false,
+    marketing: initialPreferences?.marketing ?? false,
+    preferences: initialPreferences?.preferences ?? false,
+  }));
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setCookies({
+      necessary: initialPreferences?.necessary ?? true,
+      analytics: initialPreferences?.analytics ?? false,
+      marketing: initialPreferences?.marketing ?? false,
+      preferences: initialPreferences?.preferences ?? false,
+    });
+  }, [initialPreferences]);
+
+  const handleSave = async () => {
+    if (!onSaveCookiePreferences) return;
+
+    try {
+      setIsSaving(true);
+      await onSaveCookiePreferences(cookies);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <Card>
@@ -739,6 +724,15 @@ function CookieSettings() {
             onCheckedChange={(checked) => setCookies({ ...cookies, preferences: checked })}
           />
         </div>
+
+        <Button
+          variant="outline"
+          onClick={handleSave}
+          disabled={!onSaveCookiePreferences || isSaving}
+          title={onSaveCookiePreferences ? undefined : 'Cookie preference persistence is not connected yet'}
+        >
+          {isSaving ? 'Saving...' : 'Save Preferences'}
+        </Button>
       </CardContent>
     </Card>
   );
@@ -748,7 +742,42 @@ function CookieSettings() {
 // MAIN COMPONENT
 // ============================================
 
-export function PrivacyCenterDashboard({ className }: { className?: string }) {
+export function PrivacyCenterDashboard({
+  className,
+  profileVisibilitySettings = EMPTY_PRIVACY_SETTINGS,
+  communicationSettings = EMPTY_PRIVACY_SETTINGS,
+  connectedApps = EMPTY_CONNECTED_APPS,
+  dataCategories = EMPTY_DATA_CATEGORIES,
+  privacyScore = null,
+  isLoading = false,
+  error = null,
+  initialCookiePreferences,
+  onDisconnectApp,
+  onRequestDataDownload,
+  onDeleteAccount,
+  onSaveCookiePreferences,
+}: PrivacyCenterDashboardProps) {
+  if (isLoading) {
+    return (
+      <div className={cn('container mx-auto py-8', className)}>
+        <div className="rounded-lg border bg-white p-6 text-center text-sm text-muted-foreground shadow-sm dark:bg-zinc-900">
+          Loading privacy center...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={cn('container mx-auto py-8', className)}>
+        <div className="rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+          <h2 className="font-semibold">Privacy center unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn('container mx-auto py-8 space-y-8', className)}>
       {/* Header */}
@@ -763,7 +792,7 @@ export function PrivacyCenterDashboard({ className }: { className?: string }) {
       </div>
 
       {/* Privacy Score */}
-      <PrivacyScore />
+      <PrivacyScore score={privacyScore} />
 
       {/* Main Content */}
       <Tabs defaultValue="visibility" className="space-y-6">
@@ -776,24 +805,30 @@ export function PrivacyCenterDashboard({ className }: { className?: string }) {
         </TabsList>
 
         <TabsContent value="visibility">
-          <VisibilitySettings />
+          <VisibilitySettings initialSettings={profileVisibilitySettings} />
         </TabsContent>
 
         <TabsContent value="communication">
-          <CommunicationSettings />
+          <CommunicationSettings initialSettings={communicationSettings} />
         </TabsContent>
 
         <TabsContent value="apps">
-          <ConnectedAppsSection />
+          <ConnectedAppsSection initialApps={connectedApps} onDisconnectApp={onDisconnectApp} />
         </TabsContent>
 
         <TabsContent value="cookies">
-          <CookieSettings />
+          <CookieSettings
+            initialPreferences={initialCookiePreferences}
+            onSaveCookiePreferences={onSaveCookiePreferences}
+          />
         </TabsContent>
 
         <TabsContent value="data" className="space-y-6">
-          <DataDownloadSection />
-          <DeleteAccountSection />
+          <DataDownloadSection
+            dataCategories={dataCategories}
+            onRequestDataDownload={onRequestDataDownload}
+          />
+          <DeleteAccountSection onDeleteAccount={onDeleteAccount} />
         </TabsContent>
       </Tabs>
 
@@ -801,19 +836,19 @@ export function PrivacyCenterDashboard({ className }: { className?: string }) {
       <Card>
         <CardContent className="py-4">
           <div className="flex flex-wrap gap-4 text-sm">
-            <a href="#" className="flex items-center gap-1 text-primary hover:underline">
+            <a href="/privacy" className="flex items-center gap-1 text-primary hover:underline">
               <FileText className="h-4 w-4" />
               Privacy Policy
             </a>
-            <a href="#" className="flex items-center gap-1 text-primary hover:underline">
+            <a href="/terms" className="flex items-center gap-1 text-primary hover:underline">
               <FileText className="h-4 w-4" />
               Terms of Service
             </a>
-            <a href="#" className="flex items-center gap-1 text-primary hover:underline">
+            <a href="/cookies" className="flex items-center gap-1 text-primary hover:underline">
               <Cookie className="h-4 w-4" />
               Cookie Policy
             </a>
-            <a href="#" className="flex items-center gap-1 text-primary hover:underline">
+            <a href="/settings/privacy" className="flex items-center gap-1 text-primary hover:underline">
               <Globe className="h-4 w-4" />
               GDPR Rights
             </a>

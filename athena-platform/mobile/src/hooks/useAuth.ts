@@ -106,7 +106,7 @@ export function useCurrentUser() {
       const response = await api.get('/auth/me');
       return unwrapApiData(response.data);
     },
-    enabled: isAuthenticated(),
+    enabled: isAuthenticated,
     staleTime: 5 * 60 * 1000, // 5 minutes
     onSuccess: (data) => {
       setUser(data as any);

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ATHENA">
+  <defs>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="55%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#a)"/>
+  <path d="M256 110 L366 380 H320 L296 320 H216 L192 380 H146 L256 110 Z M230 280 H282 L256 214 L230 280 Z" fill="#ffffff"/>
+  <circle cx="200" cy="82" r="10" fill="#ffffff" opacity="0.85"/>
+  <circle cx="256" cy="66" r="12" fill="#ffffff"/>
+  <circle cx="312" cy="82" r="10" fill="#ffffff" opacity="0.85"/>
+</svg>

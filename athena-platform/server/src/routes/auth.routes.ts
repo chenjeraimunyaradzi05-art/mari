@@ -1,8 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Persona } from '@prisma/client';
+import { Persona, Prisma, Region, UserRole, WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { hashPassword, comparePassword } from '../utils/password';
+import { hashPassword, comparePassword, DUMMY_PASSWORD_HASH } from '../utils/password';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -17,19 +17,189 @@ import crypto from 'crypto';
 import { sessionService } from '../services/session.service';
 import { hashOpaqueToken } from '../utils/opaqueToken';
 import { getTrustedOriginFromHeaders, isCorsOriginAllowed } from '../utils/origins';
+import {
+  clearFailedLogins,
+  getLockoutStatus,
+  recordFailedLogin,
+} from '../utils/loginAttempts';
 
 const router = Router();
+
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_MAX_LENGTH = 128;
+const EXTERNAL_AUTH_TOKEN_MAX_LENGTH = 4096;
+const AUTH_CODE_PATTERN = /^[A-Za-z0-9-]+$/;
+const SECURE_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
+const PERSONA_VALUES = [
+  'EARLY_CAREER',
+  'MID_CAREER',
+  'ENTREPRENEUR',
+  'CREATOR',
+  'MENTOR',
+  'EDUCATION_PROVIDER',
+  'EMPLOYER',
+  'REAL_ESTATE',
+  'GOVERNMENT_NGO',
+];
+
+type AuthEmailContext = Record<string, string | undefined>;
+
+type InviteCodeRecord = {
+  id: string;
+  usesCount: number;
+  maxUses: number | null;
+};
 
 // Helper: Generate secure token
 function generateSecureToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
+async function requireAuthEmailDelivery(
+  sendTask: () => Promise<boolean>,
+  failureMessage: string,
+  context: AuthEmailContext
+): Promise<void> {
+  try {
+    const sent = await sendTask();
+    if (!sent) {
+      logger.error('Required auth email was not accepted by the email provider', context);
+      throw new ApiError(503, failureMessage);
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    logger.error('Required auth email failed', { ...context, error });
+    throw new ApiError(503, failureMessage);
+  }
+}
+
+function sendBestEffortAuthEmail(
+  label: string,
+  sendTask: () => Promise<boolean>,
+  context: AuthEmailContext
+): void {
+  sendTask()
+    .then((sent) => {
+      if (!sent) {
+        logger.warn(`${label} was not accepted by the email provider`, context);
+      }
+    })
+    .catch((error) => logger.error(`${label} failed`, { ...context, error }));
+}
+
+function sanitizeName(raw: unknown, fallback = ''): string {
+  const sanitized = String(raw ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F\u200B-\u200F\u2028\u2029\uFEFF]/g, '')
+    .trim()
+    .slice(0, 80);
+
+  return sanitized || fallback;
+}
+
+function normalizeOptionalCode(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const code = raw.trim();
+  return code ? code : null;
+}
+
+function ensureSecureToken(token: unknown, label: string): string {
+  if (typeof token !== 'string' || !SECURE_TOKEN_PATTERN.test(token)) {
+    throw new ApiError(400, `${label} required`);
+  }
+
+  return token;
+}
+
+async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<globalThis.Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findUsableInviteCode(rawInviteCode: unknown): Promise<InviteCodeRecord | null> {
+  const normalizedCode = normalizeOptionalCode(rawInviteCode)?.toUpperCase();
+  if (!normalizedCode) return null;
+
+  const inviteRecord = await prisma.inviteCode.findFirst({
+    where: {
+      code: normalizedCode,
+      isActive: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    select: { id: true, usesCount: true, maxUses: true },
+  });
+
+  if (!inviteRecord) {
+    throw new ApiError(400, 'Invalid or expired invite code');
+  }
+
+  if (inviteRecord.maxUses !== null && inviteRecord.usesCount >= inviteRecord.maxUses) {
+    throw new ApiError(400, 'Invite code has reached its usage limit');
+  }
+
+  return inviteRecord;
+}
+
+async function consumeInviteCode(
+  tx: Prisma.TransactionClient | typeof prisma,
+  inviteRecord: InviteCodeRecord
+): Promise<void> {
+  const result = await tx.inviteCode.updateMany({
+    where: {
+      id: inviteRecord.id,
+      isActive: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      ...(inviteRecord.maxUses !== null
+        ? { usesCount: { lt: inviteRecord.maxUses } }
+        : {}),
+    },
+    data: {
+      usesCount: { increment: 1 },
+      lastUsedAt: new Date(),
+    },
+  });
+
+  if (result.count !== 1) {
+    throw new ApiError(400, 'Invite code is no longer available');
+  }
+
+  if (inviteRecord.maxUses !== null) {
+    await tx.inviteCode.updateMany({
+      where: {
+        id: inviteRecord.id,
+        usesCount: { gte: inviteRecord.maxUses },
+      },
+      data: { isActive: false },
+    });
+  }
+}
+
 function getRefreshTokenCookieBaseOptions() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const raw = String(process.env.COOKIE_SAMESITE || '').toLowerCase();
+  const sameSite: 'lax' | 'strict' | 'none' =
+    raw === 'none' || raw === 'strict' || raw === 'lax'
+      ? (raw as 'lax' | 'strict' | 'none')
+      : isProduction
+        ? 'none' // cross-site Netlify -> API origin requires SameSite=None
+        : 'lax';
+
+  // SameSite=None mandates Secure cookies (browser requirement).
+  const secure = sameSite === 'none' ? true : isProduction;
+
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax' as const,
+    secure,
+    sameSite,
     path: '/',
   };
 }
@@ -44,11 +214,7 @@ function getRefreshTokenCookieOptions(refreshToken: string) {
 }
 
 function getRefreshTokenClearCookieOptions() {
-  return {
-    ...getRefreshTokenCookieBaseOptions(),
-    maxAge: 0,
-    expires: new Date(0),
-  };
+  return getRefreshTokenCookieBaseOptions();
 }
 
 function buildAuthResponseData(
@@ -65,16 +231,24 @@ function buildAuthResponseData(
 }
 
 function enforceTrustedRefreshCookieRequest(req: Request): void {
-  if (!req.cookies?.refreshToken) {
-    return;
-  }
-
   const requestOrigin = getTrustedOriginFromHeaders({
     origin: req.headers.origin,
     referer: req.headers.referer,
   });
 
-  if (!requestOrigin || !isCorsOriginAllowed(requestOrigin)) {
+  // In production, every refresh request must come from a trusted origin —
+  // even when the browser doesn't send the cookie back (helps catch
+  // misconfigured proxies that strip cookies but still POST).
+  if (process.env.NODE_ENV === 'production') {
+    if (!requestOrigin || !isCorsOriginAllowed(requestOrigin)) {
+      throw new ApiError(403, 'Cross-site refresh requests are not allowed');
+    }
+    return;
+  }
+
+  // Outside production: only enforce when we have an origin AND a cookie
+  // (preserves dev tooling like Postman that may not set Origin/Referer).
+  if (req.cookies?.refreshToken && requestOrigin && !isCorsOriginAllowed(requestOrigin)) {
     throw new ApiError(403, 'Cross-site refresh requests are not allowed');
   }
 }
@@ -164,9 +338,11 @@ async function handleVerifyEmailToken(
     ]);
   }
 
-  await sendWelcomeEmail(
-    verificationToken.user.email,
-    verificationToken.user.firstName
+  // Welcome email is best-effort — never block verification on email delivery.
+  sendBestEffortAuthEmail(
+    'Welcome email after email verification',
+    () => sendWelcomeEmail(verificationToken.user.email, verificationToken.user.firstName),
+    { userId: verificationToken.userId, email: verificationToken.user.email }
   );
 
   res.json({
@@ -181,14 +357,21 @@ async function handleVerifyEmailToken(
 router.post(
   '/register',
   [
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail().isLength({ max: 254 }).normalizeEmail(),
     body('password')
-      .isLength({ min: 8 })
-      .withMessage('Password must be at least 8 characters')
+      .isLength({ min: PASSWORD_MIN_LENGTH, max: PASSWORD_MAX_LENGTH })
+      .withMessage(`Password must be between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters`)
       .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/)
       .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
-    body('firstName').notEmpty().trim(),
-    body('lastName').notEmpty().trim(),
+    body('firstName').notEmpty().trim().isLength({ max: 80 }),
+    body('lastName').notEmpty().trim().isLength({ max: 80 }),
+    body('referralCode')
+      .optional({ checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ min: 4, max: 32 })
+      .matches(AUTH_CODE_PATTERN)
+      .withMessage('Referral codes can only include letters, numbers, and dashes'),
     body('womanSelfAttested')
       .isBoolean()
       .custom((value) => value === true)
@@ -197,14 +380,13 @@ router.post(
       .optional({ checkFalsy: true })
       .isString()
       .trim()
-      .isLength({ min: 4, max: 32 }),
+      .isLength({ min: 4, max: 32 })
+      .matches(AUTH_CODE_PATTERN)
+      .withMessage('Invite codes can only include letters, numbers, and dashes'),
     body('persona')
       .optional({ checkFalsy: true })
       .customSanitizer((v) => (typeof v === 'string' ? v.trim().toUpperCase() : v))
-      .isIn([
-        'EARLY_CAREER', 'MID_CAREER', 'ENTREPRENEUR', 'CREATOR',
-        'MENTOR', 'EDUCATION_PROVIDER', 'EMPLOYER', 'REAL_ESTATE', 'GOVERNMENT_NGO'
-      ]),
+      .isIn(PERSONA_VALUES),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -218,7 +400,14 @@ router.post(
         typeof rawPersona === 'string' && rawPersona.trim()
           ? (rawPersona.trim().toUpperCase() as Persona)
           : Persona.EARLY_CAREER;
-      const { email, password, firstName, lastName, referralCode, womanSelfAttested, inviteCode } = req.body;
+      const { email, password, referralCode, womanSelfAttested, inviteCode } = req.body;
+
+      const firstName = sanitizeName(req.body.firstName);
+      const lastName = sanitizeName(req.body.lastName);
+
+      if (!firstName || !lastName) {
+        throw new ApiError(400, 'First name and last name are required');
+      }
 
       if (!womanSelfAttested) {
         throw new ApiError(400, 'Women-only access requires self-attestation');
@@ -238,7 +427,7 @@ router.post(
 
       // Generate unique referral code for the new user
       const generateReferralCode = (): string => {
-        return crypto.randomBytes(4).toString('hex').toUpperCase();
+        return crypto.randomBytes(8).toString('hex').toUpperCase();
       };
       
       let newUserReferralCode = generateReferralCode();
@@ -252,9 +441,10 @@ router.post(
 
       // Validate referral code if provided
       let referrerId: string | null = null;
-      if (referralCode) {
+      const normalizedReferralCode = normalizeOptionalCode(referralCode);
+      if (normalizedReferralCode) {
         const referrer = await prisma.user.findUnique({
-          where: { referralCode: referralCode.toUpperCase() },
+          where: { referralCode: normalizedReferralCode.toUpperCase() },
           select: { id: true },
         });
         if (referrer) {
@@ -262,72 +452,78 @@ router.post(
         }
       }
 
-      let inviteRecord: { id: string; usesCount: number; maxUses: number | null; isActive: boolean } | null = null;
-      if (inviteCode) {
-        const normalizedCode = String(inviteCode).trim().toUpperCase();
-        inviteRecord = await prisma.inviteCode.findFirst({
-          where: {
-            code: normalizedCode,
-            isActive: true,
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-          },
-          select: { id: true, usesCount: true, maxUses: true, isActive: true },
-        });
-
-        if (!inviteRecord) {
-          throw new ApiError(400, 'Invalid or expired invite code');
-        }
-
-        if (inviteRecord.maxUses !== null && inviteRecord.usesCount >= inviteRecord.maxUses) {
-          throw new ApiError(400, 'Invite code has reached its usage limit');
-        }
-      }
+      const inviteRecord = await findUsableInviteCode(inviteCode);
 
       // Create user
-      const user = await prisma.user.create({
-        data: {
-          email,
-          passwordHash,
-          firstName,
-          lastName,
-          displayName: `${firstName} ${lastName}`,
-          persona,
-          womanSelfAttested: true,
-          inviteCodeId: inviteRecord?.id ?? undefined,
-          referralCode: newUserReferralCode,
-          profile: {
-            create: {},
-          },
-          subscription: {
-            create: {
-              tier: 'FREE',
-              status: 'ACTIVE',
-            },
-          },
-        },
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-          persona: true,
-          referralCode: true,
-        },
-      });
+      let user;
+      try {
+        const createUser = async (tx: Prisma.TransactionClient | typeof prisma) => {
+          if (inviteRecord) {
+            await consumeInviteCode(tx, inviteRecord);
+          }
 
-      if (inviteRecord) {
-        const nextUses = inviteRecord.usesCount + 1;
-        await prisma.inviteCode.update({
-          where: { id: inviteRecord.id },
-          data: {
-            usesCount: { increment: 1 },
-            lastUsedAt: new Date(),
-            ...(inviteRecord.maxUses !== null
-              ? { isActive: nextUses < inviteRecord.maxUses }
-              : {}),
-          },
-        });
+          return tx.user.create({
+            data: {
+              email,
+              passwordHash,
+              firstName,
+              lastName,
+              displayName: `${firstName} ${lastName}`,
+              persona,
+              womanSelfAttested: true,
+              inviteCodeId: inviteRecord?.id ?? undefined,
+              referralCode: newUserReferralCode,
+              profile: {
+                create: {},
+              },
+              subscription: {
+                create: {
+                  tier: 'FREE',
+                  status: 'ACTIVE',
+                },
+              },
+            },
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              avatar: true,
+              role: true,
+              persona: true,
+              country: true,
+              preferredLocale: true,
+              preferredCurrency: true,
+              timezone: true,
+              region: true,
+              womanSelfAttested: true,
+              womanVerificationStatus: true,
+              isPublic: true,
+              allowMessages: true,
+              createdAt: true,
+              updatedAt: true,
+              lastLoginAt: true,
+              referralCode: true,
+              referralCredits: true,
+            },
+          });
+        };
+
+        user = inviteRecord
+          ? await prisma.$transaction((tx) => createUser(tx))
+          : await createUser(prisma);
+      } catch (err) {
+        // Race window: two concurrent registrations for the same email both
+        // passed the findUnique check, and one of them lost the unique race.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          const target = Array.isArray(err.meta?.target) ? err.meta.target : [];
+          if (target.includes('email')) {
+            throw new ApiError(409, 'Email already registered');
+          }
+          throw new ApiError(409, 'Could not create a unique account code. Please try again.');
+        }
+        throw err;
       }
 
       // Store verification token
@@ -369,36 +565,19 @@ router.post(
         });
       }
 
-      // Send verification email (async, don't block response)
-      sendVerificationEmail(email, firstName, verificationToken).catch((err) => logger.error('Failed to send verification email', { error: err }));
-
-      // Generate tokens
-      const tokenPayload = {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        persona: user.persona,
-      };
-
-      const accessToken = generateAccessToken(tokenPayload);
-      const refreshToken = generateRefreshToken(tokenPayload);
-
-      // Set refresh token in an HttpOnly secure cookie
-      const cookieOptions = getRefreshTokenCookieOptions(refreshToken);
-      res.cookie('refreshToken', refreshToken, cookieOptions);
-
-      await sessionService.createSession(
-        user.id,
-        accessToken,
-        refreshToken,
-        req.headers['user-agent'],
-        req.ip
+      await requireAuthEmailDelivery(
+        () => sendVerificationEmail(email, firstName, verificationToken),
+        'Verification email could not be sent. Please try resending verification later.',
+        { userId: user.id, email }
       );
 
       res.status(201).json({
         success: true,
         message: 'Registration successful. Please check your email to verify your account.',
-        data: buildAuthResponseData(accessToken, user as Record<string, unknown>),
+        data: {
+          user,
+          verificationRequired: true,
+        },
       });
     } catch (error) {
       next(error);
@@ -409,7 +588,13 @@ router.post(
 // ===========================================
 router.post(
   '/login',
-  [body('email').isEmail().normalizeEmail(), body('password').notEmpty()],
+  [
+    body('email').isEmail().isLength({ max: 254 }).normalizeEmail(),
+    body('password')
+      .isString()
+      .isLength({ min: 1, max: PASSWORD_MAX_LENGTH })
+      .withMessage(`Password must be ${PASSWORD_MAX_LENGTH} characters or fewer`),
+  ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
@@ -418,12 +603,25 @@ router.post(
       }
 
       const { email, password } = req.body;
+      const ipAddress = req.ip;
+
+      // Account lockout — reject early so we don't leak timing info or burn bcrypt cycles
+      // on accounts that have already been flagged. Falls back to allow when Redis is down.
+      const lockStatus = await getLockoutStatus(email, ipAddress);
+      if (lockStatus.locked) {
+        const minutes = Math.max(1, Math.ceil(lockStatus.retryAfterSeconds / 60));
+        throw new ApiError(
+          429,
+          `Too many failed login attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
+        );
+      }
 
       const user = await prisma.user.findUnique({
         where: { email },
         select: {
           id: true,
           email: true,
+          emailVerified: true,
           passwordHash: true,
           firstName: true,
           lastName: true,
@@ -435,17 +633,41 @@ router.post(
           preferredCurrency: true,
           timezone: true,
           region: true,
+          country: true,
+          womanSelfAttested: true,
+          womanVerificationStatus: true,
+          isPublic: true,
+          allowMessages: true,
+          createdAt: true,
+          updatedAt: true,
+          lastLoginAt: true,
+          referralCode: true,
+          referralCredits: true,
         },
       });
 
-      if (!user || !user.passwordHash) {
+      // Always run bcrypt — constant-time defence against email enumeration.
+      const passwordHashToCompare = user?.passwordHash || DUMMY_PASSWORD_HASH;
+      const isValidPassword = await comparePassword(password, passwordHashToCompare);
+
+      if (!user || !user.passwordHash || !isValidPassword) {
+        const nextLockoutStatus = await recordFailedLogin(email, ipAddress);
+        if (nextLockoutStatus.locked) {
+          const minutes = Math.max(1, Math.ceil(nextLockoutStatus.retryAfterSeconds / 60));
+          throw new ApiError(
+            429,
+            `Too many failed login attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
+          );
+        }
         throw new ApiError(401, 'Invalid email or password');
       }
 
-      const isValidPassword = await comparePassword(password, user.passwordHash);
-      if (!isValidPassword) {
-        throw new ApiError(401, 'Invalid email or password');
+      if (!user.emailVerified) {
+        throw new ApiError(403, 'Please verify your email before signing in.');
       }
+
+      // Successful credentials — clear any tracked failures.
+      await clearFailedLogins(email, ipAddress);
 
       await prisma.user.update({
         where: { id: user.id },
@@ -495,21 +717,27 @@ router.post(
 router.post(
   '/google',
   [
-    body('credential').isString().notEmpty(),
+    body('credential').optional().isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
+    body('idToken').optional().isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
+    body().custom((value) => {
+      if (!value?.credential && !value?.idToken) {
+        throw new Error('Google credential required');
+      }
+      return true;
+    }),
     body('mode').optional().isIn(['login', 'register']),
     body('womanSelfAttested').optional().isBoolean(),
     body('inviteCode')
       .optional({ checkFalsy: true })
       .isString()
       .trim()
-      .isLength({ min: 4, max: 32 }),
+      .isLength({ min: 4, max: 32 })
+      .matches(AUTH_CODE_PATTERN)
+      .withMessage('Invite codes can only include letters, numbers, and dashes'),
     body('persona')
       .optional({ checkFalsy: true })
       .customSanitizer((v) => (typeof v === 'string' ? v.trim().toUpperCase() : v))
-      .isIn([
-        'EARLY_CAREER', 'MID_CAREER', 'ENTREPRENEUR', 'CREATOR',
-        'MENTOR', 'EDUCATION_PROVIDER', 'EMPLOYER', 'REAL_ESTATE', 'GOVERNMENT_NGO'
-      ]),
+      .isIn(PERSONA_VALUES),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -523,8 +751,9 @@ router.post(
         throw new ApiError(503, 'Google sign-in is not configured');
       }
 
-      const googleResponse = await fetch(
-        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(String(req.body.credential))}`
+      const googleIdentityToken = String(req.body.credential || req.body.idToken);
+      const googleResponse = await fetchWithTimeout(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(googleIdentityToken)}`
       );
 
       if (!googleResponse.ok) {
@@ -557,9 +786,9 @@ router.post(
       const email = String(googleProfile.email).trim().toLowerCase();
       const profileName = (googleProfile.name || '').trim();
       const nameParts = profileName.split(/\s+/).filter(Boolean);
-      const firstName = (googleProfile.given_name || nameParts[0] || 'ATHENA').trim();
-      const lastName = (googleProfile.family_name || nameParts.slice(1).join(' ') || 'Member').trim();
-      const displayName = profileName || `${firstName} ${lastName}`.trim();
+      const firstName = sanitizeName(googleProfile.given_name || nameParts[0], 'ATHENA');
+      const lastName = sanitizeName(googleProfile.family_name || nameParts.slice(1).join(' '), 'Member');
+      const displayName = sanitizeName(profileName, `${firstName} ${lastName}`.trim());
       const rawPersona = req.body?.persona;
       const persona: Persona =
         typeof rawPersona === 'string' && rawPersona.trim()
@@ -587,8 +816,15 @@ router.post(
         timezone: true,
         region: true,
         referralCode: true,
+        referralCredits: true,
         womanSelfAttested: true,
         womanVerificationStatus: true,
+        country: true,
+        isPublic: true,
+        allowMessages: true,
+        createdAt: true,
+        updatedAt: true,
+        lastLoginAt: true,
       } as const;
 
       const existingEmailUser = await prisma.user.findUnique({
@@ -607,15 +843,22 @@ router.post(
             lastName: string;
             displayName: string | null;
             avatar: string | null;
-            role: unknown;
-            persona: unknown;
+            role: UserRole;
+            persona: Persona;
             preferredLocale: string;
             preferredCurrency: string;
             timezone: string;
-            region: unknown;
+            region: Region;
             referralCode: string | null;
+            referralCredits: number;
             womanSelfAttested: boolean;
-            womanVerificationStatus: unknown;
+            womanVerificationStatus: WomanVerificationStatus;
+            country: string;
+            isPublic: boolean;
+            allowMessages: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            lastLoginAt: Date | null;
           }
         | null = null;
       let created = false;
@@ -657,28 +900,9 @@ router.post(
           throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');
         }
 
-        let inviteRecord: { id: string; usesCount: number; maxUses: number | null; isActive: boolean } | null = null;
-        if (req.body?.inviteCode) {
-          const normalizedCode = String(req.body.inviteCode).trim().toUpperCase();
-          inviteRecord = await prisma.inviteCode.findFirst({
-            where: {
-              code: normalizedCode,
-              isActive: true,
-              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-            },
-            select: { id: true, usesCount: true, maxUses: true, isActive: true },
-          });
+        const inviteRecord = await findUsableInviteCode(req.body?.inviteCode);
 
-          if (!inviteRecord) {
-            throw new ApiError(400, 'Invalid or expired invite code');
-          }
-
-          if (inviteRecord.maxUses !== null && inviteRecord.usesCount >= inviteRecord.maxUses) {
-            throw new ApiError(400, 'Invite code has reached its usage limit');
-          }
-        }
-
-        const generateReferralCode = (): string => crypto.randomBytes(4).toString('hex').toUpperCase();
+        const generateReferralCode = (): string => crypto.randomBytes(8).toString('hex').toUpperCase();
         let referralCode = generateReferralCode();
         let codeAttempts = 0;
         while (codeAttempts < 10) {
@@ -688,32 +912,42 @@ router.post(
           codeAttempts += 1;
         }
 
-        user = await prisma.user.create({
-          data: {
-            email,
-            firstName,
-            lastName,
-            displayName,
-            avatar: googleProfile.picture || undefined,
-            persona,
-            womanSelfAttested: true,
-            emailVerified: true,
-            emailVerifiedAt: new Date(),
-            lastLoginAt: new Date(),
-            inviteCodeId: inviteRecord?.id ?? undefined,
-            referralCode,
-            profile: {
-              create: {},
-            },
-            subscription: {
-              create: {
-                tier: 'FREE',
-                status: 'ACTIVE',
+        const createSocialUser = async (tx: Prisma.TransactionClient | typeof prisma) => {
+          if (inviteRecord) {
+            await consumeInviteCode(tx, inviteRecord);
+          }
+
+          return tx.user.create({
+            data: {
+              email,
+              firstName,
+              lastName,
+              displayName,
+              avatar: googleProfile.picture || undefined,
+              persona,
+              womanSelfAttested: true,
+              emailVerified: true,
+              emailVerifiedAt: new Date(),
+              lastLoginAt: new Date(),
+              inviteCodeId: inviteRecord?.id ?? undefined,
+              referralCode,
+              profile: {
+                create: {},
+              },
+              subscription: {
+                create: {
+                  tier: 'FREE',
+                  status: 'ACTIVE',
+                },
               },
             },
-          },
-          select: selectUser,
-        });
+            select: selectUser,
+          });
+        };
+
+        user = inviteRecord
+          ? await prisma.$transaction((tx) => createSocialUser(tx))
+          : await createSocialUser(prisma);
 
         await prisma.$executeRaw`
           UPDATE "User"
@@ -721,22 +955,10 @@ router.post(
           WHERE "id" = ${user.id}
         `;
 
-        if (inviteRecord) {
-          const nextUses = inviteRecord.usesCount + 1;
-          await prisma.inviteCode.update({
-            where: { id: inviteRecord.id },
-            data: {
-              usesCount: { increment: 1 },
-              lastUsedAt: new Date(),
-              ...(inviteRecord.maxUses !== null
-                ? { isActive: nextUses < inviteRecord.maxUses }
-                : {}),
-            },
-          });
-        }
-
-        sendWelcomeEmail(email, firstName).catch((err) =>
-          logger.error('Failed to send welcome email after Google sign-up', { error: err })
+        sendBestEffortAuthEmail(
+          'Welcome email after Google sign-up',
+          () => sendWelcomeEmail(email, firstName),
+          { userId: user.id, email }
         );
 
         created = true;
@@ -778,14 +1000,306 @@ router.post(
 );
 
 // ===========================================
+// FACEBOOK AUTH
+// ===========================================
+router.post(
+  '/facebook',
+  [
+    body('accessToken').isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
+    body('mode').optional().isIn(['login', 'register']),
+    body('womanSelfAttested').optional().isBoolean(),
+    body('inviteCode')
+      .optional({ checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ min: 4, max: 32 })
+      .matches(AUTH_CODE_PATTERN)
+      .withMessage('Invite codes can only include letters, numbers, and dashes'),
+    body('persona')
+      .optional({ checkFalsy: true })
+      .customSanitizer((v) => (typeof v === 'string' ? v.trim().toUpperCase() : v))
+      .isIn(PERSONA_VALUES),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const facebookAppId = process.env.FACEBOOK_APP_ID?.trim();
+      const facebookAppSecret = process.env.FACEBOOK_APP_SECRET?.trim();
+      if (!facebookAppId || !facebookAppSecret) {
+        throw new ApiError(503, 'Facebook sign-in is not configured');
+      }
+
+      const userAccessToken = String(req.body.accessToken);
+      const appAccessToken = `${facebookAppId}|${facebookAppSecret}`;
+
+      // Verify token with Facebook's debug_token endpoint to confirm it belongs to our app.
+      const debugResp = await fetchWithTimeout(
+        `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(userAccessToken)}&access_token=${encodeURIComponent(appAccessToken)}`
+      );
+      if (!debugResp.ok) {
+        throw new ApiError(401, 'Invalid Facebook credential');
+      }
+      const debugPayload = (await debugResp.json()) as {
+        data?: { app_id?: string; is_valid?: boolean; user_id?: string; expires_at?: number };
+      };
+      const debugData = debugPayload.data;
+      if (!debugData || debugData.is_valid !== true) {
+        throw new ApiError(401, 'Invalid or expired Facebook token');
+      }
+      if (debugData.app_id !== facebookAppId) {
+        throw new ApiError(401, 'Facebook credential app mismatch');
+      }
+      if (!debugData.user_id) {
+        throw new ApiError(401, 'Facebook credential missing user id');
+      }
+
+      // Fetch basic profile.
+      const meResp = await fetchWithTimeout(
+        `https://graph.facebook.com/v19.0/me?fields=${encodeURIComponent('id,email,first_name,last_name,name,picture.type(large)')}&access_token=${encodeURIComponent(userAccessToken)}`
+      );
+      if (!meResp.ok) {
+        throw new ApiError(401, 'Unable to read Facebook profile');
+      }
+      const fbProfile = (await meResp.json()) as {
+        id?: string;
+        email?: string;
+        first_name?: string;
+        last_name?: string;
+        name?: string;
+        picture?: { data?: { url?: string } };
+      };
+
+      if (!fbProfile.id || fbProfile.id !== debugData.user_id) {
+        throw new ApiError(401, 'Facebook profile mismatch');
+      }
+      if (!fbProfile.email) {
+        throw new ApiError(400, 'Facebook account must share an email to join ATHENA');
+      }
+
+      const fbMode = req.body?.mode === 'register' ? 'register' : 'login';
+      const fbEmail = String(fbProfile.email).trim().toLowerCase();
+      const fbProfileName = (fbProfile.name || '').trim();
+      const fbNameParts = fbProfileName.split(/\s+/).filter(Boolean);
+      const fbFirstName = sanitizeName(fbProfile.first_name || fbNameParts[0], 'ATHENA');
+      const fbLastName = sanitizeName(fbProfile.last_name || fbNameParts.slice(1).join(' '), 'Member');
+      const fbDisplayName = sanitizeName(fbProfileName, `${fbFirstName} ${fbLastName}`.trim());
+      const fbAvatarUrl = fbProfile.picture?.data?.url;
+      const fbRawPersona = req.body?.persona;
+      const fbPersona: Persona =
+        typeof fbRawPersona === 'string' && fbRawPersona.trim()
+          ? (fbRawPersona.trim().toUpperCase() as Persona)
+          : Persona.EARLY_CAREER;
+
+      const linkedFbRows = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "User"
+        WHERE "facebookId" = ${fbProfile.id}
+        LIMIT 1
+      `;
+
+      const fbSelectUser = {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        avatar: true,
+        role: true,
+        persona: true,
+        preferredLocale: true,
+        preferredCurrency: true,
+        timezone: true,
+        region: true,
+        referralCode: true,
+        referralCredits: true,
+        womanSelfAttested: true,
+        womanVerificationStatus: true,
+        country: true,
+        isPublic: true,
+        allowMessages: true,
+        createdAt: true,
+        updatedAt: true,
+        lastLoginAt: true,
+      } as const;
+
+      const existingFbEmailUser = await prisma.user.findUnique({
+        where: { email: fbEmail },
+        select: { ...fbSelectUser, emailVerifiedAt: true },
+      });
+
+      let fbUser:
+        | {
+            id: string;
+            email: string;
+            firstName: string;
+            lastName: string;
+            displayName: string | null;
+            avatar: string | null;
+            role: UserRole;
+            persona: Persona;
+            preferredLocale: string;
+            preferredCurrency: string;
+            timezone: string;
+            region: Region;
+            referralCode: string | null;
+            referralCredits: number;
+            womanSelfAttested: boolean;
+            womanVerificationStatus: WomanVerificationStatus;
+            country: string;
+            isPublic: boolean;
+            allowMessages: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            lastLoginAt: Date | null;
+          }
+        | null = null;
+      let fbCreated = false;
+
+      if (linkedFbRows[0]?.id) {
+        fbUser = await prisma.user.update({
+          where: { id: linkedFbRows[0].id },
+          data: {
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
+            lastLoginAt: new Date(),
+            avatar: existingFbEmailUser?.avatar || fbAvatarUrl || undefined,
+          },
+          select: fbSelectUser,
+        });
+      } else if (existingFbEmailUser) {
+        await prisma.$executeRaw`
+          UPDATE "User"
+          SET "facebookId" = ${fbProfile.id}
+          WHERE "id" = ${existingFbEmailUser.id}
+        `;
+
+        fbUser = await prisma.user.update({
+          where: { id: existingFbEmailUser.id },
+          data: {
+            emailVerified: true,
+            emailVerifiedAt: existingFbEmailUser.emailVerifiedAt ?? new Date(),
+            lastLoginAt: new Date(),
+            avatar: existingFbEmailUser.avatar || fbAvatarUrl || undefined,
+          },
+          select: fbSelectUser,
+        });
+      } else {
+        if (fbMode !== 'register') {
+          throw new ApiError(404, 'No ATHENA account exists for this Facebook email. Please create an account first.');
+        }
+
+        if (req.body?.womanSelfAttested !== true) {
+          throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');
+        }
+
+        const fbInviteRecord = await findUsableInviteCode(req.body?.inviteCode);
+
+        const fbGenerateReferralCode = (): string => crypto.randomBytes(8).toString('hex').toUpperCase();
+        let fbReferralCode = fbGenerateReferralCode();
+        let fbCodeAttempts = 0;
+        while (fbCodeAttempts < 10) {
+          const existingCode = await prisma.user.findUnique({ where: { referralCode: fbReferralCode } });
+          if (!existingCode) break;
+          fbReferralCode = fbGenerateReferralCode();
+          fbCodeAttempts += 1;
+        }
+
+        const createFacebookUser = async (tx: Prisma.TransactionClient | typeof prisma) => {
+          if (fbInviteRecord) {
+            await consumeInviteCode(tx, fbInviteRecord);
+          }
+
+          return tx.user.create({
+            data: {
+              email: fbEmail,
+              firstName: fbFirstName,
+              lastName: fbLastName,
+              displayName: fbDisplayName,
+              avatar: fbAvatarUrl || undefined,
+              persona: fbPersona,
+              womanSelfAttested: true,
+              emailVerified: true,
+              emailVerifiedAt: new Date(),
+              lastLoginAt: new Date(),
+              inviteCodeId: fbInviteRecord?.id ?? undefined,
+              referralCode: fbReferralCode,
+              profile: { create: {} },
+              subscription: { create: { tier: 'FREE', status: 'ACTIVE' } },
+            },
+            select: fbSelectUser,
+          });
+        };
+
+        fbUser = fbInviteRecord
+          ? await prisma.$transaction((tx) => createFacebookUser(tx))
+          : await createFacebookUser(prisma);
+
+        await prisma.$executeRaw`
+          UPDATE "User"
+          SET "facebookId" = ${fbProfile.id}
+          WHERE "id" = ${fbUser.id}
+        `;
+
+        sendBestEffortAuthEmail(
+          'Welcome email after Facebook sign-up',
+          () => sendWelcomeEmail(fbEmail, fbFirstName),
+          { userId: fbUser.id, email: fbEmail }
+        );
+
+        fbCreated = true;
+      }
+
+      if (!fbUser) {
+        throw new ApiError(500, 'Facebook sign-in failed');
+      }
+
+      const fbTokenPayload = {
+        userId: fbUser.id,
+        email: fbUser.email,
+        role: fbUser.role,
+        persona: fbUser.persona,
+      };
+
+      const fbAccessTokenJwt = generateAccessToken(fbTokenPayload);
+      const fbRefreshToken = generateRefreshToken(fbTokenPayload);
+      const fbCookieOptions = getRefreshTokenCookieOptions(fbRefreshToken);
+      res.cookie('refreshToken', fbRefreshToken, fbCookieOptions);
+
+      await sessionService.createSession(
+        fbUser.id,
+        fbAccessTokenJwt,
+        fbRefreshToken,
+        req.headers['user-agent'],
+        req.ip
+      );
+
+      res.status(fbCreated ? 201 : 200).json({
+        success: true,
+        message: fbCreated ? 'Facebook sign-up successful' : 'Facebook sign-in successful',
+        data: buildAuthResponseData(fbAccessTokenJwt, fbUser as Record<string, unknown>),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
 // REFRESH TOKEN
 // ===========================================
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
     enforceTrustedRefreshCookieRequest(req);
 
-    // Prefer cookie-based refresh token (HttpOnly). Fallback to request body.
-    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+    // Cookie-only refresh — body-supplied tokens are a CSRF channel.
+    // (Outside production we also accept the body so test tooling keeps working.)
+    const refreshToken =
+      req.cookies?.refreshToken ||
+      (process.env.NODE_ENV !== 'production' ? req.body?.refreshToken : undefined);
 
     if (!refreshToken) {
       throw new ApiError(400, 'Refresh token required');
@@ -798,6 +1312,13 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     const session = await sessionService.findActiveSessionByRefreshToken(refreshToken);
 
     if (!session || session.userId !== decoded.userId) {
+      // If this token previously belonged to a *revoked* session, it's a
+      // replay of a rotated token — treat as compromise and burn every
+      // session for that user.
+      const compromisedUserId = await sessionService.detectRefreshTokenReuse(refreshToken);
+      if (compromisedUserId) {
+        res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+      }
       throw new ApiError(401, 'Invalid refresh token');
     }
 
@@ -853,21 +1374,36 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 // ===========================================
 // LOGOUT
 // ===========================================
-router.post('/logout', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/logout', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
-    const token = authHeader?.split(' ')[1];
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : undefined;
+    const refreshToken = req.cookies?.refreshToken;
 
-    if (token) {
-      // Find and revoke the session
-      const session = await sessionService.findActiveSessionByAccessToken(token);
-
-      if (session) {
-        await sessionService.revokeSession(session.id);
+    // Best-effort revoke — try the access-token session first, then fall
+    // back to the refresh-token session. Either failing should NEVER block
+    // logout (we still clear the cookie below so the user is signed out).
+    try {
+      if (accessToken) {
+        const session = await sessionService.findActiveSessionByAccessToken(accessToken);
+        if (session) await sessionService.revokeSession(session.id);
       }
+    } catch (err) {
+      logger.warn('Logout: access-token session revoke failed', { error: (err as Error)?.message });
     }
 
-    // Clear refresh token cookie
+    try {
+      if (refreshToken) {
+        const session = await sessionService.findActiveSessionByRefreshToken(refreshToken);
+        if (session) await sessionService.revokeSession(session.id);
+      }
+    } catch (err) {
+      logger.warn('Logout: refresh-token session revoke failed', { error: (err as Error)?.message });
+    }
+
+    // Always clear the cookie.
     res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
 
     res.json({
@@ -878,6 +1414,78 @@ router.post('/logout', authenticate, async (req: AuthRequest, res, next) => {
     next(error);
   }
 });
+
+// ===========================================
+// CHANGE PASSWORD
+// ===========================================
+router.post(
+  '/change-password',
+  authenticate,
+  [
+    body('currentPassword')
+      .isString()
+      .isLength({ min: 1, max: PASSWORD_MAX_LENGTH })
+      .withMessage('Current password is required'),
+    body('newPassword')
+      .isLength({ min: PASSWORD_MIN_LENGTH, max: PASSWORD_MAX_LENGTH })
+      .withMessage(`Password must be between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters`)
+      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/)
+      .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { id: true, passwordHash: true },
+      });
+
+      if (!user?.passwordHash) {
+        throw new ApiError(400, 'Password change is unavailable for this account');
+      }
+
+      const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
+      if (!isCurrentPasswordValid) {
+        throw new ApiError(401, 'Current password is incorrect');
+      }
+
+      const nextPasswordHash = await hashPassword(newPassword);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: nextPasswordHash },
+      });
+
+      const authHeader = req.headers.authorization;
+      const accessToken = authHeader?.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
+        : undefined;
+      const currentSession = accessToken
+        ? await sessionService.findActiveSessionByAccessToken(accessToken)
+        : null;
+
+      await prisma.session.updateMany({
+        where: {
+          userId: user.id,
+          revokedAt: null,
+          ...(currentSession ? { id: { not: currentSession.id } } : {}),
+        },
+        data: { revokedAt: new Date() },
+      });
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // ===========================================
 // GET CURRENT USER
@@ -916,7 +1524,10 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
         currentCompany: true,
         yearsExperience: true,
         isPublic: true,
+        allowMessages: true,
         createdAt: true,
+        updatedAt: true,
+        lastLoginAt: true,
         referralCode: true,
         referralCredits: true,
         subscription: {
@@ -948,7 +1559,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.post(
   '/forgot-password',
-  [body('email').isEmail().normalizeEmail()],
+  [body('email').isEmail().isLength({ max: 254 }).normalizeEmail()],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email } = req.body;
@@ -974,8 +1585,17 @@ router.post(
           },
         });
 
-        // Send password reset email
-        await sendPasswordResetEmail(email, user.firstName, resetToken);
+        // Send password reset email. Keep the public response generic to avoid account enumeration.
+        const sent = await sendPasswordResetEmail(email, user.firstName, resetToken);
+        if (!sent) {
+          logger.error('Password reset email was not accepted by the email provider', {
+            userId: user.id,
+            email,
+          });
+          await prisma.verificationToken.deleteMany({
+            where: { userId: user.id, type: 'PASSWORD_RESET' },
+          });
+        }
       }
 
       res.json({
@@ -994,10 +1614,13 @@ router.post(
 router.post(
   '/reset-password',
   [
-    body('token').notEmpty(),
+    body('token')
+      .isString()
+      .matches(SECURE_TOKEN_PATTERN)
+      .withMessage('Invalid or expired reset token'),
     body('password')
-      .isLength({ min: 8 })
-      .withMessage('Password must be at least 8 characters')
+      .isLength({ min: PASSWORD_MIN_LENGTH, max: PASSWORD_MAX_LENGTH })
+      .withMessage(`Password must be between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters`)
       .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/)
       .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
   ],
@@ -1056,11 +1679,10 @@ router.get('/verify-email', async (req: Request, res: Response, next: NextFuncti
   try {
     const { token } = req.query;
 
-    if (!token || typeof token !== 'string') {
-      throw new ApiError(400, 'Verification token required');
-    }
-
-    await handleVerifyEmailToken(token, res);
+    await handleVerifyEmailToken(
+      ensureSecureToken(token, 'Verification token'),
+      res
+    );
   } catch (error) {
     next(error);
   }
@@ -1068,13 +1690,10 @@ router.get('/verify-email', async (req: Request, res: Response, next: NextFuncti
 
 router.post('/verify-email', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const token = req.body?.token;
-
-    if (!token || typeof token !== 'string') {
-      throw new ApiError(400, 'Verification token required');
-    }
-
-    await handleVerifyEmailToken(token, res);
+    await handleVerifyEmailToken(
+      ensureSecureToken(req.body?.token, 'Verification token'),
+      res
+    );
   } catch (error) {
     next(error);
   }
@@ -1083,18 +1702,30 @@ router.post('/verify-email', async (req: Request, res: Response, next: NextFunct
 // ===========================================
 // RESEND VERIFICATION EMAIL
 // ===========================================
-router.post('/resend-verification', authenticate, async (req: AuthRequest, res, next) => {
+router.post(
+  '/resend-verification',
+  [body('email').isEmail().isLength({ max: 254 }).normalizeEmail()],
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-    });
-
-    if (!user) {
-      throw new ApiError(404, 'User not found');
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
     }
 
-    if (user.emailVerified) {
-      throw new ApiError(400, 'Email already verified');
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const successMessage =
+      'If an unverified account exists for that email, a new verification link will be sent.';
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || user.emailVerified) {
+      res.json({
+        success: true,
+        message: successMessage,
+      });
+      return;
     }
 
     // Delete existing verification tokens
@@ -1114,12 +1745,21 @@ router.post('/resend-verification', authenticate, async (req: AuthRequest, res, 
       },
     });
 
-    // Send verification email
-    await sendVerificationEmail(user.email, user.firstName, verificationToken);
+    // Send verification email. Keep the public response generic to avoid account enumeration.
+    const sent = await sendVerificationEmail(user.email, user.firstName, verificationToken);
+    if (!sent) {
+      logger.error('Resent verification email was not accepted by the email provider', {
+        userId: user.id,
+        email: user.email,
+      });
+      await prisma.verificationToken.deleteMany({
+        where: { userId: user.id, type: 'EMAIL_VERIFICATION' },
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Verification email sent successfully',
+      message: successMessage,
     });
   } catch (error) {
     next(error);
@@ -1136,6 +1776,41 @@ router.get('/sessions', authenticate, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       data: sessions,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// REVOKE ACTIVE SESSION
+// ===========================================
+router.delete('/sessions/:sessionId', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const sessionId = req.params.sessionId?.trim();
+    if (!sessionId) {
+      throw new ApiError(400, 'Session id is required');
+    }
+
+    const session = await prisma.session.findFirst({
+      where: {
+        id: sessionId,
+        userId: req.user!.id,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+
+    if (!session) {
+      throw new ApiError(404, 'Session not found');
+    }
+
+    await sessionService.revokeSession(session.id);
+
+    res.json({
+      success: true,
+      message: 'Session revoked',
     });
   } catch (error) {
     next(error);

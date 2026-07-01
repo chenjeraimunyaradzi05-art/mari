@@ -1,23 +1,156 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export function forwardSetCookieHeaders(from: Response, to: NextResponse) {
+type ParsedSetCookie = {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: 'lax' | 'strict' | 'none';
+  maxAge?: number;
+  expires?: Date;
+};
+
+function splitCombinedSetCookieHeader(headerValue: string): string[] {
+  const cookies: string[] = [];
+  let current = '';
+  let inExpires = false;
+
+  for (let i = 0; i < headerValue.length; i += 1) {
+    const char = headerValue[i];
+    const nextChars = headerValue.slice(i, i + 8).toLowerCase();
+
+    if (!inExpires && nextChars === 'expires=') {
+      inExpires = true;
+    }
+
+    if (char === ',' && !inExpires) {
+      cookies.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+
+    if (inExpires && char === ';') {
+      inExpires = false;
+    }
+  }
+
+  if (current.trim()) {
+    cookies.push(current.trim());
+  }
+
+  return cookies;
+}
+
+function parseSetCookie(cookieHeader: string): ParsedSetCookie | null {
+  const parts = cookieHeader.split(';').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) {
+    return null;
+  }
+
+  const [nameValue, ...attributes] = parts;
+  const separatorIndex = nameValue.indexOf('=');
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  const parsed: ParsedSetCookie = {
+    name: nameValue.slice(0, separatorIndex),
+    value: nameValue.slice(separatorIndex + 1),
+  };
+
+  for (const attribute of attributes) {
+    const [rawKey, ...rawValueParts] = attribute.split('=');
+    const key = rawKey.trim().toLowerCase();
+    const value = rawValueParts.join('=').trim();
+
+    switch (key) {
+      case 'domain':
+        parsed.domain = value || undefined;
+        break;
+      case 'path':
+        parsed.path = value || '/';
+        break;
+      case 'httponly':
+        parsed.httpOnly = true;
+        break;
+      case 'secure':
+        parsed.secure = true;
+        break;
+      case 'samesite': {
+        const normalized = value.toLowerCase();
+        if (normalized === 'lax' || normalized === 'strict' || normalized === 'none') {
+          parsed.sameSite = normalized;
+        }
+        break;
+      }
+      case 'max-age': {
+        const maxAge = Number.parseInt(value, 10);
+        if (Number.isFinite(maxAge)) {
+          parsed.maxAge = maxAge;
+        }
+        break;
+      }
+      case 'expires': {
+        const expires = new Date(value);
+        if (!Number.isNaN(expires.getTime())) {
+          parsed.expires = expires;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return parsed;
+}
+
+function getSetCookieHeaders(from: Response): string[] {
   const headersWithGetSetCookie = from.headers as Headers & {
     getSetCookie?: () => string[];
   };
 
   if (typeof headersWithGetSetCookie.getSetCookie === 'function') {
-    const cookies = headersWithGetSetCookie.getSetCookie();
-    for (const cookie of cookies) {
-      to.headers.append('Set-Cookie', cookie);
-    }
+    const cookies = headersWithGetSetCookie.getSetCookie().filter(Boolean);
     if (cookies.length > 0) {
-      return;
+      return cookies;
     }
   }
 
   const fallbackCookie = from.headers.get('set-cookie');
-  if (fallbackCookie) {
-    to.headers.append('Set-Cookie', fallbackCookie);
+  if (!fallbackCookie) {
+    return [];
+  }
+
+  return splitCombinedSetCookieHeader(fallbackCookie).filter(Boolean);
+}
+
+export function forwardSetCookieHeaders(from: Response, to: NextResponse) {
+  const cookieHeaders = getSetCookieHeaders(from);
+
+  for (const cookieHeader of cookieHeaders) {
+    const parsed = parseSetCookie(cookieHeader);
+
+    if (parsed) {
+      to.cookies.set({
+        name: parsed.name,
+        value: parsed.value,
+        domain: parsed.domain,
+        path: parsed.path || '/',
+        httpOnly: parsed.httpOnly,
+        secure: parsed.secure,
+        sameSite: parsed.sameSite,
+        ...(typeof parsed.maxAge === 'number' ? { maxAge: parsed.maxAge } : {}),
+        ...(parsed.expires ? { expires: parsed.expires } : {}),
+      });
+      continue;
+    }
+
+    to.headers.append('Set-Cookie', cookieHeader);
   }
 }
 

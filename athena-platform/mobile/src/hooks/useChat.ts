@@ -228,7 +228,7 @@ export function useMarkAsRead() {
       markAsReadLocal(conversationId, messageIds);
       
       // Emit socket event for real-time sync
-      socketService.emit('messages:read', { conversationId, messageIds });
+      socketService.markMessagesRead(conversationId, messageIds);
     },
   });
 }
@@ -245,7 +245,11 @@ export function useSendTyping() {
       conversationId: string;
       isTyping: boolean;
     }) => {
-      socketService.emit('typing', { conversationId, isTyping });
+      if (isTyping) {
+        socketService.startTyping(conversationId);
+      } else {
+        socketService.stopTyping(conversationId);
+      }
     },
   });
 }

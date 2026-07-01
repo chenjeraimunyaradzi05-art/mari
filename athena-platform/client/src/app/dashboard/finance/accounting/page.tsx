@@ -9,6 +9,7 @@ export default function AccountingPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [journals, setJournals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [accountForm, setAccountForm] = useState({
@@ -77,6 +78,18 @@ export default function AccountingPage() {
     ]);
     setAccounts(accountsRes.data?.data || []);
     setJournals(journalsRes.data?.data || []);
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setFormError(null);
+    try {
+      await reload();
+    } catch (error: any) {
+      setFormError(error?.response?.data?.error || 'Failed to refresh accounting data');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleCreateAccount = async () => {
@@ -711,8 +724,12 @@ export default function AccountingPage() {
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             Trial Balance Snapshot
           </h2>
-          <button className="btn-outline text-sm" disabled>
-            Refresh (coming soon)
+          <button
+            className="btn-outline text-sm"
+            onClick={handleRefresh}
+            disabled={loading || refreshing}
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
         <p className="text-sm text-gray-500 dark:text-gray-400">

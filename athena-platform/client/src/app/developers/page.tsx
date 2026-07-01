@@ -61,7 +61,7 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-white">
       {/* Hero Section */}
       <section className="relative bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -117,7 +117,7 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
           <div className="max-w-4xl mx-auto space-y-6">
             {Object.entries(codeExamples).map(([key, code]) => (
               <div key={key} className="bg-gray-800 rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2 bg-gray-750 border-b border-gray-700">
+                <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900/80 px-4 py-2">
                   <span className="text-sm text-gray-400 capitalize">{key === 'auth' ? 'Authentication' : key === 'jobs' ? 'Search Jobs' : 'AI Analysis'}</span>
                   <button
                     onClick={() => copyToClipboard(code, key)}
@@ -142,7 +142,7 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
         <div className="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
             {endpoints.map((endpoint, i) => (
-              <div key={i} className="flex items-center gap-4 p-4 hover:bg-gray-50 dark:hover:bg-gray-750">
+              <div key={i} className="flex items-center gap-4 p-4 hover:bg-gray-50 dark:hover:bg-gray-700/60">
                 <span className={`px-2 py-1 text-xs font-mono font-bold rounded ${
                   endpoint.method === 'GET' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
                   'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'

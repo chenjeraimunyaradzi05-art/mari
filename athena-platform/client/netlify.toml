@@ -4,8 +4,8 @@
 # Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  command = "npm ci --legacy-peer-deps && npm run build"
-  # publish directory is handled automatically by @netlify/plugin-nextjs
+  command = "node ../../scripts/netlify-build.mjs"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -13,8 +13,12 @@
   NEXT_TELEMETRY_DISABLED = "1"
   # -------------------------------------------------------
   # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
-  #   NEXT_PUBLIC_API_URL = "https://YOUR-SERVER.up.railway.app"
+  #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
   #   NEXT_PUBLIC_APP_URL = "https://YOUR-APP.netlify.app"
+  # Neon support:
+  #   Netlify Database provisions NETLIFY_DB_URL automatically when @netlify/database is installed.
+  #   Existing Neon deployments can provide NEON_DATABASE_URL / NEON_DIRECT_DATABASE_URL.
+  #   The build wrapper maps these values to DATABASE_URL / DIRECT_DATABASE_URL before Next builds.
   # -------------------------------------------------------
 
 # Enable Next.js runtime (handles SSR, ISR, API routes, middleware)
@@ -25,7 +29,7 @@
 # RUNTIME ROUTING
 # ===========================================
 # Keep only the uploads self-rewrite here.
-# Realtime should connect directly to Railway using:
+# Realtime should connect directly to the backend using:
 #   NEXT_PUBLIC_SOCKET_URL
 # falling back to:
 #   NEXT_PUBLIC_API_URL
@@ -41,13 +45,18 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "SAMEORIGIN"
+    X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     X-XSS-Protection = "1; mode=block"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=(self)"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()"
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
     X-DNS-Prefetch-Control = "on"
+    X-Permitted-Cross-Domain-Policies = "none"
+    Cross-Origin-Resource-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "unsafe-none"
 
 # ===========================================
 # CACHING

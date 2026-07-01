@@ -98,8 +98,9 @@ import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
 
 // Import services
 import { initializeSocketHandlers } from './services/socket.service';
-// import { initializeOpenSearch } from './utils/opensearch'; // Disabled - needs OpenSearch
+import { initializeOpenSearch, isOpenSearchEnabled } from './utils/opensearch';
 import { presenceService } from './services/presence.service';
+import { validateWorkerStartupConfiguration } from './utils/worker-config';
 // Workers are dynamically imported to avoid Redis connection when disabled
 // import { startAllWorkers, stopAllWorkers } from './services/workers.service';
 
@@ -119,25 +120,55 @@ app.disable('x-powered-by');
 // Graceful shutdown flag
 let isShuttingDown = false;
 
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+
+async function startBackgroundWorkersIfEnabled(): Promise<void> {
+  if (process.env.ENABLE_WORKERS !== 'true') {
+    return;
+  }
+
+  const workerConfig = validateWorkerStartupConfiguration();
+  if (!workerConfig.ok) {
+    const message = workerConfig.errors.join('; ');
+    logger.error('Worker startup configuration invalid', { message });
+    if (isProductionRuntime) {
+      throw new Error(message);
+    }
+    return;
+  }
+
+  try {
+    const { startAllWorkers } = await import('./services/workers.service');
+    await startAllWorkers();
+  } catch (err) {
+    logger.error('Failed to start background workers', err);
+    if (isProductionRuntime) {
+      throw err;
+    }
+  }
+}
+
+async function initializeSearchIfConfigured(): Promise<void> {
+  if (!isOpenSearchEnabled()) {
+    logger.info('OpenSearch disabled; Prisma search fallback is active');
+    return;
+  }
+
+  const connected = await initializeOpenSearch();
+  if (!connected && isProductionRuntime && process.env.OPENSEARCH_ENABLED === 'true') {
+    throw new Error('OpenSearch is enabled but could not be initialized');
+  }
+}
+
 // ===========================================
 // INITIALIZE SERVICES
 // ===========================================
 
-// Initialize OpenSearch for full-text search (disabled)
-// initializeOpenSearch();
-
 // Note: OpenSearch sync is handled via Prisma middleware extension
 // See: prisma client extensions or use queueSearchIndexing in services
-
-// Initialize background workers (video processing, notifications, etc.)
-// Disabled by default - requires Redis. Set ENABLE_WORKERS=true to enable
-if (process.env.ENABLE_WORKERS === 'true') {
-  import('./services/workers.service').then(({ startAllWorkers }) => {
-    startAllWorkers().catch((err: Error) => {
-      logger.error('Failed to start background workers', err);
-    });
-  });
-}
 
 function logCorsRejection(origin: string | undefined) {
   logger.warn('CORS rejected origin', { origin, allowedOrigins: getAllowedOrigins() });
@@ -227,7 +258,7 @@ const limiter = rateLimit({
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks') || req.path === '/api/auth/refresh',
+  skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
   validate: { xForwardedForHeader: false },
 });
 
@@ -236,6 +267,17 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 10 : 100, // relaxed in dev
   message: { success: false, message: 'Too many login attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+});
+
+// Lenient limiter just for /refresh — high enough not to interfere with
+// active sessions, low enough to cap leaked-token replay loops.
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: process.env.NODE_ENV === 'production' ? 30 : 300,
+  message: { success: false, message: 'Too many refresh requests, please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
@@ -256,7 +298,9 @@ if (rateLimitEnabled) {
   // Apply stricter limits to auth endpoints
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
+  app.use('/api/auth/refresh', refreshLimiter);
   app.use('/api/auth/forgot-password', passwordResetLimiter);
+  app.use('/api/auth/resend-verification', passwordResetLimiter);
   app.use('/api/auth/reset-password', passwordResetLimiter);
 }
 
@@ -495,9 +539,23 @@ initializeSocketHandlers(io);
 io.on('connection', (socket) => {
   logger.debug(`Basic socket connected: ${socket.id}`);
 
-  socket.on('join_room', (userId: string) => {
-    socket.join(userId);
-    logger.debug(`User ${userId} joined their room`);
+  socket.on('join_room', (requestedRoom: string) => {
+    const authenticatedSocket = socket as typeof socket & { userId?: string };
+    const ownUserRoom = authenticatedSocket.userId ? `user:${authenticatedSocket.userId}` : null;
+    const legacyOwnRoom = authenticatedSocket.userId;
+
+    if (!ownUserRoom || (requestedRoom !== ownUserRoom && requestedRoom !== legacyOwnRoom)) {
+      logger.warn('Rejected legacy socket room join', {
+        socketId: socket.id,
+        userId: authenticatedSocket.userId,
+        requestedRoom,
+      });
+      socket.emit('join_room:error', { message: 'Not authorized to join room' });
+      return;
+    }
+
+    socket.join(ownUserRoom);
+    logger.debug(`User ${authenticatedSocket.userId} joined their room`);
   });
 
   socket.on('disconnect', () => {
@@ -520,7 +578,6 @@ export { app, httpServer };
  * Also called directly when this file is the entry point (require.main === module).
  */
 export async function startServer() {
-  // Early log so Railway shows something immediately
   console.log('[ATHENA] Starting server process...');
   console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
 
@@ -536,15 +593,19 @@ export async function startServer() {
   // Initialize Sentry now that secrets/DSN may be available
   initSentry();
 
+  await initializeSearchIfConfigured();
+
   // Ensure DB connection with retry/backoff
   try {
-    await connectWithRetry(6, 500);
+    await connectWithRetry(8, 750);
     logger.info('Database connected');
   } catch (err) {
     logger.error('Failed to connect to database after retries', { err });
     // Don't exit — let the server start so /health and /readyz can report status.
     // /readyz will return 503 if DB is unreachable.
   }
+
+  await startBackgroundWorkersIfEnabled();
 
   const PORT = process.env.PORT || 5000;
 

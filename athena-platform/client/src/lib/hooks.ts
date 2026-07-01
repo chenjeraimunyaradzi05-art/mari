@@ -12,6 +12,7 @@ import {
   mentorApi,
   courseApi,
   subscriptionApi,
+  paymentsApi,
   educationApi,
   formationApi,
   eventsApi,
@@ -71,10 +72,8 @@ export function useAuth() {
   const registerMutation = useMutation({
     mutationFn: authApi.register,
     onSuccess: (response) => {
-      const { user: userData, accessToken } = response.data.data;
-      login(userData, accessToken, '');
       queryClient.invalidateQueries();
-      toast.success('Welcome to ATHENA!');
+      toast.success(response.data.message || 'Registration successful. Please verify your email.');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Registration failed');
@@ -1220,6 +1219,15 @@ export function useCancelSubscription() {
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to cancel subscription');
     },
+  });
+}
+
+export function usePaymentMethods(region?: string) {
+  return useQuery({
+    queryKey: ['payment-methods', region],
+    queryFn: () => paymentsApi.getMethods(region),
+    enabled: Boolean(region),
+    select: (response) => response.data.methods || response.data.data || [],
   });
 }
 

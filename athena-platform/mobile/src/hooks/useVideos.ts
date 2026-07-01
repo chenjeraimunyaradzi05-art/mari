@@ -30,7 +30,7 @@ export const videoKeys = {
 /**
  * Infinite scroll video feed
  */
-export function useVideoFeed(feedType: FeedType = 'for-you') {
+export function useVideoFeed(feedType: FeedType = 'forYou') {
   const { setVideos, appendVideos, setHasMore, setLoading } = useVideoStore();
 
   return useInfiniteQuery({
@@ -95,7 +95,7 @@ export function useUserVideos(userId: string) {
  */
 export function useLikeVideo() {
   const queryClient = useQueryClient();
-  const { likeVideoOptimistic, unlikeVideoOptimistic } = useVideoStore();
+  const { likeVideo: likeVideoOptimistic, unlikeVideo: unlikeVideoOptimistic } = useVideoStore();
 
   return useMutation({
     mutationFn: async ({ videoId, isLiked }: { videoId: string; isLiked: boolean }) => {
@@ -135,7 +135,7 @@ export function useLikeVideo() {
  */
 export function useSaveVideo() {
   const queryClient = useQueryClient();
-  const { saveVideoOptimistic, unsaveVideoOptimistic } = useVideoStore();
+  const { saveVideo: saveVideoOptimistic, unsaveVideo: unsaveVideoOptimistic } = useVideoStore();
 
   return useMutation({
     mutationFn: async ({ videoId, isSaved }: { videoId: string; isSaved: boolean }) => {
@@ -172,7 +172,10 @@ export function useSaveVideo() {
  */
 export function useFollowCreator() {
   const queryClient = useQueryClient();
-  const { followCreatorOptimistic, unfollowCreatorOptimistic } = useVideoStore();
+  const {
+    followUser: followCreatorOptimistic,
+    unfollowUser: unfollowCreatorOptimistic,
+  } = useVideoStore();
 
   return useMutation({
     mutationFn: async ({ userId, isFollowing }: { userId: string; isFollowing: boolean }) => {
@@ -368,7 +371,7 @@ export function useSavedVideos() {
  * Track video view
  */
 export function useTrackView() {
-  const { addToWatchHistory } = useVideoStore();
+  const { addToWatchHistory, updateWatchProgress } = useVideoStore();
 
   return useMutation({
     mutationFn: async ({
@@ -387,7 +390,8 @@ export function useTrackView() {
       return response.data;
     },
     onSuccess: (_, { videoId, watchDuration }) => {
-      addToWatchHistory(videoId, watchDuration);
+      addToWatchHistory(videoId);
+      updateWatchProgress(videoId, watchDuration);
     },
   });
 }

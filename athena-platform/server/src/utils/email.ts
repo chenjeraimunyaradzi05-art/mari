@@ -200,9 +200,15 @@ const templates = {
 // Send email via SendGrid (or log in development)
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   const { to, subject, html, text } = options;
+  const sendgridApiKey = process.env.SENDGRID_API_KEY;
+
+  if (process.env.NODE_ENV === 'production' && !sendgridApiKey) {
+    logger.error('Email sending is not configured in production', { to, subject });
+    return false;
+  }
 
   // In development, just log the email
-  if (process.env.NODE_ENV !== 'production' || !process.env.SENDGRID_API_KEY) {
+  if (process.env.NODE_ENV !== 'production') {
     logger.info(`📧 Email would be sent to: ${to}`);
     logger.info(`   Subject: ${subject}`);
     logger.info(`   (Email sending disabled in development)`);
@@ -212,7 +218,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
     // Dynamic import to avoid issues if package not installed
     const sgMail = await import('@sendgrid/mail');
-    sgMail.default.setApiKey(process.env.SENDGRID_API_KEY);
+    sgMail.default.setApiKey(sendgridApiKey!);
 
     await sgMail.default.send({
       to,

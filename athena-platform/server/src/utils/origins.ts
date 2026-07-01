@@ -1,19 +1,26 @@
 export function getAllowedOrigins(): string[] {
-  const fallbackOrigins = [
-    process.env.CLIENT_URL || 'http://localhost:3000',
+  const configuredOrigins = [
+    process.env.CLIENT_URL,
+    process.env.FRONTEND_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.URL,
+  ].filter((origin): origin is string => Boolean(origin));
+
+  const localDevOrigins = [
+    'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
     'http://127.0.0.1:3002',
-  ];
+  ].filter((origin): origin is string => Boolean(origin));
 
   const envOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const platformOrigins = [process.env.NETLIFY_URL, process.env.RAILWAY_URL].filter(
+  const platformOrigins = [process.env.NETLIFY_URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL].filter(
     (origin): origin is string => Boolean(origin)
   );
 
@@ -21,7 +28,8 @@ export function getAllowedOrigins(): string[] {
     new Set([
       ...envOrigins,
       ...platformOrigins,
-      ...(process.env.NODE_ENV === 'production' ? [] : fallbackOrigins),
+      ...configuredOrigins,
+      ...(process.env.NODE_ENV === 'production' ? [] : localDevOrigins),
     ])
   );
 }
@@ -41,8 +49,7 @@ export function isCorsOriginAllowed(origin: string | undefined): boolean {
   }
 
   if (arePreviewOriginsEnabled()) {
-    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin) ||
-        /^https:\/\/[a-z0-9-]+\.up\.railway\.app$/i.test(origin)) {
+    if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin)) {
       return true;
     }
   }

@@ -13,7 +13,7 @@
  * - Preview and publish
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Plus,
@@ -98,7 +98,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 type LessonType = 'video' | 'article' | 'quiz' | 'assignment' | 'resource';
 type CourseStatus = 'draft' | 'review' | 'published' | 'archived';
 
-interface Lesson {
+export interface Lesson {
   id: string;
   title: string;
   type: LessonType;
@@ -109,7 +109,7 @@ interface Lesson {
   isComplete: boolean;
 }
 
-interface Module {
+export interface Module {
   id: string;
   title: string;
   description?: string;
@@ -117,7 +117,7 @@ interface Module {
   isExpanded: boolean;
 }
 
-interface Course {
+export interface Course {
   id: string;
   title: string;
   subtitle?: string;
@@ -146,136 +146,35 @@ interface Course {
   };
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
+interface CourseBuilderPortalProps {
+  className?: string;
+  initialCourse?: Course | null;
+  isLoading?: boolean;
+  error?: string | null;
+  onSaveCourse?: (course: Course) => void;
+  onPublishCourse?: (course: Course) => void;
+}
 
-const MOCK_COURSE: Course = {
-  id: '1',
-  title: 'Product Management Fundamentals',
-  subtitle: 'Learn to build products users love',
-  description: 'A comprehensive course covering all aspects of modern product management, from discovery to delivery.',
-  category: 'Business',
-  level: 'beginner',
-  language: 'English',
-  status: 'draft',
-  price: 49.99,
-  originalPrice: 99.99,
-  certificate: true,
-  createdAt: new Date(2025, 11, 1),
-  updatedAt: new Date(2026, 0, 18),
-  learningOutcomes: [
-    'Understand product management fundamentals',
-    'Create product roadmaps and strategies',
-    'Conduct user research effectively',
-    'Work with cross-functional teams',
-  ],
-  requirements: [
-    'No prior experience required',
-    'Basic understanding of business concepts',
-  ],
-  targetAudience: [
-    'Aspiring product managers',
-    'Career changers into tech',
-    'Entrepreneurs building products',
-  ],
-  stats: {
-    enrollments: 0,
-    completionRate: 0,
-    avgRating: 0,
-    reviews: 0,
-    revenue: 0,
-  },
-  modules: [
-    {
-      id: 'm1',
-      title: 'Introduction to Product Management',
-      description: 'Learn what product management is and why it matters',
-      isExpanded: true,
-      lessons: [
-        {
-          id: 'l1',
-          title: 'What is Product Management?',
-          type: 'video',
-          duration: 12,
-          isPreview: true,
-          isComplete: true,
-        },
-        {
-          id: 'l2',
-          title: 'The Product Manager Role',
-          type: 'video',
-          duration: 18,
-          isPreview: false,
-          isComplete: true,
-        },
-        {
-          id: 'l3',
-          title: 'Module Quiz',
-          type: 'quiz',
-          duration: 10,
-          isPreview: false,
-          isComplete: false,
-        },
-      ],
-    },
-    {
-      id: 'm2',
-      title: 'Product Discovery',
-      description: 'Learn how to find and validate product ideas',
-      isExpanded: false,
-      lessons: [
-        {
-          id: 'l4',
-          title: 'Understanding User Problems',
-          type: 'video',
-          duration: 15,
-          isPreview: false,
-          isComplete: false,
-        },
-        {
-          id: 'l5',
-          title: 'User Research Methods',
-          type: 'article',
-          duration: 8,
-          isPreview: false,
-          isComplete: false,
-        },
-        {
-          id: 'l6',
-          title: 'Competitive Analysis Template',
-          type: 'resource',
-          isPreview: false,
-          isComplete: false,
-        },
-      ],
-    },
-    {
-      id: 'm3',
-      title: 'Product Strategy',
-      description: 'Define your product vision and roadmap',
-      isExpanded: false,
-      lessons: [
-        {
-          id: 'l7',
-          title: 'Creating a Product Vision',
-          type: 'video',
-          duration: 20,
-          isPreview: false,
-          isComplete: false,
-        },
-        {
-          id: 'l8',
-          title: 'Roadmapping Assignment',
-          type: 'assignment',
-          duration: 30,
-          isPreview: false,
-          isComplete: false,
-        },
-      ],
-    },
-  ],
-};
+function createEmptyCourse(): Course {
+  const now = new Date();
+
+  return {
+    id: 'new-course',
+    title: 'Untitled course',
+    category: 'Uncategorized',
+    level: 'beginner',
+    language: 'English',
+    status: 'draft',
+    modules: [],
+    price: 0,
+    learningOutcomes: [],
+    requirements: [],
+    targetAudience: [],
+    certificate: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 // ============================================
 // CONFIG
@@ -581,7 +480,13 @@ function AddLessonDialog({
   );
 }
 
-function CourseSettingsSheet({ course }: { course: Course }) {
+function CourseSettingsSheet({
+  course,
+  onSave,
+}: {
+  course: Course;
+  onSave?: (course: Course) => void;
+}) {
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -629,6 +534,7 @@ function CourseSettingsSheet({ course }: { course: Course }) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="Uncategorized">Uncategorized</SelectItem>
                     <SelectItem value="Business">Business</SelectItem>
                     <SelectItem value="Technology">Technology</SelectItem>
                     <SelectItem value="Design">Design</SelectItem>
@@ -711,7 +617,12 @@ function CourseSettingsSheet({ course }: { course: Course }) {
             </div>
           </div>
 
-          <Button className="w-full">
+          <Button
+            className="w-full"
+            disabled={!onSave}
+            title={onSave ? undefined : 'Course settings persistence is not connected yet'}
+            onClick={() => onSave?.(course)}
+          >
             <Save className="h-4 w-4 mr-2" />
             Save Settings
           </Button>
@@ -796,7 +707,7 @@ function CoursePreviewCard({ course }: { course: Course }) {
             {[
               { label: 'Course thumbnail uploaded', done: !!course.thumbnail },
               { label: 'At least 1 module', done: course.modules.length > 0 },
-              { label: 'All lessons have content', done: completedLessons === totalLessons },
+              { label: 'All lessons have content', done: totalLessons > 0 && completedLessons === totalLessons },
               { label: 'Course description filled', done: !!course.description },
               { label: 'Pricing set', done: course.price > 0 },
             ].map((item, index) => (
@@ -822,10 +733,21 @@ function CoursePreviewCard({ course }: { course: Course }) {
 // MAIN COMPONENT
 // ============================================
 
-export function CourseBuilderPortal({ className }: { className?: string }) {
-  const [course, setCourse] = useState<Course>(MOCK_COURSE);
+export function CourseBuilderPortal({
+  className,
+  initialCourse = null,
+  isLoading = false,
+  error = null,
+  onSaveCourse,
+  onPublishCourse,
+}: CourseBuilderPortalProps) {
+  const [course, setCourse] = useState<Course>(() => initialCourse ?? createEmptyCourse());
   const [addLessonOpen, setAddLessonOpen] = useState(false);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCourse(initialCourse ?? createEmptyCourse());
+  }, [initialCourse]);
 
   const toggleModule = (moduleId: string) => {
     setCourse(prev => ({
@@ -875,7 +797,48 @@ export function CourseBuilderPortal({ className }: { className?: string }) {
     }));
   };
 
+  const deleteLesson = (moduleId: string, lessonId: string) => {
+    setCourse(prev => ({
+      ...prev,
+      modules: prev.modules.map(module =>
+        module.id === moduleId
+          ? { ...module, lessons: module.lessons.filter(lesson => lesson.id !== lessonId) }
+          : module
+      ),
+      updatedAt: new Date(),
+    }));
+  };
+
+  const deleteModule = (moduleId: string) => {
+    setCourse(prev => ({
+      ...prev,
+      modules: prev.modules.filter(module => module.id !== moduleId),
+      updatedAt: new Date(),
+    }));
+  };
+
   const statusConfig = STATUS_CONFIG[course.status];
+
+  if (isLoading) {
+    return (
+      <div className={cn('min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950', className)}>
+        <div className="rounded-lg border bg-white p-6 text-sm text-muted-foreground shadow-sm dark:bg-zinc-900">
+          Loading course builder...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={cn('min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950', className)}>
+        <div className="max-w-md rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+          <h2 className="font-semibold">Course builder unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('min-h-screen bg-zinc-50 dark:bg-zinc-950', className)}>
@@ -905,12 +868,17 @@ export function CourseBuilderPortal({ className }: { className?: string }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <CourseSettingsSheet course={course} />
+              <CourseSettingsSheet course={course} onSave={onSaveCourse} />
               <Button variant="outline" size="sm">
                 <Eye className="h-4 w-4 mr-2" />
                 Preview
               </Button>
-              <Button size="sm">
+              <Button
+                size="sm"
+                disabled={!onPublishCourse}
+                title={onPublishCourse ? undefined : 'Course publishing is not connected yet'}
+                onClick={() => onPublishCourse?.(course)}
+              >
                 <Send className="h-4 w-4 mr-2" />
                 Publish
               </Button>
@@ -939,10 +907,10 @@ export function CourseBuilderPortal({ className }: { className?: string }) {
                   module={module}
                   onToggle={() => toggleModule(module.id)}
                   onAddLesson={() => handleAddLesson(module.id)}
-                  onEditLesson={(lessonId) => console.log('Edit lesson', lessonId)}
-                  onDeleteLesson={(lessonId) => console.log('Delete lesson', lessonId)}
-                  onEditModule={() => console.log('Edit module', module.id)}
-                  onDeleteModule={() => console.log('Delete module', module.id)}
+                  onEditLesson={() => {}}
+                  onDeleteLesson={(lessonId) => deleteLesson(module.id, lessonId)}
+                  onEditModule={() => {}}
+                  onDeleteModule={() => deleteModule(module.id)}
                 />
               ))}
 
@@ -977,21 +945,19 @@ export function CourseBuilderPortal({ className }: { className?: string }) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <p className="text-sm font-medium mb-1">Add more practice</p>
-                  <p className="text-xs text-muted-foreground">
-                    Consider adding quizzes after each module to reinforce learning
-                  </p>
+                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  Live course analysis is not connected yet. Suggestions will appear here when an
+                  educator recommendation service returns them for this course.
                 </div>
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
-                  <p className="text-sm font-medium mb-1">Great pacing!</p>
-                  <p className="text-xs text-muted-foreground">
-                    Your lesson lengths are optimal for student engagement
-                  </p>
-                </div>
-                <Button variant="outline" className="w-full" size="sm">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  disabled
+                  title="AI course suggestions are not connected yet"
+                >
                   <Sparkles className="h-4 w-4 mr-2" />
-                  Get More Suggestions
+                  Get Suggestions
                 </Button>
               </CardContent>
             </Card>

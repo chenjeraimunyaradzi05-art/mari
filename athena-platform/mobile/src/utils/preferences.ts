@@ -54,15 +54,16 @@ function currencyForRegion(region: string): string {
 
 export function getDeviceDefaults(): LocalPreferences {
   const locales = Localization.getLocales?.() || [];
+  const calendars = Localization.getCalendars?.() || [];
   const primary = locales[0];
-  const countryCode = primary?.regionCode || primary?.countryCode || primary?.languageTag?.split('-')[1];
+  const countryCode = primary?.regionCode || primary?.languageTag?.split('-')[1];
   const preferredLocale = primary?.languageTag || 'en-AU';
   const region = regionFromCountry(countryCode || null);
 
   return {
     preferredLocale,
     preferredCurrency: currencyForRegion(region),
-    timezone: Localization.timezone || 'Australia/Sydney',
+    timezone: calendars[0]?.timeZone || 'Australia/Sydney',
     region,
   };
 }

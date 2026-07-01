@@ -471,14 +471,16 @@ const AUTH_TAG_LENGTH = 16;
 
 function getDVEncryptionKey(): Buffer {
   const keyHex = process.env.DV_ENCRYPTION_KEY;
-  if (!keyHex || keyHex.length < 64) {
+  const isValidKey = Boolean(keyHex && /^[0-9a-fA-F]{64}$/.test(keyHex));
+
+  if (!isValidKey) {
     if (process.env.NODE_ENV === 'production') {
-      // eslint-disable-next-line no-console
-      console.error('[DV-SAFE] WARNING: DV_ENCRYPTION_KEY not set in production — using insecure fallback. Set a 64 hex-char key!');
+      throw new Error('DV_ENCRYPTION_KEY must be a 64-character hex key in production');
     }
     return scryptSync('dev-only-insecure-key', 'athena-dv-salt', 32);
   }
-  return Buffer.from(keyHex, 'hex');
+
+  return Buffer.from(keyHex!, 'hex');
 }
 
 function encryptMessage(content: string): string {
