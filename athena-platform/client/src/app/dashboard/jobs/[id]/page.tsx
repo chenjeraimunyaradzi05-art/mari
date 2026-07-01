@@ -3,13 +3,13 @@
 import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import toast from 'react-hot-toast';
 import {
   MapPin,
   Briefcase,
   Clock,
   DollarSign,
   Building,
-  Calendar,
   Users,
   Bookmark,
   Share2,
@@ -19,21 +19,88 @@ import {
   Globe,
   Heart,
 } from 'lucide-react';
-import { useJob, useApplyToJob, useAuth } from '@/lib/hooks';
-import { formatCurrency, formatRelativeTime, formatDate, cn } from '@/lib/utils';
+import {
+  useJob,
+  useApplyToJob,
+  useSavedJobs,
+  useSaveJob,
+  useUnsaveJob,
+  useJobRecommendations,
+} from '@/lib/hooks';
+import {
+  formatRelativeTime,
+  formatDate,
+  formatSalaryRange,
+  JOB_TYPE_LABELS,
+  cn,
+} from '@/lib/utils';
 import { Loading } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
 import { sanitizeHtml } from '@/lib/utils/sanitize';
 
+type JobLike = Record<string, any>;
+
+function getOrganizationLogo(job: JobLike): string | null {
+  return job.organization?.logo || job.organization?.logoUrl || null;
+}
+
+function getJobLocation(job: JobLike): string {
+  const parts = [job.city, job.state, job.country].filter(Boolean);
+  const location = parts.join(', ') || job.location || '';
+
+  if (job.isRemote || job.remote) {
+    return location ? `Remote (${location})` : 'Remote';
+  }
+
+  return location || 'Location not specified';
+}
+
+function getExperienceLabel(job: JobLike): string {
+  const min = typeof job.experienceMin === 'number' ? job.experienceMin : null;
+  const max = typeof job.experienceMax === 'number' ? job.experienceMax : null;
+
+  if (min !== null && max !== null) return `${min}-${max} years`;
+  if (min !== null) return `${min}+ years`;
+  if (max !== null) return `Up to ${max} years`;
+
+  return job.experienceLevel || 'Not specified';
+}
+
+function getSkillName(skill: any): string {
+  if (typeof skill === 'string') return skill;
+  return skill?.skill?.name || skill?.name || '';
+}
+
 export default function JobDetailPage() {
   const params = useParams();
-  const { user } = useAuth();
   const jobId = params.id as string;
   const { data: job, isLoading, error } = useJob(jobId);
+  const { data: savedJobs } = useSavedJobs();
+  const {
+    data: recommendedJobs,
+    isLoading: isLoadingRecommendations,
+    isError: recommendationsError,
+  } = useJobRecommendations();
   const applyToJob = useApplyToJob();
+  const saveJob = useSaveJob();
+  const unsaveJob = useUnsaveJob();
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
-  const [isSaved, setIsSaved] = useState(false);
+
+  const savedJobIds = useMemo(
+    () => new Set((savedJobs || []).map((savedJob: { id: string }) => savedJob.id)),
+    [savedJobs]
+  );
+  const isSaved = savedJobIds.has(jobId) || Boolean(job?.isSaved);
+  const isSaving = saveJob.isPending || unsaveJob.isPending;
+  const skillNames = useMemo(
+    () => (job?.skills || []).map(getSkillName).filter(Boolean),
+    [job?.skills]
+  );
+  const relatedJobs = useMemo(
+    () => (recommendedJobs || []).filter((recommendation: JobLike) => recommendation.id !== jobId).slice(0, 3),
+    [jobId, recommendedJobs]
+  );
 
   const handleApply = () => {
     applyToJob.mutate(
@@ -45,6 +112,36 @@ export default function JobDetailPage() {
         },
       }
     );
+  };
+
+  const handleSaveToggle = () => {
+    if (isSaving) return;
+    if (isSaved) {
+      unsaveJob.mutate(jobId);
+      return;
+    }
+    saveJob.mutate(jobId);
+  };
+
+  const handleShare = async () => {
+    if (!job || typeof window === 'undefined') return;
+
+    const url = `${window.location.origin}/dashboard/jobs/${jobId}`;
+    const title = `${job.title}${job.organization?.name ? ` at ${job.organization.name}` : ''}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text: title, url });
+        return;
+      }
+
+      await navigator.clipboard.writeText(url);
+      toast.success('Job link copied');
+    } catch (shareError: any) {
+      if (shareError?.name !== 'AbortError') {
+        toast.error('Unable to share job');
+      }
+    }
   };
 
   if (isLoading) {
@@ -86,11 +183,11 @@ export default function JobDetailPage() {
       <div className="card">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="flex items-start space-x-4">
-            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-xl flex items-center justify-center flex-shrink-0">
-              {job.organization?.logoUrl ? (
+            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+              {getOrganizationLogo(job) ? (
                 <img
-                  src={job.organization.logoUrl}
-                  alt={job.organization.name}
+                  src={getOrganizationLogo(job)!}
+                  alt={job.organization?.name || 'Company logo'}
                   className="w-12 h-12 rounded-lg object-contain"
                 />
               ) : (
@@ -101,20 +198,26 @@ export default function JobDetailPage() {
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                 {job.title}
               </h1>
-              <Link
-                href={`/dashboard/organizations/${job.organization?.slug}`}
-                className="text-lg text-primary-600 hover:underline"
-              >
-                {job.organization?.name || 'Unknown Company'}
-              </Link>
+              {job.organization?.slug ? (
+                <Link
+                  href={`/dashboard/organizations/${job.organization.slug}`}
+                  className="text-lg text-primary-600 hover:underline"
+                >
+                  {job.organization?.name || 'Company not listed'}
+                </Link>
+              ) : (
+                <p className="text-lg text-gray-600 dark:text-gray-400">
+                  {job.organization?.name || 'Company not listed'}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500 dark:text-gray-400">
                 <span className="flex items-center">
                   <MapPin className="w-4 h-4 mr-1" />
-                  {job.location}
+                  {getJobLocation(job)}
                 </span>
                 <span className="flex items-center">
                   <Briefcase className="w-4 h-4 mr-1" />
-                  {job.type}
+                  {JOB_TYPE_LABELS[job.type] || job.type}
                 </span>
                 <span className="flex items-center">
                   <Clock className="w-4 h-4 mr-1" />
@@ -126,9 +229,11 @@ export default function JobDetailPage() {
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setIsSaved(!isSaved)}
+              onClick={handleSaveToggle}
+              disabled={isSaving}
+              aria-label={isSaved ? 'Remove from saved jobs' : 'Save job'}
               className={cn(
-                'p-2.5 rounded-lg transition',
+                'p-2.5 rounded-lg transition disabled:opacity-50',
                 isSaved
                   ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30'
                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'
@@ -136,7 +241,11 @@ export default function JobDetailPage() {
             >
               <Bookmark className={cn('w-5 h-5', isSaved && 'fill-current')} />
             </button>
-            <button className="p-2.5 bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg transition">
+            <button
+              onClick={handleShare}
+              aria-label="Share job"
+              className="p-2.5 bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg transition"
+            >
               <Share2 className="w-5 h-5" />
             </button>
             <button
@@ -187,14 +296,14 @@ export default function JobDetailPage() {
           )}
 
           {/* Skills */}
-          {job.skills?.length > 0 && (
+          {skillNames.length > 0 && (
             <div className="card">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Required Skills
               </h2>
               <div className="flex flex-wrap gap-2">
-                {job.skills.map((skill: string, index: number) => (
-                  <Badge key={index} variant="secondary">
+                {skillNames.map((skill: string) => (
+                  <Badge key={skill} variant="secondary">
                     {skill}
                   </Badge>
                 ))}
@@ -234,25 +343,27 @@ export default function JobDetailPage() {
               <div className="flex justify-between">
                 <dt className="text-gray-500 dark:text-gray-400">Salary</dt>
                 <dd className="font-medium text-gray-900 dark:text-white">
-                  {job.salaryMin && job.salaryMax
-                    ? `${formatCurrency(job.salaryMin)} - ${formatCurrency(job.salaryMax)}`
-                    : job.salary || 'Not disclosed'}
+                  {job.showSalary === false
+                    ? 'Not disclosed'
+                    : formatSalaryRange(job.salaryMin ?? undefined, job.salaryMax ?? undefined)}
                 </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500 dark:text-gray-400">Job Type</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">{job.type}</dd>
+                <dd className="font-medium text-gray-900 dark:text-white">
+                  {JOB_TYPE_LABELS[job.type] || job.type}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500 dark:text-gray-400">Experience</dt>
                 <dd className="font-medium text-gray-900 dark:text-white">
-                  {job.experienceLevel || 'Not specified'}
+                  {getExperienceLabel(job)}
                 </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500 dark:text-gray-400">Remote</dt>
                 <dd className="font-medium text-gray-900 dark:text-white">
-                  {job.remote ? 'Yes' : 'No'}
+                  {job.isRemote || job.remote ? 'Yes' : 'No'}
                 </dd>
               </div>
               <div className="flex justify-between">
@@ -276,8 +387,7 @@ export default function JobDetailPage() {
               About {job.organization?.name}
             </h2>
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-              {job.organization?.description ||
-                'A great place to work and grow your career.'}
+              {job.organization?.description || 'Company description not available.'}
             </p>
             <div className="space-y-2 text-sm">
               {job.organization?.industry && (
@@ -305,22 +415,77 @@ export default function JobDetailPage() {
                 </a>
               )}
             </div>
-            <Link
-              href={`/dashboard/organizations/${job.organization?.slug}`}
-              className="btn-outline w-full mt-4 text-center"
-            >
-              View Company Profile
-            </Link>
+            {job.organization?.slug && (
+              <Link
+                href={`/dashboard/organizations/${job.organization.slug}`}
+                className="btn-outline w-full mt-4 text-center"
+              >
+                View Company Profile
+              </Link>
+            )}
           </div>
 
-          {/* Similar Jobs */}
+          {/* Recommended Jobs */}
           <div className="card">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Similar Jobs
+              Recommended Jobs
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-              Similar job recommendations coming soon
-            </p>
+            {isLoadingRecommendations ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="h-20 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />
+                ))}
+              </div>
+            ) : recommendationsError ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                Recommendations could not be loaded.
+              </p>
+            ) : relatedJobs.length > 0 ? (
+              <div className="space-y-3">
+                {relatedJobs.map((recommendation: JobLike) => (
+                  <Link
+                    key={recommendation.id}
+                    href={`/dashboard/jobs/${recommendation.id}`}
+                    className="block rounded-lg border border-gray-200 p-3 transition hover:border-primary-300 hover:bg-primary-50/60 dark:border-gray-800 dark:hover:border-primary-800 dark:hover:bg-primary-950/20"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {recommendation.title}
+                        </h3>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {recommendation.organization?.name || 'Company not listed'}
+                        </p>
+                      </div>
+                      {typeof recommendation.matchScore === 'number' && (
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                          {recommendation.matchScore}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center">
+                        <MapPin className="mr-1 h-3 w-3" />
+                        {getJobLocation(recommendation)}
+                      </span>
+                      <span className="flex items-center">
+                        <DollarSign className="mr-1 h-3 w-3" />
+                        {recommendation.showSalary === false
+                          ? 'Not disclosed'
+                          : formatSalaryRange(
+                              recommendation.salaryMin ?? undefined,
+                              recommendation.salaryMax ?? undefined
+                            )}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                No live recommendations available for this profile yet.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -328,7 +493,7 @@ export default function JobDetailPage() {
       {/* Apply Modal */}
       {showApplyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full p-6">
+          <div className="bg-white dark:bg-gray-900 rounded-lg max-w-lg w-full p-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
               Apply to {job.title}
             </h3>

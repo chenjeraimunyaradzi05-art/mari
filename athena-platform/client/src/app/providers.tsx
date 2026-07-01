@@ -95,7 +95,7 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
 }
 
 function ThemeSync({ children }: { children: React.ReactNode }) {
-  const { theme } = useAppUIStore();
+  const { theme, accentColor, fontSize, compactMode, reduceMotion } = useAppUIStore();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -118,6 +118,11 @@ function ThemeSync({ children }: { children: React.ReactNode }) {
       }
     };
 
+    root.dataset.accentColor = accentColor;
+    root.dataset.fontSize = fontSize;
+    root.classList.toggle('compact', compactMode);
+    root.classList.toggle('reduce-motion', reduceMotion);
+
     applyTheme(theme);
 
     // If following system theme, respond to changes.
@@ -138,7 +143,7 @@ function ThemeSync({ children }: { children: React.ReactNode }) {
     };
     mediaList.addListener?.(onChange);
     return () => mediaList.removeListener?.(onChange);
-  }, [theme]);
+  }, [accentColor, compactMode, fontSize, reduceMotion, theme]);
 
   return <>{children}</>;
 }

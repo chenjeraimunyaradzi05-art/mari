@@ -385,6 +385,10 @@ export const subscriptionApi = {
   cancel: () => api.post('/subscriptions/cancel'),
 };
 
+export const paymentsApi = {
+  getMethods: (region?: string) => api.get('/payments/methods', { params: { region } }),
+};
+
 // ============================================
 // EDUCATION API (Week 10)
 // ============================================

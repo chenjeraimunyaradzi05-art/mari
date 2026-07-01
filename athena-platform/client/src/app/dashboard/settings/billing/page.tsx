@@ -1,7 +1,6 @@
 'use client';
 
 import { Suspense, useState, useEffect } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   CreditCard,
@@ -11,7 +10,14 @@ import {
   Download,
   ExternalLink,
 } from 'lucide-react';
-import { useAuth, useSubscription, useCancelSubscription, useManageBilling, useCreateCheckout } from '@/lib/hooks';
+import {
+  useAuth,
+  useSubscription,
+  useCancelSubscription,
+  useManageBilling,
+  useCreateCheckout,
+  usePaymentMethods,
+} from '@/lib/hooks';
 import { formatCurrency, formatDate, cn, getStoredPreference } from '@/lib/utils';
 
 const plans = [
@@ -62,6 +68,42 @@ const plans = [
   },
 ];
 
+const checkoutTierByPlan: Record<string, string> = {
+  pro: 'PREMIUM_CAREER',
+  enterprise: 'ENTERPRISE',
+};
+
+const paymentRegionCodes: Record<string, string> = {
+  ANZ: 'AU',
+  AU: 'AU',
+  NZ: 'NZ',
+  US: 'US',
+  UK: 'UK',
+  EU: 'EU',
+  SEA: 'SG',
+  SG: 'SG',
+  PH: 'PH',
+  ID: 'ID',
+  MEA: 'KE',
+  KE: 'KE',
+  IN: 'IN',
+  BR: 'BR',
+};
+
+const paymentTypeLabels: Record<string, string> = {
+  card: 'Card',
+  wallet: 'Wallet',
+  bank: 'Bank transfer',
+  mobile_money: 'Mobile money',
+};
+
+type PaymentMethod = {
+  provider: string;
+  type: string;
+  name: string;
+  icon?: string;
+};
+
 export default function BillingSettingsPage() {
   return (
     <Suspense fallback={null}>
@@ -84,12 +126,7 @@ function BillingContent() {
   useEffect(() => {
     const upgradeTier = searchParams.get('upgrade');
     if (upgradeTier && !createCheckout.isPending && !createCheckout.isSuccess) {
-      // Map 'pro' to actual tier enum if needed, or pass 'pro' if backend handles it
-      const tierMap: Record<string, string> = {
-        'pro': 'PREMIUM_CAREER', // Default pro tier
-        // Add others if needed
-      };
-      const tier = tierMap[upgradeTier] || upgradeTier;
+      const tier = checkoutTierByPlan[upgradeTier] || upgradeTier;
       
       createCheckout.mutate(tier);
     }
@@ -99,16 +136,14 @@ function BillingContent() {
     setRegion(user?.region || getStoredPreference('athena.region', 'ANZ'));
   }, [user]);
 
+  const paymentRegion = paymentRegionCodes[region] || region || 'US';
+  const {
+    data: paymentMethods = [],
+    isLoading: paymentMethodsLoading,
+    isError: paymentMethodsError,
+  } = usePaymentMethods(paymentRegion);
   const currentPlan = user?.subscriptionTier || 'FREE';
   const isPremium = currentPlan !== 'FREE';
-  const paymentMethodsByRegion: Record<string, { name: string; description: string }[]> = {
-    JP: [{ name: 'PayPay', description: 'Fast mobile wallet payments in Japan.' }],
-    KR: [{ name: 'KakaoPay', description: 'Local wallet for South Korea.' }],
-    IN: [{ name: 'UPI', description: 'Unified Payments Interface support.' }],
-    BR: [{ name: 'Pix', description: 'Instant bank transfer for Brazil.' }],
-    MX: [{ name: 'OXXO', description: 'Cash payments at OXXO stores.' }],
-    LATAM: [{ name: 'Mercado Pago', description: 'Regional payment gateway for LatAm.' }],
-  };
 
   const handleManageBilling = async () => {
     manageBilling.mutate(undefined, {
@@ -210,35 +245,57 @@ function BillingContent() {
         )}
       </div>
 
-      {/* Local Payment Methods */}
-      {(paymentMethodsByRegion[region] || []).length > 0 && (
-        <div className="card">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Local payment methods
-              </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Available in your region (integration in progress).
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-3">
-            {paymentMethodsByRegion[region].map((method) => (
-              <div
-                key={method.name}
-                className="flex items-start justify-between rounded-lg border border-dashed border-gray-200 dark:border-gray-800 p-4"
-              >
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">{method.name}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{method.description}</p>
-                </div>
-                <span className="text-xs text-gray-400">Placeholder</span>
-              </div>
-            ))}
-          </div>
+      {/* Available Payment Methods */}
+      <div className="card">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Available payment methods
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Methods currently returned by the payment routing service for {paymentRegion}.
+          </p>
         </div>
-      )}
+        <div className="mt-4 grid gap-3">
+          {paymentMethodsLoading ? (
+            [1, 2].map((item) => (
+              <div
+                key={item}
+                className="h-20 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse"
+              />
+            ))
+          ) : paymentMethodsError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+              Payment methods could not be loaded.
+            </div>
+          ) : paymentMethods.length > 0 ? (
+            paymentMethods.map((method: PaymentMethod) => (
+              <div
+                key={`${method.provider}-${method.type}`}
+                className="flex items-start justify-between rounded-lg border border-gray-200 dark:border-gray-800 p-4"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-gray-100 p-2 dark:bg-gray-800">
+                    <CreditCard className="h-5 w-5 text-gray-500" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{method.name}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {paymentTypeLabels[method.type] || method.type}
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                  Available
+                </span>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              No payment methods are configured for this region.
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Available Plans */}
       <div>
@@ -310,15 +367,16 @@ function BillingContent() {
                     Downgrade
                   </button>
                 ) : (
-                  <Link
-                    href={`/api/subscription/checkout?plan=${plan.id}`}
+                  <button
+                    onClick={() => createCheckout.mutate(checkoutTierByPlan[plan.id] || plan.id)}
+                    disabled={createCheckout.isPending}
                     className={cn(
-                      'w-full py-2.5 text-center block',
+                      'w-full py-2.5 text-center disabled:opacity-50',
                       plan.popular ? 'btn-primary' : 'btn-outline'
                     )}
                   >
-                    Upgrade
-                  </Link>
+                    {createCheckout.isPending ? 'Opening checkout...' : 'Upgrade'}
+                  </button>
                 )}
               </div>
             );
@@ -352,165 +410,6 @@ function BillingContent() {
             >
               Update
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Regional Payment Options (Phase 6 placeholders) */}
-      {region === 'MEA' && (
-        <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-            Regional payment options (coming soon)
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            We’re preparing local payment methods to improve access across MEA markets.
-          </p>
-          <div className="space-y-3">
-            {[
-              {
-                name: 'M-Pesa',
-                availability: 'Kenya, Tanzania',
-                status: 'Coming soon',
-              },
-              {
-                name: 'Paystack',
-                availability: 'Nigeria, Ghana',
-                status: 'Coming soon',
-              },
-              {
-                name: 'Bank transfer',
-                availability: 'UAE, Saudi Arabia, Egypt',
-                status: 'Planned',
-              },
-            ].map((option) => (
-              <div
-                key={option.name}
-                className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-3"
-              >
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {option.name}
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {option.availability}
-                  </p>
-                </div>
-                <span className="text-xs font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  {option.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* SEA Payment Options (Phase 5 placeholders) */}
-      {region === 'SEA' && (
-        <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-            Regional payment options (coming soon)
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            We’re preparing local payment methods to improve access across SEA markets.
-          </p>
-          <div className="space-y-3">
-            {[
-              {
-                name: 'GCash',
-                availability: 'Philippines',
-                status: 'Coming soon',
-              },
-              {
-                name: 'GrabPay',
-                availability: 'Singapore, Malaysia, Philippines',
-                status: 'Coming soon',
-              },
-              {
-                name: 'OVO',
-                availability: 'Indonesia',
-                status: 'Planned',
-              },
-            ].map((option) => (
-              <div
-                key={option.name}
-                className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-3"
-              >
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {option.name}
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {option.availability}
-                  </p>
-                </div>
-                <span className="text-xs font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  {option.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Rest of World Payment Options (Phase 7 placeholders) */}
-      {region === 'ROW' && (
-        <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-            Regional payment options (coming soon)
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            We’re preparing local payment methods for Phase 7 markets.
-          </p>
-          <div className="space-y-3">
-            {[
-              {
-                name: 'PayPay',
-                availability: 'Japan',
-                status: 'Planned',
-              },
-              {
-                name: 'KakaoPay',
-                availability: 'South Korea',
-                status: 'Planned',
-              },
-              {
-                name: 'UPI',
-                availability: 'India',
-                status: 'Planned',
-              },
-              {
-                name: 'Pix',
-                availability: 'Brazil',
-                status: 'Planned',
-              },
-              {
-                name: 'OXXO',
-                availability: 'Mexico',
-                status: 'Planned',
-              },
-              {
-                name: 'Mercado Pago',
-                availability: 'Latin America',
-                status: 'Planned',
-              },
-            ].map((option) => (
-              <div
-                key={option.name}
-                className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-3"
-              >
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {option.name}
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {option.availability}
-                  </p>
-                </div>
-                <span className="text-xs font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  {option.status}
-                </span>
-              </div>
-            ))}
           </div>
         </div>
       )}

@@ -55,39 +55,68 @@ export const viewport: Viewport = {
 const themeBootScript = `
   (function() {
     const storageKeys = ['athena-ui', 'athena-ui-store', 'athena-theme'];
+    const allowedAccentColors = ['rose', 'purple', 'blue', 'green', 'pink', 'orange', 'teal'];
+    const allowedFontSizes = ['small', 'medium', 'large'];
+    const state = {
+      theme: 'system',
+      accentColor: 'rose',
+      fontSize: 'medium',
+      compactMode: false,
+      reduceMotion: false
+    };
 
-    const readStoredTheme = () => {
+    const readStoredUIState = () => {
       for (const key of storageKeys) {
         try {
           const raw = window.localStorage.getItem(key);
           if (!raw) continue;
 
           if (raw === 'light' || raw === 'dark' || raw === 'system') {
-            return raw;
+            state.theme = raw;
+            continue;
           }
 
           const parsed = JSON.parse(raw);
-          const theme = parsed && typeof parsed === 'object'
-            ? (parsed.state && parsed.state.theme) || parsed.theme
+          const stored = parsed && typeof parsed === 'object'
+            ? (parsed.state && typeof parsed.state === 'object' ? parsed.state : parsed)
             : null;
 
+          const theme = stored ? stored.theme : null;
           if (theme === 'light' || theme === 'dark' || theme === 'system') {
-            return theme;
+            state.theme = theme;
+          }
+
+          if (key === 'athena-ui' && stored) {
+            if (allowedAccentColors.indexOf(stored.accentColor) >= 0) {
+              state.accentColor = stored.accentColor;
+            }
+            if (allowedFontSizes.indexOf(stored.fontSize) >= 0) {
+              state.fontSize = stored.fontSize;
+            }
+            if (typeof stored.compactMode === 'boolean') {
+              state.compactMode = stored.compactMode;
+            }
+            if (typeof stored.reduceMotion === 'boolean') {
+              state.reduceMotion = stored.reduceMotion;
+            }
           }
         } catch (_) {}
       }
-
-      return 'system';
     };
 
-    const storedTheme = readStoredTheme();
-    const resolvedTheme = storedTheme === 'system'
+    readStoredUIState();
+
+    const resolvedTheme = state.theme === 'system'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : storedTheme;
+      : state.theme;
 
     const root = document.documentElement;
     root.classList.toggle('dark', resolvedTheme === 'dark');
+    root.classList.toggle('compact', state.compactMode);
+    root.classList.toggle('reduce-motion', state.reduceMotion);
     root.dataset.theme = resolvedTheme;
+    root.dataset.accentColor = state.accentColor;
+    root.dataset.fontSize = state.fontSize;
     root.style.colorScheme = resolvedTheme;
   })();
 `;

@@ -211,6 +211,22 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
   - `client/src/app/dashboard/settings/notifications/page.tsx` now renders the persisted notification preference object from `/api/notifications/preferences`, saves the backend-supported `email`/`push`/`inApp` shape, and removes unsaved digest toggles plus local-only preference defaults.
 - Re-verified after the learning/notification cleanup:
   - Client production build passes with `npm run build`.
+- Continued dashboard settings cleanup:
+  - `client/src/app/dashboard/settings/appearance/page.tsx` no longer uses decorative local-only accent, font-size, compact-mode, or reduced-motion controls. Appearance preferences now persist through the existing UI store, apply before first paint via the root boot script, and drive CSS variables/classes used by the dashboard UI; the preview also uses the current account identity instead of a hardcoded sample user.
+- Re-verified after the appearance settings cleanup:
+  - Client production build passes with `npm run build`.
+- Continued job detail cleanup:
+  - `client/src/app/dashboard/jobs/[id]/page.tsx` no longer uses a local-only saved-job toggle or static "similar jobs coming soon" placeholder. The save button now uses the existing saved-job mutations, share copies or invokes native share, backend `logo`/`isRemote`/job-skill fields are normalized for display, and the sidebar shows live personalized job recommendations from `/api/jobs/recommendations/for-me`.
+- Re-verified after the job detail cleanup:
+  - Client production build passes with `npm run build`.
+- Continued billing settings cleanup:
+  - `client/src/app/dashboard/settings/billing/page.tsx` no longer renders hardcoded regional payment "coming soon" sections or a dead checkout link. Billing now reads available payment methods from `/api/payments/methods` through `paymentsApi`/`usePaymentMethods`, maps the user's launch region to the payment routing region, and opens checkout through the existing subscription mutation.
+- Re-verified after the billing settings cleanup:
+  - Client production build passes with `npm run build`.
+- Continued finance/accounting cleanup:
+  - `client/src/app/dashboard/finance/accounting/page.tsx` no longer shows a disabled "Refresh (coming soon)" action. The trial-balance card now refreshes live accounting accounts and journal entries through the existing accounting endpoints, with loading and error handling.
+- Re-verified after the finance/accounting cleanup:
+  - Client production build passes with `npm run build`.
 
 ## Launch Readiness Checklist
 
@@ -256,6 +272,10 @@ Runtime legal markdown in `athena-platform/client/src/content/legal/*.md` is int
 - [x] Add CI validation gates for launch readiness and auth/session route coverage.
 - [x] Remove hardcoded learning catalog/course-progress stats, ratings, durations, lessons, streaks, and certificate fallbacks.
 - [x] Align notification settings with persisted backend preferences instead of local-only defaults.
+- [x] Persist and apply appearance settings instead of local-only display controls.
+- [x] Live-wire job detail save/share controls and recommendation sidebar.
+- [x] Replace billing regional payment placeholders with live payment-method availability and mutation-backed checkout.
+- [x] Replace accounting refresh placeholder with a real reload action.
 - [ ] Provision Redis and provider URLs, then enable workers intentionally in production.
 - [x] De-scope livestream from launch by keeping routes unmounted until schema and streaming infrastructure are implemented.
 

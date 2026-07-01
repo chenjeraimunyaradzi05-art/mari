@@ -12,6 +12,7 @@ import {
   mentorApi,
   courseApi,
   subscriptionApi,
+  paymentsApi,
   educationApi,
   formationApi,
   eventsApi,
@@ -1218,6 +1219,15 @@ export function useCancelSubscription() {
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to cancel subscription');
     },
+  });
+}
+
+export function usePaymentMethods(region?: string) {
+  return useQuery({
+    queryKey: ['payment-methods', region],
+    queryFn: () => paymentsApi.getMethods(region),
+    enabled: Boolean(region),
+    select: (response) => response.data.methods || response.data.data || [],
   });
 }
 
