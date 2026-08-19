@@ -1,11 +1,21 @@
-<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ATHENA">
   <defs>
-    <linearGradient id="athenaGradient" x1="14" y1="10" x2="106" y2="110" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#6366F1"/>
-      <stop offset="0.55" stop-color="#8B5CF6"/>
-      <stop offset="1" stop-color="#EC4899"/>
+    <linearGradient id="athenaRose" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f43f5e"/>
+      <stop offset="0.55" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="athenaShine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect x="10" y="10" width="100" height="100" rx="24" fill="url(#athenaGradient)"/>
-  <path d="M60 32L83 88H72.5L67.5 76H52.5L47.5 88H37L60 32ZM55.5 66H64.5L60 54L55.5 66Z" fill="white"/>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#athenaRose)"/>
+  <rect x="8" y="8" width="112" height="56" rx="28" fill="url(#athenaShine)"/>
+  <!-- Stylized A with crown accent -->
+  <path d="M64 30 L90 94 H79.5 L74 80 H54 L48.5 94 H38 L64 30 Z M57.5 70 H70.5 L64 54 L57.5 70 Z" fill="#ffffff"/>
+  <!-- Subtle crown dots above -->
+  <circle cx="52" cy="24" r="2.4" fill="#ffffff" opacity="0.85"/>
+  <circle cx="64" cy="20" r="2.8" fill="#ffffff"/>
+  <circle cx="76" cy="24" r="2.4" fill="#ffffff" opacity="0.85"/>
 </svg>

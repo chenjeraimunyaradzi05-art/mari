@@ -87,6 +87,19 @@ const FILE_CONFIGS = {
 
 type FileConfig = (typeof FILE_CONFIGS)[keyof typeof FILE_CONFIGS];
 
+const CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm': '.webm',
+  'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+};
+
 const LOCAL_UPLOADS_ROOT = path.resolve(process.cwd(), 'uploads');
 const VALID_UPLOAD_FOLDERS = new Set(
   Object.values(FILE_CONFIGS).map((config) => config.folder)
@@ -107,6 +120,10 @@ const upload = multer({
 
 function hasS3Credentials(): boolean {
   return !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
+}
+
+function getSafeExtensionForContentType(contentType: string): string {
+  return CONTENT_TYPE_EXTENSIONS[contentType] || '.bin';
 }
 
 function normalizeUploadKey(key: string): string {
@@ -225,7 +242,7 @@ router.post('/presigned-url', authenticate, async (req: AuthRequest, res, next) 
       throw new ApiError(400, `Invalid content type for ${fileType}`);
     }
 
-    const fileExtension = path.extname(fileName);
+    const fileExtension = getSafeExtensionForContentType(contentType);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
     const command = new PutObjectCommand({
@@ -323,7 +340,7 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
     const fileExtension =
       contentType === 'image/webp'
         ? '.webp'
-        : path.extname(file.originalname);
+        : getSafeExtensionForContentType(contentType);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
     let publicUrl: string;
@@ -532,7 +549,7 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
       );
     }
 
-    const fileExtension = path.extname(file.originalname);
+    const fileExtension = getSafeExtensionForContentType(file.mimetype);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
     let publicUrl: string;
@@ -619,7 +636,7 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
       const fileExtension =
         contentType === 'image/webp'
           ? '.webp'
-          : path.extname(file.originalname);
+          : getSafeExtensionForContentType(contentType);
       const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
       let fileUrl: string;

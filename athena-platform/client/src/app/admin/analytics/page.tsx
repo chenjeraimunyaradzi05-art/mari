@@ -3,14 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { 
-  ChevronLeft, 
+import {
+  Briefcase,
+  ChevronLeft,
+  DollarSign,
+  Heart,
+  MessageSquare,
   TrendingUp,
   Users,
-  MessageSquare,
-  Briefcase,
-  Heart,
-  DollarSign,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -55,12 +55,16 @@ export default function AdminAnalyticsPage() {
   });
 
   const isLoading = engagementLoading || revenueLoading;
+  const activeUsers = engagement?.metrics.activeUsers || 0;
+  const newPosts = engagement?.metrics.newPosts || 0;
+  const newComments = engagement?.metrics.newComments || 0;
+  const newLikes = engagement?.metrics.newLikes || 0;
 
   const engagementCards = [
-    { label: 'Active Users', value: engagement?.metrics.activeUsers || 0, icon: Users, color: 'text-blue-600' },
-    { label: 'New Posts', value: engagement?.metrics.newPosts || 0, icon: MessageSquare, color: 'text-purple-600' },
-    { label: 'New Comments', value: engagement?.metrics.newComments || 0, icon: MessageSquare, color: 'text-green-600' },
-    { label: 'New Likes', value: engagement?.metrics.newLikes || 0, icon: Heart, color: 'text-pink-600' },
+    { label: 'Active Users', value: activeUsers, icon: Users, color: 'text-blue-600' },
+    { label: 'New Posts', value: newPosts, icon: MessageSquare, color: 'text-purple-600' },
+    { label: 'New Comments', value: newComments, icon: MessageSquare, color: 'text-green-600' },
+    { label: 'New Likes', value: newLikes, icon: Heart, color: 'text-pink-600' },
     { label: 'Job Applications', value: engagement?.metrics.newApplications || 0, icon: Briefcase, color: 'text-orange-600' },
   ];
 
@@ -83,11 +87,10 @@ export default function AdminAnalyticsPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" />
           </div>
         ) : (
           <>
-            {/* Revenue Section */}
             <section className="mb-8">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                 <DollarSign className="h-5 w-5" />
@@ -123,7 +126,6 @@ export default function AdminAnalyticsPage() {
               </div>
             </section>
 
-            {/* Engagement Section */}
             <section>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                 <TrendingUp className="h-5 w-5" />
@@ -135,7 +137,7 @@ export default function AdminAnalyticsPage() {
                 </label>
                 <select
                   value={days}
-                  onChange={(e) => setDays(Number(e.target.value))}
+                  onChange={(event) => setDays(Number(event.target.value))}
                   className="input w-full"
                 >
                   <option value={7}>Last 7 days</option>
@@ -159,7 +161,6 @@ export default function AdminAnalyticsPage() {
               </div>
             </section>
 
-            {/* Engagement Rate Calculations */}
             <section className="mt-8">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Key Ratios
@@ -168,43 +169,23 @@ export default function AdminAnalyticsPage() {
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
                   <p className="text-sm text-gray-500 mb-1">Posts per Active User</p>
                   <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {engagement?.metrics.activeUsers 
-                      ? (engagement.metrics.newPosts / engagement.metrics.activeUsers).toFixed(2)
-                      : '0'}
+                    {activeUsers ? (newPosts / activeUsers).toFixed(2) : '0'}
                   </p>
                 </div>
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
                   <p className="text-sm text-gray-500 mb-1">Comments per Post</p>
                   <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {engagement?.metrics.newPosts 
-                      ? (engagement.metrics.newComments / engagement.metrics.newPosts).toFixed(2)
-                      : '0'}
+                    {newPosts ? (newComments / newPosts).toFixed(2) : '0'}
                   </p>
                 </div>
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
                   <p className="text-sm text-gray-500 mb-1">Likes per Post</p>
                   <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {engagement?.metrics.newPosts 
-                      ? (engagement.metrics.newLikes / engagement.metrics.newPosts).toFixed(2)
-                      : '0'}
+                    {newPosts ? (newLikes / newPosts).toFixed(2) : '0'}
                   </p>
                 </div>
               </div>
             </section>
-
-            {/* Future Enhancements Note */}
-            <div className="mt-8 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-6">
-              <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">
-                Coming Soon
-              </h3>
-              <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-                <li>• User growth charts over time</li>
-                <li>• Revenue trend visualization</li>
-                <li>• Cohort retention analysis</li>
-                <li>• Geographic distribution maps</li>
-                <li>• Real-time activity feed</li>
-              </ul>
-            </div>
           </>
         )}
       </main>

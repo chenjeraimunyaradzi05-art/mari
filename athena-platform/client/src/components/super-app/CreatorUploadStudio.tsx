@@ -138,11 +138,8 @@ export function CreatorUploadStudio() {
     };
   }, [uploadState.preview]);
 
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
+  const handleSelectedFile = useCallback(
+    (file: File) => {
       // Validate file type
       if (!file.type.startsWith('video/')) {
         addToast('Please select a video file', 'error');
@@ -153,6 +150,10 @@ export function CreatorUploadStudio() {
       if (file.size > MAX_VIDEO_SIZE) {
         addToast('Video must be under 500MB', 'error');
         return;
+      }
+
+      if (uploadState.preview) {
+        URL.revokeObjectURL(uploadState.preview);
       }
 
       const preview = URL.createObjectURL(file);
@@ -178,9 +179,23 @@ export function CreatorUploadStudio() {
         }));
         setStep('edit');
       };
+      video.onerror = () => {
+        addToast('Unable to read video metadata', 'error');
+        URL.revokeObjectURL(preview);
+      };
       video.src = preview;
     },
-    [addToast]
+    [addToast, uploadState.preview]
+  );
+
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        handleSelectedFile(file);
+      }
+    },
+    [handleSelectedFile]
   );
 
   const handleDrop = useCallback(
@@ -188,13 +203,10 @@ export function CreatorUploadStudio() {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
       if (file) {
-        const fakeEvent = {
-          target: { files: [file] },
-        } as unknown as React.ChangeEvent<HTMLInputElement>;
-        handleFileSelect(fakeEvent);
+        handleSelectedFile(file);
       }
     },
-    [handleFileSelect]
+    [handleSelectedFile]
   );
 
   const handleTrimChange = useCallback((values: number[]) => {

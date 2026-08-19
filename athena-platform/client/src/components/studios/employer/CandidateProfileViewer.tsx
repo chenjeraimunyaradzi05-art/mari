@@ -26,7 +26,6 @@ import {
   Star,
   Download,
   ExternalLink,
-  MessageSquare,
   CheckCircle2,
   AlertCircle,
   Sparkles,
@@ -35,7 +34,6 @@ import {
   Clock,
   FileText,
   Link2,
-  Play,
   ThumbsUp,
   ThumbsDown,
   Share2,
@@ -140,163 +138,11 @@ interface CandidateProfile {
   references?: number;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_CANDIDATE: CandidateProfile = {
-  id: '1',
-  name: 'Sarah Chen',
-  avatar: '/avatars/sarah.jpg',
-  headline: 'Senior Product Manager | B2B SaaS | Ex-Google, Ex-Stripe',
-  email: 'sarah.chen@email.com',
-  phone: '+1 (555) 123-4567',
-  location: 'San Francisco, CA',
-  linkedinUrl: 'https://linkedin.com/in/sarahchen',
-  portfolioUrl: 'https://sarahchen.com',
-  resumeUrl: '/resumes/sarah-chen.pdf',
-  matchScore: 94,
-  source: 'LinkedIn',
-  appliedAt: new Date(2026, 0, 15),
-  expectedSalary: { min: 180000, max: 220000 },
-  availability: 'Available in 2 weeks',
-  references: 3,
-  experience: [
-    {
-      id: '1',
-      title: 'Senior Product Manager',
-      company: 'TechCorp',
-      location: 'San Francisco, CA',
-      startDate: new Date(2023, 5),
-      current: true,
-      description: [
-        'Led product strategy for enterprise platform serving 500+ customers',
-        'Increased user engagement by 40% through data-driven feature development',
-        'Managed cross-functional team of 12 engineers and designers',
-      ],
-      skills: ['Product Strategy', 'User Research', 'Data Analysis', 'Agile'],
-    },
-    {
-      id: '2',
-      title: 'Product Manager',
-      company: 'Google',
-      location: 'Mountain View, CA',
-      startDate: new Date(2020, 2),
-      endDate: new Date(2023, 4),
-      current: false,
-      description: [
-        'Owned product roadmap for Google Workspace integrations',
-        'Launched 3 major features with 10M+ users',
-        'Collaborated with UX research to improve user satisfaction scores by 25%',
-      ],
-      skills: ['A/B Testing', 'Roadmapping', 'Stakeholder Management'],
-    },
-    {
-      id: '3',
-      title: 'Associate Product Manager',
-      company: 'Stripe',
-      location: 'San Francisco, CA',
-      startDate: new Date(2018, 7),
-      endDate: new Date(2020, 1),
-      current: false,
-      description: [
-        'Supported launch of Stripe Terminal point-of-sale product',
-        'Conducted competitive analysis and market research',
-        'Created product specifications and user stories',
-      ],
-      skills: ['Fintech', 'API Products', 'Documentation'],
-    },
-  ],
-  education: [
-    {
-      id: '1',
-      degree: 'MBA',
-      institution: 'Stanford Graduate School of Business',
-      location: 'Stanford, CA',
-      graduationDate: new Date(2018, 5),
-      honors: ['Dean\'s List', 'Product Management Club President'],
-    },
-    {
-      id: '2',
-      degree: 'BS Computer Science',
-      institution: 'UC Berkeley',
-      location: 'Berkeley, CA',
-      graduationDate: new Date(2016, 5),
-      gpa: 3.8,
-    },
-  ],
-  skills: [
-    { name: 'Product Strategy', level: 'expert', yearsOfExperience: 6, verified: true, endorsements: 45 },
-    { name: 'User Research', level: 'advanced', yearsOfExperience: 5, verified: true, endorsements: 32 },
-    { name: 'Data Analysis', level: 'advanced', yearsOfExperience: 5, verified: true, endorsements: 28 },
-    { name: 'Agile/Scrum', level: 'expert', yearsOfExperience: 6, verified: true, endorsements: 38 },
-    { name: 'SQL', level: 'intermediate', yearsOfExperience: 4, verified: false, endorsements: 15 },
-    { name: 'Figma', level: 'intermediate', yearsOfExperience: 3, verified: false, endorsements: 12 },
-    { name: 'A/B Testing', level: 'advanced', yearsOfExperience: 4, verified: true, endorsements: 22 },
-    { name: 'Roadmapping', level: 'expert', yearsOfExperience: 5, verified: true, endorsements: 35 },
-  ],
-  interviews: [
-    {
-      id: '1',
-      type: 'phone',
-      date: new Date(2026, 0, 16),
-      interviewer: 'John Smith (Recruiter)',
-      rating: 4,
-      feedback: 'Strong communication skills. Good understanding of the role.',
-      status: 'completed',
-    },
-    {
-      id: '2',
-      type: 'video',
-      date: new Date(2026, 0, 20),
-      interviewer: 'Maria Garcia (Hiring Manager)',
-      rating: 5,
-      feedback: 'Excellent product sense. Great examples from previous experience.',
-      status: 'completed',
-    },
-    {
-      id: '3',
-      type: 'technical',
-      date: new Date(2026, 0, 25),
-      interviewer: 'Panel Interview',
-      rating: 0,
-      status: 'scheduled',
-    },
-  ],
-  aiInsights: [
-    {
-      type: 'strength',
-      title: 'Strong Product Experience',
-      description: '6+ years at top tech companies (Google, Stripe) with proven track record of shipping successful products.',
-    },
-    {
-      type: 'strength',
-      title: 'Technical Background',
-      description: 'CS degree from UC Berkeley provides strong technical foundation for B2B SaaS product management.',
-    },
-    {
-      type: 'concern',
-      title: 'Salary Expectations',
-      description: 'Expected salary range ($180-220k) is at the higher end of the budgeted range for this position.',
-    },
-    {
-      type: 'recommendation',
-      title: 'Discuss Growth Opportunities',
-      description: 'Candidate appears motivated by career growth. Highlight leadership path and mentorship opportunities.',
-    },
-  ],
-};
-
-const JOB_REQUIREMENTS = [
-  { skill: 'Product Strategy', required: true, match: true },
-  { skill: 'B2B SaaS Experience', required: true, match: true },
-  { skill: 'Agile/Scrum', required: true, match: true },
-  { skill: 'Data Analysis', required: true, match: true },
-  { skill: 'User Research', required: false, match: true },
-  { skill: 'Team Leadership', required: true, match: true },
-  { skill: 'API Products', required: false, match: true },
-  { skill: 'Enterprise Sales', required: false, match: false },
-];
+interface JobRequirement {
+  skill: string;
+  required: boolean;
+  match: boolean;
+}
 
 // ============================================
 // COMPONENTS
@@ -309,7 +155,7 @@ const SKILL_LEVELS: Record<string, { label: string; width: number }> = {
   expert: { label: 'Expert', width: 100 },
 };
 
-function MatchScoreCard({ score, requirements }: { score: number; requirements: typeof JOB_REQUIREMENTS }) {
+function MatchScoreCard({ score, requirements }: { score: number; requirements: JobRequirement[] }) {
   const matched = requirements.filter(r => r.match).length;
   const total = requirements.length;
   const requiredMatched = requirements.filter(r => r.required && r.match).length;
@@ -331,6 +177,12 @@ function MatchScoreCard({ score, requirements }: { score: number; requirements: 
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {requirements.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            Job requirement matching is not connected yet.
+          </div>
+        ) : (
+          <>
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span>Overall Match</span>
@@ -344,7 +196,7 @@ function MatchScoreCard({ score, requirements }: { score: number; requirements: 
             <span>Required Skills</span>
             <span className="font-medium text-emerald-600">{requiredMatched}/{requiredTotal}</span>
           </div>
-          <Progress value={(requiredMatched / requiredTotal) * 100} className="h-2 [&>div]:bg-emerald-500" />
+          <Progress value={requiredTotal ? (requiredMatched / requiredTotal) * 100 : 0} className="h-2 [&>div]:bg-emerald-500" />
         </div>
 
         <Separator />
@@ -364,6 +216,8 @@ function MatchScoreCard({ score, requirements }: { score: number; requirements: 
             </div>
           ))}
         </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -391,7 +245,12 @@ function AIInsightsCard({ insights }: { insights: AIInsight[] }) {
         <CardDescription>Powered by Athena AI</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {insights.map((insight, index) => (
+        {insights.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            AI candidate insights are not connected yet.
+          </div>
+        ) : (
+          insights.map((insight, index) => (
           <div
             key={index}
             className={cn(
@@ -409,13 +268,22 @@ function AIInsightsCard({ insights }: { insights: AIInsight[] }) {
               </div>
             </div>
           </div>
-        ))}
+          ))
+        )}
       </CardContent>
     </Card>
   );
 }
 
 function ExperienceTimeline({ experience }: { experience: Experience[] }) {
+  if (experience.length === 0) {
+    return (
+      <div className="py-8 text-center text-sm text-muted-foreground">
+        Work experience is not connected for this candidate.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {experience.map((exp, index) => (
@@ -463,6 +331,14 @@ function ExperienceTimeline({ experience }: { experience: Experience[] }) {
 }
 
 function SkillsGrid({ skills }: { skills: Skill[] }) {
+  if (skills.length === 0) {
+    return (
+      <div className="py-8 text-center text-sm text-muted-foreground">
+        Skills are not connected for this candidate.
+      </div>
+    );
+  }
+
   return (
     <div className="grid md:grid-cols-2 gap-4">
       {skills.map((skill) => (
@@ -512,6 +388,14 @@ function InterviewHistory({ interviews }: { interviews: Interview[] }) {
     onsite: 'Onsite',
     technical: 'Technical Interview',
   };
+
+  if (interviews.length === 0) {
+    return (
+      <div className="py-8 text-center text-sm text-muted-foreground">
+        Interview history is not connected for this candidate.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -576,15 +460,41 @@ function InterviewHistory({ interviews }: { interviews: Interview[] }) {
 // ============================================
 
 export function CandidateProfileViewer({
-  candidate = MOCK_CANDIDATE,
+  candidate,
+  requirements = [],
   onBack,
   className,
 }: {
-  candidate?: CandidateProfile;
+  candidate?: CandidateProfile | null;
+  requirements?: JobRequirement[];
   onBack?: () => void;
   className?: string;
 }) {
   const [activeTab, setActiveTab] = useState('overview');
+
+  if (!candidate) {
+    return (
+      <div className={cn('min-h-screen bg-zinc-50 dark:bg-zinc-950', className)}>
+        <div className="container mx-auto px-4 py-8">
+          {onBack && (
+            <Button variant="ghost" className="mb-4" onClick={onBack}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+          )}
+          <Card>
+            <CardContent className="py-16 text-center">
+              <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h1 className="text-xl font-semibold">No candidate profile connected</h1>
+              <p className="text-sm text-muted-foreground mt-2">
+                Candidate details will appear here once a live application profile is selected.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('min-h-screen bg-zinc-50 dark:bg-zinc-950', className)}>
@@ -612,15 +522,20 @@ export function CandidateProfileViewer({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" disabled title="Candidate email is not connected yet">
                 <Mail className="h-4 w-4 mr-2" />
                 Email
               </Button>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" disabled title="Interview scheduling is not connected yet">
                 <Calendar className="h-4 w-4 mr-2" />
                 Schedule
               </Button>
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700">
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                disabled
+                title="Application decisions are not connected yet"
+              >
                 <ThumbsUp className="h-4 w-4 mr-2" />
                 Move Forward
               </Button>
@@ -631,16 +546,16 @@ export function CandidateProfileViewer({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem>
+                  <DropdownMenuItem disabled>
                     <Share2 className="h-4 w-4 mr-2" />
                     Share profile
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem disabled={!candidate.resumeUrl}>
                     <Download className="h-4 w-4 mr-2" />
                     Download resume
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-red-600">
+                  <DropdownMenuItem className="text-red-600" disabled>
                     <ThumbsDown className="h-4 w-4 mr-2" />
                     Reject candidate
                   </DropdownMenuItem>
@@ -730,9 +645,11 @@ export function CandidateProfileViewer({
                         </Button>
                       )}
                       {candidate.resumeUrl && (
-                        <Button variant="outline" size="sm">
-                          <FileText className="h-4 w-4 mr-2" />
-                          Resume
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={candidate.resumeUrl} target="_blank" rel="noopener noreferrer">
+                            <FileText className="h-4 w-4 mr-2" />
+                            Resume
+                          </a>
                         </Button>
                       )}
                     </div>
@@ -790,7 +707,12 @@ export function CandidateProfileViewer({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {candidate.education.map((edu) => (
+                    {candidate.education.length === 0 ? (
+                      <div className="py-8 text-center text-sm text-muted-foreground">
+                        Education is not connected for this candidate.
+                      </div>
+                    ) : (
+                      candidate.education.map((edu) => (
                       <div key={edu.id} className="flex items-start gap-4">
                         <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
                           <Award className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -815,7 +737,8 @@ export function CandidateProfileViewer({
                           )}
                         </div>
                       </div>
-                    ))}
+                      ))
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -856,7 +779,7 @@ export function CandidateProfileViewer({
                           {candidate.interviews.filter(i => i.status === 'scheduled').length} scheduled
                         </CardDescription>
                       </div>
-                      <Button>
+                      <Button disabled title="Interview scheduling is not connected yet">
                         <Calendar className="h-4 w-4 mr-2" />
                         Schedule Interview
                       </Button>
@@ -872,7 +795,7 @@ export function CandidateProfileViewer({
 
           {/* Sidebar */}
           <div className="space-y-6">
-            <MatchScoreCard score={candidate.matchScore} requirements={JOB_REQUIREMENTS} />
+            <MatchScoreCard score={candidate.matchScore} requirements={requirements} />
             <AIInsightsCard insights={candidate.aiInsights} />
 
             {/* Application Info */}

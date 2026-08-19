@@ -10,6 +10,14 @@ import { groupChatService, validatePermission } from '../services/group-chat.ser
 import { chatStorageService } from '../services/chat-storage.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import {
+  CONTENT_LIMITS,
+  normalizeMessageAttachments,
+  normalizeUserText,
+  parseBoundedInteger,
+  parseOptionalDate,
+} from '../utils/contentSafety';
+import { prisma } from '../utils/prisma';
 
 const router = Router();
 
@@ -21,16 +29,36 @@ const router = Router();
 router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
-    const { content, attachments, replyToId } = req.body;
+    const attachments = normalizeMessageAttachments(req.body?.attachments);
+    const content = req.body?.content === undefined || req.body?.content === null
+      ? ''
+      : normalizeUserText(req.body.content, {
+          field: 'content',
+          maxLength: CONTENT_LIMITS.groupMessage,
+          allowEmpty: true,
+        });
+    const replyToId = typeof req.body?.replyToId === 'string' && req.body.replyToId.trim()
+      ? req.body.replyToId.trim()
+      : undefined;
     
     if (!content && (!attachments || attachments.length === 0)) {
       throw new ApiError(400, 'Content or attachments required');
     }
     
-    // Validate permission
-    const canSend = await validatePermission(groupId, req.user!.id, 'send_messages');
-    if (!canSend) {
-      throw new ApiError(403, 'You are not allowed to send messages in this group');
+    const sendPolicy = await groupChatService.canSendMessage(groupId, req.user!.id);
+    if (!sendPolicy.allowed) {
+      throw new ApiError(403, sendPolicy.reason || 'You are not allowed to send messages in this group');
+    }
+
+    if (replyToId) {
+      const replyTo = await prisma.message.findUnique({
+        where: { id: replyToId },
+        select: { conversationId: true, deletedAt: true },
+      });
+
+      if (!replyTo || replyTo.conversationId !== groupId || replyTo.deletedAt) {
+        throw new ApiError(400, 'Invalid reply target');
+      }
     }
     
     // Store message
@@ -60,7 +88,9 @@ router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res
 router.get('/:groupId/chat/messages', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
-    const { cursor, limit = '50', before, after } = req.query;
+    const limit = parseBoundedInteger(req.query.limit, 'limit', 50, 1, 100);
+    const before = parseOptionalDate(req.query.before, 'before');
+    const after = parseOptionalDate(req.query.after, 'after');
     
     // Validate membership
     const canRead = await validatePermission(groupId, req.user!.id, 'send_messages');
@@ -70,9 +100,9 @@ router.get('/:groupId/chat/messages', authenticate, async (req: AuthRequest, res
     
     const messages = await chatStorageService.getMessages({
       conversationId: groupId,
-      limit: parseInt(limit as string, 10),
-      before: before ? new Date(before as string) : undefined,
-      after: after ? new Date(after as string) : undefined,
+      limit,
+      before,
+      after,
     });
     
     res.json({
@@ -124,7 +154,7 @@ router.delete('/:groupId/members/:userId', authenticate, async (req: AuthRequest
     const { groupId, userId } = req.params;
     const { reason } = req.body;
     
-    await groupChatService.removeMember(groupId, userId, req.user!.id, reason);
+    await groupChatService.removeMember(groupId, req.user!.id, userId, reason);
     
     res.json({
       success: true,
@@ -151,8 +181,8 @@ router.patch('/:groupId/members/:userId/role', authenticate, async (req: AuthReq
     
     const member = await groupChatService.updateMemberRole(
       groupId,
-      userId,
       req.user!.id,
+      userId,
       role
     );
     
@@ -221,7 +251,7 @@ router.post('/:groupId/members/:userId/ban', authenticate, async (req: AuthReque
     const { groupId, userId } = req.params;
     const { reason } = req.body;
     
-    await groupChatService.banMember(groupId, userId, req.user!.id, reason);
+    await groupChatService.banMember(groupId, req.user!.id, userId, reason);
     
     res.json({
       success: true,
@@ -240,8 +270,29 @@ router.post('/:groupId/members/:userId/ban', authenticate, async (req: AuthReque
 router.delete('/:groupId/chat/messages/:messageId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, messageId } = req.params;
-    
-    await chatStorageService.deleteMessage(messageId, req.user!.id);
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, senderId: true, conversationId: true, deletedAt: true },
+    });
+
+    if (!message || message.conversationId !== groupId || message.deletedAt) {
+      throw new ApiError(404, 'Message not found');
+    }
+
+    const isAuthor = message.senderId === req.user!.id;
+    const canModerate = isAuthor ? true : await validatePermission(groupId, req.user!.id, 'delete_messages');
+
+    if (!canModerate) {
+      throw new ApiError(403, 'You are not allowed to delete this message');
+    }
+
+    const deleted = await chatStorageService.deleteMessage(messageId, req.user!.id, {
+      allowModerator: !isAuthor,
+    });
+
+    if (!deleted) {
+      throw new ApiError(403, 'You are not allowed to delete this message');
+    }
     
     res.json({
       success: true,
@@ -264,6 +315,15 @@ router.patch('/:groupId/chat/messages/:messageId/pin', authenticate, async (req:
     const canPin = await validatePermission(groupId, req.user!.id, 'pin_messages');
     if (!canPin) {
       throw new ApiError(403, 'You are not allowed to pin messages');
+    }
+
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { conversationId: true, deletedAt: true },
+    });
+
+    if (!message || message.conversationId !== groupId || message.deletedAt) {
+      throw new ApiError(404, 'Message not found');
     }
 
     await chatStorageService.pinMessage(messageId, req.user!.id, true);

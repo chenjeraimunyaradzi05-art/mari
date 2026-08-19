@@ -1,11 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { Sun, Moon, Monitor, Check, Palette } from 'lucide-react';
-import { useUIStore } from '@/lib/store';
+import { useAuthStore, useUIStore, type UIAccentColor, type UIFontSize } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
-const themes = [
+type ThemePreference = 'light' | 'dark' | 'system';
+
+const themes: Array<{
+  id: ThemePreference;
+  name: string;
+  icon: typeof Sun;
+  description: string;
+}> = [
   {
     id: 'light',
     name: 'Light',
@@ -26,30 +32,73 @@ const themes = [
   },
 ];
 
-const accentColors = [
-  { id: 'purple', name: 'Purple', color: '#8B5CF6', class: 'bg-purple-500' },
-  { id: 'blue', name: 'Blue', color: '#3B82F6', class: 'bg-blue-500' },
-  { id: 'green', name: 'Green', color: '#10B981', class: 'bg-emerald-500' },
-  { id: 'pink', name: 'Pink', color: '#EC4899', class: 'bg-pink-500' },
-  { id: 'orange', name: 'Orange', color: '#F97316', class: 'bg-orange-500' },
-  { id: 'teal', name: 'Teal', color: '#14B8A6', class: 'bg-teal-500' },
+const accentColors: Array<{
+  id: UIAccentColor;
+  name: string;
+  class: string;
+}> = [
+  { id: 'rose', name: 'Rose', class: 'bg-rose-500' },
+  { id: 'purple', name: 'Purple', class: 'bg-violet-500' },
+  { id: 'blue', name: 'Blue', class: 'bg-blue-500' },
+  { id: 'green', name: 'Green', class: 'bg-emerald-500' },
+  { id: 'pink', name: 'Pink', class: 'bg-pink-500' },
+  { id: 'orange', name: 'Orange', class: 'bg-orange-500' },
+  { id: 'teal', name: 'Teal', class: 'bg-teal-500' },
 ];
 
-const fontSizes = [
+const fontSizes: Array<{
+  id: UIFontSize;
+  name: string;
+  size: string;
+}> = [
   { id: 'small', name: 'Small', size: '14px' },
   { id: 'medium', name: 'Medium', size: '16px' },
   { id: 'large', name: 'Large', size: '18px' },
 ];
 
-export default function AppearanceSettingsPage() {
-  const { theme, setTheme } = useUIStore();
-  const [selectedTheme, setSelectedTheme] = useState(theme || 'system');
-  const [accentColor, setAccentColor] = useState('purple');
-  const [fontSize, setFontSize] = useState('medium');
+function Toggle({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="relative inline-flex cursor-pointer items-center">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="sr-only peer"
+        aria-label={label}
+      />
+      <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:bg-gray-700 dark:peer-focus:ring-primary-800 rtl:peer-checked:after:-translate-x-full" />
+    </label>
+  );
+}
 
-  useEffect(() => {
-    setTheme(selectedTheme as 'light' | 'dark' | 'system');
-  }, [selectedTheme, setTheme]);
+export default function AppearanceSettingsPage() {
+  const {
+    theme,
+    setTheme,
+    accentColor,
+    setAccentColor,
+    fontSize,
+    setFontSize,
+    compactMode,
+    setCompactMode,
+    reduceMotion,
+    setReduceMotion,
+  } = useUIStore();
+  const { user } = useAuthStore();
+
+  const displayName =
+    user?.displayName || [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'ATHENA member';
+  const initials =
+    [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join('').toUpperCase() ||
+    displayName.slice(0, 2).toUpperCase();
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
@@ -72,15 +121,15 @@ export default function AppearanceSettingsPage() {
           {themes.map((themeOption) => (
             <button
               key={themeOption.id}
-              onClick={() => setSelectedTheme(themeOption.id as 'light' | 'dark' | 'system')}
+              onClick={() => setTheme(themeOption.id)}
               className={cn(
-                'relative flex flex-col items-center p-6 rounded-xl border-2 transition',
-                selectedTheme === themeOption.id
+                'relative flex flex-col items-center rounded-lg border-2 p-6 transition',
+                theme === themeOption.id
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
                   : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
               )}
             >
-              {selectedTheme === themeOption.id && (
+              {theme === themeOption.id && (
                 <div className="absolute top-3 right-3 w-5 h-5 bg-primary-500 rounded-full flex items-center justify-center">
                   <Check className="w-3 h-3 text-white" />
                 </div>
@@ -134,6 +183,7 @@ export default function AppearanceSettingsPage() {
                 color.class,
                 accentColor === color.id && 'ring-2 ring-offset-2 ring-gray-400 dark:ring-offset-gray-900'
               )}
+              aria-label={`Use ${color.name} accent color`}
               title={color.name}
             >
               {accentColor === color.id && (
@@ -142,9 +192,6 @@ export default function AppearanceSettingsPage() {
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-4">
-          Note: Custom accent colors coming soon
-        </p>
       </div>
 
       {/* Font Size */}
@@ -183,14 +230,14 @@ export default function AppearanceSettingsPage() {
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
           Preview
         </h2>
-        <div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-4">
+        <div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-full bg-primary-500 flex items-center justify-center text-white font-semibold">
-              A
+              {initials}
             </div>
             <div>
               <p className="font-medium text-gray-900 dark:text-white">
-                Sample User
+                {displayName}
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 This is how text will appear
@@ -223,10 +270,11 @@ export default function AppearanceSettingsPage() {
               Reduce spacing and padding for a more compact view
             </p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" className="sr-only peer" />
-            <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-          </label>
+          <Toggle
+            checked={compactMode}
+            label="Compact mode"
+            onChange={setCompactMode}
+          />
         </div>
       </div>
 
@@ -241,10 +289,11 @@ export default function AppearanceSettingsPage() {
               Minimize animations and transitions
             </p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" className="sr-only peer" />
-            <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-          </label>
+          <Toggle
+            checked={reduceMotion}
+            label="Reduce motion"
+            onChange={setReduceMotion}
+          />
         </div>
       </div>
     </div>

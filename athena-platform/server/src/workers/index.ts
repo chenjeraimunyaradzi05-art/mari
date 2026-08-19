@@ -12,23 +12,33 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { logger } from '../utils/logger';
-import { startAllWorkers, stopAllWorkers } from '../services/workers.service';
 import { prisma } from '../utils/prisma';
+import { resolveWorkerRedisUrl, validateWorkerStartupConfiguration } from '../utils/worker-config';
 import Redis from 'ioredis';
-
-// Create Redis client for worker process
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  lazyConnect: true,
-});
 
 // Track shutdown state
 let isShuttingDown = false;
+let redis: Redis | null = null;
+let stopWorkers: (() => Promise<void>) | null = null;
 
 async function main() {
   logger.info('🔧 Starting Athena Background Workers...');
   logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
   try {
+    const workerConfig = validateWorkerStartupConfiguration({
+      forceEnabled: true,
+      requireEnableFlag: true,
+    });
+    if (!workerConfig.ok) {
+      throw new Error(workerConfig.errors.join('; '));
+    }
+
+    // Create Redis client for worker process after validating production config.
+    redis = new Redis(resolveWorkerRedisUrl(), {
+      lazyConnect: true,
+    });
+
     // Verify database connection
     await prisma.$queryRaw`SELECT 1`;
     logger.info('✅ Database connection verified');
@@ -38,7 +48,9 @@ async function main() {
     logger.info('✅ Redis connection verified');
 
     // Start all workers
-    await startAllWorkers();
+    const workerService = await import('../services/workers.service');
+    stopWorkers = workerService.stopAllWorkers;
+    await workerService.startAllWorkers();
     logger.info('🚀 All workers started successfully');
 
     // Log worker status periodically
@@ -58,15 +70,19 @@ async function main() {
 
       try {
         // Stop all workers (waits for current jobs to complete)
-        await stopAllWorkers();
-        logger.info('Workers stopped');
+        if (stopWorkers) {
+          await stopWorkers();
+          logger.info('Workers stopped');
+        }
 
         // Disconnect from services
         await prisma.$disconnect();
         logger.info('Prisma disconnected');
 
-        await redis.quit();
-        logger.info('Redis disconnected');
+        if (redis) {
+          await redis.quit();
+          logger.info('Redis disconnected');
+        }
 
         logger.info('Graceful shutdown complete');
         process.exit(0);

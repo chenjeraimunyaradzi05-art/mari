@@ -17,15 +17,76 @@ import {
   DataExportJob,
   AnalyticsJob,
 } from '../utils/queue';
-import { indexDocument, deleteDocument } from '../utils/opensearch';
+import { indexDocument, deleteDocument, isOpenSearchEnabled } from '../utils/opensearch';
 import { mlService } from './ml.service';
 import { sendEmail } from '../utils/email';
+import { resolveWorkerRedisUrl } from '../utils/worker-config';
+
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+const VIDEO_PROCESSOR_URL = process.env.VIDEO_PROCESSOR_URL;
+const PUSH_NOTIFICATION_PROVIDER_URL = process.env.PUSH_NOTIFICATION_PROVIDER_URL;
+const DATA_EXPORT_PROCESSOR_URL = process.env.DATA_EXPORT_PROCESSOR_URL;
+const WORKER_STARTUP_TIMEOUT_MS = parseInt(process.env.WORKER_STARTUP_TIMEOUT_MS || '10000', 10);
+
+function canSimulateWorker(feature: string): boolean {
+  if (!isProductionRuntime) return true;
+  return process.env.WORKER_ALLOW_SIMULATION === 'true' || process.env[`${feature}_ALLOW_SIMULATION`] === 'true';
+}
+
+async function postJson<T>(baseUrl: string | undefined, path: string, payload: Record<string, any>, serviceName: string): Promise<T> {
+  if (!baseUrl) {
+    throw new Error(`${serviceName} URL is required for production worker processing`);
+  }
+
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`${serviceName} request failed (${response.status})${body ? `: ${body.slice(0, 300)}` : ''}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function callVideoProcessor<T>(path: string, payload: Record<string, any>): Promise<T> {
+  return postJson<T>(VIDEO_PROCESSOR_URL, path, payload, 'Video processor');
+}
+
+async function callPushProvider<T>(payload: Record<string, any>): Promise<T> {
+  return postJson<T>(PUSH_NOTIFICATION_PROVIDER_URL, '/send', payload, 'Push notification provider');
+}
+
+async function callDataExportProcessor<T>(payload: Record<string, any>): Promise<T> {
+  return postJson<T>(DATA_EXPORT_PROCESSOR_URL, '/export', payload, 'Data export processor');
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 // ===========================================
 // REDIS CONNECTION FOR WORKERS
 // ===========================================
 
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+const redisConnection = new Redis(resolveWorkerRedisUrl(), {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   lazyConnect: true,
@@ -48,6 +109,23 @@ export const videoWorker = new Worker<VideoProcessingJob>(
     logger.info('Processing video', { jobId: job.id, videoId });
 
     try {
+      if (!canSimulateWorker('VIDEO_PROCESSING')) {
+        const result = await callVideoProcessor<{ outputs: Record<string, string> }>('/process', {
+          jobId: job.id,
+          videoId,
+          userId,
+          inputUrl,
+          options,
+        });
+        await job.updateProgress(100);
+        logger.info('Video processing completed by external processor', {
+          jobId: job.id,
+          videoId,
+          outputs: result.outputs,
+        });
+        return { success: true, outputs: result.outputs };
+      }
+
       // Update progress
       await job.updateProgress(10);
 
@@ -97,11 +175,15 @@ export const emailWorker = new Worker<EmailJob>(
       const subject = variables?.subject || `ATHENA Notification: ${type}`;
       const html = variables?.html || `<p>${variables?.body || 'You have a new notification from ATHENA.'}</p>`;
       
-      await sendEmail({
+      const sent = await sendEmail({
         to,
         subject,
         html,
       });
+
+      if (!sent) {
+        throw new Error('Email provider did not accept the message');
+      }
 
       logger.info('Email sent successfully', { jobId: job.id, to });
       return { success: true, sentAt: new Date().toISOString() };
@@ -120,14 +202,35 @@ export const emailWorker = new Worker<EmailJob>(
 export const pushWorker = new Worker<PushNotificationJob>(
   QUEUE_NAMES.PUSH_NOTIFICATIONS,
   async (job: Job<PushNotificationJob>) => {
-    const { userId, title, body, data } = job.data;
+    const { userId, title, body, data, deviceTokens } = job.data;
     logger.info('Sending push notification', { jobId: job.id, userId });
 
     try {
-      // In production, this would use Firebase FCM or similar
-      // For now, just log
-      logger.info('Push notification sent', { jobId: job.id, userId, title });
-      return { success: true, sentAt: new Date().toISOString() };
+      if (!canSimulateWorker('PUSH_NOTIFICATION')) {
+        const result = await callPushProvider<{
+          sentCount?: number;
+          failureCount?: number;
+          providerMessageId?: string;
+        }>({
+          jobId: job.id,
+          userId,
+          title,
+          body,
+          data,
+          deviceTokens,
+        });
+
+        logger.info('Push notification sent by provider', {
+          jobId: job.id,
+          userId,
+          sentCount: result.sentCount,
+          failureCount: result.failureCount,
+        });
+        return { success: true, sentAt: new Date().toISOString(), ...result };
+      }
+
+      logger.info('Push notification simulated', { jobId: job.id, userId, title });
+      return { success: true, simulated: true, sentAt: new Date().toISOString() };
     } catch (error: any) {
       logger.error('Push notification failed', { jobId: job.id, userId, error: error.message });
       throw error;
@@ -147,16 +250,31 @@ export const searchIndexingWorker = new Worker<SearchIndexingJob>(
     logger.debug('Search indexing job', { jobId: job.id, operation, indexName, documentId });
 
     try {
+      if (!isOpenSearchEnabled()) {
+        logger.debug('Search indexing skipped because OpenSearch is disabled', {
+          jobId: job.id,
+          operation,
+          indexName,
+          documentId,
+        });
+        return { success: true, skipped: true, reason: 'opensearch_disabled', operation, documentId };
+      }
+
+      let indexed = false;
       switch (operation) {
         case 'index':
         case 'update':
           if (document) {
-            await indexDocument(indexName, documentId, document);
+            indexed = await indexDocument(indexName, documentId, document);
           }
           break;
         case 'delete':
-          await deleteDocument(indexName, documentId);
+          indexed = await deleteDocument(indexName, documentId);
           break;
+      }
+
+      if (!indexed) {
+        throw new Error('OpenSearch is enabled but the document was not indexed');
       }
 
       return { success: true, operation, documentId };
@@ -229,17 +347,32 @@ export const dataExportWorker = new Worker<DataExportJob>(
     try {
       await job.updateProgress(10);
 
-      // In production, this would gather all user data
-      // For now, simulate
+      if (!canSimulateWorker('DATA_EXPORT')) {
+        const result = await callDataExportProcessor<{ exportUrl: string; expiresAt?: string }>({
+          jobId: job.id,
+          userId,
+          exportType,
+          format,
+        });
+
+        if (!result.exportUrl) {
+          throw new Error('Data export processor completed without an exportUrl');
+        }
+
+        await job.updateProgress(100);
+        logger.info('Data export completed by processor', { jobId: job.id, userId, exportUrl: result.exportUrl });
+        return { success: true, exportUrl: result.exportUrl, expiresAt: result.expiresAt };
+      }
+
       await simulateProcessing(5000);
       await job.updateProgress(80);
 
       const exportUrl = `https://exports.athena.com/${userId}/${exportType}-${Date.now()}.${format}`;
 
       await job.updateProgress(100);
-      logger.info('Data export completed', { jobId: job.id, userId, exportUrl });
+      logger.info('Data export simulated', { jobId: job.id, userId, exportUrl });
 
-      return { success: true, exportUrl };
+      return { success: true, simulated: true, exportUrl };
     } catch (error: any) {
       logger.error('Data export failed', { jobId: job.id, userId, error: error.message });
       throw error;
@@ -317,8 +450,12 @@ function simulateProcessing(ms: number): Promise<void> {
 export async function startAllWorkers(): Promise<void> {
   logger.info('Starting all background workers...');
   
-  // Workers are already started when instantiated
-  // This function serves as a formal startup point and logs status
+  await withTimeout(
+    Promise.all(workers.map((worker) => worker.waitUntilReady())).then(() => undefined),
+    WORKER_STARTUP_TIMEOUT_MS,
+    'Background worker startup'
+  );
+
   workers.forEach((worker) => {
     logger.info(`Worker started: ${worker.name}`);
   });

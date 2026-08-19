@@ -8,6 +8,13 @@ import { aiService } from '../services/ai.service'; // Added import
 import { generateFeed, getVideoFeed, recordPostView } from '../services/feed.service';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
+import {
+  CONTENT_LIMITS,
+  normalizeMediaUrls,
+  normalizeOptionalUserText,
+  normalizeSafeUrl,
+  normalizeUserText,
+} from '../utils/contentSafety';
 
 const router = Router();
 
@@ -278,9 +285,9 @@ router.post(
   '/',
   authenticate,
   [
-    body('content').notEmpty().trim(),
+    body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.post }),
     body('type').optional().isIn(['TEXT', 'IMAGE', 'VIDEO', 'ARTICLE', 'JOB_SHARE', 'COURSE_SHARE']),
-    body('mediaUrls').optional().isArray(),
+    body('mediaUrls').optional().isArray({ max: 10 }),
     body('isPublic').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -290,7 +297,13 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { content, type = 'TEXT', mediaUrls, isPublic = true } = req.body;
+      const content = normalizeUserText(req.body.content, {
+        field: 'content',
+        maxLength: CONTENT_LIMITS.post,
+      });
+      const mediaUrls = normalizeMediaUrls(req.body.mediaUrls);
+      const type = req.body.type || 'TEXT';
+      const isPublic = req.body.isPublic ?? true;
 
       // AI Content Enrichment
       let enrichedData = { qualityScore: 0, tags: [], sentiment: 'neutral', isSafe: true };
@@ -361,12 +374,12 @@ router.post(
   '/share',
   authenticate,
   [
-    body('title').notEmpty().isString(),
-    body('url').notEmpty().isString(),
+    body('title').isString().notEmpty().isLength({ max: CONTENT_LIMITS.shareTitle }),
+    body('url').isString().notEmpty().isLength({ max: 2048 }),
     body('entityType').optional().isIn(['job', 'course', 'post', 'video', 'resource']),
-    body('entityId').optional().isString(),
-    body('message').optional().isString(),
-    body('description').optional().isString(),
+    body('entityId').optional().isString().isLength({ max: 100 }),
+    body('message').optional().isString().isLength({ max: CONTENT_LIMITS.shareMessage }),
+    body('description').optional().isString().isLength({ max: CONTENT_LIMITS.shareDescription }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -375,7 +388,22 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { title, url, description, message, entityType = 'resource', entityId } = req.body;
+      const title = normalizeUserText(req.body.title, {
+        field: 'title',
+        maxLength: CONTENT_LIMITS.shareTitle,
+      });
+      const url = normalizeSafeUrl(req.body.url, { field: 'url' });
+      const description = normalizeOptionalUserText(req.body.description, {
+        field: 'description',
+        maxLength: CONTENT_LIMITS.shareDescription,
+        allowEmpty: true,
+      });
+      const message = normalizeOptionalUserText(req.body.message, {
+        field: 'message',
+        maxLength: CONTENT_LIMITS.shareMessage,
+        allowEmpty: true,
+      });
+      const { entityType = 'resource', entityId } = req.body;
 
       const content = [
         message || `Shared from ${entityType}`,
@@ -414,15 +442,15 @@ router.post(
       });
 
       if (entityType === 'post' && entityId) {
-        await prisma.post.update({
-          where: { id: entityId },
+        await prisma.post.updateMany({
+          where: { id: entityId, isPublic: true, isHidden: false },
           data: { shareCount: { increment: 1 } },
         });
       }
 
       if (entityType === 'video' && entityId) {
-        await prisma.video.update({
-          where: { id: entityId },
+        await prisma.video.updateMany({
+          where: { id: entityId, status: 'PUBLISHED', isHidden: false },
           data: { shareCount: { increment: 1 } },
         });
       }
@@ -450,8 +478,20 @@ router.post(
 // ===========================================
 // UPDATE POST
 // ===========================================
-router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
-  try {
+router.patch(
+  '/:id',
+  authenticate,
+  [
+    body('content').optional().isString().isLength({ max: CONTENT_LIMITS.post }),
+    body('isPublic').optional().isBoolean(),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
+    }
+
     const { id } = req.params;
 
     const existingPost = await prisma.post.findUnique({
@@ -467,14 +507,24 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(403, 'Not authorized to edit this post');
     }
 
-    const { content, isPublic } = req.body;
+    const data: { content?: string; isPublic?: boolean } = {};
+    if (req.body.content !== undefined) {
+      data.content = normalizeUserText(req.body.content, {
+        field: 'content',
+        maxLength: CONTENT_LIMITS.post,
+      });
+    }
+    if (req.body.isPublic !== undefined) {
+      data.isPublic = req.body.isPublic;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new ApiError(400, 'No valid post updates provided');
+    }
 
     const post = await prisma.post.update({
       where: { id },
-      data: {
-        content,
-        isPublic,
-      },
+      data,
     });
 
     res.json({
@@ -482,10 +532,11 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       message: 'Post updated',
       data: post,
     });
-  } catch (error) {
-    next(error);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 // ===========================================
 // DELETE POST
@@ -530,6 +581,10 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
 
     const post = await prisma.post.findUnique({ where: { id } });
     if (!post) {
+      throw new ApiError(404, 'Post not found');
+    }
+
+    if (post.isHidden || (!post.isPublic && post.authorId !== req.user!.id)) {
       throw new ApiError(404, 'Post not found');
     }
 
@@ -618,15 +673,44 @@ router.delete('/:id/like', authenticate, async (req: AuthRequest, res, next) => 
 router.post(
   '/:id/comments',
   authenticate,
-  [body('content').notEmpty().trim()],
+  [
+    body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.comment }),
+    body('parentId').optional().isString().isLength({ max: 100 }),
+  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
       const { id } = req.params;
-      const { content, parentId } = req.body;
+      const content = normalizeUserText(req.body.content, {
+        field: 'content',
+        maxLength: CONTENT_LIMITS.comment,
+      });
+      const parentId = typeof req.body.parentId === 'string' && req.body.parentId.trim()
+        ? req.body.parentId.trim()
+        : undefined;
 
       const post = await prisma.post.findUnique({ where: { id } });
       if (!post) {
         throw new ApiError(404, 'Post not found');
+      }
+
+      if (post.isHidden || !post.isPublic) {
+        throw new ApiError(404, 'Post not found');
+      }
+
+      if (parentId) {
+        const parent = await prisma.comment.findUnique({
+          where: { id: parentId },
+          select: { postId: true, isHidden: true },
+        });
+
+        if (!parent || parent.postId !== id || parent.isHidden) {
+          throw new ApiError(400, 'Invalid parent comment');
+        }
       }
 
       const comment = await prisma.comment.create({

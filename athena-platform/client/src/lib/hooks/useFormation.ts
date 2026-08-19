@@ -7,6 +7,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api-fetch';
 import { useFormationStore } from '@/lib/stores/formation.store';
 import type { 
   Business, 
@@ -40,21 +41,21 @@ export const formationKeys = {
 const formationApi = {
   // Businesses
   getBusinesses: async (): Promise<Business[]> => {
-    const response = await fetch('/api/formation/businesses', { credentials: 'include' });
+    const response = await apiFetch('/api/formation/businesses', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch businesses');
     const { data } = await response.json();
     return data;
   },
 
   getBusiness: async (id: string): Promise<Business> => {
-    const response = await fetch(`/api/formation/businesses/${id}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/formation/businesses/${id}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch business');
     const { data } = await response.json();
     return data;
   },
 
   createBusiness: async (data: Partial<Business>): Promise<Business> => {
-    const response = await fetch('/api/formation/businesses', {
+    const response = await apiFetch('/api/formation/businesses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -66,7 +67,7 @@ const formationApi = {
   },
 
   updateBusiness: async (id: string, data: Partial<Business>): Promise<Business> => {
-    const response = await fetch(`/api/formation/businesses/${id}`, {
+    const response = await apiFetch(`/api/formation/businesses/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -78,7 +79,7 @@ const formationApi = {
   },
 
   deleteBusiness: async (id: string): Promise<void> => {
-    const response = await fetch(`/api/formation/businesses/${id}`, {
+    const response = await apiFetch(`/api/formation/businesses/${id}`, {
       method: 'DELETE',
       credentials: 'include',
     });
@@ -87,14 +88,14 @@ const formationApi = {
 
   // Wizard
   getWizardProgress: async (businessId: string): Promise<FormationWizardData> => {
-    const response = await fetch(`/api/formation/wizard/${businessId}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/formation/wizard/${businessId}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch wizard progress');
     const { data } = await response.json();
     return data;
   },
 
   saveWizardProgress: async (businessId: string, data: FormationWizardData): Promise<void> => {
-    const response = await fetch(`/api/formation/wizard/${businessId}`, {
+    const response = await apiFetch(`/api/formation/wizard/${businessId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -105,7 +106,7 @@ const formationApi = {
 
   // Co-founders
   getCofounderMatches: async (): Promise<CofounderMatch[]> => {
-    const response = await fetch('/api/formation/cofounders', { credentials: 'include' });
+    const response = await apiFetch('/api/formation/cofounders', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch co-founder matches');
     const { data } = await response.json();
     return data;
@@ -116,7 +117,7 @@ const formationApi = {
     status: CofounderStatus, 
     message?: string
   ): Promise<CofounderMatch> => {
-    const response = await fetch(`/api/formation/cofounders/${matchId}`, {
+    const response = await apiFetch(`/api/formation/cofounders/${matchId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -129,14 +130,14 @@ const formationApi = {
 
   // Compliance
   getComplianceItems: async (businessId: string): Promise<ComplianceItem[]> => {
-    const response = await fetch(`/api/formation/compliance/${businessId}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/formation/compliance/${businessId}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch compliance items');
     const { data } = await response.json();
     return data;
   },
 
   markComplianceComplete: async (itemId: string): Promise<ComplianceItem> => {
-    const response = await fetch(`/api/formation/compliance/${itemId}/complete`, {
+    const response = await apiFetch(`/api/formation/compliance/${itemId}/complete`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -147,7 +148,7 @@ const formationApi = {
 
   // Documents
   getDocuments: async (businessId: string): Promise<FormationDocument[]> => {
-    const response = await fetch(`/api/formation/documents/${businessId}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/formation/documents/${businessId}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch documents');
     const { data } = await response.json();
     return data;
@@ -158,7 +159,7 @@ const formationApi = {
     formData.append('file', file);
     formData.append('type', type);
 
-    const response = await fetch(`/api/formation/documents/${businessId}`, {
+    const response = await apiFetch(`/api/formation/documents/${businessId}`, {
       method: 'POST',
       credentials: 'include',
       body: formData,

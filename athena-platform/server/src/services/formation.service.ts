@@ -15,8 +15,7 @@ const stripe = process.env.STRIPE_SECRET_KEY
   : null;
 const isProduction =
   process.env.NODE_ENV === 'production' ||
-  process.env.VERCEL_ENV === 'production' ||
-  process.env.RAILWAY_ENVIRONMENT === 'production';
+  process.env.VERCEL_ENV === 'production';
 const allowStripeSimulation = process.env.ALLOW_STRIPE_SIMULATION === 'true';
 
 // Formation fee amounts in cents by business type
@@ -245,6 +244,12 @@ export async function confirmFormationPayment(
       logger.error('Failed to verify payment', { error, paymentIntentId });
       throw new ApiError(500, 'Payment verification failed');
     }
+  } else if (isProduction && !allowStripeSimulation) {
+    logger.error('Stripe not configured in production for formation payment confirmation', {
+      registrationId,
+      paymentIntentId,
+    });
+    throw new ApiError(500, 'Payment verification is unavailable. Please contact support.');
   }
 
   return prisma.businessRegistration.update({

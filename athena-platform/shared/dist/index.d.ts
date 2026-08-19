@@ -1,0 +1,291 @@
+/**
+ * Shared Types for ATHENA Platform
+ * Used by server, client, and mobile apps
+ */
+export * from './utils';
+export * from './hooks';
+export declare enum UserRole {
+    USER = "USER",
+    CREATOR = "CREATOR",
+    EMPLOYER = "EMPLOYER",
+    MENTOR = "MENTOR",
+    EDUCATION_PROVIDER = "EDUCATION_PROVIDER",
+    ADMIN = "ADMIN"
+}
+export declare enum Persona {
+    EARLY_CAREER = "EARLY_CAREER",
+    MID_CAREER = "MID_CAREER",
+    CAREER_CHANGER = "MID_CAREER",
+    RETURNING_PROFESSIONAL = "MID_CAREER",
+    STUDENT = "EARLY_CAREER",
+    ENTREPRENEUR = "ENTREPRENEUR",
+    CREATOR = "CREATOR",
+    EMPLOYER = "EMPLOYER",
+    MENTOR = "MENTOR",
+    EDUCATION_PROVIDER = "EDUCATION_PROVIDER",
+    REAL_ESTATE = "REAL_ESTATE",
+    GOVERNMENT_NGO = "GOVERNMENT_NGO"
+}
+export declare enum JobType {
+    FULL_TIME = "FULL_TIME",
+    PART_TIME = "PART_TIME",
+    CONTRACT = "CONTRACT",
+    INTERNSHIP = "INTERNSHIP",
+    CASUAL = "CASUAL"
+}
+export declare enum JobStatus {
+    DRAFT = "DRAFT",
+    ACTIVE = "ACTIVE",
+    PAUSED = "PAUSED",
+    CLOSED = "CLOSED",
+    EXPIRED = "EXPIRED"
+}
+export declare enum ApplicationStatus {
+    PENDING = "PENDING",
+    REVIEWING = "REVIEWING",
+    REVIEWED = "REVIEWED",
+    SHORTLISTED = "SHORTLISTED",
+    INTERVIEW = "INTERVIEW",
+    OFFER = "OFFER",
+    OFFERED = "OFFERED",
+    REJECTED = "REJECTED",
+    WITHDRAWN = "WITHDRAWN"
+}
+export declare enum NotificationType {
+    JOB_MATCH = "JOB_MATCH",
+    APPLICATION_UPDATE = "APPLICATION_UPDATE",
+    MESSAGE = "MESSAGE",
+    CONNECTION_REQUEST = "CONNECTION_REQUEST",
+    POST_LIKE = "POST_LIKE",
+    POST_COMMENT = "POST_COMMENT",
+    SYSTEM = "SYSTEM"
+}
+export declare enum SubscriptionTier {
+    FREE = "FREE",
+    PREMIUM_CAREER = "PREMIUM_CAREER",
+    PREMIUM_PROFESSIONAL = "PREMIUM_PROFESSIONAL",
+    PREMIUM_ENTREPRENEUR = "PREMIUM_ENTREPRENEUR",
+    PREMIUM_CREATOR = "PREMIUM_CREATOR",
+    ENTERPRISE = "ENTERPRISE",
+    EMPLOYER_BASIC = "EMPLOYER_BASIC",
+    EMPLOYER_PRO = "EMPLOYER_PRO"
+}
+export interface User {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    displayName: string;
+    avatar?: string;
+    role: UserRole;
+    persona: Persona;
+    headline?: string;
+    bio?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    currentJobTitle?: string;
+    currentCompany?: string;
+    yearsExperience?: number;
+    emailVerified: boolean;
+    isPublic: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface UserProfile extends User {
+    skills: UserSkill[];
+    experience: Experience[];
+    education: Education[];
+    subscription?: Subscription;
+}
+export interface UserSkill {
+    id: string;
+    skill: Skill;
+    level: number;
+    endorsed: number;
+}
+export interface Skill {
+    id: string;
+    name: string;
+    category: string;
+}
+export interface Experience {
+    id: string;
+    title: string;
+    company: string;
+    startDate: string;
+    endDate?: string;
+    isCurrent: boolean;
+    description?: string;
+}
+export interface Education {
+    id: string;
+    institution: string;
+    degree: string;
+    field: string;
+    startYear: number;
+    endYear?: number;
+}
+export interface Job {
+    id: string;
+    title: string;
+    slug: string;
+    description: string;
+    type: JobType;
+    status: JobStatus;
+    city?: string;
+    state?: string;
+    country?: string;
+    isRemote: boolean;
+    salaryMin?: number;
+    salaryMax?: number;
+    salaryType?: string;
+    showSalary: boolean;
+    experienceMin?: number;
+    experienceMax?: number;
+    viewCount: number;
+    organization: Organization;
+    postedBy: User;
+    skills: Skill[];
+    publishedAt?: string;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface JobApplication {
+    id: string;
+    job: Job;
+    user: User;
+    status: ApplicationStatus;
+    coverLetter?: string;
+    resumeUrl?: string;
+    appliedAt: string;
+    updatedAt: string;
+}
+export interface Organization {
+    id: string;
+    name: string;
+    slug: string;
+    description?: string;
+    logo?: string;
+    website?: string;
+    industry?: string;
+    size?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    isVerified: boolean;
+    safetyScore?: number;
+}
+export interface Post {
+    id: string;
+    content: string;
+    type: string;
+    author: User;
+    likeCount: number;
+    commentCount: number;
+    viewCount: number;
+    isPublic: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface Comment {
+    id: string;
+    content: string;
+    author: User;
+    createdAt: string;
+}
+export interface Conversation {
+    id: string;
+    participants: User[];
+    lastMessage?: Message;
+    unreadCount: number;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface Message {
+    id: string;
+    content: string;
+    sender: User;
+    conversationId: string;
+    isRead: boolean;
+    createdAt: string;
+}
+export interface Notification {
+    id: string;
+    type: NotificationType;
+    title: string;
+    message: string;
+    link?: string;
+    isRead: boolean;
+    createdAt: string;
+}
+export interface Subscription {
+    id: string;
+    tier: SubscriptionTier;
+    status: string;
+    startDate: string;
+    endDate?: string;
+}
+export interface ApiResponse<T> {
+    success: boolean;
+    data?: T;
+    message?: string;
+    error?: string;
+}
+export interface PaginatedResponse<T> {
+    items: T[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasMore: boolean;
+}
+export interface SocketEvents {
+    'notification:subscribe': () => void;
+    'notification:mark_read': (data: {
+        notificationId: string;
+    }) => void;
+    'notification:mark_all_read': () => void;
+    'message:join_conversation': (data: {
+        conversationId: string;
+    }) => void;
+    'message:leave_conversation': (data: {
+        conversationId: string;
+    }) => void;
+    'message:send': (data: {
+        conversationId: string;
+        content: string;
+    }) => void;
+    'typing:start': (data: {
+        conversationId: string;
+    }) => void;
+    'typing:stop': (data: {
+        conversationId: string;
+    }) => void;
+    'notification:new': (notification: Notification) => void;
+    'notification:read': (data: {
+        notificationId: string;
+    }) => void;
+    'message:new': (message: Message) => void;
+    'message:read': (data: {
+        messageId: string;
+    }) => void;
+    'typing:update': (data: {
+        userId: string;
+        isTyping: boolean;
+    }) => void;
+    'user:online': (data: {
+        userId: string;
+    }) => void;
+    'user:offline': (data: {
+        userId: string;
+    }) => void;
+    'job:application_update': (data: {
+        applicationId: string;
+        status: ApplicationStatus;
+    }) => void;
+    'job:new_match': (data: {
+        job: Job;
+    }) => void;
+}
+//# sourceMappingURL=index.d.ts.map

@@ -1,0 +1,7 @@
+Contact: mailto:chenjeraimunyaradzi05@gmail.com
+Expires: 2027-08-18T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://athena-life.netlify.app/.well-known/security.txt
+Policy: https://athena-life.netlify.app/trust
+# Report security vulnerabilities to the contact above.
+# Please include reproduction steps and do not access other users' data.

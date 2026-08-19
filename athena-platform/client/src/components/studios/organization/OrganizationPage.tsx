@@ -14,7 +14,7 @@
  * - Follow/Connect actions
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { cn } from '@/lib/utils';
 import {
   Building2,
@@ -26,21 +26,15 @@ import {
   CheckCircle2,
   ExternalLink,
   Share2,
-  Bell,
   BellOff,
   MoreHorizontal,
   Link2,
   Mail,
-  Phone,
-  Award,
-  TrendingUp,
   Heart,
   MessageSquare,
   Bookmark,
   Play,
   Image as ImageIcon,
-  FileText,
-  Star,
   ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -56,7 +50,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 // ============================================
 // TYPES
@@ -107,107 +100,10 @@ interface Post {
 }
 
 // ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_ORGANIZATION: Organization = {
-  id: '1',
-  name: 'TechVentures Inc',
-  tagline: 'Building the future of work',
-  description: `TechVentures Inc is a leading technology company focused on creating innovative solutions for the modern workplace. We believe in empowering teams with tools that enhance productivity, collaboration, and creativity.
-
-Our mission is to transform how organizations operate by providing cutting-edge software solutions that scale with their needs. From startups to enterprises, we serve clients across the globe with our suite of products.
-
-We're proud to be at the forefront of workplace innovation, constantly pushing boundaries and exploring new technologies to deliver exceptional value to our customers.`,
-  industry: 'Technology',
-  companySize: '501-1,000 employees',
-  founded: 2015,
-  headquarters: 'Dubai, UAE',
-  website: 'https://techventures.example.com',
-  specialties: ['SaaS', 'Enterprise Software', 'AI/ML', 'Cloud Computing', 'Remote Work Tools'],
-  verified: true,
-  followers: 24500,
-  employees: 847,
-};
-
-const MOCK_TEAM: TeamMember[] = [
-  { id: '1', name: 'Ahmed Hassan', role: 'CEO & Founder', avatar: '' },
-  { id: '2', name: 'Sarah Mitchell', role: 'CTO', avatar: '' },
-  { id: '3', name: 'Michael Chen', role: 'VP of Engineering', avatar: '' },
-  { id: '4', name: 'Fatima Al-Rashid', role: 'Head of Product', avatar: '' },
-  { id: '5', name: 'James Wilson', role: 'Head of Design', avatar: '' },
-  { id: '6', name: 'Priya Sharma', role: 'Head of HR', avatar: '' },
-];
-
-const MOCK_JOBS: JobPosting[] = [
-  {
-    id: '1',
-    title: 'Senior Software Engineer',
-    location: 'Dubai, UAE',
-    type: 'Full-time',
-    postedAt: new Date(Date.now() - 86400000),
-    applicants: 45,
-  },
-  {
-    id: '2',
-    title: 'Product Manager',
-    location: 'Remote',
-    type: 'Full-time',
-    postedAt: new Date(Date.now() - 172800000),
-    applicants: 32,
-  },
-  {
-    id: '3',
-    title: 'UX Designer',
-    location: 'Abu Dhabi, UAE',
-    type: 'Full-time',
-    postedAt: new Date(Date.now() - 259200000),
-    applicants: 28,
-  },
-  {
-    id: '4',
-    title: 'DevOps Engineer',
-    location: 'Dubai, UAE',
-    type: 'Full-time',
-    postedAt: new Date(Date.now() - 345600000),
-    applicants: 19,
-  },
-];
-
-const MOCK_POSTS: Post[] = [
-  {
-    id: '1',
-    content: `We're excited to announce our latest product launch! 🚀 After months of development, our new AI-powered analytics platform is now available. It helps teams make data-driven decisions faster than ever.`,
-    media: { type: 'image', url: '' },
-    likes: 342,
-    comments: 28,
-    createdAt: new Date(Date.now() - 3600000),
-  },
-  {
-    id: '2',
-    content: `Proud to share that TechVentures has been recognized as one of the top 50 places to work in the UAE! Thank you to our amazing team for making this possible. 🏆`,
-    likes: 567,
-    comments: 45,
-    createdAt: new Date(Date.now() - 86400000),
-  },
-  {
-    id: '3',
-    content: `Join us for our upcoming webinar on "The Future of Remote Work" featuring industry experts. Register now - link in bio! 📅`,
-    media: { type: 'video', url: '' },
-    likes: 189,
-    comments: 12,
-    createdAt: new Date(Date.now() - 172800000),
-  },
-];
-
-// ============================================
 // COMPONENTS
 // ============================================
 
 function OrganizationHeader({ org }: { org: Organization }) {
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [notificationsOn, setNotificationsOn] = useState(false);
-
   return (
     <div className="relative">
       {/* Cover Image */}
@@ -248,25 +144,17 @@ function OrganizationHeader({ org }: { org: Organization }) {
 
           {/* Actions */}
           <div className="flex gap-2">
-            <Button
-              variant={isFollowing ? 'outline' : 'default'}
-              onClick={() => setIsFollowing(!isFollowing)}
-            >
-              {isFollowing ? 'Following' : 'Follow'}
+            <Button disabled title="Organization follow is not connected yet">
+              Follow
             </Button>
-            {isFollowing && (
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setNotificationsOn(!notificationsOn)}
-              >
-                {notificationsOn ? (
-                  <Bell className="h-4 w-4" />
-                ) : (
-                  <BellOff className="h-4 w-4" />
-                )}
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="icon"
+              disabled
+              title="Organization notifications are not connected yet"
+            >
+              <BellOff className="h-4 w-4" />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
@@ -274,16 +162,16 @@ function OrganizationHeader({ org }: { org: Organization }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem>
+                <DropdownMenuItem disabled>
                   <Share2 className="h-4 w-4 mr-2" />
                   Share
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem disabled>
                   <Link2 className="h-4 w-4 mr-2" />
                   Copy link
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
+                <DropdownMenuItem disabled>
                   <Mail className="h-4 w-4 mr-2" />
                   Contact
                 </DropdownMenuItem>
@@ -360,32 +248,38 @@ function TeamSection({ team }: { team: TeamMember[] }) {
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>Leadership Team</CardTitle>
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" disabled={team.length === 0}>
             See all
             <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {team.map((member) => (
-            <div
-              key={member.id}
-              className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted cursor-pointer"
-            >
-              <Avatar>
-                <AvatarImage src={member.avatar} />
-                <AvatarFallback>
-                  {member.name.split(' ').map(n => n[0]).join('')}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <h4 className="font-medium text-sm">{member.name}</h4>
-                <p className="text-xs text-muted-foreground">{member.role}</p>
+        {team.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            Leadership data is not connected yet.
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {team.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center gap-3 p-3 border rounded-lg"
+              >
+                <Avatar>
+                  <AvatarImage src={member.avatar} />
+                  <AvatarFallback>
+                    {member.name.split(' ').map(n => n[0]).join('')}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <h4 className="font-medium text-sm">{member.name}</h4>
+                  <p className="text-xs text-muted-foreground">{member.role}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -404,29 +298,35 @@ function JobsSection({ jobs }: { jobs: JobPosting[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {jobs.map((job) => (
-          <div
-            key={job.id}
-            className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted cursor-pointer"
-          >
-            <div>
-              <h4 className="font-medium">{job.title}</h4>
-              <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                <span className="flex items-center gap-1">
-                  <MapPin className="h-3 w-3" />
-                  {job.location}
-                </span>
-                <span>{job.type}</span>
-                <span>{job.applicants} applicants</span>
-              </div>
-            </div>
-            <Button variant="outline" size="sm">
-              Apply
-            </Button>
+        {jobs.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            Open positions are not connected yet.
           </div>
-        ))}
+        ) : (
+          jobs.map((job) => (
+            <div
+              key={job.id}
+              className="flex items-center justify-between p-4 border rounded-lg"
+            >
+              <div>
+                <h4 className="font-medium">{job.title}</h4>
+                <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                  <span className="flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    {job.location}
+                  </span>
+                  <span>{job.type}</span>
+                  <span>{job.applicants} applicants</span>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" disabled title="Job application routing is not connected yet">
+                Apply
+              </Button>
+            </div>
+          ))
+        )}
 
-        <Button variant="outline" className="w-full">
+        <Button variant="outline" className="w-full" disabled={jobs.length === 0}>
           View all jobs
           <ExternalLink className="h-4 w-4 ml-2" />
         </Button>
@@ -435,10 +335,7 @@ function JobsSection({ jobs }: { jobs: JobPosting[] }) {
   );
 }
 
-function PostCard({ post, orgName }: { post: Post; orgName: string }) {
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
-
+function PostCard({ post, org }: { post: Post; org: Organization }) {
   const formatTime = (date: Date) => {
     const diff = Date.now() - date.getTime();
     const hours = Math.floor(diff / 3600000);
@@ -456,8 +353,8 @@ function PostCard({ post, orgName }: { post: Post; orgName: string }) {
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h4 className="font-semibold">{orgName}</h4>
-              <CheckCircle2 className="h-4 w-4 text-blue-500" />
+              <h4 className="font-semibold">{org.name}</h4>
+              {org.verified && <CheckCircle2 className="h-4 w-4 text-blue-500" />}
             </div>
             <p className="text-xs text-muted-foreground">{formatTime(post.createdAt)}</p>
           </div>
@@ -482,27 +379,28 @@ function PostCard({ post, orgName }: { post: Post; orgName: string }) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setLiked(!liked)}
-              className={cn(liked && 'text-red-500')}
+              disabled
+              title="Post reactions are not connected yet"
             >
-              <Heart className={cn('h-4 w-4 mr-1', liked && 'fill-current')} />
-              {post.likes + (liked ? 1 : 0)}
+              <Heart className="h-4 w-4 mr-1" />
+              {post.likes}
             </Button>
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" disabled title="Post comments are not connected yet">
               <MessageSquare className="h-4 w-4 mr-1" />
               {post.comments}
             </Button>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon">
+            <Button variant="ghost" size="icon" disabled title="Post sharing is not connected yet">
               <Share2 className="h-4 w-4" />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setSaved(!saved)}
+              disabled
+              title="Post saving is not connected yet"
             >
-              <Bookmark className={cn('h-4 w-4', saved && 'fill-current')} />
+              <Bookmark className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -511,46 +409,97 @@ function PostCard({ post, orgName }: { post: Post; orgName: string }) {
   );
 }
 
-function PostsSection({ posts, orgName }: { posts: Post[]; orgName: string }) {
+function PostsSection({ posts, org }: { posts: Post[]; org: Organization }) {
+  if (posts.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Posts</CardTitle>
+        </CardHeader>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Organization posts are not connected yet.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {posts.map((post) => (
-        <PostCard key={post.id} post={post} orgName={orgName} />
+        <PostCard key={post.id} post={post} org={org} />
       ))}
     </div>
   );
 }
 
-function SidebarCard({ org }: { org: Organization }) {
+function SidebarCard({ organizations }: { organizations: Organization[] }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm">Similar Organizations</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="flex items-center gap-3">
+        {organizations.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            Similar organizations are not connected yet.
+          </div>
+        ) : (
+          organizations.map((organization) => (
+          <div key={organization.id} className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
               <Building2 className="h-5 w-5 text-muted-foreground" />
             </div>
             <div className="flex-1">
-              <h4 className="font-medium text-sm">Tech Company {i}</h4>
-              <p className="text-xs text-muted-foreground">Technology</p>
+              <h4 className="font-medium text-sm">{organization.name}</h4>
+              <p className="text-xs text-muted-foreground">{organization.industry}</p>
             </div>
-            <Button variant="outline" size="sm">Follow</Button>
+            <Button variant="outline" size="sm" disabled>Follow</Button>
           </div>
-        ))}
+          ))
+        )}
       </CardContent>
     </Card>
   );
+}
+
+interface OrganizationPageProps {
+  organization?: Organization | null;
+  team?: TeamMember[];
+  jobs?: JobPosting[];
+  posts?: Post[];
+  similarOrganizations?: Organization[];
+  className?: string;
 }
 
 // ============================================
 // MAIN COMPONENT
 // ============================================
 
-export function OrganizationPage({ className }: { className?: string }) {
-  const org = MOCK_ORGANIZATION;
+export function OrganizationPage({
+  organization,
+  team = [],
+  jobs = [],
+  posts = [],
+  similarOrganizations = [],
+  className,
+}: OrganizationPageProps) {
+  if (!organization) {
+    return (
+      <div className={cn('container mx-auto py-8', className)}>
+        <Card>
+          <CardContent className="py-16 text-center">
+            <Building2 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <h1 className="text-xl font-semibold">No organization profile connected</h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              Organization details will appear here once a live profile is selected.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const org = organization;
 
   return (
     <div className={cn('container mx-auto py-8 space-y-6', className)}>
@@ -570,15 +519,15 @@ export function OrganizationPage({ className }: { className?: string }) {
 
             <TabsContent value="about" className="mt-6 space-y-6">
               <AboutSection org={org} />
-              <TeamSection team={MOCK_TEAM} />
+              <TeamSection team={team} />
             </TabsContent>
 
             <TabsContent value="posts" className="mt-6">
-              <PostsSection posts={MOCK_POSTS} orgName={org.name} />
+              <PostsSection posts={posts} org={org} />
             </TabsContent>
 
             <TabsContent value="jobs" className="mt-6">
-              <JobsSection jobs={MOCK_JOBS} />
+              <JobsSection jobs={jobs} />
             </TabsContent>
 
             <TabsContent value="people" className="mt-6">
@@ -590,11 +539,16 @@ export function OrganizationPage({ className }: { className?: string }) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    {MOCK_TEAM.concat(MOCK_TEAM).slice(0, 8).map((member, i) => (
+                  {team.length === 0 ? (
+                    <div className="py-8 text-center text-sm text-muted-foreground">
+                      Employee profiles are not connected yet.
+                    </div>
+                  ) : (
+                    <div className="grid sm:grid-cols-2 gap-4">
+                    {team.slice(0, 8).map((member) => (
                       <div
-                        key={`${member.id}-${i}`}
-                        className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted cursor-pointer"
+                        key={member.id}
+                        className="flex items-center gap-3 p-3 border rounded-lg"
                       >
                         <Avatar>
                           <AvatarImage src={member.avatar} />
@@ -606,11 +560,14 @@ export function OrganizationPage({ className }: { className?: string }) {
                           <h4 className="font-medium text-sm">{member.name}</h4>
                           <p className="text-xs text-muted-foreground">{member.role}</p>
                         </div>
-                        <Button variant="outline" size="sm">Connect</Button>
+                        <Button variant="outline" size="sm" disabled title="Employee connections are not connected yet">
+                          Connect
+                        </Button>
                       </div>
                     ))}
-                  </div>
-                  <Button variant="outline" className="w-full mt-4">
+                    </div>
+                  )}
+                  <Button variant="outline" className="w-full mt-4" disabled={team.length === 0}>
                     See all employees
                   </Button>
                 </CardContent>
@@ -621,7 +578,7 @@ export function OrganizationPage({ className }: { className?: string }) {
 
         {/* Sidebar */}
         <div className="space-y-6">
-          <SidebarCard org={org} />
+          <SidebarCard organizations={similarOrganizations} />
 
           <Card>
             <CardHeader>
@@ -638,7 +595,7 @@ export function OrganizationPage({ className }: { className?: string }) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Open Jobs</span>
-                <span className="font-medium">{MOCK_JOBS.length}</span>
+                <span className="font-medium">{jobs.length}</span>
               </div>
             </CardContent>
           </Card>

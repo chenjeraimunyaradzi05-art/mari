@@ -185,6 +185,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - OPENSEARCH_NODE=http://opensearch:9200
       - ML_SERVICE_URL=http://ml-service:8000
+      - ENABLE_WORKERS=true
       - WORKER_CONCURRENCY=5
     volumes:
       - ./server:/app

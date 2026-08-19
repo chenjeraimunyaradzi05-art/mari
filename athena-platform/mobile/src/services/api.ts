@@ -24,6 +24,14 @@ let authToken: string | null = null;
 let refreshToken: string | null = null;
 let refreshPromise: Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number }> | null = null;
 
+const authPathsToSkipRefresh = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
+
 export const setAuthToken = (token: string | null) => {
   authToken = token;
   if (token) {
@@ -58,8 +66,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = String(originalRequest?.url || '');
+    const shouldSkipRefresh = authPathsToSkipRefresh.some((path) => requestUrl.includes(path));
 
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !shouldSkipRefresh) {
       originalRequest._retry = true;
       try {
         if (!refreshToken) {
@@ -69,7 +79,11 @@ api.interceptors.response.use(
         if (!refreshPromise) {
           refreshPromise = axios
             .post(`${API_URL}/auth/refresh`, { refreshToken })
-            .then((response) => unwrapApiData(response.data))
+            .then((response) =>
+              unwrapApiData<{ accessToken: string; refreshToken?: string; expiresIn?: number }>(
+                response.data
+              )
+            )
             .finally(() => {
               refreshPromise = null;
             });
@@ -114,8 +128,12 @@ api.interceptors.response.use(
 
 // Auth
 export const authApi = {
-  login: (email: string, password: string) =>
-    api.post('/auth/login', { email, password }),
+  login: (email: string, password: string, twoFactorCode?: string) =>
+    api.post('/auth/login', {
+      email,
+      password,
+      ...(twoFactorCode ? { twoFactorCode } : {}),
+    }),
   register: (data: {
     email: string;
     password: string;

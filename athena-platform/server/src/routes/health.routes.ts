@@ -37,6 +37,69 @@ interface ComponentHealth {
   details?: Record<string, any>;
 }
 
+interface LaunchReadinessCheck {
+  key: string;
+  category: 'core' | 'security' | 'payments' | 'media' | 'ai' | 'observability' | 'workers' | 'email' | 'search';
+  required: boolean;
+  ok: boolean;
+  message: string;
+}
+
+function isConfiguredEnv(name: string): boolean {
+  const value = process.env[name];
+  if (!value) return false;
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+
+  return ![
+    'changeme',
+    'change_me',
+    'secret',
+    'your-secret',
+    'your_secret',
+    'not_configured',
+    'sk_test_not_configured',
+    'price_career',
+    'price_professional',
+    'price_entrepreneur',
+    'price_creator',
+  ].includes(normalized);
+}
+
+function envCheck(
+  key: string,
+  category: LaunchReadinessCheck['category'],
+  required: boolean,
+  message?: string
+): LaunchReadinessCheck {
+  const ok = isConfiguredEnv(key);
+  return {
+    key,
+    category,
+    required,
+    ok,
+    message: ok ? 'Configured' : message || `${key} is not configured`,
+  };
+}
+
+function anyEnvCheck(
+  key: string,
+  keys: string[],
+  category: LaunchReadinessCheck['category'],
+  required: boolean,
+  message?: string
+): LaunchReadinessCheck {
+  const ok = keys.some(isConfiguredEnv);
+  return {
+    key,
+    category,
+    required,
+    ok,
+    message: ok ? `Configured via ${keys.find(isConfiguredEnv)}` : message || `${keys.join(' or ')} is not configured`,
+  };
+}
+
 function hasProtectedHealthAccess(req: Request): boolean {
   if (process.env.NODE_ENV !== 'production') {
     return true;
@@ -179,6 +242,109 @@ router.get('/detailed', async (req: Request, res: Response) => {
   const statusCode = overallStatus === 'healthy' ? 200 : overallStatus === 'degraded' ? 200 : 503;
 
   res.status(statusCode).json(health);
+});
+
+// ===========================================
+// LAUNCH READINESS
+// ===========================================
+
+/**
+ * @route GET /health/launch-readiness
+ * @description Production launch readiness checklist for externally configured services
+ */
+router.get('/launch-readiness', async (req: Request, res: Response) => {
+  if (!hasProtectedHealthAccess(req)) {
+    return res.status(404).json({
+      success: false,
+      message: 'Not found',
+    });
+  }
+
+  const production =
+    process.env.NODE_ENV === 'production' ||
+    process.env.VERCEL_ENV === 'production' ||
+    process.env.RENDER_ENV === 'production';
+
+  const workersEnabled = process.env.ENABLE_WORKERS === 'true';
+  const videoSimulationAllowed = process.env.VIDEO_ALLOW_SIMULATION === 'true';
+  const workerSimulationAllowed =
+    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
+    process.env.VIDEO_PROCESSING_ALLOW_SIMULATION === 'true';
+  const pushSimulationAllowed =
+    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
+    process.env.PUSH_NOTIFICATION_ALLOW_SIMULATION === 'true';
+  const dataExportSimulationAllowed =
+    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
+    process.env.DATA_EXPORT_ALLOW_SIMULATION === 'true';
+  const openSearchEnabled = process.env.OPENSEARCH_ENABLED === 'true' || isConfiguredEnv('OPENSEARCH_NODE');
+
+  const checks: LaunchReadinessCheck[] = [
+    envCheck('DATABASE_URL', 'core', true),
+    anyEnvCheck('PUBLIC_APP_URL', ['CLIENT_URL', 'FRONTEND_URL'], 'core', true),
+    envCheck('ALLOWED_ORIGINS', 'security', production, 'Production CORS allowlist is not configured'),
+    envCheck('JWT_SECRET', 'security', true),
+    envCheck('DV_ENCRYPTION_KEY', 'security', production, 'DV safe-chat encryption key is not configured'),
+    envCheck('METRICS_TOKEN', 'observability', production, 'Metrics endpoint token is required in production'),
+    anyEnvCheck(
+      'HEALTH_DIAGNOSTICS_ACCESS',
+      ['HEALTH_DIAGNOSTICS_TOKEN', 'DEBUG_SECRET'],
+      'observability',
+      production,
+      'Protected health diagnostics need HEALTH_DIAGNOSTICS_TOKEN or DEBUG_SECRET in production'
+    ),
+    envCheck('SENTRY_DSN', 'observability', false),
+    envCheck('SENDGRID_API_KEY', 'email', production, 'Transactional email is not configured'),
+    envCheck('STRIPE_SECRET_KEY', 'payments', production, 'Stripe payments are not configured'),
+    envCheck('STRIPE_WEBHOOK_SECRET', 'payments', production, 'Stripe webhook verification is not configured'),
+    envCheck('STRIPE_PRICE_CAREER', 'payments', production, 'Career subscription price ID is not configured'),
+    envCheck('STRIPE_PRICE_PROFESSIONAL', 'payments', production, 'Professional subscription price ID is not configured'),
+    envCheck('STRIPE_PRICE_ENTREPRENEUR', 'payments', production, 'Entrepreneur subscription price ID is not configured'),
+    envCheck('STRIPE_PRICE_CREATOR', 'payments', production, 'Creator subscription price ID is not configured'),
+    envCheck('S3_BUCKET', 'media', production, 'Media bucket is not configured'),
+    envCheck('AWS_REGION', 'media', production, 'AWS region is not configured'),
+    envCheck('AWS_ACCESS_KEY_ID', 'media', production, 'AWS access key is not configured'),
+    envCheck('AWS_SECRET_ACCESS_KEY', 'media', production, 'AWS secret key is not configured'),
+    envCheck('VIDEO_PROCESSOR_URL', 'media', production && !videoSimulationAllowed, 'Production video processor is not configured'),
+    anyEnvCheck('AI_PROVIDER_KEY', ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'], 'ai', production, 'AI provider key is not configured'),
+    envCheck('ML_SERVICE_URL', 'ai', production, 'ML service URL is not configured'),
+    envCheck('OPENSEARCH_NODE', 'search', openSearchEnabled, 'OpenSearch is enabled but OPENSEARCH_NODE is not configured'),
+    envCheck('REDIS_URL', 'workers', production || workersEnabled, 'Redis is required for production queues/workers'),
+    envCheck(
+      'VIDEO_PROCESSOR_URL',
+      'workers',
+      workersEnabled && production && !workerSimulationAllowed,
+      'Video worker needs VIDEO_PROCESSOR_URL when simulation is disabled'
+    ),
+    envCheck(
+      'PUSH_NOTIFICATION_PROVIDER_URL',
+      'workers',
+      workersEnabled && production && !pushSimulationAllowed,
+      'Push worker needs PUSH_NOTIFICATION_PROVIDER_URL when simulation is disabled'
+    ),
+    envCheck(
+      'DATA_EXPORT_PROCESSOR_URL',
+      'workers',
+      workersEnabled && production && !dataExportSimulationAllowed,
+      'Data export worker needs DATA_EXPORT_PROCESSOR_URL when simulation is disabled'
+    ),
+  ];
+
+  const requiredFailures = checks.filter((check) => check.required && !check.ok);
+  const recommendedMissing = checks.filter((check) => !check.required && !check.ok);
+  const status = requiredFailures.length === 0 ? 'ready' : 'not_ready';
+
+  res.status(status === 'ready' ? 200 : 503).json({
+    status,
+    environment: production ? 'production' : process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    summary: {
+      total: checks.length,
+      passed: checks.filter((check) => check.ok).length,
+      requiredFailures: requiredFailures.length,
+      recommendedMissing: recommendedMissing.length,
+    },
+    checks,
+  });
 });
 
 // ===========================================

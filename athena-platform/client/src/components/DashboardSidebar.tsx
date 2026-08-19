@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore, useAuthStore } from '@/lib/store';
+import { useUnreadMessageCount } from '@/lib/hooks';
 
 interface NavItem {
   href: string;
@@ -56,7 +57,7 @@ const communityNavItems: NavItem[] = [
   { href: '/dashboard/community', label: 'Feed', icon: Users },
   { href: '/dashboard/groups', label: 'Groups', icon: Users },
   { href: '/dashboard/mentors', label: 'Find Mentors', icon: Heart },
-  { href: '/dashboard/messages', label: 'Messages', icon: MessageCircle, badge: 3 },
+  { href: '/dashboard/messages', label: 'Messages', icon: MessageCircle },
   { href: '/dashboard/events', label: 'Events', icon: Calendar },
   { href: '/dashboard/referrals', label: 'Invite Friends', icon: Gift },
 ];
@@ -155,8 +156,17 @@ function NavSection({ title, items, collapsed }: NavSectionProps) {
 export default function DashboardSidebar() {
   const { user } = useAuthStore();
   const { sidebarOpen, sidebarCollapsed, toggleSidebar, toggleSidebarCollapsed } = useUIStore();
+  const { data: unreadMessageCount = 0 } = useUnreadMessageCount();
 
   const isPro = user?.subscriptionTier !== 'FREE';
+  const messageBadge = user && unreadMessageCount > 0
+    ? unreadMessageCount > 99 ? '99+' : unreadMessageCount
+    : undefined;
+  const liveCommunityNavItems = communityNavItems.map((item) =>
+    item.href === '/dashboard/messages' && messageBadge
+      ? { ...item, badge: messageBadge }
+      : item
+  );
 
   return (
     <>
@@ -187,7 +197,7 @@ export default function DashboardSidebar() {
         {/* Logo (Mobile only) */}
         <div className="lg:hidden flex items-center space-x-2 p-4 border-b border-gray-200 dark:border-gray-700">
             <Image
-              src="/athena-logo.png"
+              src="/logo.svg"
               alt="ATHENA"
               width={36}
               height={36}
@@ -203,7 +213,7 @@ export default function DashboardSidebar() {
         {/* Scrollable Nav Content */}
         <div className="flex-1 overflow-y-auto py-4">
           <NavSection title="Main" items={mainNavItems} collapsed={sidebarCollapsed} />
-          <NavSection title="Community" items={communityNavItems} collapsed={sidebarCollapsed} />
+          <NavSection title="Community" items={liveCommunityNavItems} collapsed={sidebarCollapsed} />
           <NavSection title="Learning" items={learningNavItems} collapsed={sidebarCollapsed} />
           <NavSection title="AI Tools" items={aiToolsNavItems} collapsed={sidebarCollapsed} />
           <NavSection title="Finance" items={financeNavItems} collapsed={sidebarCollapsed} />

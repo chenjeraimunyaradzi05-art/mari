@@ -124,7 +124,7 @@ export function SuperAppNav({ className }: SuperAppNavProps) {
           <Link href="/" className={cn('flex items-center gap-2', isCollapsed && 'mr-auto')}
           >
             <Image
-              src="/athena-logo.png"
+              src="/logo.svg"
               alt="ATHENA"
               width={32}
               height={32}

@@ -212,14 +212,15 @@ export async function markAsRead(
  */
 export async function deleteMessage(
   messageId: string,
-  userId: string
+  userId: string,
+  options: { allowModerator?: boolean } = {}
 ): Promise<boolean> {
   try {
     const message = await prisma.message.findUnique({
       where: { id: messageId },
     });
     
-    if (!message || message.senderId !== userId) {
+    if (!message || (!options.allowModerator && message.senderId !== userId)) {
       return false;
     }
     

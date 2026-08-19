@@ -13,7 +13,8 @@
  * - Financial overview
  */
 
-import React, { useState } from 'react';
+import Link from 'next/link';
+import React, { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Building2,
@@ -34,7 +35,7 @@ import {
   ChevronRight,
   MoreHorizontal,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -45,6 +46,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useFormations } from '@/lib/hooks';
 
 // ============================================
 // TYPES
@@ -87,6 +89,18 @@ interface FormationDashboardProps {
   className?: string;
 }
 
+interface FormationRegistration {
+  id: string;
+  businessName?: string | null;
+  type: string;
+  status: string;
+  abn?: string | null;
+  acn?: string | null;
+  data?: Record<string, unknown> | null;
+  createdAt?: string | Date | null;
+  updatedAt?: string | Date | null;
+}
+
 // ============================================
 // STATUS CONFIG
 // ============================================
@@ -99,98 +113,92 @@ const STATUS_CONFIG: Record<BusinessStatus, { label: string; color: string; icon
   'active': { label: 'Active', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: CheckCircle2 },
 };
 
-const COMPLIANCE_STATUS_CONFIG = {
-  complete: { color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/30' },
-  pending: { color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' },
-  overdue: { color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/30' },
-  upcoming: { color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/30' },
-};
+function normalizeBusinessStatus(status: string): BusinessStatus {
+  switch (status) {
+    case 'APPROVED':
+    case 'COMPLETED':
+      return 'registered';
+    case 'SUBMITTED':
+    case 'UNDER_REVIEW':
+    case 'ADDITIONAL_INFO_REQUIRED':
+    case 'NEEDS_INFO':
+      return 'pending-approval';
+    case 'DETAILS_COMPLETE':
+    case 'PEOPLE_ADDED':
+    case 'ADDRESS_VERIFIED':
+    case 'DOCUMENTS_UPLOADED':
+    case 'PAYMENT_PENDING':
+    case 'PAYMENT_COMPLETE':
+    case 'PENDING_PAYMENT':
+    case 'PAID':
+      return 'in-progress';
+    default:
+      return 'draft';
+  }
+}
 
-// ============================================
-// MOCK DATA
-// ============================================
+function normalizeBusinessType(type: string): Business['type'] {
+  switch (type) {
+    case 'COMPANY':
+      return 'Corporation';
+    case 'PARTNERSHIP':
+      return 'Partnership';
+    case 'TRUST':
+      return 'Non-Profit';
+    default:
+      return 'Sole Proprietor';
+  }
+}
 
-const mockBusiness: Business = {
-  id: '1',
-  name: 'TechVenture Labs LLC',
-  type: 'LLC',
-  status: 'in-progress',
-  state: 'Delaware',
-  formationProgress: 65,
-  createdAt: new Date('2026-01-10'),
-  ein: '12-3456789',
-};
+function getProgressForStatus(status: string): number {
+  const progress: Record<string, number> = {
+    DRAFT: 10,
+    DETAILS_COMPLETE: 25,
+    PEOPLE_ADDED: 40,
+    ADDRESS_VERIFIED: 55,
+    DOCUMENTS_UPLOADED: 70,
+    PAYMENT_PENDING: 75,
+    PENDING_PAYMENT: 75,
+    PAYMENT_COMPLETE: 85,
+    PAID: 85,
+    SUBMITTED: 90,
+    UNDER_REVIEW: 95,
+    ADDITIONAL_INFO_REQUIRED: 80,
+    NEEDS_INFO: 80,
+    APPROVED: 100,
+    COMPLETED: 100,
+    REJECTED: 100,
+  };
 
-const mockCofounderMatches: CofounderMatch[] = [
-  {
-    id: '1',
-    name: 'Sarah Chen',
-    avatar: '/avatars/sarah.jpg',
-    role: 'Technical Co-founder',
-    matchScore: 94,
-    skills: ['Full-Stack Development', 'AI/ML', 'System Architecture'],
-    status: 'pending',
-  },
-  {
-    id: '2',
-    name: 'Marcus Johnson',
-    avatar: '/avatars/marcus.jpg',
-    role: 'Marketing Co-founder',
-    matchScore: 89,
-    skills: ['Growth Marketing', 'Brand Strategy', 'B2B Sales'],
-    status: 'connected',
-  },
-  {
-    id: '3',
-    name: 'Elena Rodriguez',
-    avatar: '/avatars/elena.jpg',
-    role: 'Operations Co-founder',
-    matchScore: 87,
-    skills: ['Operations', 'Finance', 'HR'],
-    status: 'pending',
-  },
-];
+  return progress[status] ?? 0;
+}
 
-const mockComplianceItems: ComplianceItem[] = [
-  {
-    id: '1',
-    title: 'Annual Report Filing',
-    description: 'File annual report with Delaware Secretary of State',
-    dueDate: new Date('2026-03-01'),
-    status: 'upcoming',
-    priority: 'high',
-  },
-  {
-    id: '2',
-    title: 'Registered Agent Fee',
-    description: 'Pay annual registered agent service fee',
-    dueDate: new Date('2026-02-15'),
-    status: 'pending',
-    priority: 'medium',
-  },
-  {
-    id: '3',
-    title: 'Operating Agreement',
-    description: 'Complete and sign LLC operating agreement',
-    status: 'complete',
-    priority: 'high',
-  },
-  {
-    id: '4',
-    title: 'EIN Application',
-    description: 'Apply for Employer Identification Number with IRS',
-    status: 'complete',
-    priority: 'high',
-  },
-  {
-    id: '5',
-    title: 'Business License',
-    description: 'Obtain local business license',
-    dueDate: new Date('2026-01-10'),
-    status: 'overdue',
-    priority: 'high',
-  },
-];
+function pickString(source: Record<string, unknown> | null | undefined, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function mapRegistrationToBusiness(registration: FormationRegistration): Business {
+  const data = registration.data && typeof registration.data === 'object' ? registration.data : null;
+
+  return {
+    id: registration.id,
+    name: registration.businessName || 'Untitled registration',
+    type: normalizeBusinessType(registration.type),
+    status: normalizeBusinessStatus(registration.status),
+    state: pickString(data, ['state', 'jurisdiction', 'country']) || 'Not specified',
+    formationProgress: getProgressForStatus(registration.status),
+    createdAt: registration.createdAt ? new Date(registration.createdAt) : new Date(),
+    ein: registration.abn || registration.acn || undefined,
+    registrationNumber: registration.acn || registration.abn || undefined,
+  };
+}
 
 // ============================================
 // COMPONENTS
@@ -290,10 +298,13 @@ function BusinessCard({ business }: { business: Business }) {
         </div>
 
         <div className="flex gap-2 mt-4">
-          <Button className="flex-1" variant="default">
+          <Link
+            href={`/dashboard/formation/${business.id}`}
+            className={cn(buttonVariants({ variant: 'default' }), 'flex-1')}
+          >
             Continue Formation
             <ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
+          </Link>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon">
@@ -414,12 +425,23 @@ function ComplianceChecklist({ items }: { items: ComplianceItem[] }) {
 // ============================================
 
 export function FormationDashboard({ className }: FormationDashboardProps) {
-  const [business] = useState<Business>(mockBusiness);
-  const [cofounderMatches] = useState<CofounderMatch[]>(mockCofounderMatches);
-  const [complianceItems] = useState<ComplianceItem[]>(mockComplianceItems);
+  const { data: registrations, isLoading, error } = useFormations();
+  const registrationList: FormationRegistration[] = Array.isArray(registrations)
+    ? registrations
+    : [];
+  const businesses = useMemo(
+    () => registrationList.map(mapRegistrationToBusiness),
+    [registrationList]
+  );
+  const business = businesses[0] ?? null;
+  const cofounderMatches: CofounderMatch[] = [];
+  const complianceItems: ComplianceItem[] = [];
 
   const completedCompliance = complianceItems.filter(item => item.status === 'complete').length;
   const overdueCompliance = complianceItems.filter(item => item.status === 'overdue').length;
+  const inProgressCount = registrationList.filter((registration) =>
+    ['DRAFT', 'DETAILS_COMPLETE', 'PEOPLE_ADDED', 'ADDRESS_VERIFIED', 'DOCUMENTS_UPLOADED'].includes(registration.status)
+  ).length;
 
   return (
     <div className={cn('space-y-6', className)}>
@@ -429,36 +451,44 @@ export function FormationDashboard({ className }: FormationDashboardProps) {
           <h1 className="text-2xl font-bold">Formation Studio</h1>
           <p className="text-muted-foreground">Build and manage your business</p>
         </div>
-        <Button>
+        <Link href="/dashboard/formation/new" className={buttonVariants({ variant: 'default' })}>
           <Plus className="h-4 w-4 mr-2" />
           Start New Business
-        </Button>
+        </Link>
       </div>
+
+      {error && (
+        <Card className="border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30">
+          <CardContent className="p-4 text-sm text-red-700 dark:text-red-300">
+            Formation registrations could not be loaded. Please try again shortly.
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Businesses"
-          value={1}
-          description="1 in formation"
+          value={isLoading ? '...' : businesses.length}
+          description={inProgressCount > 0 ? `${inProgressCount} in formation` : 'No active registrations'}
           icon={Building2}
         />
         <StatCard
           title="Co-founder Matches"
-          value={cofounderMatches.length}
-          description={`${cofounderMatches.filter(m => m.status === 'connected').length} connected`}
+          value={0}
+          description="Matching not configured"
           icon={Users}
         />
         <StatCard
           title="Compliance"
-          value={`${completedCompliance}/${complianceItems.length}`}
-          description={overdueCompliance > 0 ? `${overdueCompliance} overdue` : 'All on track'}
+          value={complianceItems.length ? `${completedCompliance}/${complianceItems.length}` : 'Not configured'}
+          description={overdueCompliance > 0 ? `${overdueCompliance} overdue` : 'No live checklist'}
           icon={FileCheck}
         />
         <StatCard
           title="Est. Setup Cost"
-          value="$499"
-          description="Formation fees + filings"
+          value="--"
+          description="Shown after checkout setup"
           icon={DollarSign}
         />
       </div>
@@ -467,7 +497,30 @@ export function FormationDashboard({ className }: FormationDashboardProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Business Card - Takes 2 columns */}
         <div className="lg:col-span-2 space-y-6">
-          <BusinessCard business={business} />
+          {isLoading ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">
+                Loading registrations...
+              </CardContent>
+            </Card>
+          ) : business ? (
+            <BusinessCard business={business} />
+          ) : (
+            <Card>
+              <CardContent className="p-6">
+                <h3 className="font-semibold text-lg">No registrations yet</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Start a registration to see formation progress, documents, and status here.
+                </p>
+                <Link
+                  href="/dashboard/formation/new"
+                  className={cn(buttonVariants({ variant: 'default' }), 'mt-4')}
+                >
+                  Start New Business
+                </Link>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Quick Actions */}
           <Card>
@@ -508,7 +561,13 @@ export function FormationDashboard({ className }: FormationDashboardProps) {
               </Button>
             </CardHeader>
             <CardContent>
-              <ComplianceChecklist items={complianceItems} />
+              {complianceItems.length > 0 ? (
+                <ComplianceChecklist items={complianceItems} />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Compliance checklist data is not connected for this dashboard yet.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -527,9 +586,15 @@ export function FormationDashboard({ className }: FormationDashboardProps) {
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
-              {cofounderMatches.map((match) => (
-                <CofounderMatchCard key={match.id} match={match} />
-              ))}
+              {cofounderMatches.length > 0 ? (
+                cofounderMatches.map((match) => (
+                  <CofounderMatchCard key={match.id} match={match} />
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Co-founder matching is not connected yet.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -543,13 +608,11 @@ export function FormationDashboard({ className }: FormationDashboardProps) {
                 <h3 className="font-semibold text-emerald-900 dark:text-emerald-100">Pro Tip</h3>
               </div>
               <p className="text-sm text-emerald-800 dark:text-emerald-200">
-                Delaware LLCs offer strong liability protection and no state corporate income tax 
-                for businesses operating outside Delaware. Complete your formation before the end 
-                of Q1 to maximize tax benefits.
+                Review your region-specific registration, tax, licensing, and reporting obligations before submitting formation documents.
               </p>
-              <Button variant="link" className="p-0 h-auto mt-2 text-emerald-700 dark:text-emerald-300">
-                Learn more about LLC benefits →
-              </Button>
+              <Link href="/dashboard/formation/new" className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300">
+                Continue setup →
+              </Link>
             </CardContent>
           </Card>
 

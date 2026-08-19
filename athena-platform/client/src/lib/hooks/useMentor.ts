@@ -7,6 +7,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api-fetch';
 import { useMentorStore } from '@/lib/stores/mentor.store';
 import type { 
   Session, 
@@ -42,92 +43,246 @@ export const mentorKeys = {
 // API FUNCTIONS
 // ============================================
 
+type RawMentorSession = Record<string, any>;
+
+export type CreateMentorSessionInput = Omit<Session, 'id'> & {
+  mentorId?: string;
+  mentorProfileId?: string;
+  scheduledAt?: Date | string;
+  durationMinutes?: number;
+  note?: string;
+};
+
+async function readPayload<T>(response: Response): Promise<T> {
+  const payload = await response.json();
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return payload.data as T;
+  }
+  return payload as T;
+}
+
+function combineDateAndTime(date: Date, time: string): Date {
+  const [hours, minutes] = time.split(':').map(Number);
+  const combined = new Date(date);
+  combined.setHours(Number.isFinite(hours) ? hours : 0, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+  return combined;
+}
+
+function getSessionStart(data: CreateMentorSessionInput): Date {
+  if (data.scheduledAt instanceof Date) {
+    return data.scheduledAt;
+  }
+  if (typeof data.scheduledAt === 'string') {
+    return new Date(data.scheduledAt);
+  }
+  return combineDateAndTime(data.date, data.startTime);
+}
+
+function getDurationMinutes(startTime: string, endTime: string): number {
+  const [startHours, startMinutes] = startTime.split(':').map(Number);
+  const [endHours, endMinutes] = endTime.split(':').map(Number);
+  const start = (startHours * 60) + startMinutes;
+  const end = (endHours * 60) + endMinutes;
+  return end > start ? end - start : 60;
+}
+
+function unwrapSessionResponse(payload: RawMentorSession | { session?: RawMentorSession }): RawMentorSession {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'session' in payload &&
+    payload.session &&
+    typeof payload.session === 'object'
+  ) {
+    return payload.session;
+  }
+  return payload as RawMentorSession;
+}
+
+function formatTime(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function normalizeSessionType(type?: string | null): SessionType {
+  const normalized = type?.toLowerCase();
+  if (normalized === 'audio' || normalized === 'chat') {
+    return normalized;
+  }
+  return 'video';
+}
+
+function normalizeSessionStatus(status?: string | null): SessionStatus {
+  switch (status) {
+    case 'CONFIRMED':
+    case 'confirmed':
+      return 'confirmed';
+    case 'IN_PROGRESS':
+    case 'in-progress':
+      return 'in-progress';
+    case 'COMPLETED':
+    case 'completed':
+      return 'completed';
+    case 'CANCELED':
+    case 'CANCELLED':
+    case 'cancelled':
+      return 'cancelled';
+    case 'NO_SHOW':
+    case 'no-show':
+      return 'no-show';
+    case 'REQUESTED':
+    case 'scheduled':
+    default:
+      return 'scheduled';
+  }
+}
+
+function toBackendSessionStatus(status: SessionStatus): 'CONFIRMED' | 'CANCELED' | 'COMPLETED' {
+  if (status === 'completed') return 'COMPLETED';
+  if (status === 'cancelled') return 'CANCELED';
+  return 'CONFIRMED';
+}
+
+function mapMentorSession(raw: RawMentorSession): Session {
+  const start = new Date(raw.scheduledAt ?? raw.date ?? Date.now());
+  const duration = Number(raw.durationMinutes ?? raw.duration ?? 60);
+  const end = new Date(start);
+  end.setMinutes(end.getMinutes() + duration);
+
+  const mentee = raw.mentee ?? {};
+  const menteeName =
+    raw.menteeName ||
+    mentee.displayName ||
+    [mentee.firstName, mentee.lastName].filter(Boolean).join(' ') ||
+    'Mentee';
+
+  return {
+    id: String(raw.id),
+    menteeId: String(raw.menteeId ?? mentee.id ?? ''),
+    menteeName,
+    menteeAvatar: raw.menteeAvatar ?? mentee.avatar ?? undefined,
+    date: start,
+    startTime: formatTime(start),
+    endTime: formatTime(end),
+    duration,
+    type: normalizeSessionType(raw.type ?? raw.sessionType),
+    status: normalizeSessionStatus(raw.status),
+    topic: raw.topic ?? raw.note ?? 'Mentorship session',
+    price: Number(raw.sessionAmount ?? raw.price ?? raw.amount ?? raw.mentorPayout ?? 0),
+    notes: raw.notes ?? raw.note ?? undefined,
+    meetingUrl: raw.meetingUrl ?? undefined,
+    recordingUrl: raw.recordingUrl ?? undefined,
+  };
+}
+
 const mentorApi = {
   // Sessions
   getSessions: async (params?: { startDate?: Date; endDate?: Date }): Promise<Session[]> => {
     const searchParams = new URLSearchParams();
+    searchParams.set('role', 'mentor');
     if (params?.startDate) searchParams.set('startDate', params.startDate.toISOString());
     if (params?.endDate) searchParams.set('endDate', params.endDate.toISOString());
     
-    const response = await fetch(`/api/mentor/sessions?${searchParams}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentors/sessions?${searchParams}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch sessions');
-    const { data } = await response.json();
-    return data;
+    const data = await readPayload<RawMentorSession[]>(response);
+    return Array.isArray(data) ? data.map(mapMentorSession) : [];
   },
 
   getSession: async (id: string): Promise<Session> => {
-    const response = await fetch(`/api/mentor/sessions/${id}`, { credentials: 'include' });
+    const response = await apiFetch('/api/mentors/sessions?role=mentor', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch session');
-    const { data } = await response.json();
-    return data;
+    const data = await readPayload<RawMentorSession[]>(response);
+    const session = Array.isArray(data) ? data.find((item) => item.id === id) : null;
+    if (!session) throw new Error('Session not found');
+    return mapMentorSession(session);
   },
 
-  createSession: async (data: Omit<Session, 'id'>): Promise<Session> => {
-    const response = await fetch('/api/mentor/sessions', {
+  createSession: async (data: CreateMentorSessionInput): Promise<Session> => {
+    const mentorId = data.mentorProfileId ?? data.mentorId;
+    if (!mentorId) {
+      throw new Error('A mentor profile id is required to create a mentor session');
+    }
+
+    const scheduledAt = getSessionStart(data);
+    const response = await apiFetch(`/api/mentors/${mentorId}/book`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        scheduledAt: scheduledAt.toISOString(),
+        durationMinutes: data.durationMinutes ?? data.duration,
+        note: data.note ?? data.notes ?? data.topic,
+      }),
     });
     if (!response.ok) throw new Error('Failed to create session');
-    const { data: session } = await response.json();
-    return session;
+    const payload = await readPayload<RawMentorSession | { session?: RawMentorSession }>(response);
+    return mapMentorSession(unwrapSessionResponse(payload));
   },
 
   updateSession: async (id: string, data: Partial<Session>): Promise<Session> => {
-    const response = await fetch(`/api/mentor/sessions/${id}`, {
+    if (!data.status) {
+      throw new Error('Only mentor session status updates are supported');
+    }
+
+    const response = await apiFetch(`/api/mentors/sessions/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ status: toBackendSessionStatus(data.status) }),
     });
     if (!response.ok) throw new Error('Failed to update session');
-    const { data: session } = await response.json();
-    return session;
+    const session = await readPayload<RawMentorSession>(response);
+    return mapMentorSession(session);
   },
 
   cancelSession: async (id: string, reason?: string): Promise<void> => {
-    const response = await fetch(`/api/mentor/sessions/${id}/cancel`, {
-      method: 'POST',
+    const response = await apiFetch(`/api/mentors/sessions/${id}/status`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ status: 'CANCELED', reason }),
     });
     if (!response.ok) throw new Error('Failed to cancel session');
   },
 
   completeSession: async (id: string, notes?: string): Promise<void> => {
-    const response = await fetch(`/api/mentor/sessions/${id}/complete`, {
-      method: 'POST',
+    const response = await apiFetch(`/api/mentors/sessions/${id}/status`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ status: 'COMPLETED', notes }),
     });
     if (!response.ok) throw new Error('Failed to complete session');
   },
 
   rescheduleSession: async (id: string, newDate: Date, newStartTime: string, newEndTime: string): Promise<Session> => {
-    const response = await fetch(`/api/mentor/sessions/${id}/reschedule`, {
-      method: 'POST',
+    const scheduledAt = combineDateAndTime(newDate, newStartTime);
+    const response = await apiFetch(`/api/mentors/sessions/${id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ date: newDate, startTime: newStartTime, endTime: newEndTime }),
+      body: JSON.stringify({
+        scheduledAt: scheduledAt.toISOString(),
+        durationMinutes: getDurationMinutes(newStartTime, newEndTime),
+      }),
     });
     if (!response.ok) throw new Error('Failed to reschedule session');
-    const { data } = await response.json();
-    return data;
+    const session = await readPayload<RawMentorSession>(response);
+    return mapMentorSession(session);
   },
 
   // Availability
   getAvailability: async (): Promise<TimeSlot[]> => {
-    const response = await fetch('/api/mentor/availability', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/availability', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch availability');
     const { data } = await response.json();
     return data;
   },
 
   saveAvailability: async (slots: TimeSlot[]): Promise<TimeSlot[]> => {
-    const response = await fetch('/api/mentor/availability', {
+    const response = await apiFetch('/api/mentor/availability', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -140,21 +295,21 @@ const mentorApi = {
 
   // Mentees
   getMentees: async (): Promise<Mentee[]> => {
-    const response = await fetch('/api/mentor/mentees', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/mentees', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch mentees');
     const { data } = await response.json();
     return data;
   },
 
   getMentee: async (id: string): Promise<Mentee> => {
-    const response = await fetch(`/api/mentor/mentees/${id}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentor/mentees/${id}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch mentee');
     const { data } = await response.json();
     return data;
   },
 
   updateMentee: async (id: string, data: Partial<Mentee>): Promise<Mentee> => {
-    const response = await fetch(`/api/mentor/mentees/${id}`, {
+    const response = await apiFetch(`/api/mentor/mentees/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -167,21 +322,21 @@ const mentorApi = {
 
   // Earnings
   getEarnings: async (range: string): Promise<EarningsData[]> => {
-    const response = await fetch(`/api/mentor/earnings?range=${range}`, { credentials: 'include' });
+    const response = await apiFetch(`/api/mentor/earnings?range=${range}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch earnings');
     const { data } = await response.json();
     return data;
   },
 
   getTransactions: async (): Promise<Transaction[]> => {
-    const response = await fetch('/api/mentor/transactions', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/transactions', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch transactions');
     const { data } = await response.json();
     return data;
   },
 
   getStats: async (): Promise<MentorStats> => {
-    const response = await fetch('/api/mentor/stats', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/stats', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch stats');
     const { data } = await response.json();
     return data;
@@ -189,14 +344,14 @@ const mentorApi = {
 
   // Payouts
   getPayoutMethods: async (): Promise<PayoutMethod[]> => {
-    const response = await fetch('/api/mentor/payout-methods', { credentials: 'include' });
+    const response = await apiFetch('/api/mentor/payout-methods', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch payout methods');
     const { data } = await response.json();
     return data;
   },
 
   addPayoutMethod: async (method: Omit<PayoutMethod, 'id'>): Promise<PayoutMethod> => {
-    const response = await fetch('/api/mentor/payout-methods', {
+    const response = await apiFetch('/api/mentor/payout-methods', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -208,7 +363,7 @@ const mentorApi = {
   },
 
   requestPayout: async (amount: number, methodId: string): Promise<Transaction> => {
-    const response = await fetch('/api/mentor/payouts', {
+    const response = await apiFetch('/api/mentor/payouts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -231,7 +386,11 @@ export function useMentorSessions(params?: { startDate?: Date; endDate?: Date })
   const { setSessions, setLoading, setError } = useMentorStore();
 
   return useQuery({
-    queryKey: mentorKeys.sessions(),
+    queryKey: [
+      ...mentorKeys.sessions(),
+      params?.startDate?.toISOString() ?? null,
+      params?.endDate?.toISOString() ?? null,
+    ],
     queryFn: async () => {
       setLoading('sessions', true);
       try {
@@ -268,7 +427,7 @@ export function useCreateSession() {
   const { addSession } = useMentorStore();
 
   return useMutation({
-    mutationFn: (data: Omit<Session, 'id'>) => mentorApi.createSession(data),
+    mutationFn: (data: CreateMentorSessionInput) => mentorApi.createSession(data),
     onSuccess: (session) => {
       addSession(session);
       queryClient.invalidateQueries({ queryKey: mentorKeys.sessions() });

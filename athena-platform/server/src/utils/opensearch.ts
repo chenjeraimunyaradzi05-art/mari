@@ -8,11 +8,18 @@ const password = process.env.OPENSEARCH_PASSWORD || 'admin';
 let client: Client | null = null;
 let isConnected = false;
 
-export const initializeOpenSearch = async () => {
+export const isOpenSearchEnabled = () => process.env.OPENSEARCH_ENABLED === 'true' || !!process.env.OPENSEARCH_NODE;
+
+export const initializeOpenSearch = async (): Promise<boolean> => {
   try {
+    if (!isOpenSearchEnabled()) {
+      logger.info('OpenSearch disabled; Prisma search fallback is active');
+      return false;
+    }
+
     if (!process.env.OPENSEARCH_NODE) {
-      logger.warn('OPENSEARCH_NODE not set, skipping OpenSearch initialization');
-      return;
+      logger.warn('OPENSEARCH_ENABLED is true but OPENSEARCH_NODE is not set; skipping OpenSearch initialization');
+      return false;
     }
 
     client = new Client({
@@ -29,10 +36,12 @@ export const initializeOpenSearch = async () => {
     const health = await client.cluster.health();
     isConnected = true;
     logger.info('OpenSearch connected', { status: health.body.status });
+    return true;
   } catch (error) {
     logger.error('OpenSearch connection failed', { error });
     client = null;
     isConnected = false;
+    return false;
   }
 };
 
@@ -42,6 +51,8 @@ export const getOpenSearchClient = () => {
   }
   return client;
 };
+
+export const isOpenSearchConnected = () => isConnected && !!client;
 
 export const IndexNames = {
   USERS: 'athena_users',
@@ -56,8 +67,8 @@ export const IndexNames = {
 // INDEXING HELPERS
 // ==========================================
 
-export const indexDocument = async (index: string, id: string, document: any) => {
-  if (!isConnected || !client) return;
+export const indexDocument = async (index: string, id: string, document: any): Promise<boolean> => {
+  if (!isConnected || !client) return false;
 
   try {
     await client.index({
@@ -67,13 +78,15 @@ export const indexDocument = async (index: string, id: string, document: any) =>
       refresh: true, // Make searchable immediately
     });
     logger.debug(`Indexed document ${id} in ${index}`);
+    return true;
   } catch (error) {
     logger.error(`Failed to index document ${id} in ${index}`, { error });
+    return false;
   }
 };
 
-export const deleteDocument = async (index: string, id: string) => {
-  if (!isConnected || !client) return;
+export const deleteDocument = async (index: string, id: string): Promise<boolean> => {
+  if (!isConnected || !client) return false;
 
   try {
     await client.delete({
@@ -81,7 +94,9 @@ export const deleteDocument = async (index: string, id: string) => {
       id,
     });
     logger.debug(`Deleted document ${id} from ${index}`);
+    return true;
   } catch (error) {
     logger.error(`Failed to delete document ${id} from ${index}`, { error });
+    return false;
   }
 };

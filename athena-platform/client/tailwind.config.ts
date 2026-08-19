@@ -10,19 +10,32 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // ATHENA Brand Colors - Emerald-based primary
+        // ATHENA Brand Colors — Rose-based primary (feminine, professional)
         primary: {
-          50: '#ecfdf5',
-          100: '#d1fae5',
-          200: '#a7f3d0',
-          300: '#6ee7b7',
-          400: '#34d399',
-          500: '#10b981',
-          600: '#059669',
-          700: '#047857',
-          800: '#065f46',
-          900: '#064e3b',
-          950: '#022c22',
+          50: 'rgb(var(--color-primary-50) / <alpha-value>)',
+          100: 'rgb(var(--color-primary-100) / <alpha-value>)',
+          200: 'rgb(var(--color-primary-200) / <alpha-value>)',
+          300: 'rgb(var(--color-primary-300) / <alpha-value>)',
+          400: 'rgb(var(--color-primary-400) / <alpha-value>)',
+          500: 'rgb(var(--color-primary-500) / <alpha-value>)',
+          600: 'rgb(var(--color-primary-600) / <alpha-value>)',
+          700: 'rgb(var(--color-primary-700) / <alpha-value>)',
+          800: 'rgb(var(--color-primary-800) / <alpha-value>)',
+          900: 'rgb(var(--color-primary-900) / <alpha-value>)',
+          950: 'rgb(var(--color-primary-950) / <alpha-value>)',
+        },
+        // Soft blush accent (for washes, pill backgrounds, etc.)
+        blossom: {
+          50: '#fff7f9',
+          100: '#fde8ef',
+          200: '#fbd2e2',
+          300: '#f7aecd',
+          400: '#ef7fb2',
+          500: '#e0588f',
+          600: '#c23a73',
+          700: '#9b285c',
+          800: '#7a1e47',
+          900: '#5b1436',
         },
         secondary: {
           50: '#faf5ff',
@@ -56,6 +69,9 @@ const config: Config = {
           emerald: '#10b981',
           violet: '#8b5cf6',
           sky: '#0ea5e9',
+          blush: '#fde4ec',
+          lavender: '#ede9fe',
+          peach: '#fed7aa',
         },
         // Social action colors
         social: {
@@ -165,15 +181,19 @@ const config: Config = {
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-        'athena-gradient': 'linear-gradient(135deg, #10b981 0%, #8b5cf6 50%, #f43f5e 100%)',
-        'athena-gradient-alt': 'linear-gradient(135deg, #059669 0%, #7c3aed 100%)',
-        'emerald-glow': 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%)',
+        'athena-gradient': 'linear-gradient(135deg, #f43f5e 0%, #a855f7 55%, #f59e0b 100%)',
+        'athena-gradient-alt': 'linear-gradient(135deg, #e11d48 0%, #7c3aed 100%)',
+        'athena-gradient-soft': 'linear-gradient(135deg, #fde4ec 0%, #ede9fe 55%, #ffedd5 100%)',
+        'emerald-glow': 'radial-gradient(circle, rgba(244, 63, 94, 0.18) 0%, transparent 70%)',
+        'rose-glow': 'radial-gradient(circle, rgba(244, 63, 94, 0.22) 0%, transparent 70%)',
       },
       boxShadow: {
         'emerald': '0 4px 14px 0 rgba(16, 185, 129, 0.25)',
+        'rose': '0 4px 14px 0 rgba(244, 63, 94, 0.25)',
+        'blossom': '0 10px 30px -12px rgba(236, 72, 153, 0.35)',
         'purple': '0 4px 14px 0 rgba(168, 85, 247, 0.25)',
         'orange': '0 4px 14px 0 rgba(249, 115, 22, 0.25)',
-        'inner-glow': 'inset 0 2px 4px 0 rgba(16, 185, 129, 0.1)',
+        'inner-glow': 'inset 0 2px 4px 0 rgba(244, 63, 94, 0.1)',
       },
       borderRadius: {
         '4xl': '2rem',

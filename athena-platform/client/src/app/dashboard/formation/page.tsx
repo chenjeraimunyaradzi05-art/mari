@@ -1,6 +1,7 @@
 "use client";
 
 import Link from 'next/link';
+import { Check, Landmark, Receipt, Rocket } from 'lucide-react';
 import { useFormations } from '@/lib/hooks';
 import { formatRelativeTime } from '@/lib/utils';
 
@@ -38,7 +39,7 @@ export default function FormationLandingPage() {
           </Link>
         </div>
 
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
 
         {!isLoading && formationList.length === 0 && (
           <p className="text-sm text-muted-foreground">No registrations yet.</p>
@@ -46,23 +47,23 @@ export default function FormationLandingPage() {
 
         {!isLoading && formationList.length > 0 && (
           <div className="grid gap-3">
-            {formationList.map((f) => (
+            {formationList.map((formation) => (
               <Link
-                key={f.id}
-                href={`/dashboard/formation/${f.id}`}
+                key={formation.id}
+                href={`/dashboard/formation/${formation.id}`}
                 className="border rounded-md p-4 hover:bg-slate-50 transition-colors"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="font-medium">
-                      {f.businessName || 'Untitled registration'}
+                      {formation.businessName || 'Untitled registration'}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {f.type} • Updated {f.updatedAt ? formatRelativeTime(f.updatedAt) : 'recently'}
+                      {formation.type} - Updated {formation.updatedAt ? formatRelativeTime(formation.updatedAt) : 'recently'}
                     </div>
                   </div>
                   <span className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground">
-                    {f.status}
+                    {formation.status}
                   </span>
                 </div>
               </Link>
@@ -73,40 +74,61 @@ export default function FormationLandingPage() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <div className="border rounded-lg p-6 space-y-4">
-          <div className="h-12 w-12 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">
-            🚀
+          <div className="h-12 w-12 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
+            <Rocket className="h-6 w-6" />
           </div>
           <h3 className="font-semibold text-xl">Register Business</h3>
           <p className="text-sm text-gray-500">
-            Register your ABN, ACN, and business name in minutes with our ASIC-integrated wizard.
+            Create and submit business-registration drafts with the connected formation workflow.
           </p>
           <ul className="text-sm gap-2 grid">
-            <li className="flex items-center">✓ Sole Trader or Company</li>
-            <li className="flex items-center">✓ Instant ABN Application</li>
-            <li className="flex items-center">✓ Legal Document Generation</li>
+            <li className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-blue-600" />
+              Sole trader or company
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-blue-600" />
+              Participant and address validation
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-blue-600" />
+              Payment and submission status
+            </li>
           </ul>
+          <Link href="/dashboard/formation/new" className="inline-flex text-sm font-medium text-primary hover:underline">
+            Start registration
+          </Link>
         </div>
 
         <div className="border rounded-lg p-6 space-y-4">
-          <div className="h-12 w-12 bg-green-100 text-green-600 rounded-lg flex items-center justify-center text-xl">
-            📊
+          <div className="h-12 w-12 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
+            <Receipt className="h-6 w-6" />
           </div>
           <h3 className="font-semibold text-xl">Tax Optimization</h3>
           <p className="text-sm text-gray-500">
-            AI-powered expense tracking and tax planning to maximize your deductions.
+            Configure tax rates, deductions, and return planning from the finance workspace.
           </p>
-          <div className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded inline-block">Coming Soon</div>
+          <Link href="/dashboard/finance/tax" className="inline-flex text-sm font-medium text-primary hover:underline">
+            Open tax workspace
+          </Link>
         </div>
 
         <div className="border rounded-lg p-6 space-y-4">
-          <div className="h-12 w-12 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center text-xl">
-            💰
+          <div className="h-12 w-12 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center">
+            <Landmark className="h-6 w-6" />
           </div>
           <h3 className="font-semibold text-xl">Grants & Capital</h3>
           <p className="text-sm text-gray-500">
-            Find and apply for government grants and funding opportunities for women-led businesses.
+            Track grant opportunities and investor outreach through connected business workflows.
           </p>
-          <div className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded inline-block">Coming Soon</div>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/dashboard/grants" className="inline-flex text-sm font-medium text-primary hover:underline">
+              Open grants
+            </Link>
+            <Link href="/dashboard/investors" className="inline-flex text-sm font-medium text-primary hover:underline">
+              Open investors
+            </Link>
+          </div>
         </div>
       </div>
     </div>

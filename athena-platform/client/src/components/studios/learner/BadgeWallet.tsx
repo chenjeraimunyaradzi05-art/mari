@@ -18,22 +18,15 @@ import { cn } from '@/lib/utils';
 import {
   Award,
   Shield,
-  Star,
-  Zap,
   Trophy,
   CheckCircle2,
-  ExternalLink,
   Share2,
   Download,
   Copy,
   Link2,
-  Calendar,
-  Building2,
   BookOpen,
   Code,
-  Briefcase,
   Users,
-  Filter,
   Search,
   Grid3X3,
   List,
@@ -43,7 +36,7 @@ import {
   Unlock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge as BadgeUI } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
@@ -67,8 +60,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -104,93 +95,6 @@ interface Badge {
     projectsCompleted?: number;
   };
 }
-
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_BADGES: Badge[] = [
-  {
-    id: '1',
-    name: 'JavaScript Expert',
-    description: 'Demonstrated advanced proficiency in JavaScript programming',
-    category: 'skills',
-    level: 'gold',
-    icon: '🟨',
-    earnedAt: new Date(2026, 0, 15),
-    issuer: { name: 'Athena Skills', verified: true },
-    verificationUrl: 'https://athena.app/verify/js-expert-123',
-    credentialId: 'JS-EXP-2026-001',
-    skills: ['JavaScript', 'ES6+', 'TypeScript', 'Node.js'],
-    isPublic: true,
-    metadata: { score: 94 },
-  },
-  {
-    id: '2',
-    name: 'React Professional',
-    description: 'Completed advanced React certification with distinction',
-    category: 'skills',
-    level: 'silver',
-    icon: '⚛️',
-    earnedAt: new Date(2026, 0, 10),
-    issuer: { name: 'Athena Skills', verified: true },
-    verificationUrl: 'https://athena.app/verify/react-pro-456',
-    credentialId: 'REACT-PRO-2026-001',
-    skills: ['React', 'Redux', 'React Query', 'Testing'],
-    isPublic: true,
-    metadata: { score: 87 },
-  },
-  {
-    id: '3',
-    name: 'Product Management Fundamentals',
-    description: 'Completed the Product Management Fundamentals course',
-    category: 'courses',
-    level: 'bronze',
-    icon: '📊',
-    earnedAt: new Date(2025, 11, 20),
-    issuer: { name: 'Sarah Johnson', verified: true },
-    credentialId: 'PM-FUND-2025-789',
-    isPublic: true,
-    metadata: { hoursCompleted: 12 },
-  },
-  {
-    id: '4',
-    name: 'Community Champion',
-    description: 'Helped 100+ community members with their questions',
-    category: 'community',
-    level: 'gold',
-    icon: '🏆',
-    earnedAt: new Date(2025, 10, 15),
-    issuer: { name: 'Athena Community', verified: true },
-    isPublic: true,
-    metadata: { projectsCompleted: 127 },
-  },
-  {
-    id: '5',
-    name: 'First Course Completed',
-    description: 'Completed your first course on Athena',
-    category: 'achievements',
-    level: 'bronze',
-    icon: '🎓',
-    earnedAt: new Date(2025, 9, 1),
-    issuer: { name: 'Athena', verified: true },
-    isPublic: true,
-  },
-  {
-    id: '6',
-    name: 'Python Intermediate',
-    description: 'Demonstrated intermediate proficiency in Python',
-    category: 'skills',
-    level: 'bronze',
-    icon: '🐍',
-    earnedAt: new Date(2025, 8, 15),
-    issuer: { name: 'Athena Skills', verified: true },
-    credentialId: 'PY-INT-2025-001',
-    skills: ['Python', 'Data Structures', 'OOP'],
-    isPublic: false,
-    metadata: { score: 72 },
-  },
-];
 
 // ============================================
 // CONFIG
@@ -273,11 +177,11 @@ function BadgeCard({
                     <Eye className="h-4 w-4 mr-2" />
                     View Details
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem disabled>
                     <Share2 className="h-4 w-4 mr-2" />
                     Share
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem disabled>
                     <Download className="h-4 w-4 mr-2" />
                     Download
                   </DropdownMenuItem>
@@ -338,12 +242,10 @@ function BadgeDetailDialog({
   badge,
   open,
   onClose,
-  onToggleVisibility,
 }: {
   badge: Badge | null;
   open: boolean;
   onClose: () => void;
-  onToggleVisibility: (badgeId: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -454,7 +356,7 @@ function BadgeDetailDialog({
             <Switch
               id="visibility"
               checked={badge.isPublic}
-              onCheckedChange={() => onToggleVisibility(badge.id)}
+              disabled
             />
           </div>
 
@@ -477,11 +379,11 @@ function BadgeDetailDialog({
 
           {/* Actions */}
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1">
+            <Button variant="outline" className="flex-1" disabled title="Badge sharing is not connected yet">
               <Share2 className="h-4 w-4 mr-2" />
               Share
             </Button>
-            <Button variant="outline" className="flex-1">
+            <Button variant="outline" className="flex-1" disabled title="Badge downloads are not connected yet">
               <Download className="h-4 w-4 mr-2" />
               Download
             </Button>
@@ -544,8 +446,13 @@ function BadgeStats({ badges }: { badges: Badge[] }) {
 // MAIN COMPONENT
 // ============================================
 
-export function BadgeWallet({ className }: { className?: string }) {
-  const [badges, setBadges] = useState<Badge[]>(MOCK_BADGES);
+export function BadgeWallet({
+  badges = [],
+  className,
+}: {
+  badges?: Badge[];
+  className?: string;
+}) {
   const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -564,15 +471,6 @@ export function BadgeWallet({ className }: { className?: string }) {
     setDialogOpen(true);
   };
 
-  const handleToggleVisibility = (badgeId: string) => {
-    setBadges(badges.map(b =>
-      b.id === badgeId ? { ...b, isPublic: !b.isPublic } : b
-    ));
-    if (selectedBadge?.id === badgeId) {
-      setSelectedBadge({ ...selectedBadge, isPublic: !selectedBadge.isPublic });
-    }
-  };
-
   return (
     <div className={cn('container mx-auto py-8 space-y-8', className)}>
       {/* Header */}
@@ -581,7 +479,7 @@ export function BadgeWallet({ className }: { className?: string }) {
           <h1 className="text-3xl font-bold">Badge Wallet</h1>
           <p className="text-muted-foreground">Your verified credentials and achievements</p>
         </div>
-        <Button>
+        <Button disabled={badges.length === 0} title="Badge sharing is not connected yet">
           <Share2 className="h-4 w-4 mr-2" />
           Share All
         </Button>
@@ -599,9 +497,10 @@ export function BadgeWallet({ className }: { className?: string }) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
+            disabled={badges.length === 0}
           />
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter} disabled={badges.length === 0}>
           <SelectTrigger className="w-full sm:w-[180px]">
             <SelectValue placeholder="Category" />
           </SelectTrigger>
@@ -660,9 +559,13 @@ export function BadgeWallet({ className }: { className?: string }) {
         <Card>
           <CardContent className="py-12 text-center">
             <Award className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="font-medium">No badges found</h3>
+            <h3 className="font-medium">
+              {badges.length === 0 ? 'No badge credentials connected' : 'No badges found'}
+            </h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Try adjusting your filters or search query
+              {badges.length === 0
+                ? 'Verified credentials will appear here once live badge data is connected.'
+                : 'Try adjusting your filters or search query'}
             </p>
           </CardContent>
         </Card>
@@ -673,7 +576,6 @@ export function BadgeWallet({ className }: { className?: string }) {
         badge={selectedBadge}
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onToggleVisibility={handleToggleVisibility}
       />
     </div>
   );

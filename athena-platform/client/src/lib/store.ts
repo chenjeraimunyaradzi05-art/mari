@@ -96,17 +96,28 @@ export const useAuthStore = create<AuthState>()(
 );
 
 // UI Store for global UI state
+export type UIAccentColor = 'rose' | 'purple' | 'blue' | 'green' | 'pink' | 'orange' | 'teal';
+export type UIFontSize = 'small' | 'medium' | 'large';
+
 interface UIState {
   isSidebarOpen: boolean;
   sidebarOpen: boolean; // Alias
   sidebarCollapsed: boolean;
   isMobileMenuOpen: boolean;
   theme: 'light' | 'dark' | 'system';
+  accentColor: UIAccentColor;
+  fontSize: UIFontSize;
+  compactMode: boolean;
+  reduceMotion: boolean;
   
   toggleSidebar: () => void;
   toggleSidebarCollapsed: () => void;
   toggleMobileMenu: () => void;
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setAccentColor: (accentColor: UIAccentColor) => void;
+  setFontSize: (fontSize: UIFontSize) => void;
+  setCompactMode: (enabled: boolean) => void;
+  setReduceMotion: (enabled: boolean) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -117,6 +128,10 @@ export const useUIStore = create<UIState>()(
       sidebarCollapsed: false,
       isMobileMenuOpen: false,
       theme: 'system',
+      accentColor: 'rose',
+      fontSize: 'medium',
+      compactMode: false,
+      reduceMotion: false,
 
       toggleSidebar: () => {
         const next = !get().isSidebarOpen;
@@ -125,6 +140,10 @@ export const useUIStore = create<UIState>()(
       toggleSidebarCollapsed: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       toggleMobileMenu: () => set({ isMobileMenuOpen: !get().isMobileMenuOpen }),
       setTheme: (theme) => set({ theme }),
+      setAccentColor: (accentColor) => set({ accentColor }),
+      setFontSize: (fontSize) => set({ fontSize }),
+      setCompactMode: (compactMode) => set({ compactMode }),
+      setReduceMotion: (reduceMotion) => set({ reduceMotion }),
     }),
     {
       name: 'athena-ui',

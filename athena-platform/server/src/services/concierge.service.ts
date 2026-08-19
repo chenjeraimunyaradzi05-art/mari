@@ -12,8 +12,7 @@ const apiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 const openai = apiKey ? new OpenAI({ apiKey }) : null;
 const isProduction =
   process.env.NODE_ENV === 'production' ||
-  process.env.VERCEL_ENV === 'production' ||
-  process.env.RAILWAY_ENVIRONMENT === 'production';
+  process.env.VERCEL_ENV === 'production';
 const allowSimulation = process.env.AI_ALLOW_SIMULATION === 'true';
 
 export interface ConciergeContext {

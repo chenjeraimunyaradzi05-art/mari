@@ -12,7 +12,24 @@ import { logger } from './logger';
 // REDIS CONNECTION
 // ===========================================
 
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+
+function resolveRedisUrl(): string {
+  if (process.env.REDIS_URL) {
+    return process.env.REDIS_URL;
+  }
+
+  if (isProductionRuntime) {
+    throw new Error('REDIS_URL is required before BullMQ queues can be used in production');
+  }
+
+  return 'redis://localhost:6379';
+}
+
+const redisConnection = new Redis(resolveRedisUrl(), {
   maxRetriesPerRequest: null, // Required for BullMQ
   enableReadyCheck: false,
   lazyConnect: true,

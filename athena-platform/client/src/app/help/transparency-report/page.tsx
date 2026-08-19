@@ -6,12 +6,15 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BarChart3, Shield, AlertTriangle, Users, Clock, TrendingUp, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import Link from 'next/link';
 
 interface ReportMetrics {
   period: string;
+  startDate?: string;
+  endDate?: string;
+  publishedAt?: string;
   totalReports: number;
   byCategory: {
     illegal: number;
@@ -46,43 +49,6 @@ interface ReportMetrics {
   };
 }
 
-// Mock data for transparency report
-const REPORT_DATA: ReportMetrics = {
-  period: 'Q4 2024',
-  totalReports: 1247,
-  byCategory: {
-    illegal: 23,
-    harmful: 156,
-    harassment: 287,
-    hate_speech: 89,
-    spam: 412,
-    misinformation: 67,
-    csam: 2,
-    terrorism: 0,
-    fraud: 134,
-    other: 77,
-  },
-  actions: {
-    contentRemoved: 623,
-    accountsSuspended: 89,
-    accountsBanned: 34,
-    warnings: 256,
-    noAction: 245,
-  },
-  timing: {
-    avgResponseHours: 18.5,
-    under24Hours: 847,
-    under72Hours: 312,
-    over72Hours: 88,
-  },
-  appeals: {
-    total: 156,
-    upheld: 112,
-    overturned: 28,
-    pending: 16,
-  },
-};
-
 const CATEGORY_LABELS: Record<string, string> = {
   illegal: 'Illegal Content',
   harmful: 'Harmful Content',
@@ -98,6 +64,49 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export default function TransparencyReportPage() {
   const [expandedSection, setExpandedSection] = useState<string | null>('overview');
+  const [reportData, setReportData] = useState<ReportMetrics | null>(null);
+  const [isLoadingReport, setIsLoadingReport] = useState(true);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTransparencyReport() {
+      setIsLoadingReport(true);
+      setReportError(null);
+
+      try {
+        const response = await fetch('/api/compliance/transparency-report', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        const payload = await response.json();
+
+        if (!response.ok || payload?.success === false) {
+          throw new Error(payload?.error || 'Unable to load transparency report.');
+        }
+
+        if (!cancelled) {
+          setReportData(payload?.data ?? null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setReportData(null);
+          setReportError(error instanceof Error ? error.message : 'Unable to load transparency report.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingReport(false);
+        }
+      }
+    }
+
+    loadTransparencyReport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleSection = (section: string) => {
     setExpandedSection(expandedSection === section ? null : section);
@@ -105,6 +114,10 @@ export default function TransparencyReportPage() {
 
   const getPercentage = (value: number, total: number) => {
     return total > 0 ? ((value / total) * 100).toFixed(1) : '0';
+  };
+
+  const getBarWidth = (value: number, total: number) => {
+    return total > 0 ? `${(value / total) * 100}%` : '0%';
   };
 
   return (
@@ -120,7 +133,9 @@ export default function TransparencyReportPage() {
           </h1>
           <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
             We believe in being open about how we moderate content and protect our community. 
-            This report details our content moderation activities for {REPORT_DATA.period}.
+            {reportData
+              ? ` This report details our content moderation activities for ${reportData.period}.`
+              : ' Published transparency metrics will appear here after formal review.'}
           </p>
         </div>
 
@@ -141,6 +156,25 @@ export default function TransparencyReportPage() {
           </div>
         </div>
 
+        {isLoadingReport ? (
+          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">Loading transparency report...</p>
+          </div>
+        ) : reportError ? (
+          <div className="rounded-xl border border-orange-200 bg-orange-50 p-6 text-orange-900 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-100">
+            <h2 className="font-semibold">Transparency report unavailable</h2>
+            <p className="mt-2 text-sm">{reportError}</p>
+          </div>
+        ) : !reportData ? (
+          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <FileText className="mx-auto h-10 w-10 text-gray-400" />
+            <h2 className="mt-4 text-lg font-semibold text-gray-900 dark:text-white">No published transparency report yet</h2>
+            <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-400">
+              ATHENA will publish moderation metrics here after a reviewed reporting period is approved for release.
+            </p>
+          </div>
+        ) : (
+          <>
         {/* Key Metrics */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
@@ -148,21 +182,21 @@ export default function TransparencyReportPage() {
               <AlertTriangle className="w-5 h-5 text-orange-500" />
               <span className="text-sm text-gray-600 dark:text-gray-400">Total Reports</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{REPORT_DATA.totalReports.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.totalReports.toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-3">
               <Shield className="w-5 h-5 text-green-500" />
               <span className="text-sm text-gray-600 dark:text-gray-400">Content Removed</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{REPORT_DATA.actions.contentRemoved.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.actions.contentRemoved.toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-3">
               <Clock className="w-5 h-5 text-blue-500" />
               <span className="text-sm text-gray-600 dark:text-gray-400">Avg Response</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{REPORT_DATA.timing.avgResponseHours}h</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.timing.avgResponseHours}h</p>
           </div>
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3 mb-3">
@@ -170,7 +204,7 @@ export default function TransparencyReportPage() {
               <span className="text-sm text-gray-600 dark:text-gray-400">Appeal Rate</span>
             </div>
             <p className="text-2xl font-bold text-gray-900 dark:text-white">
-              {getPercentage(REPORT_DATA.appeals.total, REPORT_DATA.actions.contentRemoved)}%
+              {getPercentage(reportData.appeals.total, reportData.actions.contentRemoved)}%
             </p>
           </div>
         </div>
@@ -196,7 +230,7 @@ export default function TransparencyReportPage() {
             {expandedSection === 'categories' && (
               <div className="px-6 pb-6">
                 <div className="space-y-3">
-                  {Object.entries(REPORT_DATA.byCategory)
+                  {Object.entries(reportData.byCategory)
                     .sort(([, a], [, b]) => b - a)
                     .map(([category, count]) => (
                       <div key={category} className="flex items-center gap-4">
@@ -206,11 +240,11 @@ export default function TransparencyReportPage() {
                         <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
                           <div
                             className="bg-purple-600 h-full rounded-full transition-all"
-                            style={{ width: `${(count / REPORT_DATA.totalReports) * 100}%` }}
+                            style={{ width: getBarWidth(count, reportData.totalReports) }}
                           />
                         </div>
                         <span className="w-20 text-right text-sm font-medium text-gray-900 dark:text-white">
-                          {count} ({getPercentage(count, REPORT_DATA.totalReports)}%)
+                          {count} ({getPercentage(count, reportData.totalReports)}%)
                         </span>
                       </div>
                     ))}
@@ -240,31 +274,31 @@ export default function TransparencyReportPage() {
                 <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                      {REPORT_DATA.actions.contentRemoved}
+                      {reportData.actions.contentRemoved}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Content Removed</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                      {REPORT_DATA.actions.accountsSuspended}
+                      {reportData.actions.accountsSuspended}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Accounts Suspended</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                      {REPORT_DATA.actions.accountsBanned}
+                      {reportData.actions.accountsBanned}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Accounts Banned</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                      {REPORT_DATA.actions.warnings}
+                      {reportData.actions.warnings}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Warnings Issued</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">
-                      {REPORT_DATA.actions.noAction}
+                      {reportData.actions.noAction}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">No Action</p>
                   </div>
@@ -294,29 +328,29 @@ export default function TransparencyReportPage() {
                 <div className="grid sm:grid-cols-3 gap-4">
                   <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                      {REPORT_DATA.timing.under24Hours}
+                      {reportData.timing.under24Hours}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Resolved &lt;24 hours</p>
                     <p className="text-xs text-green-600 dark:text-green-400">
-                      {getPercentage(REPORT_DATA.timing.under24Hours, REPORT_DATA.totalReports)}%
+                      {getPercentage(reportData.timing.under24Hours, reportData.totalReports)}%
                     </p>
                   </div>
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                      {REPORT_DATA.timing.under72Hours}
+                      {reportData.timing.under72Hours}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Resolved 24-72 hours</p>
                     <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                      {getPercentage(REPORT_DATA.timing.under72Hours, REPORT_DATA.totalReports)}%
+                      {getPercentage(reportData.timing.under72Hours, reportData.totalReports)}%
                     </p>
                   </div>
                   <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                      {REPORT_DATA.timing.over72Hours}
+                      {reportData.timing.over72Hours}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Resolved &gt;72 hours</p>
                     <p className="text-xs text-red-600 dark:text-red-400">
-                      {getPercentage(REPORT_DATA.timing.over72Hours, REPORT_DATA.totalReports)}%
+                      {getPercentage(reportData.timing.over72Hours, reportData.totalReports)}%
                     </p>
                   </div>
                 </div>
@@ -345,31 +379,31 @@ export default function TransparencyReportPage() {
                 <div className="grid sm:grid-cols-4 gap-4">
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {REPORT_DATA.appeals.total}
+                      {reportData.appeals.total}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Total Appeals</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                      {REPORT_DATA.appeals.upheld}
+                      {reportData.appeals.upheld}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Decision Upheld</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                      {REPORT_DATA.appeals.overturned}
+                      {reportData.appeals.overturned}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Overturned</p>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                      {REPORT_DATA.appeals.pending}
+                      {reportData.appeals.pending}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Pending Review</p>
                   </div>
                 </div>
                 <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
-                  Our appeal overturn rate of {getPercentage(REPORT_DATA.appeals.overturned, REPORT_DATA.appeals.total)}% 
+                  Our appeal overturn rate of {getPercentage(reportData.appeals.overturned, reportData.appeals.total)}% 
                   reflects our commitment to fair content moderation and willingness to correct errors.
                 </p>
               </div>
@@ -382,9 +416,9 @@ export default function TransparencyReportPage() {
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Methodology</h2>
           <div className="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-400">
             <p>
-              This report covers content moderation activities from October 1 to December 31, 2024. 
-              All data is collected from our internal moderation systems and represents actions taken 
-              in response to both user reports and proactive detection systems.
+              This report covers content moderation activities for {reportData.period}. All data is
+              collected from our internal moderation systems and represents actions taken in response
+              to both user reports and proactive detection systems.
             </p>
             <p className="mt-4">
               <strong>Definitions:</strong>
@@ -398,6 +432,8 @@ export default function TransparencyReportPage() {
             </ul>
           </div>
         </div>
+          </>
+        )}
 
         {/* Footer Links */}
         <div className="mt-12 flex flex-wrap gap-4 justify-center">

@@ -21,6 +21,8 @@ export interface User {
   firstName?: string;
   lastName?: string;
   avatar?: string;
+  headline?: string;
+  bio?: string;
   persona?: string;
   role: 'USER' | 'CREATOR' | 'EMPLOYER' | 'MENTOR' | 'EDUCATION_PROVIDER' | 'ADMIN';
   subscriptionTier?:
@@ -190,6 +192,8 @@ export const useAuthStore = create<AuthStore>()(
 
 export const selectUser = (state: AuthStore) => state.user;
 export const selectIsAuthenticated = (state: AuthStore) => state.isAuthenticated;
+export const selectIsSessionValid = (state: AuthStore) =>
+  state.isAuthenticated && (!state.sessionExpiry || Date.now() < state.sessionExpiry);
 export const selectIsLoading = (state: AuthStore) => state.isLoading;
 export const selectTokens = (state: AuthStore) => state.tokens;
 export const selectAccessToken = (state: AuthStore) => state.tokens?.accessToken;

@@ -14,7 +14,7 @@
  * - Transcript view
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Play,
@@ -31,27 +31,20 @@ import {
   CheckCircle2,
   Circle,
   Lock,
-  BookOpen,
   FileText,
   MessageSquare,
-  Clock,
-  Star,
   Download,
   Share2,
-  MoreHorizontal,
   ThumbsUp,
-  ThumbsDown,
   Send,
   PanelRightOpen,
   PanelRightClose,
-  ListVideo,
   StickyNote,
   HelpCircle,
   Bookmark,
   BookmarkCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
@@ -119,101 +112,25 @@ interface CourseData {
   progress: number;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
+interface TranscriptItem {
+  time: number;
+  text: string;
+}
 
-const MOCK_COURSE: CourseData = {
-  id: '1',
-  title: 'Product Management Fundamentals',
-  instructor: {
-    name: 'Sarah Johnson',
-    avatar: '/avatars/sarah.jpg',
-  },
-  progress: 35,
-  currentLesson: {
-    id: 'l2',
-    title: 'The Product Manager Role',
-    duration: 18,
-    type: 'video',
-    isCompleted: false,
-    isLocked: false,
-  },
-  modules: [
-    {
-      id: 'm1',
-      title: 'Introduction to Product Management',
-      lessons: [
-        { id: 'l1', title: 'What is Product Management?', duration: 12, type: 'video', isCompleted: true, isLocked: false },
-        { id: 'l2', title: 'The Product Manager Role', duration: 18, type: 'video', isCompleted: false, isLocked: false },
-        { id: 'l3', title: 'Module Quiz', duration: 10, type: 'quiz', isCompleted: false, isLocked: false },
-      ],
-    },
-    {
-      id: 'm2',
-      title: 'Product Discovery',
-      lessons: [
-        { id: 'l4', title: 'Understanding User Problems', duration: 15, type: 'video', isCompleted: false, isLocked: false },
-        { id: 'l5', title: 'User Research Methods', duration: 8, type: 'article', isCompleted: false, isLocked: false },
-        { id: 'l6', title: 'Discovery Quiz', duration: 10, type: 'quiz', isCompleted: false, isLocked: true },
-      ],
-    },
-    {
-      id: 'm3',
-      title: 'Product Strategy',
-      lessons: [
-        { id: 'l7', title: 'Creating a Product Vision', duration: 20, type: 'video', isCompleted: false, isLocked: true },
-        { id: 'l8', title: 'Roadmapping Basics', duration: 15, type: 'video', isCompleted: false, isLocked: true },
-      ],
-    },
-  ],
-};
+interface StudentClassroomViewProps {
+  className?: string;
+  course?: CourseData | null;
+  initialNotes?: Note[];
+  questions?: Question[];
+  transcript?: TranscriptItem[];
+  isLoading?: boolean;
+  error?: string | null;
+  onAskQuestion?: (question: string) => void;
+}
 
-const MOCK_NOTES: Note[] = [
-  {
-    id: '1',
-    timestamp: 120,
-    content: 'Key responsibilities: Product vision, roadmap, stakeholder management',
-    createdAt: new Date(2026, 0, 18),
-  },
-  {
-    id: '2',
-    timestamp: 340,
-    content: 'PM is the "CEO of the product" - responsible for success',
-    createdAt: new Date(2026, 0, 18),
-  },
-];
-
-const MOCK_QUESTIONS: Question[] = [
-  {
-    id: '1',
-    author: { name: 'Alex Chen', avatar: '/avatars/alex.jpg' },
-    content: 'How does the PM role differ between startups and large companies?',
-    upvotes: 15,
-    replies: 3,
-    createdAt: new Date(2026, 0, 17),
-    isAnswered: true,
-  },
-  {
-    id: '2',
-    author: { name: 'Maria Rodriguez' },
-    content: 'Is technical background necessary for product management?',
-    upvotes: 8,
-    replies: 5,
-    createdAt: new Date(2026, 0, 16),
-    isAnswered: true,
-  },
-];
-
-const MOCK_TRANSCRIPT = [
-  { time: 0, text: "Welcome back to the course. In this lesson, we're going to explore the role of a Product Manager in depth." },
-  { time: 15, text: "A Product Manager is often called the 'CEO of the product', but what does that really mean?" },
-  { time: 30, text: "First and foremost, the PM is responsible for the product's success. This means understanding the market, the users, and the business." },
-  { time: 50, text: "Let's break down the key responsibilities of a Product Manager..." },
-  { time: 65, text: "Number one: Defining the product vision. This is your north star that guides all decisions." },
-  { time: 85, text: "Number two: Creating and maintaining the product roadmap. This is your plan for getting from here to there." },
-  { time: 105, text: "Number three: Working with stakeholders. This includes engineering, design, marketing, sales, and leadership." },
-];
+const EMPTY_NOTES: Note[] = [];
+const EMPTY_QUESTIONS: Question[] = [];
+const EMPTY_TRANSCRIPT: TranscriptItem[] = [];
 
 // ============================================
 // COMPONENTS
@@ -247,9 +164,11 @@ function VideoPlayer({
 
   return (
     <div className="relative aspect-video bg-black rounded-lg overflow-hidden group">
-      {/* Video placeholder */}
       <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
-        <Play className="h-16 w-16 text-white/50" />
+        <div className="flex flex-col items-center gap-3 text-white/60">
+          <Play className="h-16 w-16" />
+          <span className="text-sm">No lesson media connected</span>
+        </div>
       </div>
 
       {/* Controls overlay */}
@@ -333,7 +252,20 @@ function CourseSidebar({
   onSelectLesson: (lessonId: string) => void;
   isCollapsed: boolean;
 }) {
-  const [expandedModules, setExpandedModules] = useState<string[]>(['m1', 'm2']);
+  const [expandedModules, setExpandedModules] = useState<string[]>(() =>
+    course.modules.slice(0, 2).map(module => module.id)
+  );
+
+  useEffect(() => {
+    setExpandedModules(previous => {
+      const moduleIds = new Set(course.modules.map(module => module.id));
+      const stillValid = previous.filter(id => moduleIds.has(id));
+
+      return stillValid.length > 0
+        ? stillValid
+        : course.modules.slice(0, 2).map(module => module.id);
+    });
+  }, [course.modules]);
 
   const toggleModule = (moduleId: string) => {
     setExpandedModules(prev =>
@@ -466,99 +398,135 @@ function NotesPanel({ notes, onAddNote }: { notes: Note[]; onAddNote: (note: str
       </div>
 
       <div className="space-y-3">
-        {notes.map((note) => (
-          <div key={note.id} className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
-            {note.timestamp && (
-              <Badge variant="secondary" className="mb-2 text-xs">
-                {formatTimestamp(note.timestamp)}
-              </Badge>
-            )}
-            <p className="text-sm">{note.content}</p>
-            <p className="text-xs text-muted-foreground mt-2">
-              {note.createdAt.toLocaleDateString()}
-            </p>
+        {notes.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            No notes have been saved for this lesson yet.
           </div>
-        ))}
+        ) : (
+          notes.map((note) => (
+            <div key={note.id} className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
+              {note.timestamp && (
+                <Badge variant="secondary" className="mb-2 text-xs">
+                  {formatTimestamp(note.timestamp)}
+                </Badge>
+              )}
+              <p className="text-sm">{note.content}</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                {note.createdAt.toLocaleDateString()}
+              </p>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
 }
 
-function QAPanel({ questions }: { questions: Question[] }) {
+function QAPanel({
+  questions,
+  onAskQuestion,
+}: {
+  questions: Question[];
+  onAskQuestion?: (question: string) => void;
+}) {
   const [newQuestion, setNewQuestion] = useState('');
+  const canAskQuestion = Boolean(onAskQuestion);
 
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
         <Input
-          placeholder="Ask a question..."
+          placeholder={canAskQuestion ? 'Ask a question...' : 'Q&A posting is not connected'}
           value={newQuestion}
           onChange={(e) => setNewQuestion(e.target.value)}
+          disabled={!canAskQuestion}
         />
-        <Button>Ask</Button>
+        <Button
+          disabled={!canAskQuestion || !newQuestion.trim()}
+          onClick={() => {
+            const question = newQuestion.trim();
+            if (!question || !onAskQuestion) return;
+            onAskQuestion(question);
+            setNewQuestion('');
+          }}
+        >
+          Ask
+        </Button>
       </div>
 
       <div className="space-y-4">
-        {questions.map((q) => (
-          <div key={q.id} className="p-4 border rounded-lg">
-            <div className="flex items-start gap-3">
-              <Avatar className="h-8 w-8">
-                <AvatarImage src={q.author.avatar} />
-                <AvatarFallback className="text-xs">
-                  {q.author.name.split(' ').map(n => n[0]).join('')}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{q.author.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {q.createdAt.toLocaleDateString()}
-                  </span>
-                  {q.isAnswered && (
-                    <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-300">
-                      Answered
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-sm mt-1">{q.content}</p>
-                <div className="flex items-center gap-4 mt-3">
-                  <Button variant="ghost" size="sm" className="h-8">
-                    <ThumbsUp className="h-4 w-4 mr-1" />
-                    {q.upvotes}
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-8">
-                    <MessageSquare className="h-4 w-4 mr-1" />
-                    {q.replies} replies
-                  </Button>
+        {questions.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            No live Q&A has been connected for this lesson yet.
+          </div>
+        ) : (
+          questions.map((q) => (
+            <div key={q.id} className="p-4 border rounded-lg">
+              <div className="flex items-start gap-3">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={q.author.avatar} />
+                  <AvatarFallback className="text-xs">
+                    {q.author.name.split(' ').map(n => n[0]).join('')}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{q.author.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {q.createdAt.toLocaleDateString()}
+                    </span>
+                    {q.isAnswered && (
+                      <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-300">
+                        Answered
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm mt-1">{q.content}</p>
+                  <div className="flex items-center gap-4 mt-3">
+                    <Button variant="ghost" size="sm" className="h-8">
+                      <ThumbsUp className="h-4 w-4 mr-1" />
+                      {q.upvotes}
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8">
+                      <MessageSquare className="h-4 w-4 mr-1" />
+                      {q.replies} replies
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
 }
 
-function TranscriptPanel({ transcript, currentTime }: { transcript: typeof MOCK_TRANSCRIPT; currentTime: number }) {
+function TranscriptPanel({ transcript, currentTime }: { transcript: TranscriptItem[]; currentTime: number }) {
   return (
     <div className="space-y-2">
-      {transcript.map((item, index) => (
-        <button
-          key={index}
-          className={cn(
-            'w-full text-left p-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800',
-            currentTime >= item.time && (transcript[index + 1]?.time || Infinity) > currentTime
-              ? 'bg-emerald-50 dark:bg-emerald-900/20 border-l-2 border-emerald-500'
-              : ''
-          )}
-        >
-          <span className="text-xs text-muted-foreground mr-2">
-            {Math.floor(item.time / 60)}:{(item.time % 60).toString().padStart(2, '0')}
-          </span>
-          <span className="text-sm">{item.text}</span>
-        </button>
-      ))}
+      {transcript.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          No transcript is available for this lesson.
+        </div>
+      ) : (
+        transcript.map((item, index) => (
+          <button
+            key={index}
+            className={cn(
+              'w-full text-left p-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800',
+              currentTime >= item.time && (transcript[index + 1]?.time || Infinity) > currentTime
+                ? 'bg-emerald-50 dark:bg-emerald-900/20 border-l-2 border-emerald-500'
+                : ''
+            )}
+          >
+            <span className="text-xs text-muted-foreground mr-2">
+              {Math.floor(item.time / 60)}:{(item.time % 60).toString().padStart(2, '0')}
+            </span>
+            <span className="text-sm">{item.text}</span>
+          </button>
+        ))
+      )}
     </div>
   );
 }
@@ -567,17 +535,83 @@ function TranscriptPanel({ transcript, currentTime }: { transcript: typeof MOCK_
 // MAIN COMPONENT
 // ============================================
 
-export function StudentClassroomView({ className }: { className?: string }) {
-  const [course] = useState<CourseData>(MOCK_COURSE);
-  const [currentLessonId, setCurrentLessonId] = useState(course.currentLesson.id);
+export function StudentClassroomView({
+  className,
+  course,
+  initialNotes = EMPTY_NOTES,
+  questions = EMPTY_QUESTIONS,
+  transcript = EMPTY_TRANSCRIPT,
+  isLoading = false,
+  error = null,
+  onAskQuestion,
+}: StudentClassroomViewProps) {
+  const [currentLessonId, setCurrentLessonId] = useState(course?.currentLesson.id ?? '');
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(180); // 3 minutes
+  const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(75);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [notes, setNotes] = useState<Note[]>(MOCK_NOTES);
+  const [notes, setNotes] = useState<Note[]>(initialNotes);
   const [isBookmarked, setIsBookmarked] = useState(false);
 
-  const duration = course.currentLesson.duration * 60;
+  useEffect(() => {
+    setNotes(initialNotes);
+  }, [initialNotes]);
+
+  useEffect(() => {
+    if (!course) {
+      setCurrentLessonId('');
+      return;
+    }
+
+    const courseLessonIds = new Set(course.modules.flatMap(module => module.lessons.map(lesson => lesson.id)));
+
+    if (!currentLessonId || !courseLessonIds.has(currentLessonId)) {
+      setCurrentLessonId(course.currentLesson.id);
+    }
+  }, [course, currentLessonId]);
+
+  if (isLoading) {
+    return (
+      <div className={cn('min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950', className)}>
+        <div className="rounded-lg border bg-white p-6 text-sm text-muted-foreground shadow-sm dark:bg-zinc-900">
+          Loading classroom...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={cn('min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950', className)}>
+        <div className="max-w-md rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+          <h2 className="font-semibold">Classroom unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!course) {
+    return (
+      <div className={cn('min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950', className)}>
+        <div className="max-w-md rounded-lg border bg-white p-6 text-center shadow-sm dark:bg-zinc-900">
+          <h2 className="font-semibold">No course connected</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The classroom is ready for live course data, but no enrolled course has been provided.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const allLessons = course.modules.flatMap(module => module.lessons);
+  const currentLesson = allLessons.find(lesson => lesson.id === currentLessonId) ?? course.currentLesson;
+  const currentLessonIndex = allLessons.findIndex(lesson => lesson.id === currentLesson.id);
+  const previousLesson = currentLessonIndex > 0 ? allLessons[currentLessonIndex - 1] : null;
+  const nextLesson = currentLessonIndex >= 0 && currentLessonIndex < allLessons.length - 1
+    ? allLessons[currentLessonIndex + 1]
+    : null;
+  const duration = currentLesson.duration * 60;
 
   const handleAddNote = (content: string) => {
     const newNote: Note = {
@@ -600,7 +634,7 @@ export function StudentClassroomView({ className }: { className?: string }) {
           </Button>
           <Separator orientation="vertical" className="h-6" />
           <div>
-            <h1 className="font-medium text-sm">{course.currentLesson.title}</h1>
+            <h1 className="font-medium text-sm">{currentLesson.title}</h1>
             <p className="text-xs text-muted-foreground">{course.title}</p>
           </div>
         </div>
@@ -613,6 +647,7 @@ export function StudentClassroomView({ className }: { className?: string }) {
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsBookmarked(!isBookmarked)}
+                  aria-label="Bookmark lesson"
                 >
                   {isBookmarked ? (
                     <BookmarkCheck className="h-5 w-5 text-emerald-500" />
@@ -671,7 +706,7 @@ export function StudentClassroomView({ className }: { className?: string }) {
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <h2 className="font-semibold">{course.currentLesson.title}</h2>
+                    <h2 className="font-semibold">{currentLesson.title}</h2>
                     <p className="text-sm text-muted-foreground">
                       {course.instructor.name}
                     </p>
@@ -710,11 +745,11 @@ export function StudentClassroomView({ className }: { className?: string }) {
                 </TabsContent>
 
                 <TabsContent value="qa" className="mt-4">
-                  <QAPanel questions={MOCK_QUESTIONS} />
+                  <QAPanel questions={questions} onAskQuestion={onAskQuestion} />
                 </TabsContent>
 
                 <TabsContent value="transcript" className="mt-4">
-                  <TranscriptPanel transcript={MOCK_TRANSCRIPT} currentTime={currentTime} />
+                  <TranscriptPanel transcript={transcript} currentTime={currentTime} />
                 </TabsContent>
               </Tabs>
             </div>
@@ -732,16 +767,25 @@ export function StudentClassroomView({ className }: { className?: string }) {
 
       {/* Navigation Footer */}
       <footer className="h-14 border-t bg-white dark:bg-zinc-900 flex items-center justify-between px-4">
-        <Button variant="outline" size="sm">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!previousLesson}
+          onClick={() => previousLesson && setCurrentLessonId(previousLesson.id)}
+        >
           <ChevronLeft className="h-4 w-4 mr-1" />
           Previous Lesson
         </Button>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">
-            Lesson 2 of 8
+            Lesson {currentLessonIndex >= 0 ? currentLessonIndex + 1 : 1} of {Math.max(allLessons.length, 1)}
           </span>
         </div>
-        <Button size="sm">
+        <Button
+          size="sm"
+          disabled={!nextLesson}
+          onClick={() => nextLesson && setCurrentLessonId(nextLesson.id)}
+        >
           Next Lesson
           <ChevronRight className="h-4 w-4 ml-1" />
         </Button>

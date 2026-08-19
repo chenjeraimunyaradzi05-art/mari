@@ -13,7 +13,7 @@
  * - Time zone support
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Calendar as CalendarIcon,
@@ -24,14 +24,10 @@ import {
   Video,
   Phone,
   MessageSquare,
-  User,
   DollarSign,
   Settings,
-  Filter,
-  MoreHorizontal,
   Check,
   X,
-  MapPin,
   Globe,
   Repeat,
 } from 'lucide-react';
@@ -56,13 +52,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -74,39 +63,14 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { useCancelSession, useConfirmSession, useMentorSessions } from '@/lib/hooks/useMentor';
+import type { Session, SessionStatus, SessionType, TimeSlot } from '@/lib/stores/mentor.store';
 
 // ============================================
 // TYPES
 // ============================================
 
 type ViewMode = 'month' | 'week' | 'day';
-type SessionType = 'video' | 'audio' | 'chat';
-type SessionStatus = 'confirmed' | 'pending' | 'completed' | 'cancelled';
-
-interface Session {
-  id: string;
-  menteeId: string;
-  menteeName: string;
-  menteeAvatar?: string;
-  date: Date;
-  startTime: string;
-  endTime: string;
-  duration: number; // minutes
-  type: SessionType;
-  status: SessionStatus;
-  topic: string;
-  price: number;
-  notes?: string;
-  recurring?: boolean;
-}
-
-interface AvailabilitySlot {
-  id: string;
-  dayOfWeek: number; // 0-6 (Sunday-Saturday)
-  startTime: string;
-  endTime: string;
-  isActive: boolean;
-}
 
 interface MentorCalendarProps {
   className?: string;
@@ -130,10 +94,12 @@ const SESSION_TYPE_CONFIG: Record<SessionType, { icon: React.ElementType; color:
 };
 
 const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string }> = {
+  scheduled: { label: 'Requested', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
   confirmed: { label: 'Confirmed', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
-  pending: { label: 'Pending', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
+  'in-progress': { label: 'In Progress', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
   completed: { label: 'Completed', color: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300' },
   cancelled: { label: 'Cancelled', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  'no-show': { label: 'No Show', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
 };
 
 function getCalendarDays(year: number, month: number) {
@@ -182,77 +148,6 @@ function getWeekDays(date: Date): Date[] {
   return days;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_SESSIONS: Session[] = [
-  {
-    id: '1',
-    menteeId: 'u1',
-    menteeName: 'Alex Thompson',
-    menteeAvatar: '/avatars/alex.jpg',
-    date: new Date(2026, 0, 20),
-    startTime: '09:00',
-    endTime: '10:00',
-    duration: 60,
-    type: 'video',
-    status: 'confirmed',
-    topic: 'Career Transition Strategy',
-    price: 150,
-  },
-  {
-    id: '2',
-    menteeId: 'u2',
-    menteeName: 'Jordan Lee',
-    menteeAvatar: '/avatars/jordan.jpg',
-    date: new Date(2026, 0, 20),
-    startTime: '14:00',
-    endTime: '14:30',
-    duration: 30,
-    type: 'audio',
-    status: 'pending',
-    topic: 'Resume Review',
-    price: 75,
-  },
-  {
-    id: '3',
-    menteeId: 'u3',
-    menteeName: 'Sam Rivera',
-    date: new Date(2026, 0, 21),
-    startTime: '11:00',
-    endTime: '12:00',
-    duration: 60,
-    type: 'video',
-    status: 'confirmed',
-    topic: 'Technical Interview Prep',
-    price: 150,
-    recurring: true,
-  },
-  {
-    id: '4',
-    menteeId: 'u4',
-    menteeName: 'Casey Morgan',
-    date: new Date(2026, 0, 22),
-    startTime: '16:00',
-    endTime: '16:30',
-    duration: 30,
-    type: 'chat',
-    status: 'confirmed',
-    topic: 'Quick Q&A',
-    price: 50,
-  },
-];
-
-const MOCK_AVAILABILITY: AvailabilitySlot[] = [
-  { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '12:00', isActive: true },
-  { id: '2', dayOfWeek: 1, startTime: '14:00', endTime: '18:00', isActive: true },
-  { id: '3', dayOfWeek: 2, startTime: '09:00', endTime: '17:00', isActive: true },
-  { id: '4', dayOfWeek: 3, startTime: '09:00', endTime: '12:00', isActive: true },
-  { id: '5', dayOfWeek: 4, startTime: '14:00', endTime: '18:00', isActive: true },
-  { id: '6', dayOfWeek: 5, startTime: '09:00', endTime: '12:00', isActive: true },
-];
-
 const TIME_SLOTS = Array.from({ length: 24 }, (_, i) => {
   const hour = i.toString().padStart(2, '0');
   return `${hour}:00`;
@@ -262,7 +157,17 @@ const TIME_SLOTS = Array.from({ length: 24 }, (_, i) => {
 // COMPONENTS
 // ============================================
 
-function SessionCard({ session, compact = false }: { session: Session; compact?: boolean }) {
+function SessionCard({
+  session,
+  compact = false,
+  onConfirm,
+  onCancel,
+}: {
+  session: Session;
+  compact?: boolean;
+  onConfirm?: (sessionId: string) => void;
+  onCancel?: (sessionId: string) => void;
+}) {
   const typeConfig = SESSION_TYPE_CONFIG[session.type];
   const statusConfig = STATUS_CONFIG[session.status];
   const TypeIcon = typeConfig.icon;
@@ -365,13 +270,13 @@ function SessionCard({ session, compact = false }: { session: Session; compact?:
         </div>
 
         <DialogFooter className="gap-2">
-          {session.status === 'pending' && (
+          {session.status === 'scheduled' && (
             <>
-              <Button variant="outline">
+              <Button variant="outline" onClick={() => onCancel?.(session.id)}>
                 <X className="h-4 w-4 mr-2" />
                 Decline
               </Button>
-              <Button>
+              <Button onClick={() => onConfirm?.(session.id)}>
                 <Check className="h-4 w-4 mr-2" />
                 Accept
               </Button>
@@ -542,9 +447,13 @@ function WeekView({
 function DayView({
   currentDate,
   sessions,
+  onConfirm,
+  onCancel,
 }: {
   currentDate: Date;
   sessions: Session[];
+  onConfirm?: (sessionId: string) => void;
+  onCancel?: (sessionId: string) => void;
 }) {
   const daySessions = sessions.filter(
     (s) => s.date.toDateString() === currentDate.toDateString()
@@ -573,7 +482,12 @@ function DayView({
       ) : (
         <div className="space-y-3">
           {daySessions.map((session) => (
-            <SessionCard key={session.id} session={session} />
+            <SessionCard
+              key={session.id}
+              session={session}
+              onConfirm={onConfirm}
+              onCancel={onCancel}
+            />
           ))}
         </div>
       )}
@@ -585,8 +499,8 @@ function AvailabilitySettings({
   availability,
   onUpdate,
 }: {
-  availability: AvailabilitySlot[];
-  onUpdate: (slots: AvailabilitySlot[]) => void;
+  availability: TimeSlot[];
+  onUpdate: (slots: TimeSlot[]) => void;
 }) {
   return (
     <Sheet>
@@ -695,9 +609,15 @@ function AvailabilitySettings({
 
 export function MentorCalendar({ className }: MentorCalendarProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('month');
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 19)); // Jan 19, 2026
-  const [sessions] = useState<Session[]>(MOCK_SESSIONS);
-  const [availability, setAvailability] = useState<AvailabilitySlot[]>(MOCK_AVAILABILITY);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [availability, setAvailability] = useState<TimeSlot[]>([]);
+  const {
+    data: sessions = [],
+    isLoading: sessionsLoading,
+    error: sessionsError,
+  } = useMentorSessions();
+  const confirmSession = useConfirmSession();
+  const cancelSession = useCancelSession();
 
   const navigateDate = (direction: 'prev' | 'next') => {
     setCurrentDate((prev) => {
@@ -737,11 +657,14 @@ export function MentorCalendar({ className }: MentorCalendarProps) {
     });
   };
 
-  const upcomingSessions = sessions.filter(
-    (s) => s.date >= new Date() && s.status !== 'cancelled'
-  ).slice(0, 5);
+  const upcomingSessions = sessions
+    .filter((s) => new Date(s.date) >= new Date() && !['cancelled', 'completed', 'no-show'].includes(s.status))
+    .slice(0, 5);
 
-  const pendingCount = sessions.filter((s) => s.status === 'pending').length;
+  const pendingCount = sessions.filter((s) => s.status === 'scheduled').length;
+  const totalHours = sessions.reduce((sum, s) => sum + s.duration, 0) / 60;
+  const totalRevenue = sessions.reduce((sum, s) => sum + s.price, 0);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
     <div className={cn('space-y-6', className)}>
@@ -785,6 +708,14 @@ export function MentorCalendar({ className }: MentorCalendarProps) {
         </Card>
       )}
 
+      {sessionsError && (
+        <Card className="border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30">
+          <CardContent className="p-4 text-sm text-red-700 dark:text-red-300">
+            Mentor sessions could not be loaded. Please try again shortly.
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid lg:grid-cols-4 gap-6">
         {/* Main Calendar */}
         <div className="lg:col-span-3">
@@ -818,14 +749,21 @@ export function MentorCalendar({ className }: MentorCalendarProps) {
               </div>
             </CardHeader>
             <CardContent>
-              {viewMode === 'month' && (
+              {sessionsLoading ? (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  Loading mentor sessions...
+                </div>
+              ) : viewMode === 'month' ? (
                 <MonthView currentDate={currentDate} sessions={sessions} />
-              )}
-              {viewMode === 'week' && (
+              ) : viewMode === 'week' ? (
                 <WeekView currentDate={currentDate} sessions={sessions} />
-              )}
-              {viewMode === 'day' && (
-                <DayView currentDate={currentDate} sessions={sessions} />
+              ) : (
+                <DayView
+                  currentDate={currentDate}
+                  sessions={sessions}
+                  onConfirm={(sessionId) => confirmSession.mutate(sessionId)}
+                  onCancel={(sessionId) => cancelSession.mutate({ id: sessionId })}
+                />
               )}
             </CardContent>
           </Card>
@@ -885,13 +823,13 @@ export function MentorCalendar({ className }: MentorCalendarProps) {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Hours</span>
                 <span className="font-semibold">
-                  {sessions.reduce((sum, s) => sum + s.duration, 0) / 60}
+                  {totalHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Revenue</span>
                 <span className="font-semibold text-emerald-600">
-                  ${sessions.reduce((sum, s) => sum + s.price, 0)}
+                  ${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                 </span>
               </div>
             </CardContent>
@@ -902,7 +840,7 @@ export function MentorCalendar({ className }: MentorCalendarProps) {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Globe className="h-4 w-4" />
-                <span>Pacific Time (PT) UTC-8</span>
+                <span>{timezone}</span>
               </div>
             </CardContent>
           </Card>

@@ -1,64 +1,96 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bell,
-  Mail,
-  MessageCircle,
   Briefcase,
-  Users,
+  Loader2,
   Megaphone,
-  Shield,
+  MessageCircle,
   Save,
+  Shield,
+  Users,
+  type LucideIcon,
 } from 'lucide-react';
-import { useNotificationPreferences, useUpdateNotificationPreferences, useAuth } from '@/lib/hooks';
-import { cn } from '@/lib/utils';
+import { useNotificationPreferences, useUpdateNotificationPreferences } from '@/lib/hooks';
+
+type NotificationPreferences = {
+  email: {
+    jobMatches: boolean;
+    applications: boolean;
+    messages: boolean;
+    mentions: boolean;
+    newsletter: boolean;
+  };
+  push: {
+    jobMatches: boolean;
+    applications: boolean;
+    messages: boolean;
+    mentions: boolean;
+  };
+  inApp: {
+    all: boolean;
+  };
+};
+
+type EmailPreferenceKey = keyof NotificationPreferences['email'];
+type PushPreferenceKey = keyof NotificationPreferences['push'];
+
+type PreferenceSetting = {
+  id: string;
+  name: string;
+  description: string;
+  emailKey?: EmailPreferenceKey;
+  pushKey?: PushPreferenceKey;
+};
 
 type NotificationCategory = {
   id: string;
   name: string;
   description: string;
-  icon: any;
-  settings: {
-    id: string;
-    name: string;
-    description: string;
-    email: boolean;
-    push: boolean;
-    inApp: boolean;
-  }[];
+  icon: LucideIcon;
+  settings: PreferenceSetting[];
 };
 
-const defaultCategories: NotificationCategory[] = [
+const DEFAULT_PREFERENCES: NotificationPreferences = {
+  email: {
+    jobMatches: true,
+    applications: true,
+    messages: true,
+    mentions: true,
+    newsletter: true,
+  },
+  push: {
+    jobMatches: true,
+    applications: true,
+    messages: true,
+    mentions: true,
+  },
+  inApp: {
+    all: true,
+  },
+};
+
+const notificationCategories: NotificationCategory[] = [
   {
     id: 'jobs',
     name: 'Jobs & Applications',
-    description: 'Notifications about job opportunities and your applications',
+    description: 'Notifications about job opportunities and applications',
     icon: Briefcase,
     settings: [
       {
-        id: 'job_recommendations',
-        name: 'Job Recommendations',
+        id: 'jobMatches',
+        name: 'Job Matches',
         description: 'New jobs matching your profile',
-        email: true,
-        push: true,
-        inApp: true,
+        emailKey: 'jobMatches',
+        pushKey: 'jobMatches',
       },
       {
-        id: 'application_updates',
+        id: 'applications',
         name: 'Application Updates',
         description: 'Status changes on your applications',
-        email: true,
-        push: true,
-        inApp: true,
-      },
-      {
-        id: 'saved_job_alerts',
-        name: 'Saved Job Alerts',
-        description: 'Updates on jobs you\'ve saved',
-        email: true,
-        push: false,
-        inApp: true,
+        emailKey: 'applications',
+        pushKey: 'applications',
       },
     ],
   },
@@ -69,28 +101,11 @@ const defaultCategories: NotificationCategory[] = [
     icon: Users,
     settings: [
       {
-        id: 'new_followers',
-        name: 'New Followers',
-        description: 'When someone follows you',
-        email: false,
-        push: true,
-        inApp: true,
-      },
-      {
-        id: 'post_interactions',
-        name: 'Post Interactions',
-        description: 'Likes and comments on your posts',
-        email: false,
-        push: true,
-        inApp: true,
-      },
-      {
         id: 'mentions',
         name: 'Mentions',
         description: 'When someone mentions you',
-        email: true,
-        push: true,
-        inApp: true,
+        emailKey: 'mentions',
+        pushKey: 'mentions',
       },
     ],
   },
@@ -101,20 +116,11 @@ const defaultCategories: NotificationCategory[] = [
     icon: MessageCircle,
     settings: [
       {
-        id: 'new_messages',
+        id: 'messages',
         name: 'New Messages',
         description: 'When you receive a new message',
-        email: true,
-        push: true,
-        inApp: true,
-      },
-      {
-        id: 'message_requests',
-        name: 'Message Requests',
-        description: 'Messages from new connections',
-        email: true,
-        push: true,
-        inApp: true,
+        emailKey: 'messages',
+        pushKey: 'messages',
       },
     ],
   },
@@ -126,122 +132,168 @@ const defaultCategories: NotificationCategory[] = [
     settings: [
       {
         id: 'newsletter',
-        name: 'Weekly Newsletter',
+        name: 'Newsletter',
         description: 'Career tips and community highlights',
-        email: true,
-        push: false,
-        inApp: false,
-      },
-      {
-        id: 'product_updates',
-        name: 'Product Updates',
-        description: 'New features and improvements',
-        email: true,
-        push: false,
-        inApp: true,
-      },
-      {
-        id: 'events',
-        name: 'Events & Webinars',
-        description: 'Upcoming ATHENA events',
-        email: true,
-        push: true,
-        inApp: true,
-      },
-    ],
-  },
-  {
-    id: 'security',
-    name: 'Security & Account',
-    description: 'Important account and security notifications',
-    icon: Shield,
-    settings: [
-      {
-        id: 'login_alerts',
-        name: 'Login Alerts',
-        description: 'Unusual login activity',
-        email: true,
-        push: true,
-        inApp: true,
-      },
-      {
-        id: 'password_changes',
-        name: 'Password Changes',
-        description: 'When your password is changed',
-        email: true,
-        push: true,
-        inApp: true,
+        emailKey: 'newsletter',
       },
     ],
   },
 ];
 
-export default function NotificationsSettingsPage() {
-  const { user } = useAuth();
-  const { data: savedPreferences } = useNotificationPreferences();
-  const updatePreferences = useUpdateNotificationPreferences();
-  const [categories, setCategories] = useState(defaultCategories);
-  const [hasChanges, setHasChanges] = useState(false);
+function normalizePreferences(input: any): NotificationPreferences {
+  return {
+    email: {
+      jobMatches: typeof input?.email?.jobMatches === 'boolean' ? input.email.jobMatches : DEFAULT_PREFERENCES.email.jobMatches,
+      applications: typeof input?.email?.applications === 'boolean' ? input.email.applications : DEFAULT_PREFERENCES.email.applications,
+      messages: typeof input?.email?.messages === 'boolean' ? input.email.messages : DEFAULT_PREFERENCES.email.messages,
+      mentions: typeof input?.email?.mentions === 'boolean' ? input.email.mentions : DEFAULT_PREFERENCES.email.mentions,
+      newsletter: typeof input?.email?.newsletter === 'boolean' ? input.email.newsletter : DEFAULT_PREFERENCES.email.newsletter,
+    },
+    push: {
+      jobMatches: typeof input?.push?.jobMatches === 'boolean' ? input.push.jobMatches : DEFAULT_PREFERENCES.push.jobMatches,
+      applications: typeof input?.push?.applications === 'boolean' ? input.push.applications : DEFAULT_PREFERENCES.push.applications,
+      messages: typeof input?.push?.messages === 'boolean' ? input.push.messages : DEFAULT_PREFERENCES.push.messages,
+      mentions: typeof input?.push?.mentions === 'boolean' ? input.push.mentions : DEFAULT_PREFERENCES.push.mentions,
+    },
+    inApp: {
+      all: typeof input?.inApp?.all === 'boolean' ? input.inApp.all : DEFAULT_PREFERENCES.inApp.all,
+    },
+  };
+}
 
-  const handleToggle = (
-    categoryId: string,
-    settingId: string,
-    channel: 'email' | 'push' | 'inApp'
-  ) => {
-    setCategories((prev) =>
-      prev.map((category) => {
-        if (category.id !== categoryId) return category;
-        return {
-          ...category,
-          settings: category.settings.map((setting) => {
-            if (setting.id !== settingId) return setting;
-            return {
-              ...setting,
-              [channel]: !setting[channel],
-            };
-          }),
-        };
-      })
+function Toggle({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: () => void;
+}) {
+  return (
+    <label className={`relative inline-flex items-center ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+        className="sr-only peer"
+        aria-label={label}
+      />
+      <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600" />
+    </label>
+  );
+}
+
+export default function NotificationsSettingsPage() {
+  const { data: savedPreferences, isLoading, isError } = useNotificationPreferences();
+  const updatePreferences = useUpdateNotificationPreferences();
+  const [draft, setDraft] = useState<NotificationPreferences | null>(null);
+
+  const persisted = useMemo(
+    () => (savedPreferences ? normalizePreferences(savedPreferences) : null),
+    [savedPreferences]
+  );
+
+  useEffect(() => {
+    if (persisted) {
+      setDraft(persisted);
+    }
+  }, [persisted]);
+
+  const hasChanges = Boolean(
+    draft &&
+    persisted &&
+    JSON.stringify(draft) !== JSON.stringify(persisted)
+  );
+
+  const handleToggleEmail = (key: EmailPreferenceKey) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            email: {
+              ...current.email,
+              [key]: !current.email[key],
+            },
+          }
+        : current
     );
-    setHasChanges(true);
+  };
+
+  const handleTogglePush = (key: PushPreferenceKey) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            push: {
+              ...current.push,
+              [key]: !current.push[key],
+            },
+          }
+        : current
+    );
+  };
+
+  const handleToggleInApp = () => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            inApp: {
+              all: !current.inApp.all,
+            },
+          }
+        : current
+    );
   };
 
   const handleSave = () => {
-    const preferences = categories.flatMap((category) =>
-      category.settings.map((setting) => ({
-        id: setting.id,
-        email: setting.email,
-        push: setting.push,
-        inApp: setting.inApp,
-      }))
-    );
+    if (!draft) return;
+    updatePreferences.mutate(draft, {
+      onSuccess: (response: any) => {
+        setDraft(normalizePreferences(response?.data?.data));
+      },
+    });
+  };
 
-    updatePreferences.mutate(
-      { preferences },
-      {
-        onSuccess: () => {
-          setHasChanges(false);
-        },
-      }
+  const setAllEmail = (enabled: boolean) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            email: {
+              jobMatches: enabled,
+              applications: enabled,
+              messages: enabled,
+              mentions: enabled,
+              newsletter: enabled,
+            },
+          }
+        : current
     );
   };
 
-  const handleToggleAll = (channel: 'email' | 'push' | 'inApp', enabled: boolean) => {
-    setCategories((prev) =>
-      prev.map((category) => ({
-        ...category,
-        settings: category.settings.map((setting) => ({
-          ...setting,
-          [channel]: enabled,
-        })),
-      }))
+  const setAllPush = (enabled: boolean) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            push: {
+              jobMatches: enabled,
+              applications: enabled,
+              messages: enabled,
+              mentions: enabled,
+            },
+          }
+        : current
     );
-    setHasChanges(true);
   };
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -263,159 +315,155 @@ export default function NotificationsSettingsPage() {
         )}
       </div>
 
-      {/* Quick Actions */}
-      <div className="card">
-        <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
-          Quick Actions
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => handleToggleAll('email', true)}
-            className="btn-outline px-3 py-1.5 text-sm"
-          >
-            Enable All Email
-          </button>
-          <button
-            onClick={() => handleToggleAll('email', false)}
-            className="btn-outline px-3 py-1.5 text-sm"
-          >
-            Disable All Email
-          </button>
-          <button
-            onClick={() => handleToggleAll('push', true)}
-            className="btn-outline px-3 py-1.5 text-sm"
-          >
-            Enable All Push
-          </button>
-          <button
-            onClick={() => handleToggleAll('push', false)}
-            className="btn-outline px-3 py-1.5 text-sm"
-          >
-            Disable All Push
-          </button>
+      {isLoading ? (
+        <div className="card flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading notification preferences...
         </div>
-      </div>
+      ) : isError || !draft ? (
+        <div className="card border-red-200 bg-red-50 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+          Notification preferences could not be loaded.
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+              Quick Actions
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setAllEmail(true)}
+                className="btn-outline px-3 py-1.5 text-sm"
+              >
+                Enable All Email
+              </button>
+              <button
+                onClick={() => setAllEmail(false)}
+                className="btn-outline px-3 py-1.5 text-sm"
+              >
+                Disable All Email
+              </button>
+              <button
+                onClick={() => setAllPush(true)}
+                className="btn-outline px-3 py-1.5 text-sm"
+              >
+                Enable All Push
+              </button>
+              <button
+                onClick={() => setAllPush(false)}
+                className="btn-outline px-3 py-1.5 text-sm"
+              >
+                Disable All Push
+              </button>
+            </div>
+          </div>
 
-      {/* Notification Categories */}
-      <div className="space-y-6">
-        {categories.map((category) => (
-          <div key={category.id} className="card">
-            <div className="flex items-start space-x-4 mb-6">
+          <div className="space-y-6">
+            {notificationCategories.map((category) => (
+              <div key={category.id} className="card">
+                <div className="flex items-start space-x-4 mb-6">
+                  <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-lg">
+                    <category.icon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {category.name}
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {category.description}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="hidden sm:grid sm:grid-cols-3 gap-4 mb-4 text-sm font-medium text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800 pb-2">
+                  <div>Notification</div>
+                  <div className="text-center">Email</div>
+                  <div className="text-center">Push</div>
+                </div>
+
+                <div className="space-y-4">
+                  {category.settings.map((setting) => (
+                    <div
+                      key={setting.id}
+                      className="sm:grid sm:grid-cols-3 gap-4 items-center py-2"
+                    >
+                      <div className="mb-2 sm:mb-0">
+                        <p className="font-medium text-gray-900 dark:text-white text-sm">
+                          {setting.name}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {setting.description}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 sm:justify-center">
+                        {setting.emailKey ? (
+                          <Toggle
+                            checked={draft.email[setting.emailKey]}
+                            label={`${setting.name} email notifications`}
+                            onChange={() => handleToggleEmail(setting.emailKey!)}
+                          />
+                        ) : (
+                          <span className="text-xs text-gray-400">Not available</span>
+                        )}
+                        <span className="sm:hidden text-sm text-gray-500">Email</span>
+                      </div>
+                      <div className="flex items-center gap-2 sm:justify-center">
+                        {setting.pushKey ? (
+                          <Toggle
+                            checked={draft.push[setting.pushKey]}
+                            label={`${setting.name} push notifications`}
+                            onChange={() => handleTogglePush(setting.pushKey!)}
+                          />
+                        ) : (
+                          <span className="text-xs text-gray-400">Not available</span>
+                        )}
+                        <span className="sm:hidden text-sm text-gray-500">Push</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="card">
+            <div className="flex items-start space-x-4">
               <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-lg">
-                <category.icon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <Bell className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  In-App Notifications
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Alerts inside your ATHENA workspace
+                </p>
+              </div>
+              <Toggle
+                checked={draft.inApp.all}
+                label="In-app notifications"
+                onChange={handleToggleInApp}
+              />
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="flex items-start space-x-4">
+              <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-lg">
+                <Shield className="w-5 h-5 text-primary-600 dark:text-primary-400" />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {category.name}
+                  Security Notifications
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {category.description}
+                  Account-security alerts remain required and are not configurable here.
                 </p>
               </div>
             </div>
-
-            {/* Table Header */}
-            <div className="hidden sm:grid sm:grid-cols-4 gap-4 mb-4 text-sm font-medium text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800 pb-2">
-              <div>Notification</div>
-              <div className="text-center">Email</div>
-              <div className="text-center">Push</div>
-              <div className="text-center">In-App</div>
-            </div>
-
-            {/* Settings */}
-            <div className="space-y-4">
-              {category.settings.map((setting) => (
-                <div
-                  key={setting.id}
-                  className="sm:grid sm:grid-cols-4 gap-4 items-center py-2"
-                >
-                  <div className="mb-2 sm:mb-0">
-                    <p className="font-medium text-gray-900 dark:text-white text-sm">
-                      {setting.name}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {setting.description}
-                    </p>
-                  </div>
-                  <div className="flex sm:justify-center">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={setting.email}
-                        onChange={() => handleToggle(category.id, setting.id, 'email')}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-                      <span className="sm:hidden ml-2 text-sm text-gray-500">Email</span>
-                    </label>
-                  </div>
-                  <div className="flex sm:justify-center">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={setting.push}
-                        onChange={() => handleToggle(category.id, setting.id, 'push')}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-                      <span className="sm:hidden ml-2 text-sm text-gray-500">Push</span>
-                    </label>
-                  </div>
-                  <div className="flex sm:justify-center">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={setting.inApp}
-                        onChange={() => handleToggle(category.id, setting.id, 'inApp')}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-                      <span className="sm:hidden ml-2 text-sm text-gray-500">In-App</span>
-                    </label>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
-        ))}
-      </div>
-
-      {/* Email Digest */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          Email Digest
-        </h2>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-gray-900 dark:text-white">
-                Daily Digest
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Receive a daily summary of your notifications
-              </p>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" />
-              <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-gray-900 dark:text-white">
-                Weekly Digest
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Receive a weekly summary every Monday
-              </p>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" defaultChecked className="sr-only peer" />
-              <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-            </label>
-          </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

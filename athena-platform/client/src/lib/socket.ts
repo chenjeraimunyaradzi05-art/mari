@@ -1,9 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { useChatStore } from './stores/chat.store';
 import { useNotificationStore } from './stores/notification.store';
-import { API_ORIGIN } from './api';
-
-const SOCKET_ORIGIN = (process.env.NEXT_PUBLIC_SOCKET_URL || API_ORIGIN).replace(/\/$/, '');
+import { SOCKET_ORIGIN } from './runtime-config';
 
 class SocketClient {
   private socket: Socket | null = null;

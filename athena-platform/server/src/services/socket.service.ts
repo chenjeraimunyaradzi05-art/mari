@@ -9,6 +9,8 @@ import { logger } from '../utils/logger';
 import { prisma } from '../utils/prisma';
 import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
+import { CONTENT_LIMITS, normalizeUserText } from '../utils/contentSafety';
+import { getOrCreateDirectConversation } from './direct-message.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -23,7 +25,12 @@ export function initializeSocketHandlers(io: SocketIOServer) {
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
-      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
+      const authToken = typeof socket.handshake.auth?.token === 'string' ? socket.handshake.auth.token : undefined;
+      const authHeader = socket.handshake.headers.authorization;
+      const bearerToken = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice('Bearer '.length)
+        : undefined;
+      const token = authToken || bearerToken;
       
       if (!token) {
         return next(new Error('Authentication required'));
@@ -110,21 +117,47 @@ export function initializeSocketHandlers(io: SocketIOServer) {
 
     socket.on('messages:send', async (data: { receiverId: string; content: string }) => {
       try {
-        const { receiverId, content } = data;
-
-        // Create message in database
-        const message = await prisma.message.create({
-          data: {
-            senderId: userId,
-            receiverId,
-            content,
-          },
-          include: {
-            sender: {
-              select: { id: true, firstName: true, lastName: true, avatar: true },
-            },
-          },
+        const receiverId = typeof data?.receiverId === 'string' ? data.receiverId : '';
+        const content = normalizeUserText(data?.content, {
+          field: 'content',
+          maxLength: CONTENT_LIMITS.directMessage,
         });
+
+        const conversation = await getOrCreateDirectConversation(userId, receiverId);
+
+        const [message] = await prisma.$transaction([
+          prisma.message.create({
+            data: {
+              conversationId: conversation.id,
+              senderId: userId,
+              receiverId,
+              content,
+              type: 'TEXT',
+            },
+            include: {
+              sender: {
+                select: { id: true, firstName: true, lastName: true, avatar: true },
+              },
+            },
+          }),
+          prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              lastMessageAt: new Date(),
+              messageCount: { increment: 1 },
+            },
+          }),
+          prisma.conversationParticipant.updateMany({
+            where: {
+              conversationId: conversation.id,
+              userId: { not: userId },
+            },
+            data: {
+              hasUnread: true,
+              unreadCount: { increment: 1 },
+            },
+          }),
+        ]);
 
         const roomId = getConversationRoomId(userId, receiverId);
 

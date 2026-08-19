@@ -78,6 +78,10 @@ class SocketService {
     this.socket?.emit('notifications:mark_read', notificationId);
   }
 
+  markMessagesRead(conversationId: string, messageIds: string[]): void {
+    this.socket?.emit('messages:read', { conversationId, messageIds });
+  }
+
   // Join a conversation room
   joinConversation(conversationId: string): void {
     this.socket?.emit('messages:join_conversation', conversationId);

@@ -1,124 +1,162 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-const registry = require('../i18n.registry.js');
+import { NextRequest, NextResponse } from 'next/server';
 
-// Backend URL for API proxying.
-// On Netlify the env var is set in the dashboard; locally it defaults to localhost.
-const BACKEND_URL = (
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-).replace(/\/$/, '');
+// ─── Constants ────────────────────────────────────────────────────────────────
+const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE === 'true';
 
-// Routes that require authentication
-const protectedRoutes = [
+const SUPPORTED_LOCALES = ['en', 'ar', 'fr', 'sw', 'zu', 'xh', 'yo', 'ig'] as const;
+type Locale = (typeof SUPPORTED_LOCALES)[number];
+const DEFAULT_LOCALE: Locale = 'en';
+
+/** Routes that require an authenticated session (refreshToken cookie). */
+const PROTECTED_PREFIXES = [
   '/dashboard',
   '/onboarding',
   '/settings',
+  '/profile',
+  '/employer',
+  '/finances',
+  '/network',
+  '/mentorship',
+  '/messages',
+  '/growth',
+  '/certifications',
+  '/skills-marketplace',
+  '/admin',
 ];
 
-// Routes that should redirect to dashboard if authenticated
-const authRoutes = [
-  '/login',
-  '/register',
-  '/forgot-password',
+/** Admin-only routes — also need the athena_role cookie to equal ADMIN. */
+const ADMIN_PREFIXES = ['/admin'];
+
+/** Routes that authenticated users should be bounced away from. */
+const AUTH_ONLY_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'];
+
+/** Paths that are always public — never gated or redirected. */
+const PUBLIC_PATHS = [
+  '/maintenance',
+  '/offline',
+  '/api',
+  '/_next',
+  '/favicon.ico',
+  '/manifest.json',
+  '/sw.js',
+  '/robots.txt',
+  '/sitemap.xml',
+  '/uploads',
+  '/icons',
+  '/fonts',
 ];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p + '?'));
+}
+
+function isProtectedPath(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+function isAdminPath(pathname: string): boolean {
+  return ADMIN_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+function isAuthOnlyPath(pathname: string): boolean {
+  return AUTH_ONLY_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+function getSafeRedirectPath(redirect: string | null | undefined, fallback: string): string {
+  if (redirect && redirect.startsWith('/') && !redirect.startsWith('//') && !redirect.includes('..')) {
+    return redirect;
+  }
+  return fallback;
+}
+
+function getLocaleFromPath(pathname: string): Locale | null {
+  const seg = pathname.split('/')[1] as Locale;
+  return SUPPORTED_LOCALES.includes(seg) ? seg : null;
+}
+
+function applySecurityHeaders(res: NextResponse): NextResponse {
+  res.headers.set('X-Content-Type-Options', 'nosniff');
+  res.headers.set('X-Frame-Options', 'DENY');
+  res.headers.set('X-XSS-Protection', '1; mode=block');
+  res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  return res;
+}
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // ── API Proxy ────────────────────────────────────────────────────
-  // Rewrite /api/* and /uploads/* to the Railway backend.
-  // Running in middleware (Edge Function on Netlify) ensures this
-  // executes before any redirect rules or serverless functions.
-  //
-  // EXCEPTION: /api/auth/* routes are NOT rewritten here.
-  // Auth routes set HttpOnly cookies (refreshToken) and
-  // NextResponse.rewrite() to external URLs on Netlify Edge may not
-  // reliably forward Set-Cookie headers. Instead, auth requests fall
-  // through to the Next.js API route handlers in app/api/auth/ which
-  // explicitly forward cookies via response.headers.getSetCookie().
-  // On Netlify, netlify.toml redirects handle /api/* and /uploads/* proxying
-  // to Railway more reliably than edge-function rewrites. Only use middleware
-  // rewriting for local development (where there are no Netlify redirects).
-  if (!process.env.NETLIFY) {
-    const isAuthRoute = pathname.startsWith('/api/auth');
-    if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
-      const destination = new URL(`${BACKEND_URL}${pathname}`);
-      request.nextUrl.searchParams.forEach((value, key) => {
-        destination.searchParams.set(key, value);
-      });
-      return NextResponse.rewrite(destination);
+  // 1. Always skip truly static / API paths — no overhead
+  if (isPublicPath(pathname)) {
+    return applySecurityHeaders(NextResponse.next());
+  }
+
+  // 2. Maintenance mode — bounce everything except the maintenance page itself
+  if (MAINTENANCE_MODE && pathname !== '/maintenance') {
+    return NextResponse.redirect(new URL('/maintenance', request.url));
+  }
+
+  // 3. i18n — strip known locale prefix and redirect to bare path
+  //    e.g. /en/dashboard → /dashboard
+  const locale = getLocaleFromPath(pathname);
+  if (locale && locale !== DEFAULT_LOCALE) {
+    const stripped = pathname.slice(locale.length + 1) || '/';
+    const target = new URL(stripped + request.nextUrl.search, request.url);
+    const res = NextResponse.redirect(target, 308);
+    return applySecurityHeaders(res);
+  }
+  if (locale === DEFAULT_LOCALE) {
+    // /en/** → /** (canonical strip)
+    const stripped = pathname.slice(DEFAULT_LOCALE.length + 1) || '/';
+    const target = new URL(stripped + request.nextUrl.search, request.url);
+    const res = NextResponse.redirect(target, 308);
+    return applySecurityHeaders(res);
+  }
+
+  const refreshToken = request.cookies.get('refreshToken')?.value;
+  const isAuthenticated = Boolean(refreshToken);
+
+  // 4. Protected routes — require refreshToken cookie
+  if (isProtectedPath(pathname)) {
+    if (!isAuthenticated) {
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      const res = NextResponse.redirect(loginUrl);
+      return applySecurityHeaders(res);
     }
-  }
 
-  const maintenanceMode = process.env.NEXT_PUBLIC_MAINTENANCE_MODE === 'true';
-  if (maintenanceMode && !pathname.startsWith('/maintenance')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/maintenance';
-    return NextResponse.rewrite(url);
-  }
-
-  const locales = registry?.locales || [];
-  const defaultLocale = registry?.defaultLocale || 'en-AU';
-  if (locales.length) {
-    const escaped = locales.map((locale: string) => locale.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
-    const localePattern = new RegExp(`^/(${escaped.join('|')})(/|$)`, 'i');
-    const match = pathname.match(localePattern);
-
-    if (match) {
-      const locale = match[1];
-      const rest = pathname.slice(locale.length + 1) || '/';
-      if (locale.toLowerCase() !== String(defaultLocale).toLowerCase()) {
-        const url = request.nextUrl.clone();
-        url.pathname = `/${defaultLocale}${rest === '' ? '' : rest}`;
-        return NextResponse.redirect(url);
+    // Admin sub-check
+    if (isAdminPath(pathname)) {
+      const role = request.cookies.get('athena_role')?.value;
+      if (role !== 'ADMIN') {
+        const res = NextResponse.redirect(new URL('/dashboard', request.url));
+        return applySecurityHeaders(res);
       }
-
-      const url = request.nextUrl.clone();
-      url.pathname = rest === '' ? '/' : rest.startsWith('/') ? rest : `/${rest}`;
-      const response = NextResponse.rewrite(url);
-      response.headers.set('x-athena-locale', locale);
-      return response;
     }
   }
-  
-  // Check if user has a session — the backend sets refreshToken as an HttpOnly cookie.
-  // Access tokens are in-memory only, so we check for the refresh cookie instead.
-  const token = request.cookies.get('refreshToken')?.value;
-  const isAuthenticated = !!token;
 
-  // Check if the route is protected
-  const isProtectedRoute = protectedRoutes.some((route) =>
-    pathname.startsWith(route)
-  );
-
-  // Check if the route is an auth page (login, register, etc.)
-  const isAuthPage = authRoutes.some((route) => pathname.startsWith(route));
-
-  // If accessing protected route without auth, redirect to login
-  if (isProtectedRoute && !isAuthenticated) {
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
+  // 5. Bounce authenticated users away from auth pages
+  if (isAuthenticated && isAuthOnlyPath(pathname)) {
+    const redirect = request.nextUrl.searchParams.get('redirect');
+    const destination = getSafeRedirectPath(redirect, '/dashboard');
+    const res = NextResponse.redirect(new URL(destination, request.url));
+    return applySecurityHeaders(res);
   }
 
-  // If accessing auth page while authenticated, redirect to dashboard
-  if (isAuthPage && isAuthenticated) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
-  }
-
-  return NextResponse.next();
+  return applySecurityHeaders(NextResponse.next());
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except:
+     * Match all paths except:
      * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
+     * - _next/image  (image optimisation)
+     * - favicon.ico
+     * - public root files (robots.txt, manifest.json, sw.js)
      */
-    '/((?!_next/static|_next/image|favicon.ico|public).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|manifest\\.json|sw\\.js|robots\\.txt|sitemap\\.xml).*)',
   ],
 };

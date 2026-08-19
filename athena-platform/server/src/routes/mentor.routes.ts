@@ -235,6 +235,40 @@ router.patch(
 );
 
 /**
+ * PATCH /api/mentors/sessions/:sessionId
+ * Reschedule a session
+ */
+router.patch(
+  '/sessions/:sessionId',
+  authenticate,
+  [
+    body('scheduledAt').isISO8601().withMessage('Valid date required'),
+    body('durationMinutes').optional().isInt({ min: 15, max: 240 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'Validation failed: ' + errors.array().map(e => e.msg).join(', '));
+      }
+
+      const updated = await mentorService.rescheduleSession(
+        req.params.sessionId,
+        req.user!.id,
+        {
+          scheduledAt: new Date(req.body.scheduledAt),
+          durationMinutes: req.body.durationMinutes ? Number(req.body.durationMinutes) : undefined,
+        }
+      );
+
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
  * GET /api/mentors/:mentorId
  * Get mentor profile by mentor profile id
  */

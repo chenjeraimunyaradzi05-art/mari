@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 // ============================================
 
 interface PullToRefreshProps {
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<void> | void;
   refreshing?: boolean;
   tintColor?: string;
   title?: string;
@@ -35,13 +35,13 @@ interface PullToRefreshProps {
 // REFRESH CONTROL WRAPPER
 // ============================================
 
-export const useRefresh = (onRefresh: () => Promise<void>) => {
+export const useRefresh = (onRefresh: () => Promise<void> | void) => {
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await onRefresh();
+      await Promise.resolve(onRefresh());
     } finally {
       setRefreshing(false);
     }
@@ -94,7 +94,9 @@ export const RefreshableScrollView: React.FC<RefreshableScrollViewProps> = ({
 // FLAT LIST WITH PULL TO REFRESH
 // ============================================
 
-interface RefreshableFlatListProps<T> extends Omit<FlatListProps<T>, 'refreshControl'>, PullToRefreshProps {}
+interface RefreshableFlatListProps<T>
+  extends Omit<FlatListProps<T>, 'refreshControl' | 'onRefresh' | 'refreshing'>,
+    PullToRefreshProps {}
 
 export function RefreshableFlatList<T>({
   onRefresh,

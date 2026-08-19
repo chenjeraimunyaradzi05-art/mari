@@ -38,29 +38,55 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [selectedPersona, setSelectedPersona] = useState(Persona.EARLY_CAREER);
+  const [womanSelfAttested, setWomanSelfAttested] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleRegister = async () => {
-    if (!firstName || !lastName || !email || !password) {
+    const trimmedFirstName = firstName.trim();
+    const trimmedLastName = lastName.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedFirstName || !trimmedLastName || !trimmedEmail || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
-    if (password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters');
+    if (
+      password.length < 12 ||
+      !/[A-Z]/.test(password) ||
+      !/[a-z]/.test(password) ||
+      !/\d/.test(password) ||
+      !/[^A-Za-z0-9]/.test(password)
+    ) {
+      Alert.alert(
+        'Error',
+        'Password must be at least 12 characters and include uppercase, lowercase, number, and special characters.'
+      );
+      return;
+    }
+
+    if (!womanSelfAttested) {
+      Alert.alert('Error', 'Please confirm the community self-attestation to continue.');
       return;
     }
 
     setIsLoading(true);
     try {
-      await register({
-        firstName,
-        lastName,
-        email,
+      const result = await register({
+        firstName: trimmedFirstName,
+        lastName: trimmedLastName,
+        email: trimmedEmail,
         password,
         persona: selectedPersona,
-        womanSelfAttested: true,
+        womanSelfAttested,
       });
+      if (result.verificationRequired) {
+        Alert.alert(
+          'Check your inbox',
+          'We sent you a verification link. Please verify your email before signing in.',
+          [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+        );
+      }
     } catch (error: any) {
       Alert.alert('Registration Failed', error.response?.data?.message || 'Please try again');
     } finally {
@@ -106,7 +132,7 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
 
           <TextInput
             style={styles.input}
-            placeholder="Password (min 8 characters)"
+            placeholder="Password (min 12 characters)"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -134,6 +160,18 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
               </TouchableOpacity>
             ))}
           </View>
+
+          <TouchableOpacity
+            style={styles.attestationRow}
+            onPress={() => setWomanSelfAttested((value) => !value)}
+          >
+            <View style={[styles.checkbox, womanSelfAttested && styles.checkboxChecked]}>
+              {womanSelfAttested && <View style={styles.checkboxDot} />}
+            </View>
+            <Text style={styles.attestationText}>
+              I confirm that I am a woman and agree to ATHENA community standards.
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.button, isLoading && styles.buttonDisabled]}
@@ -239,6 +277,43 @@ const styles = StyleSheet.create({
   personaTextSelected: {
     color: '#fff',
     fontWeight: '500',
+  },
+  attestationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 15,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: '#6366f1',
+    borderColor: '#6366f1',
+  },
+  checkboxDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  attestationText: {
+    flex: 1,
+    color: '#4b5563',
+    fontSize: 14,
+    lineHeight: 20,
   },
   button: {
     backgroundColor: '#6366f1',

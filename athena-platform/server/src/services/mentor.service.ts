@@ -509,6 +509,103 @@ export async function updateSessionStatus(
 }
 
 /**
+ * Reschedule a mentorship session
+ */
+export async function rescheduleSession(
+  sessionId: string,
+  userId: string,
+  data: {
+    scheduledAt: Date;
+    durationMinutes?: number;
+  }
+) {
+  const session = await prisma.mentorSession.findUnique({
+    where: { id: sessionId },
+    include: { mentorProfile: true },
+  });
+
+  if (!session) {
+    throw new ApiError(404, 'Session not found');
+  }
+
+  const isMentee = session.menteeId === userId;
+  const isMentor = session.mentorProfile.userId === userId;
+  if (!isMentee && !isMentor) {
+    throw new ApiError(403, 'Not authorized');
+  }
+
+  if (!['REQUESTED', 'CONFIRMED'].includes(session.status)) {
+    throw new ApiError(400, 'Only requested or confirmed sessions can be rescheduled');
+  }
+
+  const durationMinutes = data.durationMinutes ?? session.durationMinutes;
+  const scheduledAt = data.scheduledAt;
+  const scheduledEnd = new Date(scheduledAt.getTime() + durationMinutes * 60 * 1000);
+  const conflictWindowStart = new Date(scheduledAt.getTime() - 240 * 60 * 1000);
+
+  const nearbySessions = await prisma.mentorSession.findMany({
+    where: {
+      id: { not: sessionId },
+      mentorProfileId: session.mentorProfileId,
+      status: { in: ['REQUESTED', 'CONFIRMED'] },
+      scheduledAt: {
+        gte: conflictWindowStart,
+        lte: scheduledEnd,
+      },
+    },
+    select: {
+      id: true,
+      scheduledAt: true,
+      durationMinutes: true,
+    },
+  });
+
+  const hasConflict = nearbySessions.some((nearbySession) => {
+    if (!nearbySession.scheduledAt) return false;
+    const nearbyStart = nearbySession.scheduledAt;
+    const nearbyEnd = new Date(
+      nearbyStart.getTime() + nearbySession.durationMinutes * 60 * 1000
+    );
+    return nearbyStart < scheduledEnd && nearbyEnd > scheduledAt;
+  });
+
+  if (hasConflict) {
+    throw new ApiError(409, 'New session time conflicts with an existing booking');
+  }
+
+  const updated = await prisma.mentorSession.update({
+    where: { id: sessionId },
+    data: {
+      scheduledAt,
+      durationMinutes,
+    },
+    include: {
+      mentee: { select: { id: true, displayName: true, avatar: true } },
+    },
+  });
+
+  const recipientId = isMentor ? session.menteeId : session.mentorProfile.userId;
+  await notificationService.notify({
+    userId: recipientId,
+    type: 'MENTOR_SESSION',
+    title: 'Session Rescheduled',
+    message: `Your mentorship session was rescheduled to ${scheduledAt.toLocaleString()}`,
+    link: `/dashboard/mentor/sessions/${sessionId}`,
+    channels: ['in-app', 'email'],
+    emailTemplate: {
+      subject: 'Mentorship Session Rescheduled',
+      html: `
+        <h2>Session Rescheduled</h2>
+        <p>Your mentorship session has been rescheduled to ${scheduledAt.toLocaleString()}.</p>
+        <a href="${process.env.CLIENT_URL}/dashboard/mentor/sessions/${sessionId}">View Details</a>
+      `,
+    },
+  });
+
+  return updated;
+}
+
+/**
  * Get session by ID
  */
 export async function getSession(sessionId: string) {

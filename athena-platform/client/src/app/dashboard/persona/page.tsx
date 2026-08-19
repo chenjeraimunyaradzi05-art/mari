@@ -8,9 +8,9 @@ export default function PersonaIndexPage() {
   return (
     <div className="p-6 space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Personality Dashboards</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Persona Dashboards</h1>
         <p className="text-gray-500 dark:text-gray-400 mt-1">
-          Select a personality type to explore its dedicated dashboard.
+          Select a persona to review live workspace signals and relevant routes.
         </p>
       </div>
 
@@ -31,7 +31,7 @@ export default function PersonaIndexPage() {
               {label}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              View stats, resources, and paths for {label}.
+              View live counts, workspace links, and account context for {label}.
             </p>
           </Link>
         ))}

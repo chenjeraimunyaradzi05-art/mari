@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { getAllowedOrigins } from '../utils/origins';
 
 /**
  * Security Headers Middleware
@@ -23,6 +24,10 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   // X-XSS-Protection: legacy XSS filter (mostly deprecated, but good for defense-in-depth)
   res.setHeader('X-XSS-Protection', '1; mode=block');
 
+  // Cross-origin isolation posture for modern browsers while preserving auth popups.
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+
   // Referrer-Policy: control how much referrer info is shared
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 
@@ -34,30 +39,42 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
 
   // Content Security Policy (CSP)
   // Prevent XSS by controlling where resources can be loaded from
-  const cspDirectives = [
+  const connectOrigins = Array.from(new Set([frontendUrl, ...getAllowedOrigins()])).join(' ');
+
+  const devCspDirectives = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // unsafe-eval required for TypeScript/Next.js HMR in dev
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
-    `connect-src 'self' ${frontendUrl} wss: ws:`, // Allow WebSocket connections
-    "img-src 'self' data: https:",
+    `connect-src 'self' ${connectOrigins} wss: ws:`,
+    "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    "media-src 'self' blob:",
+    "media-src 'self' blob: https:",
+    "worker-src 'self' blob:",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
   ];
 
-  if (isProduction) {
-    // In production, strip unsafe tokens from directives but keep the directives themselves
-    const prodCSP = cspDirectives
-      .map((d) => d.replace(/'unsafe-inline'/g, '').replace(/'unsafe-eval'/g, '').replace(/\s{2,}/g, ' ').trim())
-      .filter(Boolean)
-      .join('; ');
-    res.setHeader('Content-Security-Policy', prodCSP);
-  } else {
-    res.setHeader('Content-Security-Policy', cspDirectives.join('; '));
-  }
+  const prodCspDirectives = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    `connect-src 'self' ${connectOrigins} wss:`,
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "media-src 'self' blob: https:",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ];
+
+  res.setHeader(
+    'Content-Security-Policy',
+    (isProduction ? prodCspDirectives : devCspDirectives).join('; ')
+  );
 
   // Expect-CT: Certificate Transparency
   if (isProduction) {

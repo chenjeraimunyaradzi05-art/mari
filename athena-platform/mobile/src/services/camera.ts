@@ -3,7 +3,7 @@
  * Step 86: Camera Integration for Stories/Verification
  */
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Alert, Platform } from 'react-native';
 import { api } from './api';
 
@@ -93,10 +93,10 @@ export async function takePhoto(options: CaptureOptions = {}): Promise<MediaAsse
       uri: asset.uri,
       type: 'image',
       fileName,
-      fileSize: asset.fileSize,
+      fileSize: asset.fileSize ?? undefined,
       width: asset.width,
       height: asset.height,
-      base64: asset.base64,
+      base64: asset.base64 ?? undefined,
     };
   } catch (error) {
     console.error('Error taking photo:', error);
@@ -130,10 +130,10 @@ export async function recordVideo(options: CaptureOptions = {}): Promise<MediaAs
       uri: asset.uri,
       type: 'video',
       fileName,
-      fileSize: asset.fileSize,
+      fileSize: asset.fileSize ?? undefined,
       width: asset.width,
       height: asset.height,
-      duration: asset.duration,
+      duration: asset.duration ?? undefined,
     };
   } catch (error) {
     console.error('Error recording video:', error);
@@ -168,10 +168,10 @@ export async function pickImageFromLibrary(options: CaptureOptions = {}): Promis
       uri: asset.uri,
       type: 'image',
       fileName,
-      fileSize: asset.fileSize,
+      fileSize: asset.fileSize ?? undefined,
       width: asset.width,
       height: asset.height,
-      base64: asset.base64,
+      base64: asset.base64 ?? undefined,
     };
   } catch (error) {
     console.error('Error picking image:', error);
@@ -205,10 +205,10 @@ export async function pickVideoFromLibrary(options: CaptureOptions = {}): Promis
       uri: asset.uri,
       type: 'video',
       fileName,
-      fileSize: asset.fileSize,
+      fileSize: asset.fileSize ?? undefined,
       width: asset.width,
       height: asset.height,
-      duration: asset.duration,
+      duration: asset.duration ?? undefined,
     };
   } catch (error) {
     console.error('Error picking video:', error);
@@ -239,7 +239,7 @@ export async function pickMultipleImages(maxCount: number = 10): Promise<MediaAs
       uri: asset.uri,
       type: 'image' as const,
       fileName: asset.uri.split('/').pop() || `image_${Date.now()}.jpg`,
-      fileSize: asset.fileSize,
+      fileSize: asset.fileSize ?? undefined,
       width: asset.width,
       height: asset.height,
     }));

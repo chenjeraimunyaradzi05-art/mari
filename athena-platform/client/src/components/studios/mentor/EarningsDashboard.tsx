@@ -18,20 +18,13 @@ import { cn } from '@/lib/utils';
 import {
   DollarSign,
   TrendingUp,
-  TrendingDown,
-  Calendar,
   Download,
   CreditCard,
   Building2,
   ArrowUpRight,
   ArrowDownRight,
   Clock,
-  CheckCircle2,
   AlertCircle,
-  FileText,
-  ExternalLink,
-  Filter,
-  ChevronDown,
   Users,
   Video,
   BookOpen,
@@ -65,7 +58,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -74,7 +66,6 @@ import { Label } from '@/components/ui/label';
 // TYPES
 // ============================================
 
-type TimeRange = '7d' | '30d' | '90d' | '12m' | 'all';
 type IncomeSource = 'sessions' | 'courses' | 'tips' | 'referrals';
 
 interface Transaction {
@@ -107,85 +98,6 @@ interface EarningsData {
   tips: number;
   referrals: number;
 }
-
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_EARNINGS_DATA: EarningsData[] = [
-  { period: 'Jan', sessions: 2400, courses: 1200, tips: 180, referrals: 100 },
-  { period: 'Feb', sessions: 2800, courses: 1400, tips: 220, referrals: 150 },
-  { period: 'Mar', sessions: 3200, courses: 1800, tips: 280, referrals: 180 },
-  { period: 'Apr', sessions: 2900, courses: 2000, tips: 240, referrals: 200 },
-  { period: 'May', sessions: 3500, courses: 2200, tips: 320, referrals: 250 },
-  { period: 'Jun', sessions: 4100, courses: 2400, tips: 380, referrals: 280 },
-];
-
-const MOCK_TRANSACTIONS: Transaction[] = [
-  {
-    id: '1',
-    type: 'earning',
-    source: 'sessions',
-    description: 'Mentoring Session',
-    amount: 150,
-    status: 'completed',
-    date: new Date(2026, 0, 18),
-    metadata: { clientName: 'Alex Thompson', sessionDuration: 60 },
-  },
-  {
-    id: '2',
-    type: 'earning',
-    source: 'courses',
-    description: 'Course Sale: Leadership Fundamentals',
-    amount: 49,
-    status: 'completed',
-    date: new Date(2026, 0, 17),
-    metadata: { courseName: 'Leadership Fundamentals' },
-  },
-  {
-    id: '3',
-    type: 'payout',
-    source: 'sessions',
-    description: 'Weekly Payout',
-    amount: -2450,
-    status: 'processing',
-    date: new Date(2026, 0, 15),
-  },
-  {
-    id: '4',
-    type: 'earning',
-    source: 'tips',
-    description: 'Tip from Sarah Chen',
-    amount: 25,
-    status: 'completed',
-    date: new Date(2026, 0, 14),
-    metadata: { clientName: 'Sarah Chen' },
-  },
-  {
-    id: '5',
-    type: 'earning',
-    source: 'referrals',
-    description: 'Referral Bonus',
-    amount: 50,
-    status: 'completed',
-    date: new Date(2026, 0, 12),
-  },
-  {
-    id: '6',
-    type: 'refund',
-    source: 'sessions',
-    description: 'Session Cancellation Refund',
-    amount: -75,
-    status: 'completed',
-    date: new Date(2026, 0, 10),
-    metadata: { clientName: 'Mike Johnson' },
-  },
-];
-
-const MOCK_PAYOUT_METHODS: PayoutMethod[] = [
-  { id: '1', type: 'bank', name: 'Chase Checking', last4: '4567', isDefault: true },
-  { id: '2', type: 'paypal', name: 'PayPal', isDefault: false },
-];
 
 // ============================================
 // CONFIG
@@ -257,7 +169,21 @@ function StatCard({
   );
 }
 
-function EarningsChart({ data, timeRange }: { data: EarningsData[]; timeRange: TimeRange }) {
+function EarningsChart({ data }: { data: EarningsData[] }) {
+  if (data.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Earnings Overview</CardTitle>
+          <CardDescription>Income breakdown by source</CardDescription>
+        </CardHeader>
+        <CardContent className="py-12 text-center text-sm text-muted-foreground">
+          Earnings analytics are not connected yet.
+        </CardContent>
+      </Card>
+    );
+  }
+
   // Calculate totals for chart legend
   const totals = data.reduce(
     (acc, d) => ({
@@ -272,7 +198,7 @@ function EarningsChart({ data, timeRange }: { data: EarningsData[]; timeRange: T
   const grandTotal = totals.sessions + totals.courses + totals.tips + totals.referrals;
 
   // Calculate max for scaling
-  const maxValue = Math.max(...data.map(d => d.sessions + d.courses + d.tips + d.referrals));
+  const maxValue = Math.max(...data.map(d => d.sessions + d.courses + d.tips + d.referrals), 1);
 
   return (
     <Card>
@@ -314,19 +240,19 @@ function EarningsChart({ data, timeRange }: { data: EarningsData[]; timeRange: T
                   >
                     <div 
                       className="bg-emerald-500 w-full"
-                      style={{ height: `${(d.sessions / total) * 100}%` }}
+                      style={{ height: `${total ? (d.sessions / total) * 100 : 0}%` }}
                     />
                     <div 
                       className="bg-blue-500 w-full"
-                      style={{ height: `${(d.courses / total) * 100}%` }}
+                      style={{ height: `${total ? (d.courses / total) * 100 : 0}%` }}
                     />
                     <div 
                       className="bg-yellow-500 w-full"
-                      style={{ height: `${(d.tips / total) * 100}%` }}
+                      style={{ height: `${total ? (d.tips / total) * 100 : 0}%` }}
                     />
                     <div 
                       className="bg-purple-500 w-full"
-                      style={{ height: `${(d.referrals / total) * 100}%` }}
+                      style={{ height: `${total ? (d.referrals / total) * 100 : 0}%` }}
                     />
                   </div>
                   <span className="text-xs text-muted-foreground">{d.period}</span>
@@ -341,7 +267,7 @@ function EarningsChart({ data, timeRange }: { data: EarningsData[]; timeRange: T
           <div className="grid grid-cols-4 gap-4">
             {Object.entries(totals).map(([key, value]) => {
               const config = SOURCE_CONFIG[key as IncomeSource];
-              const percentage = ((value / grandTotal) * 100).toFixed(1);
+              const percentage = grandTotal ? ((value / grandTotal) * 100).toFixed(1) : '0.0';
               
               return (
                 <div key={key} className="text-center">
@@ -368,13 +294,23 @@ function TransactionsTable({ transactions }: { transactions: Transaction[] }) {
             <CardTitle>Recent Transactions</CardTitle>
             <CardDescription>Your latest earnings and payouts</CardDescription>
           </div>
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={transactions.length === 0}
+            title="Transaction export is not connected yet"
+          >
             <Download className="h-4 w-4 mr-2" />
             Export
           </Button>
         </div>
       </CardHeader>
       <CardContent>
+        {transactions.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            No live earnings or payout transactions are connected yet.
+          </div>
+        ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -439,6 +375,7 @@ function TransactionsTable({ transactions }: { transactions: Transaction[] }) {
             })}
           </TableBody>
         </Table>
+        )}
       </CardContent>
     </Card>
   );
@@ -487,14 +424,20 @@ function PayoutMethodCard({
   );
 }
 
-function WithdrawDialog() {
+function WithdrawDialog({
+  availableBalance,
+  payoutMethods,
+}: {
+  availableBalance: number;
+  payoutMethods: PayoutMethod[];
+}) {
   const [amount, setAmount] = useState('');
-  const availableBalance = 3245.50;
+  const canWithdraw = availableBalance > 0 && payoutMethods.length > 0;
 
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button>
+        <Button disabled={!canWithdraw}>
           <DollarSign className="h-4 w-4 mr-2" />
           Withdraw
         </Button>
@@ -539,23 +482,24 @@ function WithdrawDialog() {
 
           <div className="space-y-2">
             <Label>Destination</Label>
-            <Select defaultValue="chase">
+            <Select value={payoutMethods.find((method) => method.isDefault)?.id ?? payoutMethods[0]?.id ?? ''}>
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="No payout method configured" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="chase">
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    Chase Checking ****4567
-                  </div>
-                </SelectItem>
-                <SelectItem value="paypal">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="h-4 w-4" />
-                    PayPal
-                  </div>
-                </SelectItem>
+                {payoutMethods.map((method) => (
+                  <SelectItem key={method.id} value={method.id}>
+                    <div className="flex items-center gap-2">
+                      {method.type === 'bank' ? (
+                        <Building2 className="h-4 w-4" />
+                      ) : (
+                        <CreditCard className="h-4 w-4" />
+                      )}
+                      {method.name}
+                      {method.last4 ? ` ****${method.last4}` : ''}
+                    </div>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -577,7 +521,7 @@ function WithdrawDialog() {
 
         <DialogFooter>
           <Button variant="outline">Cancel</Button>
-          <Button disabled={!amount || parseFloat(amount) <= 0}>
+          <Button disabled={!canWithdraw || !amount || parseFloat(amount) <= 0}>
             Confirm Withdrawal
           </Button>
         </DialogFooter>
@@ -587,12 +531,6 @@ function WithdrawDialog() {
 }
 
 function TaxDocuments() {
-  const documents = [
-    { id: '1', name: '2025 1099-NEC', year: 2025, status: 'available' },
-    { id: '2', name: '2024 1099-NEC', year: 2024, status: 'available' },
-    { id: '3', name: '2026 1099-NEC', year: 2026, status: 'pending' },
-  ];
-
   return (
     <Card>
       <CardHeader>
@@ -600,29 +538,8 @@ function TaxDocuments() {
         <CardDescription>Download your tax forms for filing</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          {documents.map((doc) => (
-            <div
-              key={doc.id}
-              className="flex items-center justify-between p-3 border rounded-lg"
-            >
-              <div className="flex items-center gap-3">
-                <FileText className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="font-medium">{doc.name}</p>
-                  <p className="text-sm text-muted-foreground">Tax Year {doc.year}</p>
-                </div>
-              </div>
-              {doc.status === 'available' ? (
-                <Button variant="outline" size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download
-                </Button>
-              ) : (
-                <Badge variant="outline">Coming Soon</Badge>
-              )}
-            </div>
-          ))}
+        <div className="py-10 text-center text-sm text-muted-foreground">
+          Tax document generation is not connected yet.
         </div>
       </CardContent>
     </Card>
@@ -634,24 +551,13 @@ function TaxDocuments() {
 // ============================================
 
 export function EarningsDashboard({ className }: { className?: string }) {
-  const [timeRange, setTimeRange] = useState<TimeRange>('30d');
-  const [payoutMethods, setPayoutMethods] = useState(MOCK_PAYOUT_METHODS);
-
-  // Calculate summary stats
-  const totalEarnings = MOCK_EARNINGS_DATA.reduce(
-    (sum, d) => sum + d.sessions + d.courses + d.tips + d.referrals,
-    0
-  );
-  const avgSessionRate = 125;
-  const totalSessions = 48;
-  const pendingBalance = 845.00;
-  const availableBalance = 3245.50;
-
-  const handleSetDefaultPayoutMethod = (methodId: string) => {
-    setPayoutMethods(methods =>
-      methods.map(m => ({ ...m, isDefault: m.id === methodId }))
-    );
-  };
+  const earningsData: EarningsData[] = [];
+  const transactions: Transaction[] = [];
+  const payoutMethods: PayoutMethod[] = [];
+  const totalEarnings = 0;
+  const totalSessions = 0;
+  const pendingBalance = 0;
+  const availableBalance = 0;
 
   return (
     <div className={cn('container mx-auto py-8 space-y-8', className)}>
@@ -662,8 +568,8 @@ export function EarningsDashboard({ className }: { className?: string }) {
           <p className="text-muted-foreground">Track your income and manage payouts</p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
-            <SelectTrigger className="w-[140px]">
+          <Select value="30d" disabled>
+            <SelectTrigger className="w-[140px]" title="Earnings analytics are not connected yet">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -674,7 +580,7 @@ export function EarningsDashboard({ className }: { className?: string }) {
               <SelectItem value="all">All time</SelectItem>
             </SelectContent>
           </Select>
-          <WithdrawDialog />
+          <WithdrawDialog availableBalance={availableBalance} payoutMethods={payoutMethods} />
         </div>
       </div>
 
@@ -683,10 +589,7 @@ export function EarningsDashboard({ className }: { className?: string }) {
         <StatCard
           title="Total Earnings"
           value={`$${totalEarnings.toLocaleString()}`}
-          change={12.5}
-          changeLabel="vs last period"
           icon={DollarSign}
-          trend="up"
         />
         <StatCard
           title="Available Balance"
@@ -701,15 +604,12 @@ export function EarningsDashboard({ className }: { className?: string }) {
         <StatCard
           title="Total Sessions"
           value={totalSessions.toString()}
-          change={8}
-          changeLabel="vs last period"
           icon={Video}
-          trend="up"
         />
       </div>
 
       {/* Charts */}
-      <EarningsChart data={MOCK_EARNINGS_DATA} timeRange={timeRange} />
+      <EarningsChart data={earningsData} />
 
       {/* Tabs for transactions and payouts */}
       <Tabs defaultValue="transactions">
@@ -720,7 +620,7 @@ export function EarningsDashboard({ className }: { className?: string }) {
         </TabsList>
 
         <TabsContent value="transactions" className="mt-6">
-          <TransactionsTable transactions={MOCK_TRANSACTIONS} />
+          <TransactionsTable transactions={transactions} />
         </TabsContent>
 
         <TabsContent value="payouts" className="mt-6">
@@ -731,49 +631,34 @@ export function EarningsDashboard({ className }: { className?: string }) {
                   <CardTitle>Payout Methods</CardTitle>
                   <CardDescription>Manage how you receive your earnings</CardDescription>
                 </div>
-                <Button variant="outline">
+                <Button variant="outline" disabled title="Payout method onboarding is not connected yet">
                   Add Method
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {payoutMethods.map((method) => (
-                <PayoutMethodCard
-                  key={method.id}
-                  method={method}
-                  onSetDefault={() => handleSetDefaultPayoutMethod(method.id)}
-                />
-              ))}
+              {payoutMethods.length > 0 ? (
+                payoutMethods.map((method) => (
+                  <PayoutMethodCard
+                    key={method.id}
+                    method={method}
+                    onSetDefault={() => {}}
+                  />
+                ))
+              ) : (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  No payout methods are connected yet.
+                </div>
+              )}
 
               <Separator className="my-6" />
 
               <div className="space-y-4">
                 <h3 className="font-medium">Payout Schedule</h3>
                 <div className="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Weekly Payouts</p>
-                      <p className="text-sm text-muted-foreground">
-                        Every Monday for the previous week's earnings
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      Change
-                    </Button>
-                  </div>
-                </div>
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Minimum Payout</p>
-                      <p className="text-sm text-muted-foreground">
-                        $50.00 minimum balance required for automatic payouts
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      Change
-                    </Button>
-                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Payout scheduling will appear once Stripe Connect onboarding and payout methods are connected.
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -790,40 +675,17 @@ export function EarningsDashboard({ className }: { className?: string }) {
                 <CardDescription>Your tax profile details</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                <div className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900 border rounded-lg">
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                    <span className="font-medium">W-9 On File</span>
-                  </div>
-                  <Button variant="link" size="sm">
-                    Update
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Legal Name</span>
-                    <span>Sarah Johnson</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Business Type</span>
-                    <span>Individual</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax ID</span>
-                    <span>***-**-1234</span>
+                    <AlertCircle className="h-5 w-5 text-muted-foreground" />
+                    <span className="font-medium">Tax profile not connected</span>
                   </div>
                 </div>
 
                 <Separator />
 
                 <div className="text-sm text-muted-foreground">
-                  <p>
-                    Need help with your taxes?{' '}
-                    <a href="#" className="text-emerald-600 hover:underline">
-                      Learn about creator tax obligations
-                    </a>
-                  </p>
+                  Tax profile details will appear after the payout/tax onboarding flow is connected.
                 </div>
               </CardContent>
             </Card>

@@ -9,8 +9,7 @@ class AiService {
   constructor() {
     this.isProduction =
       process.env.NODE_ENV === 'production' ||
-      process.env.VERCEL_ENV === 'production' ||
-      process.env.RAILWAY_ENVIRONMENT === 'production';
+      process.env.VERCEL_ENV === 'production';
     this.allowSimulation = process.env.AI_ALLOW_SIMULATION === 'true';
 
     // Prefer the specific AI_ vars if available, fallback to generic OPENAI_API_KEY
@@ -246,6 +245,68 @@ class AiService {
     } catch (err) {
         logger.error("Interview Coach AI failed", err);
         throw err;
+    }
+  }
+
+  async evaluateInterviewAnswer(params: {
+    question: string;
+    answer: string;
+    jobRole?: string;
+    interviewType?: string;
+    difficulty?: string;
+  }): Promise<{
+    feedback: string;
+    analysis: { rating: number; strengths: string[]; improvements: string[] };
+    nextQuestion: string;
+  }> {
+    if (!this.openai) {
+      this.ensureOpenAI('interview answer feedback');
+      return {
+        feedback:
+          'Development simulation: connect AI_OPENAI_API_KEY or OPENAI_API_KEY for production interview feedback.',
+        analysis: {
+          rating: 3,
+          strengths: ['Answer submitted successfully'],
+          improvements: ['Configure AI provider credentials for detailed coaching'],
+        },
+        nextQuestion: 'What outcome did your answer create, and how did you measure it?',
+      };
+    }
+
+    try {
+      const systemPrompt = `You are an expert interview coach. Evaluate the candidate answer and return valid JSON only:
+{
+  "feedback": "Concise coaching feedback",
+  "analysis": {
+    "rating": number between 1 and 5,
+    "strengths": ["strength"],
+    "improvements": ["improvement"]
+  },
+  "nextQuestion": "A relevant follow-up interview question"
+}`;
+
+      const userPrompt = `Job role: ${params.jobRole || 'Not specified'}
+Interview type: ${params.interviewType || 'mixed'}
+Difficulty: ${params.difficulty || 'mid'}
+Question: ${params.question}
+Candidate answer: ${params.answer}`;
+
+      const completion = await this.openai.chat.completions.create({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+        response_format: { type: 'json_object' },
+      });
+
+      const content = completion.choices[0]?.message?.content;
+      if (!content) throw new Error('No response from AI');
+
+      return JSON.parse(content);
+    } catch (error) {
+      logger.error('AI Interview Answer Feedback failed:', error);
+      throw error;
     }
   }
 

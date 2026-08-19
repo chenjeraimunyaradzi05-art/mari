@@ -39,6 +39,29 @@ type LegalAgreementRecord = {
   acceptedAt: string;
 };
 
+type TransparencyCountMap = Record<string, number>;
+
+const TRANSPARENCY_CATEGORY_DEFAULTS: TransparencyCountMap = {
+  illegal: 0,
+  harmful: 0,
+  harassment: 0,
+  hate_speech: 0,
+  spam: 0,
+  misinformation: 0,
+  csam: 0,
+  terrorism: 0,
+  fraud: 0,
+  other: 0,
+};
+
+const TRANSPARENCY_ACTION_DEFAULTS: TransparencyCountMap = {
+  contentRemoved: 0,
+  accountsSuspended: 0,
+  accountsBanned: 0,
+  warnings: 0,
+  noAction: 0,
+};
+
 const LEGAL_DOCUMENTS: LegalDocumentEntry[] = [
   {
     id: 'terms-v1',
@@ -88,6 +111,20 @@ function normalizeRegionCode(code?: string): string {
   if (upper === 'GB') return 'UK';
   if (upper in REGION_CONFIGS) return upper;
   return getRegionFromCountry(upper);
+}
+
+function normalizeCountMap(value: unknown, defaults: TransparencyCountMap): TransparencyCountMap {
+  const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  return Object.fromEntries(
+    Object.entries(defaults).map(([key, fallback]) => {
+      const raw = source[key];
+      return [key, typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback];
+    })
+  );
+}
+
+function formatTransparencyPeriod(period: string): string {
+  return period.replace(/_/g, ' ');
 }
 
 // ============================================
@@ -199,6 +236,73 @@ router.get('/uk-safety', (_req: Request, res: Response) => {
       },
     },
   });
+});
+
+/**
+ * GET /api/compliance/transparency-report
+ * Get the latest published transparency report, or a specific published period.
+ */
+router.get('/transparency-report', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const requestedPeriod = typeof req.query.period === 'string'
+      ? req.query.period.trim()
+      : '';
+
+    const where: any = {
+      publishedAt: { not: null },
+      ...(requestedPeriod ? { period: requestedPeriod } : {}),
+    };
+
+    const report = await (prisma as any).transparencyReport.findFirst({
+      where,
+      orderBy: [{ endDate: 'desc' }, { publishedAt: 'desc' }],
+    });
+
+    if (!report) {
+      return res.json({
+        success: true,
+        data: null,
+        meta: {
+          status: 'not_published',
+          period: requestedPeriod || null,
+        },
+      });
+    }
+
+    const totalAppeals = report.totalAppeals ?? 0;
+    const appealsUpheld = report.appealsUpheld ?? 0;
+    const appealsOverturned = report.appealsOverturned ?? 0;
+
+    res.json({
+      success: true,
+      data: {
+        id: report.id,
+        period: formatTransparencyPeriod(report.period),
+        rawPeriod: report.period,
+        startDate: report.startDate,
+        endDate: report.endDate,
+        publishedAt: report.publishedAt,
+        publishedUrl: report.publishedUrl,
+        totalReports: report.totalReports ?? 0,
+        byCategory: normalizeCountMap(report.reportsByCategory, TRANSPARENCY_CATEGORY_DEFAULTS),
+        actions: normalizeCountMap(report.actionsByType, TRANSPARENCY_ACTION_DEFAULTS),
+        timing: {
+          avgResponseHours: report.avgResponseHours ?? 0,
+          under24Hours: report.under24Hours ?? 0,
+          under72Hours: report.under72Hours ?? 0,
+          over72Hours: report.over72Hours ?? 0,
+        },
+        appeals: {
+          total: totalAppeals,
+          upheld: appealsUpheld,
+          overturned: appealsOverturned,
+          pending: Math.max(totalAppeals - appealsUpheld - appealsOverturned, 0),
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 /**

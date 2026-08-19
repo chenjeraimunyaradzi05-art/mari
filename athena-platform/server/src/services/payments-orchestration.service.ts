@@ -7,10 +7,9 @@ import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
-  apiVersion: '2023-10-16',
-});
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
+  : null;
 
 export type PaymentProvider = 'stripe' | 'paypal' | 'wise' | 'gcash' | 'grabpay' | 'mpesa' | 'pix' | 'upi';
 export type Currency = 'AUD' | 'USD' | 'GBP' | 'EUR' | 'NZD' | 'SGD' | 'PHP' | 'IDR' | 'INR' | 'BRL' | 'KES';
@@ -99,6 +98,16 @@ const FX_RATES: Record<string, number> = {
   'USD_GBP': 0.80,
   'GBP_USD': 1.25,
 };
+
+function assertProviderConfigured(provider: PaymentProvider): void {
+  const message = `${provider} payments are not configured`;
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+
+  logger.warn(`${message}; returning development simulation`);
+}
 
 /**
  * Get best payment provider for region
@@ -251,6 +260,16 @@ export async function processPayment(
  * Process Stripe payment
  */
 async function processStripePayment(request: PaymentRequest): Promise<PaymentResult> {
+  if (!stripe) {
+    assertProviderConfigured('stripe');
+    return {
+      success: false,
+      provider: 'stripe',
+      status: 'requires_action',
+      error: 'Stripe is not configured in this environment',
+    };
+  }
+
   // Get or create customer
   let customerId = await getStripeCustomerId(request.userId);
   
@@ -290,7 +309,7 @@ async function processStripePayment(request: PaymentRequest): Promise<PaymentRes
  * Process PayPal payment (simulated)
  */
 async function processPayPalPayment(request: PaymentRequest): Promise<PaymentResult> {
-  // In production, integrate with PayPal SDK
+  assertProviderConfigured('paypal');
   logger.info('Processing PayPal payment', { amount: request.amount });
   
   return {
@@ -305,6 +324,7 @@ async function processPayPalPayment(request: PaymentRequest): Promise<PaymentRes
  * Process GrabPay payment (simulated)
  */
 async function processGrabPayPayment(request: PaymentRequest): Promise<PaymentResult> {
+  assertProviderConfigured('grabpay');
   logger.info('Processing GrabPay payment', { amount: request.amount });
   
   return {
@@ -319,6 +339,7 @@ async function processGrabPayPayment(request: PaymentRequest): Promise<PaymentRe
  * Process GCash payment (simulated)
  */
 async function processGCashPayment(request: PaymentRequest): Promise<PaymentResult> {
+  assertProviderConfigured('gcash');
   logger.info('Processing GCash payment', { amount: request.amount });
   
   return {
@@ -333,6 +354,7 @@ async function processGCashPayment(request: PaymentRequest): Promise<PaymentResu
  * Process M-Pesa payment (simulated)
  */
 async function processMPesaPayment(request: PaymentRequest): Promise<PaymentResult> {
+  assertProviderConfigured('mpesa');
   logger.info('Processing M-Pesa payment', { amount: request.amount });
   
   return {
@@ -347,6 +369,7 @@ async function processMPesaPayment(request: PaymentRequest): Promise<PaymentResu
  * Process Pix payment (simulated)
  */
 async function processPixPayment(request: PaymentRequest): Promise<PaymentResult> {
+  assertProviderConfigured('pix');
   logger.info('Processing Pix payment', { amount: request.amount });
   
   return {
@@ -361,6 +384,7 @@ async function processPixPayment(request: PaymentRequest): Promise<PaymentResult
  * Process UPI payment (simulated)
  */
 async function processUPIPayment(request: PaymentRequest): Promise<PaymentResult> {
+  assertProviderConfigured('upi');
   logger.info('Processing UPI payment', { amount: request.amount });
   
   return {
@@ -408,6 +432,16 @@ export async function processCreatorPayout(
  * Process Stripe Connect payout
  */
 async function processStripeConnectPayout(request: PayoutRequest): Promise<PaymentResult> {
+  if (!stripe) {
+    assertProviderConfigured('stripe');
+    return {
+      success: false,
+      provider: 'stripe',
+      status: 'failed',
+      error: 'Stripe is not configured in this environment',
+    };
+  }
+
   // Get connected account ID
   const connectedAccountId = await getStripeConnectAccountId(request.userId);
   
@@ -438,6 +472,7 @@ async function processStripeConnectPayout(request: PayoutRequest): Promise<Payme
  * Process Wise payout (simulated)
  */
 async function processWisePayout(request: PayoutRequest): Promise<PaymentResult> {
+  assertProviderConfigured('wise');
   logger.info('Processing Wise payout', { amount: request.amount, currency: request.currency });
   
   // In production, integrate with Wise API

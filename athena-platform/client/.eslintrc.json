@@ -10,5 +10,19 @@
     "@next/next/no-img-element": "warn",
     "jsx-a11y/alt-text": "warn",
     "react-hooks/exhaustive-deps": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "*.js",
+        "*.cjs",
+        "*.config.js",
+        "scripts/*.js",
+        "tailwind.config.ts"
+      ],
+      "rules": {
+        "@typescript-eslint/no-require-imports": "off"
+      }
+    }
+  ]
 }

@@ -15,6 +15,7 @@ import * as SecureStore from 'expo-secure-store';
 interface LoginCredentials {
   email: string;
   password: string;
+  twoFactorCode?: string;
 }
 
 interface RegisterData {
@@ -106,7 +107,7 @@ export function useCurrentUser() {
       const response = await api.get('/auth/me');
       return unwrapApiData(response.data);
     },
-    enabled: isAuthenticated(),
+    enabled: isAuthenticated,
     staleTime: 5 * 60 * 1000, // 5 minutes
     onSuccess: (data) => {
       setUser(data as any);

@@ -24,6 +24,8 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async () => {
@@ -32,11 +34,30 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       return;
     }
 
+    if (requiresTwoFactor && twoFactorCode.trim().length < 6) {
+      Alert.alert('Authenticator Code Required', 'Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await login(email, password);
+      await login(email, password, requiresTwoFactor ? twoFactorCode.trim() : undefined);
+      setRequiresTwoFactor(false);
+      setTwoFactorCode('');
     } catch (error: any) {
-      Alert.alert('Login Failed', error.response?.data?.message || 'Invalid credentials');
+      const responseMessage = error.response?.data?.message;
+      if (typeof responseMessage === 'string' && responseMessage.toLowerCase().includes('two-factor')) {
+        setRequiresTwoFactor(true);
+        Alert.alert(
+          'Authenticator Code Required',
+          responseMessage.toLowerCase().includes('required')
+            ? 'Enter the 6-digit code from your authenticator app.'
+            : responseMessage
+        );
+        return;
+      }
+
+      Alert.alert('Login Failed', responseMessage || 'Invalid credentials');
     } finally {
       setIsLoading(false);
     }
@@ -69,6 +90,18 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           onChangeText={setPassword}
           secureTextEntry
         />
+        {requiresTwoFactor && (
+          <TextInput
+            style={styles.input}
+            placeholder="Authenticator code"
+            value={twoFactorCode}
+            onChangeText={setTwoFactorCode}
+            keyboardType="number-pad"
+            textContentType="oneTimeCode"
+            autoCapitalize="none"
+            maxLength={8}
+          />
+        )}
 
         <TouchableOpacity
           style={[styles.button, isLoading && styles.buttonDisabled]}

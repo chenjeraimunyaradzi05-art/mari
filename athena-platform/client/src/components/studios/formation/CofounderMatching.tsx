@@ -13,29 +13,22 @@
  * - Chat initiation
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Heart,
   X,
   Star,
-  MessageCircle,
   RefreshCw,
   Filter,
-  ChevronLeft,
-  ChevronRight,
   MapPin,
   Briefcase,
-  GraduationCap,
-  Globe,
   Clock,
   Users,
   Target,
   Zap,
   Award,
-  Building2,
   CheckCircle2,
-  Info,
   Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -43,14 +36,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import {
   Sheet,
   SheetContent,
@@ -113,135 +98,9 @@ interface CofounderMatchingProps {
   className?: string;
 }
 
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_PROFILES: CofounderProfile[] = [
-  {
-    id: '1',
-    name: 'Sarah Chen',
-    avatar: '/avatars/sarah.jpg',
-    tagline: 'Ex-Google Engineer | AI/ML Expert | 2x Founder',
-    location: 'San Francisco, CA',
-    timezone: 'PST (UTC-8)',
-    experience: '10+ years',
-    lookingFor: ['CEO/Business Lead', 'Product Manager'],
-    skills: ['Machine Learning', 'Python', 'System Architecture', 'Technical Leadership', 'Product Strategy'],
-    industries: ['AI/ML', 'SaaS', 'Enterprise', 'HealthTech'],
-    commitment: 'full-time',
-    equity: '30-40%',
-    bio: 'Serial entrepreneur with a passion for building AI-powered solutions. Previously led ML teams at Google and co-founded an AI startup (acquired). Looking for a business-focused co-founder to build the next big thing in enterprise AI.',
-    achievements: [
-      'Led team of 20+ engineers at Google',
-      'Previous startup acquired for $15M',
-      'Published researcher in NeurIPS',
-      '500+ GitHub stars on open source projects',
-    ],
-    education: 'PhD Computer Science, Stanford',
-    previousStartups: 2,
-    matchScore: 94,
-    compatibilityBreakdown: {
-      skills: 95,
-      vision: 92,
-      availability: 98,
-      values: 90,
-    },
-    verifications: ['LinkedIn', 'Email', 'Identity'],
-  },
-  {
-    id: '2',
-    name: 'Marcus Johnson',
-    avatar: '/avatars/marcus.jpg',
-    tagline: 'Growth Marketing Expert | Ex-Uber | MBA',
-    location: 'New York, NY',
-    timezone: 'EST (UTC-5)',
-    experience: '8 years',
-    lookingFor: ['Technical Co-founder', 'CTO'],
-    skills: ['Growth Marketing', 'B2B Sales', 'Fundraising', 'Brand Strategy', 'Team Building'],
-    industries: ['Fintech', 'B2B SaaS', 'Marketplace'],
-    commitment: 'full-time',
-    equity: '40-50%',
-    bio: 'Growth leader who scaled Uber in 5 markets. MBA from Wharton. Have a validated idea in fintech space and seeking a technical co-founder to bring it to life. Strong network of investors and advisors.',
-    achievements: [
-      'Scaled Uber from 0 to 100K users in NYC',
-      'Raised $2M angel round for previous venture',
-      'Forbes 30 Under 30 nominee',
-      'Built and sold marketing agency',
-    ],
-    education: 'MBA Wharton, BS Marketing Northwestern',
-    previousStartups: 1,
-    matchScore: 89,
-    compatibilityBreakdown: {
-      skills: 88,
-      vision: 95,
-      availability: 85,
-      values: 88,
-    },
-    verifications: ['LinkedIn', 'Email'],
-  },
-  {
-    id: '3',
-    name: 'Elena Rodriguez',
-    avatar: '/avatars/elena.jpg',
-    tagline: 'Product Designer | Ex-Airbnb | Design Systems',
-    location: 'Austin, TX',
-    timezone: 'CST (UTC-6)',
-    experience: '7 years',
-    lookingFor: ['Technical Co-founder', 'Business Lead'],
-    skills: ['UI/UX Design', 'Design Systems', 'User Research', 'Prototyping', 'Brand Identity'],
-    industries: ['Consumer Tech', 'Travel', 'E-commerce', 'Social'],
-    commitment: 'flexible',
-    equity: '25-35%',
-    bio: 'Design leader passionate about creating beautiful, user-centered products. Led design for Airbnb Experiences. Looking to join or start something from scratch where design is a core differentiator.',
-    achievements: [
-      'Led redesign of Airbnb Experiences',
-      'Design mentor at 500 Startups',
-      'Speaker at Config 2025',
-      'Built design system used by 50+ teams',
-    ],
-    education: 'BFA Design, RISD',
-    matchScore: 87,
-    compatibilityBreakdown: {
-      skills: 90,
-      vision: 88,
-      availability: 82,
-      values: 87,
-    },
-    verifications: ['LinkedIn', 'Email', 'Identity'],
-  },
-  {
-    id: '4',
-    name: 'David Kim',
-    avatar: '/avatars/david.jpg',
-    tagline: 'Full-Stack Developer | YC Alum | Open Source',
-    location: 'Seattle, WA',
-    timezone: 'PST (UTC-8)',
-    experience: '6 years',
-    lookingFor: ['Business Co-founder', 'Sales Lead'],
-    skills: ['React', 'Node.js', 'AWS', 'DevOps', 'Mobile Development'],
-    industries: ['Developer Tools', 'SaaS', 'Productivity'],
-    commitment: 'full-time',
-    equity: '40-50%',
-    bio: 'YC W23 alum. Built and shipped multiple products. Contributor to major open source projects. Looking for a business-minded co-founder who can handle sales, marketing, and fundraising while I build.',
-    achievements: [
-      'YC W23 batch',
-      '10K+ GitHub followers',
-      'Core contributor to popular OSS project',
-      'Built app with 50K+ users',
-    ],
-    education: 'BS CS, University of Washington',
-    previousStartups: 1,
-    matchScore: 85,
-    compatibilityBreakdown: {
-      skills: 82,
-      vision: 90,
-      availability: 88,
-      values: 80,
-    },
-    verifications: ['LinkedIn', 'GitHub', 'Email'],
-  },
-];
+// Co-founder matching is not backed by a live endpoint yet. Keep the UI honest
+// by starting empty instead of showing invented partner profiles.
+const INITIAL_PROFILES: CofounderProfile[] = [];
 
 const ROLE_OPTIONS = [
   'Technical Co-founder',
@@ -670,50 +529,14 @@ function FilterSheet({
   );
 }
 
-function MatchNotification({ profile, onClose, onMessage }: { profile: CofounderProfile; onClose: () => void; onMessage: () => void }) {
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="text-center">
-        <div className="py-6">
-          <div className="relative w-32 h-32 mx-auto mb-6">
-            <div className="absolute inset-0 animate-ping bg-emerald-400 rounded-full opacity-25" />
-            <Avatar className="h-32 w-32 border-4 border-emerald-500">
-              <AvatarImage src={profile.avatar} alt={profile.name} />
-              <AvatarFallback className="text-4xl">
-                {profile.name.split(' ').map((n) => n[0]).join('')}
-              </AvatarFallback>
-            </Avatar>
-          </div>
-          
-          <h2 className="text-2xl font-bold text-emerald-600 mb-2">It&apos;s a Match! 🎉</h2>
-          <p className="text-muted-foreground mb-6">
-            You and {profile.name} both want to connect!
-          </p>
-
-          <div className="flex gap-3 justify-center">
-            <Button variant="outline" onClick={onClose}>
-              Keep Browsing
-            </Button>
-            <Button onClick={onMessage}>
-              <MessageCircle className="h-4 w-4 mr-2" />
-              Send Message
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ============================================
 // MAIN COMPONENT
 // ============================================
 
 export function CofounderMatching({ className }: CofounderMatchingProps) {
-  const [profiles, setProfiles] = useState(MOCK_PROFILES);
+  const [profiles] = useState(INITIAL_PROFILES);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [expandedProfile, setExpandedProfile] = useState(false);
-  const [showMatch, setShowMatch] = useState<CofounderProfile | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     roles: [],
     industries: [],
@@ -724,35 +547,21 @@ export function CofounderMatching({ className }: CofounderMatchingProps) {
 
   const currentProfile = profiles[currentIndex];
 
-  const handleLike = useCallback(() => {
-    // Simulate random match (30% chance)
-    if (Math.random() < 0.3 && currentProfile) {
-      setShowMatch(currentProfile);
-    }
-    setCurrentIndex((prev) => Math.min(prev + 1, profiles.length - 1));
-    setExpandedProfile(false);
-  }, [currentProfile, profiles.length]);
-
-  const handlePass = useCallback(() => {
-    setCurrentIndex((prev) => Math.min(prev + 1, profiles.length - 1));
+  const advanceProfile = useCallback(() => {
+    setCurrentIndex((prev) => Math.min(prev + 1, profiles.length));
     setExpandedProfile(false);
   }, [profiles.length]);
 
-  const handleSuperLike = useCallback(() => {
-    // Super like always shows match notification
-    if (currentProfile) {
-      setShowMatch(currentProfile);
-    }
-    setCurrentIndex((prev) => Math.min(prev + 1, profiles.length - 1));
-    setExpandedProfile(false);
-  }, [currentProfile, profiles.length]);
+  const handleLike = advanceProfile;
+  const handlePass = advanceProfile;
+  const handleSuperLike = advanceProfile;
 
   const handleRefresh = () => {
     setCurrentIndex(0);
     setExpandedProfile(false);
   };
 
-  const isOutOfProfiles = currentIndex >= profiles.length;
+  const isOutOfProfiles = profiles.length === 0 || currentIndex >= profiles.length;
 
   return (
     <div className={cn('space-y-6', className)}>
@@ -780,13 +589,13 @@ export function CofounderMatching({ className }: CofounderMatchingProps) {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold">3</p>
+            <p className="text-2xl font-bold">0</p>
             <p className="text-sm text-muted-foreground">Connections</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold">12</p>
+            <p className="text-2xl font-bold">0</p>
             <p className="text-sm text-muted-foreground">Profile Views</p>
           </CardContent>
         </Card>
@@ -797,16 +606,16 @@ export function CofounderMatching({ className }: CofounderMatchingProps) {
         {isOutOfProfiles ? (
           <Card className="w-full max-w-md text-center p-8">
             <Users className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold mb-2">No More Profiles</h3>
+            <h3 className="text-xl font-semibold mb-2">Matching is not connected yet</h3>
             <p className="text-muted-foreground mb-6">
-              You&apos;ve viewed all available co-founder profiles. Check back later for new matches!
+              Co-founder profiles will appear here once the live matching endpoint is available.
             </p>
             <Button onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4 mr-2" />
-              Start Over
+              Refresh
             </Button>
           </Card>
-        ) : (
+        ) : currentProfile ? (
           <ProfileCard
             profile={currentProfile}
             onLike={handleLike}
@@ -815,26 +624,21 @@ export function CofounderMatching({ className }: CofounderMatchingProps) {
             expanded={expandedProfile}
             onToggleExpand={() => setExpandedProfile(!expandedProfile)}
           />
+        ) : (
+          <Card className="w-full max-w-md text-center p-8">
+            <Users className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+            <h3 className="text-xl font-semibold mb-2">No profile selected</h3>
+          </Card>
         )}
       </div>
 
       {/* Keyboard Hints */}
-      <div className="flex justify-center gap-4 text-sm text-muted-foreground">
-        <span>← Pass</span>
-        <span>↑ Super Like</span>
-        <span>→ Like</span>
-      </div>
-
-      {/* Match Notification */}
-      {showMatch && (
-        <MatchNotification
-          profile={showMatch}
-          onClose={() => setShowMatch(null)}
-          onMessage={() => {
-            setShowMatch(null);
-            // Navigate to messages
-          }}
-        />
+      {!isOutOfProfiles && (
+        <div className="flex justify-center gap-4 text-sm text-muted-foreground">
+          <span>← Pass</span>
+          <span>↑ Super Like</span>
+          <span>→ Like</span>
+        </div>
       )}
     </div>
   );

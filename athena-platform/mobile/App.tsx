@@ -4,10 +4,10 @@
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
+import { LinkingOptions, NavigationContainer } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { AuthProvider } from './src/context/AuthContext';
-import { AppNavigator } from './src/navigation/AppNavigator';
+import { AppNavigator, type RootStackParamList } from './src/navigation/AppNavigator';
 import { syncPushToken } from './src/services/pushNotifications';
 import { startOfflineSync } from './src/services/offlineSync';
 import { api } from './src/services/api';
@@ -28,7 +28,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const linking = {
+  const linking: LinkingOptions<RootStackParamList> = {
     prefixes: [Linking.createURL('/'), 'athena://', 'https://athena.app'],
     config: {
       screens: {
@@ -53,7 +53,7 @@ export default function App() {
         ProfileEdit: 'profile/edit',
       },
     },
-  } as const;
+  };
 
   return (
     <SafeAreaProvider>

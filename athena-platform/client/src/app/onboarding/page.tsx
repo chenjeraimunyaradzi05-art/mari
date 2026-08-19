@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import {
   ChevronRight,
   ChevronLeft,
@@ -46,6 +47,7 @@ const goalOptions = [
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const updateProfile = useUpdateProfile();
   const { data: mySkills } = useMySkills();
@@ -63,6 +65,7 @@ export default function OnboardingPage() {
     goals: [] as string[],
   });
   const [newSkill, setNewSkill] = useState('');
+  const isNewSignup = searchParams?.get('entry') === 'register';
 
   useEffect(() => {
     if (!mySkills?.length) return;
@@ -103,7 +106,7 @@ export default function OnboardingPage() {
   };
 
   const handleSkipOnboarding = () => {
-    router.push('/dashboard');
+    router.push(isNewSignup ? '/dashboard?welcome=new' : '/dashboard');
   };
 
   const handleComplete = async () => {
@@ -128,7 +131,7 @@ export default function OnboardingPage() {
         await Promise.allSettled(skillsToSave.map((skillName) => userApi.addSkill(skillName)));
       }
 
-      router.push('/dashboard');
+      router.push(isNewSignup ? '/dashboard?welcome=new' : '/dashboard');
     } catch (error: any) {
       toast.error(error?.response?.data?.message || 'Failed to complete onboarding');
     } finally {

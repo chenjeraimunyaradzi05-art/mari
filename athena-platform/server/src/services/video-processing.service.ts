@@ -7,6 +7,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { ApiError } from '../middleware/errorHandler';
 import { v4 as uuidv4 } from 'uuid';
 
 // S3 Configuration
@@ -20,6 +21,47 @@ const s3Client = new S3Client({
 
 const BUCKET_NAME = process.env.S3_BUCKET || 'athena-media';
 const CDN_URL = process.env.CDN_URL || `https://${BUCKET_NAME}.s3.amazonaws.com`;
+const VIDEO_PROCESSOR_URL = process.env.VIDEO_PROCESSOR_URL;
+
+const isProductionRuntime =
+  process.env.NODE_ENV === 'production' ||
+  process.env.VERCEL_ENV === 'production' ||
+  process.env.RENDER_ENV === 'production';
+
+function canUseSimulatedVideoProcessing(): boolean {
+  return !isProductionRuntime || process.env.VIDEO_ALLOW_SIMULATION === 'true';
+}
+
+function requireVideoProcessingRuntime(feature: string): void {
+  if (canUseSimulatedVideoProcessing() || VIDEO_PROCESSOR_URL) return;
+
+  throw new ApiError(
+    503,
+    `Video ${feature} is not configured for production. Set VIDEO_PROCESSOR_URL for the media processor, or set VIDEO_ALLOW_SIMULATION=true only for non-production verification.`
+  );
+}
+
+async function callVideoProcessor<T>(path: string, payload: Record<string, any>): Promise<T> {
+  if (!VIDEO_PROCESSOR_URL) {
+    throw new ApiError(503, 'VIDEO_PROCESSOR_URL is required for production video processing');
+  }
+
+  const response = await fetch(`${VIDEO_PROCESSOR_URL.replace(/\/$/, '')}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new ApiError(
+      502,
+      `Video processor request failed (${response.status})${body ? `: ${body.slice(0, 300)}` : ''}`
+    );
+  }
+
+  return response.json() as Promise<T>;
+}
 
 // Video Processing Status
 export type VideoProcessingStatus = 
@@ -75,6 +117,8 @@ export async function initiateVideoProcessing(
     applyEffects?: VideoEffect[];
   } = {}
 ): Promise<VideoProcessingJob> {
+  requireVideoProcessingRuntime('processing');
+
   const jobId = uuidv4();
 
   const job: VideoProcessingJob = {
@@ -200,6 +244,12 @@ export async function generateCaptions(
   videoUrl: string,
   language: string = 'en'
 ): Promise<{ vtt: string; srt: string; segments: CaptionSegment[] }> {
+  requireVideoProcessingRuntime('caption generation');
+
+  if (!canUseSimulatedVideoProcessing()) {
+    return callVideoProcessor('/captions', { videoUrl, language });
+  }
+
   // In production, this would call OpenAI Whisper API
   // For now, return simulated captions
   logger.info('Generating captions for video', { videoUrl, language });
@@ -272,6 +322,16 @@ export async function generateThumbnail(
   videoUrl: string,
   timestamp: number = 0
 ): Promise<string> {
+  requireVideoProcessingRuntime('thumbnail generation');
+
+  if (!canUseSimulatedVideoProcessing()) {
+    const result = await callVideoProcessor<{ thumbnailUrl: string }>('/thumbnail', {
+      videoUrl,
+      timestamp,
+    });
+    return result.thumbnailUrl;
+  }
+
   // In production, this would use FFmpeg to extract frame
   logger.info('Generating thumbnail', { videoUrl, timestamp });
   
@@ -320,7 +380,17 @@ export async function applyEffects(
   videoUrl: string,
   effects: VideoEffect[]
 ): Promise<string> {
+  requireVideoProcessingRuntime('effects rendering');
+
   logger.info('Applying effects to video', { videoUrl, effectCount: effects.length });
+
+  if (!canUseSimulatedVideoProcessing()) {
+    const result = await callVideoProcessor<{ outputUrl: string }>('/effects', {
+      videoUrl,
+      effects,
+    });
+    return result.outputUrl;
+  }
 
   // Build FFmpeg filter chain
   const filterChain = effects.map((effect) => {
@@ -376,6 +446,24 @@ async function processVideoAsync(
   }
 ): Promise<void> {
   try {
+    if (!canUseSimulatedVideoProcessing()) {
+      updateJobStatus(job.id, 'transcoding', 10);
+      const result = await callVideoProcessor<{
+        outputs: VideoProcessingJob['outputs'];
+        metadata?: VideoProcessingJob['metadata'];
+      }>('/process', {
+        jobId: job.id,
+        userId: job.userId,
+        videoUrl: job.originalUrl,
+        options,
+      });
+
+      job.outputs = result.outputs || {};
+      job.metadata = result.metadata || {};
+      updateJobStatus(job.id, 'completed', 100);
+      return;
+    }
+
     // Step 1: Analyze video metadata
     updateJobStatus(job.id, 'transcoding', 10);
     job.metadata = {

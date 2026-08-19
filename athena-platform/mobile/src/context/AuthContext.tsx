@@ -14,6 +14,8 @@ interface User {
   lastName: string;
   displayName?: string;
   avatar?: string;
+  headline?: string;
+  bio?: string;
   persona: string;
   preferredLocale?: string;
   preferredCurrency?: string;
@@ -25,8 +27,8 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (data: RegisterData) => Promise<void>;
+  login: (email: string, password: string, twoFactorCode?: string) => Promise<void>;
+  register: (data: RegisterData) => Promise<{ verificationRequired: boolean }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -80,8 +82,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const login = async (email: string, password: string) => {
-    const response = await api.post('/auth/login', { email, password });
+  const login = async (email: string, password: string, twoFactorCode?: string) => {
+    const response = await api.post('/auth/login', {
+      email,
+      password,
+      ...(twoFactorCode ? { twoFactorCode } : {}),
+    });
     const { user: userData, accessToken, refreshToken } = unwrapApiData<{
       user: User;
       accessToken: string;
@@ -108,14 +114,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await setLocalPreferences(preferences);
   };
 
-  const register = async (data: RegisterData) => {
+  const register = async (data: RegisterData): Promise<{ verificationRequired: boolean }> => {
     const response = await api.post('/auth/register', data);
-    const { user: userData, accessToken, refreshToken } = unwrapApiData<{
-      user: User;
-      accessToken: string;
+    const { user: userData, accessToken, refreshToken, verificationRequired } = unwrapApiData<{
+      user?: User;
+      accessToken?: string;
       refreshToken?: string;
       expiresIn?: number;
+      verificationRequired?: boolean;
     }>(response.data);
+
+    if (verificationRequired || (!accessToken && userData)) {
+      return { verificationRequired: true };
+    }
     
     if (!accessToken || !userData) {
       throw new Error('Invalid registration response');
@@ -134,6 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       region: userData?.region,
     });
     await setLocalPreferences(preferences);
+    return { verificationRequired: false };
   };
 
   const logout = async () => {

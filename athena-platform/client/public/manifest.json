@@ -4,8 +4,8 @@
   "description": "The Career SuperApp - Your all-in-one platform for professional growth, networking, and opportunities",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#10b981",
+  "background_color": "#fff1f2",
+  "theme_color": "#f43f5e",
   "orientation": "portrait-primary",
   "scope": "/",
   "lang": "en",
@@ -13,104 +13,47 @@
   "categories": ["business", "education", "social", "productivity"],
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "512x512",
+      "src": "/logo.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-72x72.png",
-      "sizes": "72x72",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-96x96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-128x128.png",
-      "sizes": "128x128",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-144x144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-152x152.png",
-      "sizes": "152x152",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-384x384.png",
-      "sizes": "384x384",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-512x512.png",
+      "src": "/logo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable any"
     }
   ],
-  "screenshots": [
-    {
-      "src": "/screenshots/feed.png",
-      "sizes": "1080x1920",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Discover career content"
-    },
-    {
-      "src": "/screenshots/jobs.png",
-      "sizes": "1080x1920",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Find verified job opportunities"
-    }
-  ],
+  "screenshots": [],
   "shortcuts": [
     {
       "name": "Feed",
       "short_name": "Feed",
-      "description": "View your personalized feed",
+      "description": "View the public ATHENA feed",
       "url": "/feed",
-      "icons": [{ "src": "/icons/shortcut-feed.png", "sizes": "96x96" }]
+      "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png" }]
     },
     {
       "name": "Jobs",
       "short_name": "Jobs",
       "description": "Browse job opportunities",
       "url": "/jobs",
-      "icons": [{ "src": "/icons/shortcut-jobs.png", "sizes": "96x96" }]
+      "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png" }]
     },
     {
-      "name": "Messages",
-      "short_name": "Messages",
-      "description": "View your messages",
-      "url": "/messages",
-      "icons": [{ "src": "/icons/shortcut-messages.png", "sizes": "96x96" }]
+      "name": "Explore",
+      "short_name": "Explore",
+      "description": "Open career video and content discovery",
+      "url": "/explore",
+      "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png" }]
     },
     {
-      "name": "Courses",
-      "short_name": "Learn",
-      "description": "Continue learning",
-      "url": "/courses",
-      "icons": [{ "src": "/icons/shortcut-courses.png", "sizes": "96x96" }]
+      "name": "Mentors",
+      "short_name": "Mentors",
+      "description": "Browse mentors and career guidance",
+      "url": "/mentors",
+      "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png" }]
     }
   ],
   "related_applications": [],

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -19,7 +19,7 @@ import {
   Mic,
   MicOff,
 } from 'lucide-react';
-import { useInterviewCoach } from '@/lib/hooks';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface Message {
@@ -54,8 +54,55 @@ export default function InterviewCoachPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<string | null>(null);
+  const [recordedAnswerUrl, setRecordedAnswerUrl] = useState<string | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const [coachError, setCoachError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const recordedAnswerUrlRef = useRef<string | null>(null);
 
-  const { mutate: getCoaching, isPending } = useInterviewCoach();
+  useEffect(() => {
+    recordedAnswerUrlRef.current = recordedAnswerUrl;
+  }, [recordedAnswerUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        recognition.onend = null;
+        recognition.onerror = null;
+        recognition.onresult = null;
+        try {
+          recognition.stop();
+        } catch {
+          // Browser speech recognition may already be stopped.
+        }
+      }
+
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.stream.getTracks().forEach((track) => track.stop());
+        if (recorder.state !== 'inactive') {
+          recorder.stop();
+        }
+      }
+
+      if (recordedAnswerUrlRef.current) {
+        URL.revokeObjectURL(recordedAnswerUrlRef.current);
+      }
+    };
+  }, []);
 
   const startSession = () => {
     if (!jobRole) return;
@@ -98,73 +145,224 @@ export default function InterviewCoachPage() {
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
 
-    // Simulate AI coaching response
-    getCoaching(
-      { question: messages[messages.length - 1]?.content || '', answer: input },
-      {
-        onSuccess: (data) => {
-          const feedbackMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: data.feedback || generateMockFeedback(),
-            feedback: data.analysis || {
-              rating: 4,
-              strengths: ['Clear structure', 'Good use of examples'],
-              improvements: ['Add more quantifiable results', 'Be more concise'],
-            },
-          };
+    setIsPending(true);
+    setCoachError(null);
 
-          const nextQuestion: Message = {
+    api
+      .post('/ai/interview-coach/feedback', {
+        question: messages[messages.length - 1]?.content || '',
+        answer: input,
+        jobRole,
+        interviewType,
+        difficulty,
+      })
+      .then((response) => {
+        const data = response.data?.data || {};
+        if (!data.feedback) {
+          setCoachError('The coach completed but did not return feedback.');
+          return;
+        }
+
+        const feedbackMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: data.feedback,
+          feedback: data.analysis,
+        };
+
+        const nextMessages: Message[] = [feedbackMessage];
+        if (data.nextQuestion) {
+          nextMessages.push({
             id: (Date.now() + 2).toString(),
             role: 'assistant',
-            content: data.nextQuestion || generateNextQuestion(),
-          };
+            content: data.nextQuestion,
+          });
+        }
 
-          setMessages((prev) => [...prev, feedbackMessage, nextQuestion]);
-        },
-        onError: () => {
-          // Fallback mock response
-          const feedbackMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: generateMockFeedback(),
-            feedback: {
-              rating: 4,
-              strengths: ['Clear structure', 'Good use of examples'],
-              improvements: ['Add more quantifiable results', 'Be more concise'],
-            },
-          };
+        setMessages((prev) => [...prev, ...nextMessages]);
+      })
+      .catch((error) => {
+        setCoachError(
+          error?.response?.data?.message ||
+            'Interview feedback is unavailable right now. Please try again later.'
+        );
+      })
+      .finally(() => {
+        setIsPending(false);
+      });
+  };
 
-          const nextQuestion: Message = {
-            id: (Date.now() + 2).toString(),
-            role: 'assistant',
-            content: generateNextQuestion(),
-          };
+  const formatRecordingTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const remainingSeconds = (seconds % 60).toString().padStart(2, '0');
+    return `${minutes}:${remainingSeconds}`;
+  };
 
-          setMessages((prev) => [...prev, feedbackMessage, nextQuestion]);
-        },
+  const clearRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  const stopSpeechRecognition = () => {
+    if (!recognitionRef.current) return;
+
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    recognition.onend = null;
+    recognition.onerror = null;
+    recognition.onresult = null;
+    try {
+      recognition.stop();
+    } catch {
+      // Browser speech recognition may already be stopped.
+    }
+  };
+
+  const startRecording = async () => {
+    if (isRecording || isPending) return;
+
+    setRecordingError(null);
+    setRecordingStatus(null);
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setRecordingError('Voice recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      if (recordedAnswerUrl) {
+        URL.revokeObjectURL(recordedAnswerUrl);
+        setRecordedAnswerUrl(null);
       }
-    );
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, {
+          type: mediaRecorder.mimeType || 'audio/webm',
+        });
+        if (blob.size > 0) {
+          setRecordedAnswerUrl(URL.createObjectURL(blob));
+        }
+        stream.getTracks().forEach((track) => track.stop());
+        recordingChunksRef.current = [];
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      setRecordingStatus('Recording...');
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((previous) => previous + 1);
+      }, 1000);
+
+      const SpeechRecognitionConstructor =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (!SpeechRecognitionConstructor) {
+        setRecordingStatus('Recording audio. Speech transcription is not available in this browser.');
+        return;
+      }
+
+      const recognition = new SpeechRecognitionConstructor();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognition.onresult = (event: any) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const transcript = event.results[index]?.[0]?.transcript || '';
+          if (event.results[index].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        if (finalTranscript.trim()) {
+          setInput((current) =>
+            [current.trimEnd(), finalTranscript.trim()].filter(Boolean).join(' ')
+          );
+        }
+
+        setRecordingStatus(
+          interimTranscript.trim()
+            ? `Listening: ${interimTranscript.trim()}`
+            : 'Recording...'
+        );
+      };
+      recognition.onerror = () => {
+        setRecordingError('Speech transcription stopped. Your audio recording is still being captured.');
+      };
+      recognition.onend = () => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          setRecordingStatus('Recording audio. Speech transcription has stopped.');
+        }
+      };
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setRecordingError('Microphone access was blocked or unavailable.');
+      clearRecordingTimer();
+      setIsRecording(false);
+    }
   };
 
-  const generateMockFeedback = () => {
-    return "Good answer! You demonstrated clear problem-solving skills and provided a specific example. To make it even stronger, try to include more quantifiable results and connect your experience directly to the role you're applying for.";
+  const stopRecording = ({ discard = false }: { discard?: boolean } = {}) => {
+    clearRecordingTimer();
+    stopSpeechRecognition();
+
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+
+    if (recorder) {
+      recorder.stream.getTracks().forEach((track) => track.stop());
+      if (recorder.state !== 'inactive') {
+        if (discard) {
+          recorder.ondataavailable = null;
+          recorder.onstop = null;
+          recordingChunksRef.current = [];
+        }
+        recorder.stop();
+      }
+    }
+
+    setIsRecording(false);
+    setRecordingTime(0);
+    if (!discard) {
+      setRecordingStatus('Recording saved. Review the clip or send the transcribed answer.');
+    }
   };
 
-  const generateNextQuestion = () => {
-    const questions = [
-      "That's great context. Now, tell me about a time when you had to work with a difficult colleague or stakeholder. How did you manage that relationship?",
-      "Excellent. Can you describe a situation where you had to make a quick decision with limited information?",
-      "Good examples. How do you typically prioritize when you have multiple urgent tasks competing for your attention?",
-      "Interesting approach. Tell me about a project where you had to learn something new quickly. How did you approach the learning process?",
-      "Great insights. Can you share an example of when you received critical feedback and how you responded to it?",
-    ];
-    return questions[Math.floor(Math.random() * questions.length)];
+  const clearRecordedAnswer = () => {
+    if (recordedAnswerUrl) {
+      URL.revokeObjectURL(recordedAnswerUrl);
+      setRecordedAnswerUrl(null);
+    }
+    setRecordingStatus(null);
+    setRecordingError(null);
   };
 
   const toggleRecording = () => {
-    setIsRecording(!isRecording);
-    // TODO: Implement actual voice recording
+    if (isRecording) {
+      stopRecording();
+    } else {
+      void startRecording();
+    }
   };
 
   if (!sessionStarted) {
@@ -437,6 +635,12 @@ export default function InterviewCoachPage() {
             </div>
           </div>
         )}
+
+        {coachError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+            {coachError}
+          </div>
+        )}
       </div>
 
       {/* Input Area */}
@@ -460,11 +664,13 @@ export default function InterviewCoachPage() {
           <div className="flex flex-col space-y-2">
             <button
               onClick={toggleRecording}
+              disabled={isPending}
               className={cn(
                 'p-3 rounded-lg transition',
                 isRecording
                   ? 'bg-red-500 text-white animate-pulse'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
+                isPending && 'cursor-not-allowed opacity-50'
               )}
               title={isRecording ? 'Stop recording' : 'Start voice recording'}
             >
@@ -483,6 +689,39 @@ export default function InterviewCoachPage() {
             </button>
           </div>
         </div>
+        {(isRecording || recordingStatus) && (
+          <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+            <div className="flex items-center justify-between gap-3">
+              <span>{recordingStatus}</span>
+              {isRecording && (
+                <span className="font-mono text-red-500">
+                  {formatRecordingTime(recordingTime)}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        {recordingError && (
+          <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+            {recordingError}
+          </p>
+        )}
+        {recordedAnswerUrl && !isRecording && (
+          <div className="mt-3 flex flex-col gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+              <Volume2 className="h-4 w-4" />
+              Recorded answer
+            </div>
+            <audio controls src={recordedAnswerUrl} className="min-w-0 flex-1" />
+            <button
+              type="button"
+              onClick={clearRecordedAnswer}
+              className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Clear
+            </button>
+          </div>
+        )}
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
           💡 Tip: Use specific examples and structure your answers with the STAR method
         </p>

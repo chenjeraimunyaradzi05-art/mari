@@ -27,10 +27,10 @@ describe('auth endpoints (validation-only)', () => {
       .expect(400);
   });
 
-  it('POST /api/auth/logout returns 401 without Authorization header', async () => {
+  it('POST /api/auth/logout succeeds without Authorization so stale cookies are cleared', async () => {
     await request(app)
       .post('/api/auth/logout')
       .send({})
-      .expect(401);
+      .expect(200);
   });
 });

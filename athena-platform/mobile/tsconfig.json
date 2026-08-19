@@ -10,13 +10,15 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
+    "declaration": false,
+    "declarationMap": false,
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@shared/*": ["../shared/*"]
+      "@shared/*": ["../shared/*"],
+      "react": ["node_modules/@types/react"],
+      "react/*": ["node_modules/react/*"]
     }
   },
   "include": ["src/**/*", "App.tsx"],
