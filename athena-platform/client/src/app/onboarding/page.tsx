@@ -170,7 +170,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 dark:from-gray-900 dark:to-gray-800">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 dark:from-slate-900 dark:to-slate-800">
       <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Progress */}
         <div className="mb-8">
@@ -190,7 +190,7 @@ export default function OnboardingPage() {
                       ? 'bg-primary-600 text-white'
                       : index === currentStep
                       ? 'bg-primary-600 text-white ring-4 ring-primary-100'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
                   )}
                 >
                   {index < currentStep ? (
@@ -205,7 +205,7 @@ export default function OnboardingPage() {
                       'flex-1 h-1 mx-2',
                       index < currentStep
                         ? 'bg-primary-600'
-                        : 'bg-gray-200 dark:bg-gray-700'
+                        : 'bg-slate-200 dark:bg-slate-700'
                     )}
                   />
                 )}
@@ -215,20 +215,20 @@ export default function OnboardingPage() {
         </div>
 
         {/* Content */}
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-8">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8">
           {/* Step 0: Welcome */}
           {currentStep === 0 && (
             <div className="text-center">
               <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center">
                 <Sparkles className="w-10 h-10 text-white" />
               </div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+              <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
                 Welcome to ATHENA, {user?.firstName}! 🎉
               </h1>
-              <p className="text-lg text-gray-600 dark:text-gray-300 mb-2">
+              <p className="text-lg text-slate-600 dark:text-slate-300 mb-2">
                 Your journey to career success starts here.
               </p>
-              <p className="text-gray-500 dark:text-gray-400 mb-8">
+              <p className="text-slate-500 dark:text-slate-400 mb-8">
                 Let's set up your profile to unlock personalized recommendations
                 and connect you with the right opportunities.
               </p>
@@ -244,15 +244,15 @@ export default function OnboardingPage() {
           {/* Step 1: Basic Info */}
           {currentStep === 1 && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
                 Tell us about yourself
               </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
+              <p className="text-slate-500 dark:text-slate-400 mb-6">
                 This information helps us personalize your experience.
               </p>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Professional Headline
                   </label>
                   <input
@@ -266,7 +266,7 @@ export default function OnboardingPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Bio
                   </label>
                   <textarea
@@ -280,7 +280,7 @@ export default function OnboardingPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Location
                   </label>
                   <input
@@ -300,15 +300,15 @@ export default function OnboardingPage() {
           {/* Step 2: Experience */}
           {currentStep === 2 && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
                 Your experience
               </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
+              <p className="text-slate-500 dark:text-slate-400 mb-6">
                 Help us understand your professional background.
               </p>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Current Role
                   </label>
                   <input
@@ -322,7 +322,7 @@ export default function OnboardingPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Company
                   </label>
                   <input
@@ -336,7 +336,7 @@ export default function OnboardingPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Years of Experience
                   </label>
                   <select
@@ -354,14 +354,14 @@ export default function OnboardingPage() {
                     <option value="10+">10+ years</option>
                   </select>
                 </div>
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
                   <div className="flex items-center space-x-3">
-                    <Upload className="w-5 h-5 text-gray-400" />
+                    <Upload className="w-5 h-5 text-slate-400" />
                     <div>
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
                         Upload your resume
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
                         We'll use AI to auto-fill your profile (optional)
                       </p>
                     </div>
@@ -377,10 +377,10 @@ export default function OnboardingPage() {
           {/* Step 3: Skills */}
           {currentStep === 3 && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
                 Your skills
               </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
+              <p className="text-slate-500 dark:text-slate-400 mb-6">
                 Add skills to help us match you with the right opportunities.
               </p>
 
@@ -424,7 +424,7 @@ export default function OnboardingPage() {
 
               {/* Skill Suggestions */}
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">
                   Suggested skills:
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -435,7 +435,7 @@ export default function OnboardingPage() {
                       <button
                         key={skill}
                         onClick={() => addSkill(skill)}
-                        className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                        className="px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition"
                       >
                         + {skill}
                       </button>
@@ -448,10 +448,10 @@ export default function OnboardingPage() {
           {/* Step 4: Goals */}
           {currentStep === 4 && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
                 Your goals
               </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
+              <p className="text-slate-500 dark:text-slate-400 mb-6">
                 What are you looking to achieve with ATHENA? (Select all that apply)
               </p>
               <div className="grid grid-cols-2 gap-3">
@@ -463,7 +463,7 @@ export default function OnboardingPage() {
                       'flex items-center space-x-3 p-4 rounded-lg border-2 transition text-left',
                       formData.goals.includes(goal.id)
                         ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
-                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                     )}
                   >
                     <div
@@ -471,7 +471,7 @@ export default function OnboardingPage() {
                         'p-2 rounded-lg',
                         formData.goals.includes(goal.id)
                           ? 'bg-primary-100 dark:bg-primary-900'
-                          : 'bg-gray-100 dark:bg-gray-800'
+                          : 'bg-slate-100 dark:bg-slate-800'
                       )}
                     >
                       <goal.icon
@@ -479,7 +479,7 @@ export default function OnboardingPage() {
                           'w-5 h-5',
                           formData.goals.includes(goal.id)
                             ? 'text-primary-600'
-                            : 'text-gray-500'
+                            : 'text-slate-500'
                         )}
                       />
                     </div>
@@ -488,7 +488,7 @@ export default function OnboardingPage() {
                         'font-medium',
                         formData.goals.includes(goal.id)
                           ? 'text-primary-700 dark:text-primary-300'
-                          : 'text-gray-700 dark:text-gray-300'
+                          : 'text-slate-700 dark:text-slate-300'
                       )}
                     >
                       {goal.label}
@@ -505,17 +505,17 @@ export default function OnboardingPage() {
               <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
                 <CheckCircle className="w-10 h-10 text-green-600" />
               </div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+              <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
                 You're all set! 🚀
               </h1>
-              <p className="text-lg text-gray-600 dark:text-gray-300 mb-8">
+              <p className="text-lg text-slate-600 dark:text-slate-300 mb-8">
                 Your profile is ready. Let's start exploring opportunities!
               </p>
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-6 text-left mb-6">
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
+              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-6 text-left mb-6">
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-3">
                   What's next?
                 </h3>
-                <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
                   <li className="flex items-center space-x-2">
                     <CheckCircle className="w-4 h-4 text-green-500" />
                     <span>Browse personalized job recommendations</span>
@@ -534,12 +534,12 @@ export default function OnboardingPage() {
           )}
 
           {/* Navigation */}
-          <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">
+          <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
             <div>
               {currentStep > 0 && currentStep < 5 && (
                 <button
                   onClick={handlePrevious}
-                  className="flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+                  className="flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
                 >
                   <ChevronLeft className="w-5 h-5 mr-1" />
                   Back
@@ -550,7 +550,7 @@ export default function OnboardingPage() {
               {currentStep < 5 && (
                 <button
                   onClick={handleSkipOnboarding}
-                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+                  className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
                 >
                   Skip for now
                 </button>

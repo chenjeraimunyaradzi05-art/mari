@@ -87,7 +87,7 @@ function LoginContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 lg:grid lg:grid-cols-2">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 lg:grid lg:grid-cols-2">
       {/* Left side - Form */}
       <div className="flex flex-col justify-center px-4 py-10 sm:px-6 lg:px-20 xl:px-24">
         <div className="mx-auto w-full max-w-xl lg:max-w-lg">
@@ -107,11 +107,11 @@ function LoginContent() {
             Secure access to your career community
           </div>
 
-          <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-8 shadow-xl shadow-primary-100/40 dark:border-gray-800 dark:bg-gray-900 dark:shadow-none sm:p-10">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-primary-100/40 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none sm:p-10">
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
               Welcome back
             </h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
+            <p className="mt-2 text-slate-600 dark:text-slate-400">
               Sign in to access your jobs, mentors, saved opportunities, and community.
             </p>
 
@@ -161,9 +161,9 @@ function LoginContent() {
                   className="absolute inset-y-0 right-0 flex items-center pr-3"
                 >
                   {showPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
+                    <EyeOff className="w-5 h-5 text-slate-400" />
                   ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
+                    <Eye className="w-5 h-5 text-slate-400" />
                   )}
                 </button>
               </div>
@@ -176,9 +176,9 @@ function LoginContent() {
               <label className="flex items-center">
                 <input
                   type="checkbox"
-                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                <span className="ml-2 text-sm text-slate-600 dark:text-slate-400">
                   Remember me
                 </span>
               </label>
@@ -212,10 +212,10 @@ function LoginContent() {
             <div className="mt-8">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300 dark:border-gray-700" />
+                <div className="w-full border-t border-slate-300 dark:border-slate-700" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white dark:bg-gray-950 text-gray-500">
+                <span className="px-2 bg-white dark:bg-slate-950 text-slate-500">
                   Or continue with
                 </span>
               </div>
@@ -241,12 +241,12 @@ function LoginContent() {
                 Facebook Soon
               </button>
             </div>
-            <p className="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
               Google sign-in is live. Facebook sign-in is still being finalized for launch.
             </p>
           </div>
 
-          <p className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
+          <p className="mt-8 text-center text-sm text-slate-600 dark:text-slate-400">
             Don&apos;t have an account?{' '}
             <Link href="/register" className="text-primary-600 hover:text-primary-500 font-medium">
               Create one free

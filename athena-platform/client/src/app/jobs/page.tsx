@@ -106,7 +106,7 @@ function JobsContent() {
                   id="remote" 
                   checked={isRemote}
                   onChange={(e) => setIsRemote(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300" 
+                  className="h-4 w-4 rounded border-slate-300" 
                 />
                 <label htmlFor="remote" className="text-sm">Remote Only</label>
               </div>
@@ -162,7 +162,7 @@ function JobsContent() {
                 ))
               ) : (
                 <div className="text-center py-12 bg-white rounded-lg border border-dashed">
-                  <h3 className="text-lg font-medium text-gray-900">No jobs found</h3>
+                  <h3 className="text-lg font-medium text-slate-900">No jobs found</h3>
                   <p className="text-muted-foreground mt-1">Try adjusting your filters or search terms.</p>
                   <Button 
                     variant="link" 

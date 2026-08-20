@@ -113,7 +113,7 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* Mobile menu overlay */}
       {isMobileMenuOpen && (
         <div
@@ -125,13 +125,13 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-transform duration-300 lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-transform duration-300 lg:translate-x-0',
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
           !isSidebarOpen && 'lg:w-20'
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800">
           <Link href="/dashboard" className="flex items-center space-x-2">
             <Image src="/athena-logo.png" alt="ATHENA" width={32} height={32} className="rounded-lg flex-shrink-0" />
             {isSidebarOpen && (
@@ -140,7 +140,7 @@ export default function DashboardLayout({
           </Link>
           <button
             onClick={() => setIsMobileMenuOpen(false)}
-            className="lg:hidden p-2 text-gray-500 hover:text-gray-700"
+            className="lg:hidden p-2 text-slate-500 hover:text-slate-700"
           >
             <X className="w-5 h-5" />
           </button>
@@ -159,7 +159,7 @@ export default function DashboardLayout({
                       'flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors',
                       isActive
                         ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     )}
                   >
                     <item.icon className="w-5 h-5 flex-shrink-0" />
@@ -172,7 +172,7 @@ export default function DashboardLayout({
 
           <div className="mt-6 px-3">
             {isSidebarOpen && (
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                 Mode
               </div>
             )}
@@ -189,7 +189,7 @@ export default function DashboardLayout({
                     'flex-1 rounded-full px-3 py-1.5 text-xs font-semibold transition border',
                     mode === item.key
                       ? 'bg-primary-500 text-white border-primary-500'
-                      : 'bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
+                      : 'bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
                   )}
                 >
                   {isSidebarOpen ? item.label : item.label.charAt(0)}
@@ -200,7 +200,7 @@ export default function DashboardLayout({
 
           <div className="mt-8">
             {isSidebarOpen && (
-              <div className="px-3 mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Account
               </div>
             )}
@@ -219,7 +219,7 @@ export default function DashboardLayout({
                         'flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors relative',
                         isActive
                           ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
-                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                       )}
                     >
                       <div className="relative">
@@ -239,7 +239,7 @@ export default function DashboardLayout({
 
         {/* Upgrade CTA */}
         {isSidebarOpen && user?.subscriptionTier === 'FREE' && (
-          <div className="p-4 border-t border-gray-200 dark:border-gray-800">
+          <div className="p-4 border-t border-slate-200 dark:border-slate-800">
             <div className="bg-gradient-to-br from-primary-500 to-secondary-500 rounded-lg p-4 text-white">
               <div className="flex items-center space-x-2 mb-2">
                 <Crown className="w-5 h-5" />
@@ -250,7 +250,7 @@ export default function DashboardLayout({
               </p>
               <Link
                 href="/dashboard/settings/billing"
-                className="block w-full bg-white text-primary-600 text-center py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition"
+                className="block w-full bg-white text-primary-600 text-center py-2 rounded-lg text-sm font-medium hover:bg-slate-100 transition"
               >
                 Upgrade Now
               </Link>
@@ -259,11 +259,11 @@ export default function DashboardLayout({
         )}
 
         {/* User profile */}
-        <div className="border-t border-gray-200 dark:border-gray-800 p-4">
+        <div className="border-t border-slate-200 dark:border-slate-800 p-4">
           <div className="relative">
             <button
               onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="flex items-center space-x-3 w-full p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+              className="flex items-center space-x-3 w-full p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
             >
               <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 dark:text-primary-400 font-semibold">
                 {user ? getInitials(user.firstName, user.lastName) : '?'}
@@ -271,24 +271,24 @@ export default function DashboardLayout({
               {isSidebarOpen && (
                 <>
                   <div className="flex-1 text-left">
-                    <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    <div className="text-sm font-medium text-slate-900 dark:text-white">
                       {user ? getFullName(user.firstName, user.lastName) : 'Guest'}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
                       {user?.email}
                     </div>
                   </div>
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
                 </>
               )}
             </button>
 
             {/* Profile dropdown */}
             {isProfileOpen && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-900 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1">
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1">
                 <Link
                   href={`/dashboard/profile/${user?.id}`}
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="flex items-center space-x-2 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                   onClick={() => setIsProfileOpen(false)}
                 >
                   <User className="w-4 h-4" />
@@ -296,19 +296,19 @@ export default function DashboardLayout({
                 </Link>
                 <Link
                   href="/dashboard/settings"
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="flex items-center space-x-2 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                   onClick={() => setIsProfileOpen(false)}
                 >
                   <Settings className="w-4 h-4" />
                   <span>Settings</span>
                 </Link>
-                <hr className="my-1 border-gray-200 dark:border-gray-700" />
+                <hr className="my-1 border-slate-200 dark:border-slate-700" />
                 <button
                   onClick={() => {
                     setIsProfileOpen(false);
                     logout();
                   }}
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-800 w-full"
+                  className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800 w-full"
                 >
                   <LogOut className="w-4 h-4" />
                   <span>Sign out</span>
@@ -322,29 +322,29 @@ export default function DashboardLayout({
       {/* Main content */}
       <div className={cn('lg:pl-64 transition-all', !isSidebarOpen && 'lg:pl-20')}>
         {/* Top navbar */}
-        <header className="sticky top-0 z-30 h-16 bg-white/80 dark:bg-gray-950/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
+        <header className="sticky top-0 z-30 h-16 bg-white/80 dark:bg-slate-950/80 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between h-full px-4 sm:px-6">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => setIsMobileMenuOpen(true)}
-                className="lg:hidden p-2 text-gray-500 hover:text-gray-700"
+                className="lg:hidden p-2 text-slate-500 hover:text-slate-700"
               >
                 <Menu className="w-5 h-5" />
               </button>
               <button
                 onClick={toggleSidebar}
-                className="hidden lg:block p-2 text-gray-500 hover:text-gray-700"
+                className="hidden lg:block p-2 text-slate-500 hover:text-slate-700"
               >
                 <Menu className="w-5 h-5" />
               </button>
 
               {/* Search */}
               <div className="hidden sm:block relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
                   placeholder="Search jobs, people, companies..."
-                  className="w-80 pl-10 pr-4 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-80 pl-10 pr-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
             </div>
@@ -363,7 +363,7 @@ export default function DashboardLayout({
               <button
                 type="button"
                 onClick={toggleTheme}
-                className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+                className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
                 aria-label="Toggle theme"
                 title="Toggle theme"
               >
@@ -379,7 +379,7 @@ export default function DashboardLayout({
               {/* Notifications */}
               <Link
                 href="/dashboard/notifications"
-                className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+                className="relative p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
               >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
@@ -392,7 +392,7 @@ export default function DashboardLayout({
               {/* Messages */}
               <Link
                 href="/dashboard/messages"
-                className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+                className="relative p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
               >
                 <MessageSquare className="w-5 h-5" />
                 {unreadMessageCount > 0 && (

@@ -17,6 +17,7 @@ import {
   eventsApi,
   groupsApi,
   statusApi,
+  paymentsApi,
 } from './api';
 import { useAuthStore, useUIStore, useNotificationStore, useMessageStore } from './store';
 // getAccessToken no longer needed here — auth bootstrap handled by AuthInitializer
@@ -1501,5 +1502,17 @@ export function useOrganizationAnalytics(orgId: string) {
     },
     enabled: !!orgId,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+// ============================================
+// PAYMENT METHOD HOOKS
+// ============================================
+export function usePaymentMethods(region?: string) {
+  return useQuery({
+    queryKey: ['payment-methods', region],
+    queryFn: () => paymentsApi.getMethods(region),
+    enabled: Boolean(region),
+    select: (response) => response.data.methods || response.data.data || [],
   });
 }

@@ -174,7 +174,7 @@ function RegisterContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 lg:grid lg:grid-cols-2">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 lg:grid lg:grid-cols-2">
       {/* Left side - Form */}
       <div className="flex flex-col justify-center px-4 py-10 sm:px-6 lg:px-20 xl:px-24">
         <div className="mx-auto w-full max-w-xl lg:max-w-lg">
@@ -194,11 +194,11 @@ function RegisterContent() {
             Career growth, community, and trusted mentoring in one place
           </div>
 
-          <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-8 shadow-xl shadow-primary-100/40 dark:border-gray-800 dark:bg-gray-900 dark:shadow-none sm:p-10">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-primary-100/40 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none sm:p-10">
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
               Create an account
             </h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
+            <p className="mt-2 text-slate-600 dark:text-slate-400">
               Join ATHENA to access jobs, mentors, learning paths, and a professional community built for women.
             </p>
 
@@ -284,9 +284,9 @@ function RegisterContent() {
                   className="absolute inset-y-0 right-0 flex items-center pr-3"
                 >
                   {showPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
+                    <EyeOff className="w-5 h-5 text-slate-400" />
                   ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
+                    <Eye className="w-5 h-5 text-slate-400" />
                   )}
                 </button>
               </div>
@@ -300,14 +300,14 @@ function RegisterContent() {
                       className={`h-4 w-4 ${
                         requirement.met
                           ? 'text-green-600 dark:text-green-400'
-                          : 'text-gray-300 dark:text-gray-600'
+                          : 'text-slate-300 dark:text-slate-600'
                       }`}
                     />
                     <span
                       className={
                         requirement.met
                           ? 'text-green-700 dark:text-green-300'
-                          : 'text-gray-500 dark:text-gray-400'
+                          : 'text-slate-500 dark:text-slate-400'
                       }
                     >
                       {requirement.label}
@@ -337,9 +337,9 @@ function RegisterContent() {
                   className="absolute inset-y-0 right-0 flex items-center pr-3"
                 >
                   {showConfirmPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
+                    <EyeOff className="w-5 h-5 text-slate-400" />
                   ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
+                    <Eye className="w-5 h-5 text-slate-400" />
                   )}
                 </button>
               </div>
@@ -384,24 +384,24 @@ function RegisterContent() {
               {errors.inviteCode && (
                 <p className="mt-1 text-sm text-red-600">{errors.inviteCode.message}</p>
               )}
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Invite codes use letters, numbers, and dashes only.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950/40">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <div className="flex items-start gap-3">
                 <input
                   {...register('womanSelfAttested')}
                   type="checkbox"
                   id="womanSelfAttested"
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                 />
                 <div>
-                  <label htmlFor="womanSelfAttested" className="text-sm font-medium text-gray-900 dark:text-white">
+                  <label htmlFor="womanSelfAttested" className="text-sm font-medium text-slate-900 dark:text-white">
                     I confirm that I am a woman (self-attestation)
                   </label>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     This helps ATHENA maintain the trust and safety standards of the community.
                   </p>
                 </div>
@@ -428,7 +428,7 @@ function RegisterContent() {
                 </>
               )}
             </button>
-            <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">
+            <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
               By creating an account, you agree to our{' '}
               <Link href="/terms" className="font-medium text-primary-600 hover:text-primary-500">
                 Terms
@@ -448,10 +448,10 @@ function RegisterContent() {
           <div className="mt-8">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300 dark:border-gray-700" />
+                <div className="w-full border-t border-slate-300 dark:border-slate-700" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white dark:bg-gray-950 text-gray-500">
+                <span className="px-2 bg-white dark:bg-slate-950 text-slate-500">
                   Or continue with
                 </span>
               </div>
@@ -480,12 +480,12 @@ function RegisterContent() {
                 Facebook Soon
               </button>
             </div>
-            <p className="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
               Google sign-in is live. Facebook sign-in is still being finalized for launch.
             </p>
           </div>
 
-          <p className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
+          <p className="mt-8 text-center text-sm text-slate-600 dark:text-slate-400">
             Already have an account?{' '}
             <Link href="/login" className="text-primary-600 hover:text-primary-500 font-medium">
               Sign in

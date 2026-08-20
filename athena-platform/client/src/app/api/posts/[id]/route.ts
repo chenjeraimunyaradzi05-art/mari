@@ -4,12 +4,12 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authHeader = request.headers.get('authorization');
     
-    const response = await fetch(`${API_URL}/api/posts/${params.id}`, {
+    const response = await fetch(`${API_URL}/api/posts/${(await params).id}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -31,12 +31,12 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authHeader = request.headers.get('authorization');
     
-    const response = await fetch(`${API_URL}/api/posts/${params.id}`, {
+    const response = await fetch(`${API_URL}/api/posts/${(await params).id}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

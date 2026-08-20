@@ -58,7 +58,7 @@ export default function DashboardPage() {
           <div className="mt-4 md:mt-0">
             <Link
               href="/dashboard/ai"
-              className="inline-flex items-center px-4 py-2 bg-white text-primary-600 rounded-lg font-medium hover:bg-gray-100 transition"
+              className="inline-flex items-center px-4 py-2 bg-white text-primary-600 rounded-lg font-medium hover:bg-slate-100 transition"
             >
               <Sparkles className="w-4 h-4 mr-2" />
               Try AI Career Coach
@@ -79,7 +79,7 @@ export default function DashboardPage() {
               <action.icon className="w-5 h-5 text-white" />
             </div>
             <div>
-              <span className="font-medium text-gray-900 dark:text-white group-hover:text-primary-600 transition">
+              <span className="font-medium text-slate-900 dark:text-white group-hover:text-primary-600 transition">
                 {action.name}
               </span>
             </div>
@@ -91,9 +91,9 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {stats.map((stat) => (
           <div key={stat.name} className="card">
-            <div className="text-sm text-gray-500 dark:text-gray-400">{stat.name}</div>
+            <div className="text-sm text-slate-500 dark:text-slate-400">{stat.name}</div>
             <div className="mt-1 flex items-baseline">
-              <span className="text-2xl font-bold text-gray-900 dark:text-white">
+              <span className="text-2xl font-bold text-slate-900 dark:text-white">
                 {stat.value}
               </span>
               <span
@@ -112,7 +112,7 @@ export default function DashboardPage() {
         {/* Job Recommendations */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               Recommended for You
             </h2>
             <Link
@@ -127,10 +127,10 @@ export default function DashboardPage() {
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="animate-pulse flex space-x-4">
-                  <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+                  <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-lg" />
                   <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
-                    <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
+                    <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                    <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
                   </div>
                 </div>
               ))}
@@ -141,16 +141,16 @@ export default function DashboardPage() {
                 <Link
                   key={job.id}
                   href={`/dashboard/jobs/${job.id}`}
-                  className="flex items-start space-x-4 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition group"
+                  className="flex items-start space-x-4 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition group"
                 >
-                  <div className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
-                    <Briefcase className="w-6 h-6 text-gray-400" />
+                  <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center">
+                    <Briefcase className="w-6 h-6 text-slate-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 dark:text-white group-hover:text-primary-600 transition truncate">
+                    <div className="font-medium text-slate-900 dark:text-white group-hover:text-primary-600 transition truncate">
                       {job.title}
                     </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                    <div className="text-sm text-slate-500 dark:text-slate-400 truncate">
                       {job.organization?.name} • {job.location}
                     </div>
                     {job.matchScore && (
@@ -164,7 +164,7 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-slate-500">
               <Briefcase className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>Complete your profile to get job recommendations</p>
             </div>
@@ -174,7 +174,7 @@ export default function DashboardPage() {
         {/* Application Tracker */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               Your Applications
             </h2>
             <Link
@@ -189,10 +189,10 @@ export default function DashboardPage() {
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="animate-pulse flex space-x-4">
-                  <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded" />
+                  <div className="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded" />
                   <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
-                    <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
+                    <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                    <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
                   </div>
                 </div>
               ))}
@@ -202,19 +202,19 @@ export default function DashboardPage() {
               {applications.slice(0, 4).map((app: any) => (
                 <div
                   key={app.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800"
+                  className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                    <div className="font-medium text-slate-900 dark:text-white truncate">
                       {app.job?.title}
                     </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
                       Applied {formatRelativeTime(app.createdAt)}
                     </div>
                   </div>
                   <span
                     className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      APPLICATION_STATUS_COLORS[app.status] || 'bg-gray-100 text-gray-800'
+                      APPLICATION_STATUS_COLORS[app.status] || 'bg-slate-100 text-slate-800'
                     }`}
                   >
                     {APPLICATION_STATUS_LABELS[app.status] || app.status}
@@ -223,7 +223,7 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-slate-500">
               <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>No applications yet</p>
               <Link
@@ -240,7 +240,7 @@ export default function DashboardPage() {
       {/* Community Feed Preview */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Community Updates
           </h2>
           <Link
@@ -255,11 +255,11 @@ export default function DashboardPage() {
           <div className="space-y-4">
             {[1, 2].map((i) => (
               <div key={i} className="animate-pulse flex space-x-4">
-                <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full" />
+                <div className="w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-full" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4" />
-                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-full" />
-                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
+                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
+                  <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-full" />
+                  <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
                 </div>
               </div>
             ))}
@@ -270,21 +270,21 @@ export default function DashboardPage() {
               <Link
                 key={post.id}
                 href={`/dashboard/community/post/${post.id}`}
-                className="flex items-start space-x-4 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+                className="flex items-start space-x-4 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
               >
                 <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 font-semibold">
                   {post.author?.firstName?.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2">
-                    <span className="font-medium text-gray-900 dark:text-white">
+                    <span className="font-medium text-slate-900 dark:text-white">
                       {post.author?.firstName} {post.author?.lastName}
                     </span>
-                    <span className="text-sm text-gray-500">
+                    <span className="text-sm text-slate-500">
                       {formatRelativeTime(post.createdAt)}
                     </span>
                   </div>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm line-clamp-2">
+                  <p className="text-slate-600 dark:text-slate-400 text-sm line-clamp-2">
                     {post.content}
                   </p>
                 </div>
@@ -292,7 +292,7 @@ export default function DashboardPage() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-slate-500">
             <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>Follow people to see their posts here</p>
           </div>
@@ -301,17 +301,17 @@ export default function DashboardPage() {
 
       {/* Upcoming Events / Reminders */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Upcoming
         </h2>
         <div className="space-y-3">
           <div className="flex items-center space-x-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
             <Calendar className="w-5 h-5 text-yellow-600" />
             <div>
-              <div className="font-medium text-gray-900 dark:text-white">
+              <div className="font-medium text-slate-900 dark:text-white">
                 Complete your profile
               </div>
-              <div className="text-sm text-gray-500">
+              <div className="text-sm text-slate-500">
                 Add skills and experience to get better job matches
               </div>
             </div>
@@ -319,10 +319,10 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
             <Clock className="w-5 h-5 text-blue-600" />
             <div>
-              <div className="font-medium text-gray-900 dark:text-white">
+              <div className="font-medium text-slate-900 dark:text-white">
                 Weekly career tips
               </div>
-              <div className="text-sm text-gray-500">
+              <div className="text-sm text-slate-500">
                 New article: "5 Ways to Stand Out in Interviews"
               </div>
             </div>

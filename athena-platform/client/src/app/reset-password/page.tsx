@@ -88,13 +88,13 @@ function ResetPasswordContent() {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
         <div className="max-w-md w-full text-center">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
               Invalid Reset Link
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
               This password reset link is invalid or has expired.
             </p>
             <Link href="/forgot-password" className="btn-primary w-full block text-center">
@@ -108,16 +108,16 @@ function ResetPasswordContent() {
 
   if (isSuccess) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
         <div className="max-w-md w-full">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8 text-center">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8 text-center">
             <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
               Password Reset Successfully!
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
               Your password has been updated. You can now log in with your new password.
             </p>
             <Link href="/login" className="btn-primary w-full block text-center">
@@ -130,7 +130,7 @@ function ResetPasswordContent() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center space-x-2 mb-4">
@@ -139,11 +139,11 @@ function ResetPasswordContent() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
             Reset your password
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
+          <p className="text-slate-600 dark:text-slate-400 mb-6">
             Enter your new password below.
           </p>
 
@@ -166,9 +166,9 @@ function ResetPasswordContent() {
                   className="absolute inset-y-0 right-0 flex items-center pr-3"
                 >
                   {showPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
+                    <EyeOff className="w-5 h-5 text-slate-400" />
                   ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
+                    <Eye className="w-5 h-5 text-slate-400" />
                   )}
                 </button>
               </div>
@@ -181,11 +181,11 @@ function ResetPasswordContent() {
                 {passwordRequirements.map((req) => (
                   <div key={req.label} className="flex items-center space-x-2 text-sm">
                     <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                      req.met ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                      req.met ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-600'
                     }`}>
                       {req.met && <Check className="w-3 h-3 text-white" />}
                     </div>
-                    <span className={req.met ? 'text-green-600 dark:text-green-400' : 'text-gray-500'}>
+                    <span className={req.met ? 'text-green-600 dark:text-green-400' : 'text-slate-500'}>
                       {req.label}
                     </span>
                   </div>
@@ -211,9 +211,9 @@ function ResetPasswordContent() {
                   className="absolute inset-y-0 right-0 flex items-center pr-3"
                 >
                   {showConfirmPassword ? (
-                    <EyeOff className="w-5 h-5 text-gray-400" />
+                    <EyeOff className="w-5 h-5 text-slate-400" />
                   ) : (
-                    <Eye className="w-5 h-5 text-gray-400" />
+                    <Eye className="w-5 h-5 text-slate-400" />
                   )}
                 </button>
               </div>

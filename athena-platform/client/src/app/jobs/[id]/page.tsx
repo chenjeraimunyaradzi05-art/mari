@@ -79,10 +79,10 @@ export default function JobDetailsPage() {
               />
               
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+                <h1 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2">
                   {job.title}
                 </h1>
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-600">
                   <Link href={`/dashboard/organizations/${job.organization?.slug}`} className="flex items-center gap-1.5 hover:text-primary hover:underline">
                     <Building2 className="h-4 w-4" />
                     {job.organization?.name}
@@ -125,7 +125,7 @@ export default function JobDetailsPage() {
             <div className="bg-white rounded-xl shadow-sm border p-6 md:p-8">
               <h2 className="text-xl font-bold mb-6">About the job</h2>
               
-              <div className="prose max-w-none text-gray-700 whitespace-pre-line">
+              <div className="prose max-w-none text-slate-700 whitespace-pre-line">
                 {job.description}
               </div>
 
@@ -147,7 +147,7 @@ export default function JobDetailsPage() {
                     <DollarSign className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-500">Salary</p>
+                    <p className="text-sm font-medium text-slate-500">Salary</p>
                     <p className="font-semibold">
                       {job.salaryMin ? `$${job.salaryMin.toLocaleString()}` : "Competitive"}
                       {job.salaryMax ? ` - $${job.salaryMax.toLocaleString()}` : ""}
@@ -160,7 +160,7 @@ export default function JobDetailsPage() {
                     <Briefcase className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-500">Job Type</p>
+                    <p className="text-sm font-medium text-slate-500">Job Type</p>
                     <p className="font-semibold capitalize">{job.type.replace('_', ' ').toLowerCase()}</p>
                   </div>
                 </div>
@@ -170,7 +170,7 @@ export default function JobDetailsPage() {
                     <Clock className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-500">Experience</p>
+                    <p className="text-sm font-medium text-slate-500">Experience</p>
                     <p className="font-semibold">{job.experienceMin ? `${job.experienceMin}+ years` : "Entry Level"}</p>
                   </div>
                 </div>

@@ -20,6 +20,7 @@ const authPathsToSkipRefresh = [
   '/auth/login',
   '/auth/register',
   '/auth/google',
+  '/auth/facebook',
   '/auth/refresh',
   '/auth/logout',
   '/auth/forgot-password',
@@ -103,6 +104,14 @@ export const authApi = {
     womanSelfAttested?: boolean;
     inviteCode?: string;
   }) => api.post('/auth/google', data),
+
+  facebook: (data: {
+    accessToken: string;
+    mode?: 'login' | 'register';
+    persona?: string;
+    womanSelfAttested?: boolean;
+    inviteCode?: string;
+  }) => api.post('/auth/facebook', data),
 
   login: (data: { email: string; password: string }) =>
     api.post('/auth/login', data),
@@ -1022,6 +1031,13 @@ export const aiAlgorithmsApi = {
     autoplayEnabled?: boolean;
   }) => api.patch('/ai/feed-preferences', data),
   recordSearch: (query: string) => api.post('/ai/feed-preferences/search', { query }),
+};
+
+// ============================================
+// PAYMENTS API
+// ============================================
+export const paymentsApi = {
+  getMethods: (region?: string) => api.get('/payments/methods', { params: { region } }),
 };
 
 export default api;

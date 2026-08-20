@@ -46,7 +46,7 @@ export default function BusinessPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-700 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -65,7 +65,7 @@ export default function BusinessPage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="/dashboard/formation"
-                className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-gray-100 transition flex items-center gap-2"
+                className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition flex items-center gap-2"
               >
                 <Zap className="w-5 h-5" />
                 Start Your Business
@@ -90,9 +90,9 @@ export default function BusinessPage() {
             { value: '24hr', label: 'Fast Formation' },
             { value: '4.9★', label: 'Customer Rating' },
           ].map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <div className="text-3xl font-bold text-blue-600">{stat.value}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -100,27 +100,27 @@ export default function BusinessPage() {
 
       {/* Services */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Business Services
         </h2>
         <div className="grid md:grid-cols-3 gap-6">
           {services.map((service) => (
-            <div key={service.title} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+            <div key={service.title} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
               <div className="w-14 h-14 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mb-4">
                 <service.icon className="w-7 h-7 text-blue-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">{service.title}</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{service.description}</p>
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">{service.title}</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">{service.description}</p>
               <ul className="space-y-2 mb-6">
                 {service.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <li key={feature} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                     <CheckCircle className="w-4 h-4 text-blue-500" />
                     {feature}
                   </li>
                 ))}
               </ul>
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <span className="text-lg font-bold text-gray-900 dark:text-white">{service.price}</span>
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                <span className="text-lg font-bold text-slate-900 dark:text-white">{service.price}</span>
               </div>
             </div>
           ))}
@@ -128,9 +128,9 @@ export default function BusinessPage() {
       </section>
 
       {/* Formation States */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
             Formation Jurisdictions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 max-w-4xl mx-auto">
@@ -140,7 +140,7 @@ export default function BusinessPage() {
                 className={`p-4 rounded-xl text-center border ${
                   state.popular
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900'
                 }`}
               >
                 {state.popular && (
@@ -148,8 +148,8 @@ export default function BusinessPage() {
                     Popular
                   </span>
                 )}
-                <h3 className="font-semibold text-gray-900 dark:text-white">{state.name}</h3>
-                <div className="flex items-center justify-center gap-1 text-sm text-gray-600 dark:text-gray-400 mt-1">
+                <h3 className="font-semibold text-slate-900 dark:text-white">{state.name}</h3>
+                <div className="flex items-center justify-center gap-1 text-sm text-slate-600 dark:text-slate-400 mt-1">
                   <Clock className="w-3 h-3" />
                   {state.time}
                 </div>
@@ -161,7 +161,7 @@ export default function BusinessPage() {
 
       {/* Process */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-12 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-12 text-center">
           How It Works
         </h2>
         <div className="max-w-4xl mx-auto">
@@ -174,8 +174,8 @@ export default function BusinessPage() {
                     {i + 1}
                   </div>
                   <div className="pt-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{step.title}</h3>
-                    <p className="text-gray-600 dark:text-gray-400">{step.description}</p>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{step.title}</h3>
+                    <p className="text-slate-600 dark:text-slate-400">{step.description}</p>
                   </div>
                 </div>
               ))}
@@ -193,7 +193,7 @@ export default function BusinessPage() {
           </p>
           <Link
             href="/dashboard/formation"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             Get Started <ArrowRight className="w-4 h-4" />
           </Link>
