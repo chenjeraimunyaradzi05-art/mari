@@ -209,7 +209,7 @@ export function GoogleSignInButton({
           size: 'large',
           text: mode === 'register' ? 'signup_with' : 'signin_with',
           shape: 'pill',
-          width: Math.max(180, Math.min(containerRef.current.offsetWidth || 280, 400)),
+          width: Math.max(containerRef.current.offsetWidth, 280),
           logo_alignment: 'left',
           type: 'standard',
         });
@@ -246,20 +246,10 @@ export function GoogleSignInButton({
   }
 
   if (!clientId || scriptError) {
-    const reason = !clientId
-      ? 'Google sign-in is not configured yet. Please use your email and password, or try again soon.'
-      : scriptError || 'Google sign-in is temporarily unavailable. Please try again shortly.';
     return (
-      <button
-        type="button"
-        onClick={() => {
-          toast(reason, { icon: 'ℹ️' });
-          onError?.(reason);
-        }}
-        className="btn-outline flex w-full items-center justify-center py-2.5"
-      >
+      <button type="button" disabled className="btn-outline flex w-full items-center justify-center py-2.5 opacity-60 cursor-not-allowed">
         <GoogleIcon />
-        <span className="ml-2">Continue with Google</span>
+        <span className="ml-2">Google Unavailable</span>
       </button>
     );
   }

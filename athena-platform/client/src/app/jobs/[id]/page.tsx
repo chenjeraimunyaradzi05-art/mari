@@ -20,8 +20,6 @@ import { Avatar } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
-import { arePublicFallbacksEnabled, getAppSiteUrl } from '@/lib/runtime-config';
-import { findFallbackJob, isFallbackJobId } from '@/lib/public-fallbacks';
 
 export default function JobDetailsPage() {
   const params = useParams();
@@ -34,11 +32,10 @@ export default function JobDetailsPage() {
     const fetchJob = async () => {
       try {
         const response = await jobApi.getById(params.id as string);
-        const nextJob = response.data.data;
-        setJob(isFallbackJobId(nextJob?.id) && !arePublicFallbacksEnabled() ? null : nextJob);
+        setJob(response.data.data);
       } catch (error) {
         console.error('Failed to fetch job:', error);
-        setJob(arePublicFallbacksEnabled() ? findFallbackJob(params.id as string) : null);
+        // router.push('/404'); // Optional: redirect on error
       } finally {
         setLoading(false);
       }
@@ -51,7 +48,7 @@ export default function JobDetailsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-slate-50 dark:bg-slate-950">
+      <div className="flex justify-center items-center min-h-[60vh]">
         <LoadingSpinner />
       </div>
     );
@@ -59,22 +56,17 @@ export default function JobDetailsPage() {
 
   if (!job) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-        <h2 className="mb-2 text-2xl font-bold">Job not found</h2>
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <h2 className="text-2xl font-bold mb-2">Job not found</h2>
         <Button onClick={() => router.push('/jobs')}>Back to Jobs</Button>
       </div>
     );
   }
 
-  const isFallbackJob = isFallbackJobId(job.id);
-  const organizationHref = isFallbackJob
-    ? '/jobs'
-    : `/dashboard/organizations/${job.organization?.slug}`;
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white pb-12">
+    <div className="bg-slate-50 min-h-screen pb-12">
       {/* Header / Banner Area */}
-      <div className="sticky top-16 z-10 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/90">
+      <div className="bg-white border-b sticky top-16 z-10 shadow-sm">
         <div className="container mx-auto px-4 py-6 max-w-6xl">
           <div className="flex flex-col md:flex-row justify-between items-start gap-6">
             <div className="flex gap-5">
@@ -83,15 +75,15 @@ export default function JobDetailsPage() {
                 alt={job.organization?.name || 'Organization'}
                 fallback={job.organization?.name?.substring(0, 2).toUpperCase() || 'ORG'}
                 size="xl"
-                className="rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900"
+                className="rounded-xl border bg-white"
               />
               
               <div>
-                <h1 className="mb-2 text-2xl font-bold text-slate-950 dark:text-white md:text-3xl">
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
                   {job.title}
                 </h1>
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-600 dark:text-slate-300">
-                  <Link href={organizationHref} className="flex items-center gap-1.5 transition hover:text-primary hover:underline">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600">
+                  <Link href={`/dashboard/organizations/${job.organization?.slug}`} className="flex items-center gap-1.5 hover:text-primary hover:underline">
                     <Building2 className="h-4 w-4" />
                     {job.organization?.name}
                   </Link>
@@ -112,24 +104,14 @@ export default function JobDetailsPage() {
                 <CrossModuleShareButton
                   title={job.title}
                   description={`${job.organization?.name || 'Employer'} • ${job.isRemote ? 'Remote' : `${job.city}, ${job.state}`}`}
-                  url={`${getAppSiteUrl()}/jobs/${job.id}`}
+                  url={`${process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/jobs/${job.id}`}
                   entityType="job"
                   entityId={job.id}
                 />
               </div>
-              {isFallbackJob ? (
-                <Button
-                  size="lg"
-                  className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700"
-                  onClick={() => router.push('/register')}
-                >
-                  Join to express interest
-                </Button>
-              ) : (
-                <Button size="lg" className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700">
-                  Apply Now
-                </Button>
-              )}
+              <Button size="lg" className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700">
+                Apply Now
+              </Button>
             </div>
           </div>
         </div>
@@ -140,10 +122,10 @@ export default function JobDetailsPage() {
           
           {/* Left Column: Job Description */}
           <div className="lg:col-span-2 space-y-6">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-slate-900 md:p-8">
+            <div className="bg-white rounded-xl shadow-sm border p-6 md:p-8">
               <h2 className="text-xl font-bold mb-6">About the job</h2>
               
-              <div className="prose max-w-none whitespace-pre-line text-slate-700 dark:prose-invert dark:text-slate-200">
+              <div className="prose max-w-none text-gray-700 whitespace-pre-line">
                 {job.description}
               </div>
 
@@ -156,8 +138,8 @@ export default function JobDetailsPage() {
           {/* Right Column: Sidebar Details */}
           <div className="space-y-6">
             {/* Job Details Card */}
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-slate-900">
-              <h3 className="mb-4 text-lg font-semibold">Job Details</h3>
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h3 className="font-semibold text-lg mb-4">Job Details</h3>
               
               <div className="space-y-4">
                 <div className="flex gap-3">
@@ -165,8 +147,8 @@ export default function JobDetailsPage() {
                     <DollarSign className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Salary</p>
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">
+                    <p className="text-sm font-medium text-gray-500">Salary</p>
+                    <p className="font-semibold">
                       {job.salaryMin ? `$${job.salaryMin.toLocaleString()}` : "Competitive"}
                       {job.salaryMax ? ` - $${job.salaryMax.toLocaleString()}` : ""}
                     </p>
@@ -178,8 +160,8 @@ export default function JobDetailsPage() {
                     <Briefcase className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Job Type</p>
-                    <p className="font-semibold capitalize text-slate-900 dark:text-slate-100">{job.type.replace('_', ' ').toLowerCase()}</p>
+                    <p className="text-sm font-medium text-gray-500">Job Type</p>
+                    <p className="font-semibold capitalize">{job.type.replace('_', ' ').toLowerCase()}</p>
                   </div>
                 </div>
 
@@ -188,15 +170,15 @@ export default function JobDetailsPage() {
                     <Clock className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Experience</p>
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">{job.experienceMin ? `${job.experienceMin}+ years` : "Entry Level"}</p>
+                    <p className="text-sm font-medium text-gray-500">Experience</p>
+                    <p className="font-semibold">{job.experienceMin ? `${job.experienceMin}+ years` : "Entry Level"}</p>
                   </div>
                 </div>
               </div>
               
               <Separator className="my-6" />
               
-              <h3 className="mb-4 text-lg font-semibold">About the Company</h3>
+              <h3 className="font-semibold text-lg mb-4">About the Company</h3>
               <div className="flex items-center gap-3 mb-4">
                 <Avatar
                   src={job.organization?.logo || null}
@@ -205,8 +187,8 @@ export default function JobDetailsPage() {
                   size="md"
                 />
                 <div>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{job.organization?.name}</p>
-                  <p className="text-xs text-muted-foreground dark:text-slate-400">{job.organization?.industry}</p>
+                  <p className="font-medium">{job.organization?.name}</p>
+                  <p className="text-xs text-muted-foreground">{job.organization?.industry}</p>
                 </div>
               </div>
               
@@ -215,7 +197,7 @@ export default function JobDetailsPage() {
                    href={job.organization.website} 
                    target="_blank" 
                    rel="noopener noreferrer"
-                   className="flex items-center gap-1 text-sm text-primary transition hover:underline"
+                   className="text-primary hover:underline text-sm flex items-center gap-1"
                  >
                    <Globe className="h-3 w-3" /> Visit Website
                  </a>
@@ -223,18 +205,8 @@ export default function JobDetailsPage() {
             </div>
 
             {/* Safety/Verified Card */}
-            {isFallbackJob ? (
-              <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-800 dark:border-blue-400/20 dark:bg-blue-400/10 dark:text-blue-100">
-                <CheckCircle className="h-5 w-5 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-sm">Demo spotlight role</p>
-                  <p className="text-xs mt-1 opacity-90">
-                    This listing is shown only when public demo fallbacks are explicitly enabled.
-                  </p>
-                </div>
-              </div>
-            ) : job.organization?.isVerified && (
-              <div className="flex gap-3 rounded-xl border border-green-100 bg-green-50 p-4 text-green-800 dark:border-green-400/20 dark:bg-green-400/10 dark:text-green-100">
+            {job.organization?.isVerified && (
+              <div className="bg-green-50 border border-green-100 rounded-xl p-4 flex gap-3 text-green-800">
                 <CheckCircle className="h-5 w-5 flex-shrink-0" />
                 <div>
                   <p className="font-semibold text-sm">Verified Employer</p>

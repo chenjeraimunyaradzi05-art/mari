@@ -10,13 +10,9 @@ import DOMPurify from 'dompurify';
 const ALLOWED_TAGS = [
   'p', 'br', 'b', 'i', 'u', 'strong', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre', 'span', 'div',
-  'img',
 ];
 
-const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'id', 'src', 'alt'];
-
-const SAFE_URI_PATTERN =
-  /^(?:(?:https?|mailto|tel):|\/(?!\/)|#|data:image\/(?:png|gif|jpe?g|webp);base64,)/i;
+const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'id'];
 
 /**
  * Sanitize HTML content to prevent XSS attacks
@@ -31,7 +27,7 @@ export function sanitizeHtml(html: string): string {
       ALLOWED_TAGS,
       ALLOWED_ATTR,
       ALLOW_DATA_ATTR: false,
-      ALLOWED_URI_REGEXP: SAFE_URI_PATTERN,
+      ADD_ATTR: ['target'], // Allow target attribute
       FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
       FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
     });
@@ -46,12 +42,10 @@ export function sanitizeHtml(html: string): string {
     .replace(/\s*on\w+\s*=\s*[^\s>]*/gi, '')
     // Remove javascript: URLs
     .replace(/javascript\s*:/gi, 'blocked:')
-    // Remove data: URLs except image data URLs used by the editor preview
-    .replace(/data:(?!image\/(?:png|gif|jpe?g|webp);base64,)/gi, 'blocked:')
+    // Remove data: URLs (can be used for XSS)
+    .replace(/data\s*:/gi, 'blocked:')
     // Remove vbscript: URLs
     .replace(/vbscript\s*:/gi, 'blocked:')
-    // Remove dangerous href/src attributes with unsafe protocols
-    .replace(/\s(?:href|src)\s*=\s*["']\s*(?:javascript|vbscript):[^"']*["']/gi, '')
     // Remove dangerous tags
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')

@@ -13,7 +13,6 @@ import { I18nextProvider } from 'react-i18next';
 import { initializeI18n, setI18nLocale } from '@/i18n/next-i18n';
 import { GDPRProvider } from '@/lib/contexts/GDPRContext';
 import { PWAInstallPrompt } from '@/components/super-app/PWAInstallPrompt';
-import FloatingAIButton from '@/components/ai/FloatingAIButton';
 import { SkipLinks, AnnouncementProvider, KeyboardShortcutsProvider } from '@/lib/accessibility';
 import { ClientOnly } from '@/components/ClientOnly';
 import { useVideoFeedStore } from '@/lib/stores/video.store';
@@ -38,22 +37,7 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   const { setLoading, login: storeLogin, logout: storeLogout } = useAuthStore();
 
   useEffect(() => {
-    const pathname = window.location.pathname;
-    const hasStoredAuth = Boolean(window.localStorage.getItem('athena-auth'));
-    const shouldBootstrapSession =
-      hasStoredAuth ||
-      pathname.startsWith('/admin') ||
-      pathname.startsWith('/dashboard') ||
-      pathname.startsWith('/employer/organizations') ||
-      pathname.startsWith('/onboarding') ||
-      pathname.startsWith('/settings');
-
-    if (!shouldBootstrapSession) {
-      setLoading(false);
-      return;
-    }
-
-    // Try silent refresh via HttpOnly cookie when we likely need an authenticated session.
+    // Try silent refresh via HttpOnly cookie on mount.
     let mounted = true;
     (async () => {
       try {
@@ -95,33 +79,20 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
 }
 
 function ThemeSync({ children }: { children: React.ReactNode }) {
-  const { theme, accentColor, fontSize, compactMode, reduceMotion } = useAppUIStore();
+  const { theme } = useAppUIStore();
 
   useEffect(() => {
     const root = document.documentElement;
-    const themeColor = document.querySelector('meta[name="theme-color"]');
 
     const applyTheme = (selected: 'light' | 'dark' | 'system') => {
-      const resolvedTheme =
-        selected === 'system'
-          ? window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light'
-          : selected;
-
-      root.classList.toggle('dark', resolvedTheme === 'dark');
-      root.dataset.theme = resolvedTheme;
-      root.style.colorScheme = resolvedTheme;
-
-      if (themeColor instanceof HTMLMetaElement) {
-        themeColor.content = resolvedTheme === 'dark' ? '#020617' : '#fff7ed';
+      if (selected === 'system') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        root.classList.toggle('dark', prefersDark);
+        return;
       }
-    };
 
-    root.dataset.accentColor = accentColor;
-    root.dataset.fontSize = fontSize;
-    root.classList.toggle('compact', compactMode);
-    root.classList.toggle('reduce-motion', reduceMotion);
+      root.classList.toggle('dark', selected === 'dark');
+    };
 
     applyTheme(theme);
 
@@ -143,7 +114,7 @@ function ThemeSync({ children }: { children: React.ReactNode }) {
     };
     mediaList.addListener?.(onChange);
     return () => mediaList.removeListener?.(onChange);
-  }, [accentColor, compactMode, fontSize, reduceMotion, theme]);
+  }, [theme]);
 
   return <>{children}</>;
 }
@@ -165,66 +136,11 @@ function LocaleSync({ children }: { children: React.ReactNode }) {
 
 function ServiceWorkerRegister() {
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
-
-    let cancelled = false;
-    const enablePwa = process.env.NEXT_PUBLIC_ENABLE_PWA === 'true';
-    const resetSessionKey = 'athena-sw-reset';
-
-    const clearAthenaCaches = async () => {
-      if (typeof window === 'undefined' || !('caches' in window)) {
-        return false;
-      }
-
-      const cacheNames = await window.caches.keys();
-      const athenaCacheNames = cacheNames.filter((cacheName) => cacheName.startsWith('athena-'));
-
-      await Promise.all(athenaCacheNames.map((cacheName) => window.caches.delete(cacheName)));
-
-      return athenaCacheNames.length > 0;
-    };
-
-    const unregisterLegacyWorker = async () => {
-      try {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        const hadRegistrations = registrations.length > 0;
-
-        await Promise.all(registrations.map((registration) => registration.unregister()));
-        const clearedCaches = await clearAthenaCaches();
-
-        if (
-          cancelled ||
-          !(hadRegistrations || clearedCaches) ||
-          window.sessionStorage.getItem(resetSessionKey)
-        ) {
-          return;
-        }
-
-        window.sessionStorage.setItem(resetSessionKey, '1');
-        window.location.reload();
-      } catch {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
         // Silent fail for unsupported environments
-      }
-    };
-
-    const registerWorker = async () => {
-      try {
-        const registration = await navigator.serviceWorker.register('/sw.js');
-        await registration.update();
-      } catch {
-        // Silent fail for unsupported environments
-      }
-    };
-
-    if (enablePwa) {
-      registerWorker();
-    } else {
-      unregisterLegacyWorker();
+      });
     }
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   return null;
@@ -266,9 +182,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
                   <SkipLinks />
                   <AuthInitializer>
                     {children}
-                    <ClientOnly>
-                      <FloatingAIButton />
-                    </ClientOnly>
                     <ClientOnly>
                       <PWAInstallPrompt />
                     </ClientOnly>

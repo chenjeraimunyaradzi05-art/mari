@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '@/lib/utils';
 import { useAuthStore } from '@/lib/store';
-import { PLAN_PRICING, TRIAL_DAYS, REFUND_DAYS, yearlySavingsBadge } from '@/lib/pricing';
 
 const plans = [
   {
@@ -46,8 +45,8 @@ const plans = [
     id: 'pro',
     name: 'Pro',
     description: 'For serious career growth',
-    monthlyPrice: PLAN_PRICING.pro.monthlyPrice,
-    yearlyPrice: PLAN_PRICING.pro.yearlyPrice, // 2 months free — see lib/pricing.ts
+    monthlyPrice: 29,
+    yearlyPrice: 290, // 2 months free
     icon: Crown,
     color: 'primary',
     popular: true,
@@ -71,8 +70,8 @@ const plans = [
     id: 'enterprise',
     name: 'Enterprise',
     description: 'For teams and organizations',
-    monthlyPrice: PLAN_PRICING.enterprise.monthlyPrice,
-    yearlyPrice: PLAN_PRICING.enterprise.yearlyPrice,
+    monthlyPrice: 99,
+    yearlyPrice: 990,
     icon: Building2,
     color: 'purple',
     popular: false,
@@ -103,7 +102,7 @@ const faqs = [
   {
     question: 'Is there a free trial for Pro?',
     answer:
-      `Yes, we offer a ${TRIAL_DAYS}-day free trial of Pro. No credit card required. You'll have full access to all Pro features during the trial.`,
+      'Yes, we offer a 14-day free trial of Pro. No credit card required. You\'ll have full access to all Pro features during the trial.',
   },
   {
     question: 'What happens when my trial ends?',
@@ -113,7 +112,7 @@ const faqs = [
   {
     question: 'Do you offer refunds?',
     answer:
-      `We offer a ${REFUND_DAYS}-day money-back guarantee for first-time subscribers. If you're not satisfied, contact us within ${REFUND_DAYS} days for a full refund.`,
+      'We offer a 30-day money-back guarantee for first-time subscribers. If you\'re not satisfied, contact us within 30 days for a full refund.',
   },
   {
     question: 'Can I get a discount for non-profits?',
@@ -124,7 +123,7 @@ const faqs = [
 
 export default function PricingPage() {
   const router = useRouter();
-  useAuthStore();
+  const { user } = useAuthStore();
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('yearly');
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
@@ -137,33 +136,28 @@ export default function PricingPage() {
   };
 
   return (
-    <div className="relative min-h-screen bg-aurora">
-      <div aria-hidden="true" className="cyber-grid pointer-events-none absolute inset-0 opacity-15" />
-      <div className="relative mx-auto max-w-7xl px-4 py-16">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+      <div className="max-w-7xl mx-auto px-4 py-16">
         {/* Header */}
-        <div className="mb-12 text-center">
-          <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-primary-200/70 bg-primary-50/80 px-3 py-1 text-xs font-semibold text-primary-700 backdrop-blur dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-300">
-            <span className="status-dot status-dot-online h-1.5 w-1.5" />
-            Simple, transparent pricing
-          </div>
-          <h1 className="text-4xl font-bold text-slate-950 dark:text-white mb-4">
-            Choose Your <span className="gradient-text-cyber">Path to Success</span>
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+            Choose Your Path to Success
           </h1>
-          <p className="mx-auto max-w-2xl text-lg text-slate-600 dark:text-slate-300">
+          <p className="text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
             Invest in your career with the tools, connections, and support you need to thrive
           </p>
         </div>
 
         {/* Billing Toggle */}
-        <div className="mb-12 flex items-center justify-center">
-          <div className="flex items-center rounded-full border border-slate-200/60 bg-white/70 p-1 backdrop-blur dark:border-white/10 dark:bg-slate-900/60">
+        <div className="flex items-center justify-center mb-12">
+          <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-full flex items-center">
             <button
               onClick={() => setBillingPeriod('monthly')}
               className={cn(
-                'rounded-full px-6 py-2 text-sm font-medium transition',
+                'px-6 py-2 rounded-full text-sm font-medium transition',
                 billingPeriod === 'monthly'
-                  ? 'bg-[linear-gradient(135deg,#f43f5e,#a855f7)] text-white shadow'
-                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow'
+                  : 'text-gray-500 dark:text-gray-400'
               )}
             >
               Monthly
@@ -171,36 +165,33 @@ export default function PricingPage() {
             <button
               onClick={() => setBillingPeriod('yearly')}
               className={cn(
-                'flex items-center rounded-full px-6 py-2 text-sm font-medium transition',
+                'px-6 py-2 rounded-full text-sm font-medium transition flex items-center',
                 billingPeriod === 'yearly'
-                  ? 'bg-[linear-gradient(135deg,#f43f5e,#a855f7)] text-white shadow'
-                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow'
+                  : 'text-gray-500 dark:text-gray-400'
               )}
             >
               Yearly
-              <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                {/* Computed from real prices — never hard-code a savings claim (P0.3) */}
-                {yearlySavingsBadge()}
+              <span className="ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-xs rounded-full">
+                Save 20%
               </span>
             </button>
           </div>
         </div>
 
         {/* Pricing Cards */}
-        <div className="mb-16 grid gap-8 md:grid-cols-3">
+        <div className="grid md:grid-cols-3 gap-8 mb-16">
           {plans.map((plan) => (
             <div
               key={plan.id}
               className={cn(
-                'card-lift relative overflow-hidden rounded-2xl',
-                plan.popular
-                  ? 'glow-primary bg-white/95 dark:bg-slate-900/95'
-                  : 'glass-panel'
+                'relative bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden transition-transform hover:scale-105',
+                plan.popular && 'ring-2 ring-primary-500'
               )}
             >
               {plan.popular && (
-                <div className="flex items-center justify-center gap-1 bg-[linear-gradient(135deg,#f43f5e,#a855f7)] py-2 text-center text-sm font-medium text-white">
-                  <Star className="h-3.5 w-3.5 fill-current" />
+                <div className="absolute top-0 left-0 right-0 bg-primary-500 text-white text-center py-2 text-sm font-medium flex items-center justify-center">
+                  <Star className="w-4 h-4 mr-1 fill-current" />
                   Most Popular
                 </div>
               )}
@@ -211,7 +202,7 @@ export default function PricingPage() {
                   <div
                     className={cn(
                       'w-12 h-12 rounded-xl flex items-center justify-center',
-                      plan.color === 'gray' && 'bg-slate-100 dark:bg-slate-700',
+                      plan.color === 'gray' && 'bg-gray-100 dark:bg-gray-700',
                       plan.color === 'primary' && 'bg-primary-100 dark:bg-primary-900/30',
                       plan.color === 'purple' && 'bg-purple-100 dark:bg-purple-900/30'
                     )}
@@ -219,17 +210,17 @@ export default function PricingPage() {
                     <plan.icon
                       className={cn(
                         'w-6 h-6',
-                        plan.color === 'gray' && 'text-slate-500',
+                        plan.color === 'gray' && 'text-gray-500',
                         plan.color === 'primary' && 'text-primary-500',
                         plan.color === 'purple' && 'text-purple-500'
                       )}
                     />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                       {plan.name}
                     </h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       {plan.description}
                     </p>
                   </div>
@@ -238,7 +229,7 @@ export default function PricingPage() {
                 {/* Pricing */}
                 <div className="mb-6">
                   <div className="flex items-baseline">
-                    <span className="text-4xl font-bold text-slate-900 dark:text-white">
+                    <span className="text-4xl font-bold text-gray-900 dark:text-white">
                       {formatCurrency(
                         billingPeriod === 'monthly'
                           ? plan.monthlyPrice
@@ -246,13 +237,13 @@ export default function PricingPage() {
                       )}
                     </span>
                     {plan.monthlyPrice > 0 && (
-                      <span className="text-slate-500 dark:text-slate-400 ml-2">
+                      <span className="text-gray-500 dark:text-gray-400 ml-2">
                         /month
                       </span>
                     )}
                   </div>
                   {plan.monthlyPrice > 0 && billingPeriod === 'yearly' && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                       {formatCurrency(plan.yearlyPrice)} billed annually
                     </p>
                   )}
@@ -263,12 +254,12 @@ export default function PricingPage() {
                   onClick={() => handleSelectPlan(plan.id)}
                   disabled={plan.disabled}
                   className={cn(
-                    'flex w-full items-center justify-center rounded-xl py-3 text-sm font-semibold transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60',
+                    'w-full py-3 rounded-lg font-semibold transition flex items-center justify-center',
                     plan.color === 'primary'
-                      ? 'bg-[linear-gradient(135deg,#f43f5e,#a855f7)] text-white shadow-blossom'
+                      ? 'bg-primary-500 text-white hover:bg-primary-600'
                       : plan.color === 'purple'
-                      ? 'bg-[linear-gradient(135deg,#a855f7,#06b6d4)] text-white shadow-purple'
-                      : 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                      ? 'bg-purple-500 text-white hover:bg-purple-600'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
                   )}
                 >
                   {plan.cta}
@@ -282,14 +273,14 @@ export default function PricingPage() {
                       {feature.included ? (
                         <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
                       ) : (
-                        <X className="w-5 h-5 text-slate-300 dark:text-slate-600 flex-shrink-0 mt-0.5" />
+                        <X className="w-5 h-5 text-gray-300 dark:text-gray-600 flex-shrink-0 mt-0.5" />
                       )}
                       <span
                         className={cn(
                           'text-sm',
                           feature.included
-                            ? 'text-slate-700 dark:text-slate-300'
-                            : 'text-slate-400 dark:text-slate-500'
+                            ? 'text-gray-700 dark:text-gray-300'
+                            : 'text-gray-400 dark:text-gray-500'
                         )}
                       >
                         {feature.name}
@@ -303,45 +294,51 @@ export default function PricingPage() {
         </div>
 
         {/* Trust Badges */}
-        <div className="mb-16 text-center">
-          <div className="inline-flex flex-wrap items-center justify-center gap-4 rounded-2xl border border-primary-100/60 bg-white/70 px-8 py-4 backdrop-blur dark:border-white/10 dark:bg-slate-900/60">
-            {[`${REFUND_DAYS}-day money-back guarantee`,'Cancel anytime','Secure payments via Stripe'].map((label) => (
-              <div key={label} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                <Check className="h-4 w-4 flex-shrink-0 text-emerald-500" />
-                {label}
-              </div>
-            ))}
+        <div className="text-center mb-16">
+          <div className="flex flex-wrap items-center justify-center gap-8 text-gray-400 dark:text-gray-500">
+            <div className="flex items-center space-x-2">
+              <Check className="w-5 h-5 text-green-500" />
+              <span>30-day money-back guarantee</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Check className="w-5 h-5 text-green-500" />
+              <span>Cancel anytime</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Check className="w-5 h-5 text-green-500" />
+              <span>Secure payments via Stripe</span>
+            </div>
           </div>
         </div>
 
         {/* FAQs */}
-        <div className="mx-auto max-w-3xl">
-          <h2 className="mb-8 text-center text-2xl font-bold text-slate-950 dark:text-white">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white text-center mb-8">
             Frequently Asked Questions
           </h2>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             {faqs.map((faq, index) => (
               <div
                 key={index}
-                className="overflow-hidden rounded-xl border border-primary-100/50 bg-white/80 backdrop-blur dark:border-white/10 dark:bg-slate-900/70"
+                className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden"
               >
                 <button
                   onClick={() => setExpandedFaq(expandedFaq === index ? null : index)}
-                  className="flex w-full items-center justify-between p-5 text-left"
+                  className="w-full flex items-center justify-between p-4 text-left"
                 >
-                  <span className="font-medium text-slate-900 dark:text-white">
+                  <span className="font-medium text-gray-900 dark:text-white">
                     {faq.question}
                   </span>
                   <HelpCircle
                     className={cn(
-                      'h-5 w-5 flex-shrink-0 text-primary-500 transition-transform',
+                      'w-5 h-5 text-gray-400 transition-transform',
                       expandedFaq === index && 'rotate-180'
                     )}
                   />
                 </button>
                 {expandedFaq === index && (
-                  <div className="border-t border-primary-100/40 px-5 pb-5 pt-3 text-sm leading-6 text-slate-600 dark:border-white/10 dark:text-slate-300">
+                  <div className="px-4 pb-4 text-gray-600 dark:text-gray-300 text-sm">
                     {faq.answer}
                   </div>
                 )}
@@ -352,28 +349,24 @@ export default function PricingPage() {
 
         {/* CTA Section */}
         <div className="mt-16 text-center">
-          <div className="overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#1a0a2e,#0d1b3e)] p-8 md:p-12">
-            <div aria-hidden="true" className="cyber-grid pointer-events-none absolute inset-0 opacity-20" />
-            <div className="relative">
-              <h2 className="mb-4 text-2xl font-bold text-white md:text-3xl">
-                Ready to <span className="gradient-text-cyber">accelerate your career</span>?
-              </h2>
-              <p className="mx-auto mb-6 max-w-2xl text-white/80">
-                {/* No unverifiable user-count claims here (audit P0.2) */}
-                Use ATHENA to find your next role, build meaningful connections,
-                and achieve your career goals.
-              </p>
-              <button
-                onClick={() => handleSelectPlan('pro')}
-                className="mx-auto flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,#f43f5e,#a855f7,#06b6d4)] px-8 py-3 font-semibold text-white shadow-blossom transition hover:-translate-y-0.5"
-              >
-                Start Free Trial
-                <ArrowRight className="h-5 w-5" />
-              </button>
-              <p className="mt-4 text-sm text-white/50">
-                {TRIAL_DAYS}-day free trial • No credit card required
-              </p>
-            </div>
+          <div className="bg-gradient-to-r from-primary-500 to-purple-500 rounded-2xl p-8 md:p-12">
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">
+              Ready to accelerate your career?
+            </h2>
+            <p className="text-white/90 mb-6 max-w-2xl mx-auto">
+              Join thousands of women who are using ATHENA to land their dream jobs,
+              build meaningful connections, and achieve their career goals.
+            </p>
+            <button
+              onClick={() => handleSelectPlan('pro')}
+              className="bg-white text-primary-600 px-8 py-3 rounded-lg font-semibold hover:bg-gray-100 transition flex items-center mx-auto"
+            >
+              Start Free Trial
+              <ArrowRight className="w-5 h-5 ml-2" />
+            </button>
+            <p className="text-white/70 text-sm mt-4">
+              14-day free trial • No credit card required
+            </p>
           </div>
         </div>
       </div>

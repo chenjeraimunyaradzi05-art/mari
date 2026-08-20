@@ -38,14 +38,14 @@ export default function DashboardHeader() {
   const { sidebarOpen, toggleSidebar } = useUIStore();
 
   return (
-    <header className="sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+    <header className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between h-16 px-4">
         {/* Left Section */}
         <div className="flex items-center space-x-4">
           {/* Mobile Menu Toggle */}
           <button
             onClick={toggleSidebar}
-            className="lg:hidden p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+            className="lg:hidden p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
             aria-label="Toggle sidebar"
           >
             <Menu className="w-5 h-5" />
@@ -54,7 +54,7 @@ export default function DashboardHeader() {
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center space-x-2">
             <Image
-              src="/logo.svg"
+              src="/athena-logo.png"
               alt="ATHENA"
               width={40}
               height={40}
@@ -80,7 +80,7 @@ export default function DashboardHeader() {
                     'flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition',
                     isActive
                       ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
-                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800'
                   )}
                 >
                   <item.icon className="w-4 h-4" />
@@ -96,18 +96,18 @@ export default function DashboardHeader() {
           {/* Search (Desktop) */}
           <button
             onClick={() => setIsSearchOpen(true)}
-            className="hidden md:flex items-center gap-3 px-3 py-2 w-64 lg:w-80 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-sm text-slate-500 dark:text-slate-300 hover:border-primary-300 dark:hover:border-primary-600 transition"
+            className="hidden md:flex items-center gap-3 px-3 py-2 w-64 lg:w-80 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-sm text-gray-500 dark:text-gray-300 hover:border-primary-300 dark:hover:border-primary-600 transition"
             aria-label="Open search"
           >
-            <Search className="w-4 h-4 text-slate-400" />
+            <Search className="w-4 h-4 text-gray-400" />
             <span className="flex-1 text-left">Search people, jobs, courses...</span>
-            <span className="text-xs text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5">⌘K</span>
+            <span className="text-xs text-gray-400 border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5">⌘K</span>
           </button>
 
           {/* Search Toggle (Mobile) */}
           <button
             onClick={() => setShowSearch(!showSearch)}
-            className="md:hidden p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+            className="md:hidden p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
             aria-label="Search"
           >
             {showSearch ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
@@ -125,7 +125,7 @@ export default function DashboardHeader() {
           {/* Messages */}
           <Link
             href="/dashboard/messages"
-            className="relative p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+            className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
             aria-label="Messages"
           >
             <MessageCircle className="w-5 h-5" />
@@ -144,15 +144,15 @@ export default function DashboardHeader() {
 
       {/* Mobile Search Bar */}
       {showSearch && (
-        <div className="md:hidden p-4 border-t border-slate-200 dark:border-slate-700">
+        <div className="md:hidden p-4 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={() => {
               setIsSearchOpen(true);
               setShowSearch(false);
             }}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-sm text-slate-500 dark:text-slate-300"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-sm text-gray-500 dark:text-gray-300"
           >
-            <Search className="w-4 h-4 text-slate-400" />
+            <Search className="w-4 h-4 text-gray-400" />
             <span className="flex-1 text-left">Search across Athena...</span>
           </button>
         </div>

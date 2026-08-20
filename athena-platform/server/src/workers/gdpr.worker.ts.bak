@@ -1,0 +1,518 @@
+/**
+ * GDPR Compliance Workers
+ * Background jobs for data export and deletion requests
+ * Phase 2: Backend Logic & Integrations
+ */
+
+import { prisma } from '../utils/prisma';
+import { logger } from '../utils/logger';
+import { createHash } from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import archiver from 'archiver';
+import { createWriteStream } from 'fs';
+import { NotificationService } from './notification.service';
+
+const notificationService = new NotificationService();
+
+// ==========================================
+// CONFIGURATION
+// ==========================================
+
+const EXPORT_DIR = process.env.GDPR_EXPORT_DIR || './exports';
+const EXPORT_EXPIRY_DAYS = 7;
+const DELETION_GRACE_PERIOD_DAYS = 30;
+
+// ==========================================
+// DATA EXPORT JOB
+// ==========================================
+
+/**
+ * Process pending data export requests
+ */
+export async function processExportRequests(): Promise<{ processed: number; failed: number }> {
+  logger.info('Starting GDPR export job');
+  
+  const pendingRequests = await prisma.dSARRequest.findMany({
+    where: {
+      type: 'EXPORT',
+      status: 'PENDING',
+    },
+    take: 10, // Process in batches
+  });
+  
+  let processed = 0;
+  let failed = 0;
+  
+  for (const request of pendingRequests) {
+    try {
+      await processExportRequest(request.id);
+      processed++;
+    } catch (error) {
+      logger.error('Export request failed', { error, requestId: request.id });
+      failed++;
+      
+      await prisma.dSARRequest.update({
+        where: { id: request.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        },
+      });
+    }
+  }
+  
+  logger.info('GDPR export job complete', { processed, failed });
+  return { processed, failed };
+}
+
+/**
+ * Process a single export request
+ */
+async function processExportRequest(requestId: string): Promise<void> {
+  // Update status
+  await prisma.dSARRequest.update({
+    where: { id: requestId },
+    data: { status: 'IN_PROGRESS' },
+  });
+  
+  const request = await prisma.dSARRequest.findUnique({
+    where: { id: requestId },
+    include: { user: true },
+  });
+  
+  if (!request) throw new Error('Request not found');
+  
+  const userId = request.userId;
+  
+  // Gather all user data
+  const userData = await gatherUserData(userId);
+  
+  // Create export directory
+  await fs.mkdir(EXPORT_DIR, { recursive: true });
+  
+  // Generate export filename
+  const timestamp = Date.now();
+  const hash = createHash('md5').update(`${userId}-${timestamp}`).digest('hex').slice(0, 8);
+  const filename = `athena-export-${hash}.zip`;
+  const filepath = path.join(EXPORT_DIR, filename);
+  
+  // Create ZIP archive
+  await createExportArchive(filepath, userData);
+  
+  // Calculate expiry
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + EXPORT_EXPIRY_DAYS);
+  
+  // Update request
+  await prisma.dSARRequest.update({
+    where: { id: requestId },
+    data: {
+      status: 'COMPLETED',
+      completedAt: new Date(),
+      downloadUrl: `/api/gdpr/download/${filename}`,
+      expiresAt,
+    },
+  });
+  
+  // Log for audit
+  await prisma.auditLog.create({
+    data: {
+      userId,
+      action: 'DSAR_EXPORT',
+      resourceType: 'DSARRequest',
+      resourceId: requestId,
+      details: { filename, dataCategories: Object.keys(userData) },
+    },
+  });
+  
+  // Notify user
+  await notificationService.notify({
+    userId,
+    type: 'SYSTEM',
+    title: 'Your Data Export is Ready',
+    message: `Your data export is ready for download. It will be available for ${EXPORT_EXPIRY_DAYS} days.`,
+    link: '/settings/privacy',
+    channels: ['in-app', 'email'],
+    priority: 'high',
+  });
+}
+
+/**
+ * Gather all user data for export
+ */
+async function gatherUserData(userId: string): Promise<Record<string, any>> {
+  const [
+    user,
+    profile,
+    posts,
+    comments,
+    likes,
+    messages,
+    followers,
+    following,
+    applications,
+    sessions,
+    courses,
+    subscriptions,
+    notifications,
+  ] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        role: true,
+        persona: true,
+        createdAt: true,
+        lastLoginAt: true,
+      },
+    }),
+    prisma.profile.findUnique({ where: { userId } }),
+    prisma.post.findMany({ where: { authorId: userId } }),
+    prisma.comment.findMany({ where: { authorId: userId } }),
+    prisma.like.findMany({ where: { userId } }),
+    prisma.message.findMany({
+      where: { OR: [{ senderId: userId }, { receiverId: userId }] },
+      orderBy: { createdAt: 'desc' },
+      take: 10000,
+    }),
+    prisma.follow.findMany({ where: { followingId: userId } }),
+    prisma.follow.findMany({ where: { followerId: userId } }),
+    prisma.jobApplication.findMany({ where: { userId } }),
+    prisma.mentorSession.findMany({ where: { menteeId: userId } }),
+    prisma.courseEnrollment.findMany({ where: { userId } }),
+    prisma.subscription.findMany({ where: { userId } }),
+    prisma.notification.findMany({ where: { userId }, take: 1000 }),
+  ]);
+  
+  return {
+    account: user,
+    profile,
+    content: {
+      posts: posts.map(sanitizePost),
+      comments: comments.map(sanitizeComment),
+      likes,
+    },
+    social: {
+      followers: followers.map((f) => f.followerId),
+      following: following.map((f) => f.followingId),
+    },
+    messages: messages.map(sanitizeMessage),
+    activity: {
+      jobApplications: applications,
+      mentorSessions: sessions,
+      courseEnrollments: courses,
+    },
+    subscriptions,
+    notifications: notifications.slice(0, 500),
+    exportedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Create ZIP archive of user data
+ */
+async function createExportArchive(filepath: string, data: Record<string, any>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const output = createWriteStream(filepath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    
+    output.on('close', resolve);
+    archive.on('error', reject);
+    
+    archive.pipe(output);
+    
+    // Add data files
+    for (const [category, content] of Object.entries(data)) {
+      archive.append(JSON.stringify(content, null, 2), { name: `${category}.json` });
+    }
+    
+    // Add readme
+    archive.append(
+      `ATHENA Data Export\n${'='.repeat(50)}\n\n` +
+      `Exported: ${new Date().toISOString()}\n\n` +
+      `This archive contains all your personal data stored by ATHENA.\n\n` +
+      `Files included:\n${Object.keys(data).map((k) => `- ${k}.json`).join('\n')}\n\n` +
+      `For questions, contact privacy@athena.com`,
+      { name: 'README.txt' }
+    );
+    
+    archive.finalize();
+  });
+}
+
+// Helper functions
+function sanitizePost(post: any) {
+  return { ...post, content: post.content };
+}
+
+function sanitizeComment(comment: any) {
+  return { ...comment, content: comment.content };
+}
+
+function sanitizeMessage(message: any) {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    direction: message.senderId === message.senderId ? 'sent' : 'received',
+    content: message.content,
+    createdAt: message.createdAt,
+  };
+}
+
+// ==========================================
+// DATA DELETION JOB
+// ==========================================
+
+/**
+ * Process pending deletion requests
+ */
+export async function processDeletionRequests(): Promise<{ processed: number; failed: number }> {
+  logger.info('Starting GDPR deletion job');
+  
+  // Get deletion requests past grace period
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - DELETION_GRACE_PERIOD_DAYS);
+  
+  const pendingRequests = await prisma.dSARRequest.findMany({
+    where: {
+      type: 'DELETION',
+      status: { in: ['PENDING', 'IN_PROGRESS'] },
+      createdAt: { lt: cutoffDate },
+    },
+    take: 5,
+  });
+  
+  let processed = 0;
+  let failed = 0;
+  
+  for (const request of pendingRequests) {
+    try {
+      await processDeletionRequest(request.id);
+      processed++;
+    } catch (error) {
+      logger.error('Deletion request failed', { error, requestId: request.id });
+      failed++;
+      
+      await prisma.dSARRequest.update({
+        where: { id: request.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        },
+      });
+    }
+  }
+  
+  logger.info('GDPR deletion job complete', { processed, failed });
+  return { processed, failed };
+}
+
+/**
+ * Process a single deletion request
+ */
+async function processDeletionRequest(requestId: string): Promise<void> {
+  const request = await prisma.dSARRequest.findUnique({
+    where: { id: requestId },
+    include: { user: { select: { email: true, firstName: true } } },
+  });
+  
+  if (!request) throw new Error('Request not found');
+  
+  const userId = request.userId;
+  const userEmail = request.user.email;
+  
+  // Update status
+  await prisma.dSARRequest.update({
+    where: { id: requestId },
+    data: { status: 'IN_PROGRESS' },
+  });
+  
+  logger.info('Processing deletion request', { requestId, userId });
+  
+  // Cascade delete user data
+  await cascadeDeleteUserData(userId);
+  
+  // Log for compliance
+  await prisma.auditLog.create({
+    data: {
+      userId: 'SYSTEM',
+      action: 'ACCOUNT_DELETE',
+      resourceType: 'User',
+      resourceId: userId,
+      details: {
+        requestId,
+        deletedAt: new Date().toISOString(),
+        emailHash: createHash('sha256').update(userEmail).digest('hex'),
+      },
+    },
+  });
+  
+  // Update request
+  await prisma.dSARRequest.update({
+    where: { id: requestId },
+    data: {
+      status: 'COMPLETED',
+      completedAt: new Date(),
+    },
+  });
+  
+  logger.info('Deletion complete', { requestId, userId });
+}
+
+/**
+ * Cascade delete all user data
+ */
+async function cascadeDeleteUserData(userId: string): Promise<void> {
+  // Order matters for foreign key constraints
+  const deletionOrder = [
+    // Notifications and activity
+    () => prisma.notification.deleteMany({ where: { userId } }),
+    () => prisma.auditLog.deleteMany({ where: { userId } }),
+    
+    // Social data
+    () => prisma.like.deleteMany({ where: { userId } }),
+    () => prisma.comment.deleteMany({ where: { authorId: userId } }),
+    () => prisma.follow.deleteMany({ where: { OR: [{ followerId: userId }, { followingId: userId }] } }),
+    
+    // Messages
+    () => prisma.message.deleteMany({ where: { OR: [{ senderId: userId }, { receiverId: userId }] } }),
+    () => prisma.conversationParticipant.deleteMany({ where: { userId } }),
+    
+    // Content
+    () => prisma.post.deleteMany({ where: { authorId: userId } }),
+    
+    // Job & career
+    () => prisma.jobApplication.deleteMany({ where: { userId } }),
+    () => prisma.mentorSession.deleteMany({ where: { menteeId: userId } }),
+    () => prisma.courseEnrollment.deleteMany({ where: { userId } }),
+    
+    // Groups
+    () => prisma.groupMember.deleteMany({ where: { userId } }),
+    () => prisma.groupJoinRequest.deleteMany({ where: { userId } }),
+    
+    // Profile & settings
+    () => prisma.userSkill.deleteMany({ where: { userId } }),
+    () => prisma.education.deleteMany({ where: { userId } }),
+    () => prisma.experience.deleteMany({ where: { userId } }),
+    () => prisma.profile.deleteMany({ where: { userId } }),
+    
+    // Payments
+    () => prisma.subscription.deleteMany({ where: { userId } }),
+    
+    // Verification
+    () => prisma.verificationBadge.deleteMany({ where: { userId } }),
+    
+    // Push tokens
+    () => prisma.pushToken.deleteMany({ where: { userId } }),
+    
+    // Finally, delete the user
+    () => prisma.user.delete({ where: { id: userId } }),
+  ];
+  
+  for (const deleteOp of deletionOrder) {
+    try {
+      await deleteOp();
+    } catch (error) {
+      // Log but continue - some tables might not have data
+      logger.warn('Deletion step failed', { error, userId });
+    }
+  }
+}
+
+// ==========================================
+// CLEANUP JOBS
+// ==========================================
+
+/**
+ * Clean up expired export files
+ */
+export async function cleanupExpiredExports(): Promise<{ deleted: number }> {
+  logger.info('Cleaning up expired exports');
+  
+  const expiredRequests = await prisma.dSARRequest.findMany({
+    where: {
+      type: 'EXPORT',
+      status: 'COMPLETED',
+      expiresAt: { lt: new Date() },
+    },
+  });
+  
+  let deleted = 0;
+  
+  for (const request of expiredRequests) {
+    if (request.downloadUrl) {
+      const filename = path.basename(request.downloadUrl);
+      const filepath = path.join(EXPORT_DIR, filename);
+      
+      try {
+        await fs.unlink(filepath);
+        deleted++;
+      } catch {
+        // File might not exist
+      }
+    }
+    
+    await prisma.dSARRequest.update({
+      where: { id: request.id },
+      data: {
+        status: 'EXPIRED',
+        downloadUrl: null,
+      },
+    });
+  }
+  
+  logger.info('Export cleanup complete', { deleted });
+  return { deleted };
+}
+
+/**
+ * Send reminder for pending deletion requests
+ */
+export async function sendDeletionReminders(): Promise<{ sent: number }> {
+  const reminderDays = [25, 28, 29]; // Days before deletion
+  let sent = 0;
+  
+  for (const daysBefore of reminderDays) {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() - (DELETION_GRACE_PERIOD_DAYS - daysBefore));
+    
+    const requests = await prisma.dSARRequest.findMany({
+      where: {
+        type: 'DELETION',
+        status: 'PENDING',
+        createdAt: {
+          gte: new Date(targetDate.getTime() - 24 * 60 * 60 * 1000),
+          lt: targetDate,
+        },
+      },
+      include: { user: { select: { email: true, firstName: true } } },
+    });
+    
+    for (const request of requests) {
+      await notificationService.notify({
+        userId: request.userId,
+        type: 'SYSTEM',
+        title: `Account Deletion in ${daysBefore} days`,
+        message: `Your account deletion request will be processed in ${daysBefore} days. Cancel now if you've changed your mind.`,
+        link: '/settings/privacy',
+        channels: ['email'],
+        priority: 'high',
+      });
+      sent++;
+    }
+  }
+  
+  return { sent };
+}
+
+export const gdprWorkers = {
+  processExportRequests,
+  processDeletionRequests,
+  cleanupExpiredExports,
+  sendDeletionReminders,
+};

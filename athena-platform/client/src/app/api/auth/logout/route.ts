@@ -4,11 +4,16 @@ import {
   forwardSetCookieHeaders,
   rejectUntrustedSameOriginRequest,
 } from '../proxy-utils';
-import { BACKEND_API_URL as API_URL } from '@/lib/runtime-config';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function POST(request: NextRequest) {
   // Always clear the refresh cookie on the Next.js side, even if the backend call fails.
   // This ensures the user is fully logged out client-side regardless of backend availability.
+  const isProduction = process.env.NODE_ENV === 'production';
+  const clearCookie =
+    `refreshToken=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isProduction ? '; Secure' : ''}`;
+
   try {
     const originError = rejectUntrustedSameOriginRequest(request);
     if (originError) {
@@ -31,15 +36,7 @@ export async function POST(request: NextRequest) {
     // Forward any Set-Cookie from backend
     forwardSetCookieHeaders(response, res);
     // Also explicitly clear the cookie on the Next.js domain
-    res.cookies.set({
-      name: 'refreshToken',
-      value: '',
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 0,
-    });
+    res.headers.append('Set-Cookie', clearCookie);
     return res;
   } catch (error) {
     console.error('Logout API error:', error);
@@ -48,15 +45,7 @@ export async function POST(request: NextRequest) {
       { success: true, message: 'Logged out' },
       { status: 200 }
     );
-    res.cookies.set({
-      name: 'refreshToken',
-      value: '',
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 0,
-    });
+    res.headers.append('Set-Cookie', clearCookie);
     return res;
   }
 }

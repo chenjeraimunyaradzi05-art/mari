@@ -12,7 +12,6 @@ import {
   mentorApi,
   courseApi,
   subscriptionApi,
-  paymentsApi,
   educationApi,
   formationApi,
   eventsApi,
@@ -72,8 +71,10 @@ export function useAuth() {
   const registerMutation = useMutation({
     mutationFn: authApi.register,
     onSuccess: (response) => {
+      const { user: userData, accessToken } = response.data.data;
+      login(userData, accessToken, '');
       queryClient.invalidateQueries();
-      toast.success(response.data.message || 'Registration successful. Please verify your email.');
+      toast.success('Welcome to ATHENA!');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Registration failed');
@@ -931,8 +932,6 @@ export function useSendMessage() {
 }
 
 export function useUnreadMessageCount() {
-  const { user } = useAuthStore();
-
   return useQuery({
     queryKey: ['conversations'],
     queryFn: messageApi.getConversations,
@@ -940,7 +939,6 @@ export function useUnreadMessageCount() {
       const conversations = response.data.data as Array<{ unreadCount?: number }>;
       return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
     },
-    enabled: Boolean(user),
     refetchInterval: 30000,
   });
 }
@@ -1222,15 +1220,6 @@ export function useCancelSubscription() {
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to cancel subscription');
     },
-  });
-}
-
-export function usePaymentMethods(region?: string) {
-  return useQuery({
-    queryKey: ['payment-methods', region],
-    queryFn: () => paymentsApi.getMethods(region),
-    enabled: Boolean(region),
-    select: (response) => response.data.methods || response.data.data || [],
   });
 }
 

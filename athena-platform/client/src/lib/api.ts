@@ -1,9 +1,8 @@
 import axios from 'axios';
 import { clearTokens, getAccessToken, setTokens } from './auth';
-import { getBackendApiUrl } from './runtime-config';
 
 // Direct backend origin — used for WebSocket connections and SSR calls
-export const API_ORIGIN = getBackendApiUrl();
+export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 
 // REST API base URL — use relative path so requests go through the proxy
 // (Netlify redirects in prod, Next.js rewrites in dev) avoiding CORS issues.
@@ -21,7 +20,6 @@ const authPathsToSkipRefresh = [
   '/auth/login',
   '/auth/register',
   '/auth/google',
-  '/auth/facebook',
   '/auth/refresh',
   '/auth/logout',
   '/auth/forgot-password',
@@ -106,15 +104,7 @@ export const authApi = {
     inviteCode?: string;
   }) => api.post('/auth/google', data),
 
-  facebook: (data: {
-    accessToken: string;
-    mode?: 'login' | 'register';
-    persona?: string;
-    womanSelfAttested?: boolean;
-    inviteCode?: string;
-  }) => api.post('/auth/facebook', data),
-
-  login: (data: { email: string; password: string; twoFactorCode?: string }) =>
+  login: (data: { email: string; password: string }) =>
     api.post('/auth/login', data),
 
   logout: () => api.post('/auth/logout'),
@@ -123,9 +113,6 @@ export const authApi = {
 
   forgotPassword: (email: string) =>
     api.post('/auth/forgot-password', { email }),
-
-  resendVerification: (email: string) =>
-    api.post('/auth/resend-verification', { email }),
 
   resetPassword: (data: { token: string; password: string }) =>
     api.post('/auth/reset-password', data),
@@ -383,10 +370,6 @@ export const subscriptionApi = {
   createPortal: () => api.post('/subscriptions/portal'),
 
   cancel: () => api.post('/subscriptions/cancel'),
-};
-
-export const paymentsApi = {
-  getMethods: (region?: string) => api.get('/payments/methods', { params: { region } }),
 };
 
 // ============================================
