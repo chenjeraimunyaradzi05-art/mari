@@ -67,8 +67,8 @@ const authNotes = [
 
 export default function ApiReferencePage() {
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-white">
-      <section className="border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-gray-950/80">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <section className="border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-1.5 text-sm font-medium text-primary-700 dark:border-primary-900/40 dark:bg-primary-950/40 dark:text-primary-300">
             <BookOpen className="h-4 w-4" />
@@ -77,7 +77,7 @@ export default function ApiReferencePage() {
           <h1 className="mt-6 max-w-4xl text-4xl font-semibold tracking-tight sm:text-5xl">
             The current ATHENA API surface, mapped to real product workflows.
           </h1>
-          <p className="mt-4 max-w-3xl text-lg leading-8 text-gray-600 dark:text-gray-300">
+          <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
             This reference is designed for partner teams, enterprise buyers, and internal developers who need a clear
             view of the platform surfaces currently available for integration.
           </p>
@@ -86,13 +86,13 @@ export default function ApiReferencePage() {
 
       <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h2 className="text-2xl font-semibold">Authentication notes</h2>
             <div className="mt-6 space-y-4">
               {authNotes.map((note) => (
                 <div
                   key={note}
-                  className="rounded-2xl border border-gray-100 bg-gray-50/80 p-4 text-sm leading-7 text-gray-700 dark:border-gray-800 dark:bg-gray-950/50 dark:text-gray-300"
+                  className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 text-sm leading-7 text-slate-700 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300"
                 >
                   {note}
                 </div>
@@ -111,7 +111,7 @@ export default function ApiReferencePage() {
             {endpointGroups.map((group) => (
               <div
                 key={group.title}
-                className="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+                className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
                 <div className="flex items-start gap-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
@@ -119,14 +119,14 @@ export default function ApiReferencePage() {
                   </div>
                   <div>
                     <h2 className="text-2xl font-semibold">{group.title}</h2>
-                    <p className="mt-2 text-sm leading-7 text-gray-600 dark:text-gray-300">{group.description}</p>
+                    <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-300">{group.description}</p>
                   </div>
                 </div>
                 <div className="mt-6 grid gap-3">
                   {group.endpoints.map((endpoint) => (
                     <div
                       key={endpoint}
-                      className="rounded-2xl border border-gray-100 bg-gray-50/80 px-4 py-3 font-mono text-sm text-gray-800 dark:border-gray-800 dark:bg-gray-950/50 dark:text-gray-200"
+                      className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 font-mono text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-200"
                     >
                       {endpoint}
                     </div>

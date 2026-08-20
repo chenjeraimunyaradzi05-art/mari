@@ -130,33 +130,33 @@ export function CrossModuleShareDialog({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <Card
-        className="bg-white dark:bg-gray-900 w-full max-w-xl mx-4 p-6"
+        className="bg-white dark:bg-slate-900 w-full max-w-xl mx-4 p-6"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Share across ATHENA</h3>
-            <p className="text-sm text-gray-500">Send this to channels or copy the link.</p>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Share across ATHENA</h3>
+            <p className="text-sm text-slate-500">Send this to channels or copy the link.</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
-            <X className="h-5 w-5 text-gray-500" />
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X className="h-5 w-5 text-slate-500" />
           </button>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium text-gray-700">Message</label>
+            <label className="text-sm font-medium text-slate-700">Message</label>
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               rows={4}
-              className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-sm"
+              className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-sm"
             />
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-gray-700">Share to Channels</p>
+              <p className="text-sm font-medium text-slate-700">Share to Channels</p>
               <Button variant="outline" size="sm" onClick={copyLink}>
                 {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 <span className="ml-2">Copy Link</span>
@@ -165,12 +165,12 @@ export function CrossModuleShareDialog({
 
             <div className="max-h-48 overflow-y-auto space-y-2">
               {loadingChannels && (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
+                <div className="flex items-center gap-2 text-sm text-slate-500">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading channels...
                 </div>
               )}
               {!loadingChannels && channels.length === 0 && (
-                <p className="text-sm text-gray-500">You are not part of any channels yet.</p>
+                <p className="text-sm text-slate-500">You are not part of any channels yet.</p>
               )}
               {channels.map((channel) => (
                 <button
@@ -179,13 +179,13 @@ export function CrossModuleShareDialog({
                   className={`w-full flex items-center justify-between p-3 rounded-lg border transition ${
                     selected.includes(channel.id)
                       ? 'border-indigo-500 bg-indigo-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                      : 'border-slate-200 hover:border-slate-300'
                   }`}
                 >
                   <div className="text-left">
-                    <p className="text-sm font-medium text-gray-900">{channel.name}</p>
+                    <p className="text-sm font-medium text-slate-900">{channel.name}</p>
                     {channel.description && (
-                      <p className="text-xs text-gray-500 line-clamp-1">{channel.description}</p>
+                      <p className="text-xs text-slate-500 line-clamp-1">{channel.description}</p>
                     )}
                   </div>
                   {selected.includes(channel.id) && <CheckCircle2 className="h-4 w-4 text-indigo-600" />}

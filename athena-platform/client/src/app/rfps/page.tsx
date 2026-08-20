@@ -138,7 +138,7 @@ export default function RFPsPage() {
   }, [rfps, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       <section className="bg-gradient-to-br from-teal-600 to-cyan-700 text-white py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl">
@@ -157,13 +157,13 @@ export default function RFPsPage() {
       <section className="container mx-auto px-4 py-8">
         <div className="flex flex-col md:flex-row gap-4 mb-8">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
               placeholder="Search RFPs..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+              className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
             />
           </div>
           <div className="flex gap-2 overflow-x-auto pb-2">
@@ -174,7 +174,7 @@ export default function RFPsPage() {
                 className={`px-4 py-2 rounded-lg whitespace-nowrap transition ${
                   selectedCategory === category.id
                     ? 'bg-teal-600 text-white'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 hover:bg-slate-50'
                 }`}
               >
                 {category.name}
@@ -190,15 +190,15 @@ export default function RFPsPage() {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-slate-500">
             <Loader2 className="w-4 h-4 animate-spin" />
             Loading RFPs...
           </div>
         ) : filteredRfps.length === 0 ? (
-          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <FileText className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No open RFPs available</h3>
-            <p className="text-gray-600 dark:text-gray-400">
+          <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+            <FileText className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">No open RFPs available</h3>
+            <p className="text-slate-600 dark:text-slate-400">
               {searchQuery || selectedCategory
                 ? 'Try adjusting your search or category.'
                 : 'No members have published open RFPs yet.'}
@@ -212,20 +212,20 @@ export default function RFPsPage() {
               return (
                 <div
                   key={rfp.id}
-                  className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition"
+                  className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 hover:shadow-lg transition"
                 >
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{rfp.title}</h3>
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{rfp.title}</h3>
                         <span className="text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 px-2 py-1 rounded-full">
                           {rfp.responseCount ?? 0} proposals
                         </span>
-                        <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded-full">
+                        <span className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded-full">
                           {formatCategory(rfp.category)}
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 dark:text-gray-400 mb-3">
+                      <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600 dark:text-slate-400 mb-3">
                         <span className="flex items-center gap-1">
                           <Building className="w-4 h-4" />
                           {requesterName(rfp)}
@@ -235,12 +235,12 @@ export default function RFPsPage() {
                           Posted {formatRelativeTime(rfp.createdAt)}
                         </span>
                       </div>
-                      <p className="text-gray-600 dark:text-gray-400 mb-4 line-clamp-3">{rfp.description}</p>
+                      <p className="text-slate-600 dark:text-slate-400 mb-4 line-clamp-3">{rfp.description}</p>
                       <div className="flex flex-wrap gap-2">
                         {(labels.length ? labels : ['Requirements available in dashboard']).map((label) => (
                           <span
                             key={label}
-                            className="flex items-center gap-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded"
+                            className="flex items-center gap-1 text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded"
                           >
                             <CheckCircle className="w-3 h-3 text-teal-500" />
                             {label}
@@ -250,7 +250,7 @@ export default function RFPsPage() {
                     </div>
                     <div className="flex flex-col md:items-end gap-2 min-w-[180px]">
                       <div className="md:text-right">
-                        <div className="flex items-center gap-1 text-lg font-bold text-gray-900 dark:text-white">
+                        <div className="flex items-center gap-1 text-lg font-bold text-slate-900 dark:text-white">
                           <DollarSign className="w-5 h-5 text-teal-600" />
                           {rfp.budget || 'Flexible budget'}
                         </div>
@@ -282,7 +282,7 @@ export default function RFPsPage() {
           </p>
           <Link
             href="/dashboard/rfps"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-teal-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-teal-700 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             Create RFP <ArrowRight className="w-4 h-4" />
           </Link>

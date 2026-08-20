@@ -112,7 +112,7 @@ export default function AcceleratorPage() {
   }, [cohorts]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       <section className="relative bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 text-white overflow-hidden">
         <div className="container mx-auto px-4 py-20 relative z-10">
           <div className="max-w-3xl">
@@ -129,7 +129,7 @@ export default function AcceleratorPage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="/dashboard/accelerator"
-                className="px-6 py-3 bg-white text-orange-600 font-semibold rounded-lg hover:bg-gray-100 transition flex items-center gap-2"
+                className="px-6 py-3 bg-white text-orange-600 font-semibold rounded-lg hover:bg-slate-100 transition flex items-center gap-2"
               >
                 <Zap className="w-5 h-5" />
                 View cohorts
@@ -148,17 +148,17 @@ export default function AcceleratorPage() {
       <section className="container mx-auto px-4 -mt-8 relative z-20">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {stats.map((detail) => (
-            <div key={detail.description} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={detail.description} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <detail.icon className="w-8 h-8 text-orange-500 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{detail.label}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{detail.description}</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-white">{detail.label}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{detail.description}</div>
             </div>
           ))}
         </div>
       </section>
 
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Published Cohorts
         </h2>
 
@@ -169,15 +169,15 @@ export default function AcceleratorPage() {
         )}
 
         {loading ? (
-          <div className="mx-auto flex max-w-5xl items-center gap-2 text-sm text-gray-500">
+          <div className="mx-auto flex max-w-5xl items-center gap-2 text-sm text-slate-500">
             <Loader2 className="w-4 h-4 animate-spin" />
             Loading accelerator cohorts...
           </div>
         ) : cohorts.length === 0 ? (
-          <div className="mx-auto max-w-5xl rounded-xl border border-gray-200 bg-white p-8 text-center dark:border-gray-700 dark:bg-gray-800">
-            <Rocket className="mx-auto mb-4 h-14 w-14 text-gray-300 dark:text-gray-600" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">No upcoming cohorts published</h3>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          <div className="mx-auto max-w-5xl rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-800">
+            <Rocket className="mx-auto mb-4 h-14 w-14 text-slate-300 dark:text-slate-600" />
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">No upcoming cohorts published</h3>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
               Accelerator cohorts will appear here when enrollment opens.
             </p>
           </div>
@@ -187,20 +187,20 @@ export default function AcceleratorPage() {
               const items = curriculumItems(cohort.curriculum).slice(0, 4);
 
               return (
-                <div key={cohort.id} className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div key={cohort.id} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <span className="text-sm text-orange-600 font-medium">{formatStatus(cohort.status)}</span>
-                      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mt-1">{cohort.name}</h3>
+                      <h3 className="text-xl font-semibold text-slate-900 dark:text-white mt-1">{cohort.name}</h3>
                     </div>
                     <span className="rounded-full bg-orange-100 px-2 py-1 text-xs font-semibold text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
                       {formatCurrency(toNumber(cohort.priceAud))}
                     </span>
                   </div>
-                  <p className="mt-3 line-clamp-3 text-sm text-gray-600 dark:text-gray-400">
+                  <p className="mt-3 line-clamp-3 text-sm text-slate-600 dark:text-slate-400">
                     {cohort.description || 'Cohort details are still being finalized.'}
                   </p>
-                  <div className="mt-5 grid gap-3 text-sm text-gray-600 dark:text-gray-300">
+                  <div className="mt-5 grid gap-3 text-sm text-slate-600 dark:text-slate-300">
                     <div className="flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-orange-500" />
                       {formatDate(cohort.startDate)} - {formatDate(cohort.endDate)}
@@ -215,7 +215,7 @@ export default function AcceleratorPage() {
                     </div>
                   </div>
                   <div className="mt-5">
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Curriculum signals</h4>
+                    <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Curriculum signals</h4>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {(items.length ? items : ['Curriculum details pending']).map((item) => (
                         <span key={item} className="inline-flex items-center gap-1 rounded bg-orange-50 px-2 py-1 text-xs text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
@@ -238,9 +238,9 @@ export default function AcceleratorPage() {
         )}
       </section>
 
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
             What Cohorts Provide
           </h2>
           <div className="grid md:grid-cols-2 gap-4 max-w-3xl mx-auto">
@@ -252,7 +252,7 @@ export default function AcceleratorPage() {
             ].map((benefit) => (
               <div key={benefit} className="flex items-center gap-3 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
                 <CheckCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
-                <span className="text-gray-900 dark:text-white">{benefit}</span>
+                <span className="text-slate-900 dark:text-white">{benefit}</span>
               </div>
             ))}
           </div>
@@ -267,7 +267,7 @@ export default function AcceleratorPage() {
           </p>
           <Link
             href="/dashboard/accelerator"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-orange-600 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-orange-600 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             View Cohorts <ArrowRight className="w-4 h-4" />
           </Link>

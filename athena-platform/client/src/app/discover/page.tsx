@@ -14,7 +14,7 @@ export default function DiscoverPage() {
       </p>
 
       <div className="mt-8 grid gap-4 md:grid-cols-2">
-        <Link href="/jobs" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/jobs" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Briefcase className="h-4 w-4" /> Jobs
           </div>
@@ -24,7 +24,7 @@ export default function DiscoverPage() {
           </span>
         </Link>
 
-        <Link href="/mentors" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/mentors" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Users className="h-4 w-4" /> Mentors
           </div>
@@ -34,7 +34,7 @@ export default function DiscoverPage() {
           </span>
         </Link>
 
-        <Link href="/courses" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/courses" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <GraduationCap className="h-4 w-4" /> Courses
           </div>
@@ -44,7 +44,7 @@ export default function DiscoverPage() {
           </span>
         </Link>
 
-        <Link href="/community" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/community" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Sparkles className="h-4 w-4" /> Community
           </div>

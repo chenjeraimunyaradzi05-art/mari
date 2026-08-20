@@ -314,19 +314,19 @@ function SearchContent() {
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       {/* Search Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
           Search
         </h1>
 
         {/* Search Form */}
         <form onSubmit={handleSearch} className="relative">
-          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search jobs, people, mentors, videos, courses..."
-            className="w-full pl-12 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-lg focus:ring-2 focus:ring-primary-500"
+            className="w-full pl-12 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-lg focus:ring-2 focus:ring-primary-500"
             autoFocus
           />
           {query && (
@@ -336,7 +336,7 @@ function SearchContent() {
                 setQuery('');
                 setResults([]);
               }}
-              className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
             >
               <X className="w-5 h-5" />
             </button>
@@ -355,7 +355,7 @@ function SearchContent() {
                 'flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition',
                 category === cat.value
                   ? 'bg-primary-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
               )}
             >
               <cat.icon className="w-4 h-4" />
@@ -365,7 +365,7 @@ function SearchContent() {
                   'px-1.5 py-0.5 text-xs rounded-full',
                   category === cat.value
                     ? 'bg-white/20'
-                    : 'bg-gray-200 dark:bg-gray-600'
+                    : 'bg-slate-200 dark:bg-slate-600'
                 )}
               >
                 {resultCounts[cat.value]}
@@ -381,11 +381,11 @@ function SearchContent() {
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="card animate-pulse">
               <div className="flex items-start space-x-4">
-                <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+                <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-lg" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
-                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
-                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-5/6" />
+                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                  <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
+                  <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-5/6" />
                 </div>
               </div>
             </div>
@@ -413,18 +413,18 @@ function SearchContent() {
                       )}
                     />
                   ) : (
-                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
-                      <Icon className="w-6 h-6 text-gray-400" />
+                    <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center">
+                      <Icon className="w-6 h-6 text-slate-400" />
                     </div>
                   )}
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="font-medium text-gray-900 dark:text-white">
+                        <h3 className="font-medium text-slate-900 dark:text-white">
                           {result.title}
                         </h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
                           {result.subtitle}
                         </p>
                       </div>
@@ -434,13 +434,13 @@ function SearchContent() {
                     </div>
 
                     {result.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mt-2 line-clamp-2">
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 line-clamp-2">
                         {result.description}
                       </p>
                     )}
 
                     {result.metadata && (
-                      <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
                         {Object.entries(result.metadata).map(([key, value]) => (
                           <span key={key}>{value}</span>
                         ))}
@@ -454,17 +454,17 @@ function SearchContent() {
         </div>
       ) : query && !isLoading ? (
         <div className="card text-center py-16">
-          <Search className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <Search className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             {searchError ? 'Search unavailable' : 'No results found'}
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+          <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
             {searchError
               ? searchError
               : `We couldn't find anything matching "${query}". Try different keywords or check your spelling.`}
           </p>
           <div className="mt-6">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Popular Searches
             </h4>
             <div className="flex flex-wrap justify-center gap-2">
@@ -475,7 +475,7 @@ function SearchContent() {
                     setQuery(term);
                     performSearch(term, category);
                   }}
-                  className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                  className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition"
                 >
                   {term}
                 </button>
@@ -485,16 +485,16 @@ function SearchContent() {
         </div>
       ) : (
         <div className="card text-center py-16">
-          <Search className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <Search className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             Start searching
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+          <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
             Search for jobs, connect with professionals, find courses, and discover
             companies.
           </p>
           <div className="mt-6">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Popular Searches
             </h4>
             <div className="flex flex-wrap justify-center gap-2">
@@ -506,7 +506,7 @@ function SearchContent() {
                       setQuery(term);
                       performSearch(term, category);
                     }}
-                    className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                    className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition"
                   >
                     {term}
                   </button>

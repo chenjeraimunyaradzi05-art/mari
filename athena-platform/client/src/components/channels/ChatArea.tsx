@@ -157,14 +157,14 @@ export function ChatArea({
   const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
 
   return (
-    <div className="flex-1 flex flex-col bg-white dark:bg-gray-950 h-full" data-testid="chat-area">
+    <div className="flex-1 flex flex-col bg-white dark:bg-slate-950 h-full" data-testid="chat-area">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-gray-500">
+          <span className="text-slate-500">
             {channelType === 'public' ? '#' : channelType === 'private' ? '🔒' : ''}
           </span>
-          <h2 className="font-semibold text-gray-900 dark:text-white">{channelName}</h2>
+          <h2 className="font-semibold text-slate-900 dark:text-white">{channelName}</h2>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon">
@@ -186,11 +186,11 @@ export function ChatArea({
           <div key={date}>
             {/* Date divider */}
             <div className="flex items-center gap-4 my-4">
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                 {formatDate(date)}
               </span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
+              <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
             </div>
 
             {/* Messages */}
@@ -204,7 +204,7 @@ export function ChatArea({
                   key={message.id}
                   className={cn(
                     'group relative flex gap-3 py-1 px-2 -mx-2 rounded-lg transition-colors',
-                    hoveredMessageId === message.id && 'bg-gray-50 dark:bg-gray-900'
+                    hoveredMessageId === message.id && 'bg-slate-50 dark:bg-slate-900'
                   )}
                   onMouseEnter={() => setHoveredMessageId(message.id)}
                   onMouseLeave={() => setHoveredMessageId(null)}
@@ -224,19 +224,19 @@ export function ChatArea({
                   <div className="flex-1 min-w-0">
                     {showAvatar && (
                       <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="font-medium text-gray-900 dark:text-white">
+                        <span className="font-medium text-slate-900 dark:text-white">
                           {message.author.firstName} {message.author.lastName}
                         </span>
-                        <span className="text-xs text-gray-500">{formatTime(message.createdAt)}</span>
+                        <span className="text-xs text-slate-500">{formatTime(message.createdAt)}</span>
                         {message.editedAt && (
-                          <span className="text-xs text-gray-400">(edited)</span>
+                          <span className="text-xs text-slate-400">(edited)</span>
                         )}
                       </div>
                     )}
 
                     {/* Reply reference */}
                     {message.replyTo && (
-                      <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 mb-1 border-l-2 border-primary-500">
+                      <div className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 mb-1 border-l-2 border-primary-500">
                         <span className="font-medium">{message.replyTo.authorName}:</span>{' '}
                         {message.replyTo.content.slice(0, 50)}...
                       </div>
@@ -253,7 +253,7 @@ export function ChatArea({
                             if (e.key === 'Enter') handleEditSubmit(message.id);
                             if (e.key === 'Escape') cancelEditing();
                           }}
-                          className="flex-1 px-3 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                          className="flex-1 px-3 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                           autoFocus
                         />
                         <Button size="sm" onClick={() => handleEditSubmit(message.id)}>
@@ -264,7 +264,7 @@ export function ChatArea({
                         </Button>
                       </div>
                     ) : (
-                      <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
+                      <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">
                         {message.content}
                       </p>
                     )}
@@ -298,7 +298,7 @@ export function ChatArea({
                               'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs',
                               reaction.hasReacted
                                 ? 'bg-primary-100 dark:bg-primary-900 border border-primary-300 dark:border-primary-700'
-                                : 'bg-gray-100 dark:bg-gray-800 border border-transparent'
+                                : 'bg-slate-100 dark:bg-slate-800 border border-transparent'
                             )}
                           >
                             <span>{reaction.emoji}</span>
@@ -319,30 +319,30 @@ export function ChatArea({
 
                   {/* Hover actions */}
                   {hoveredMessageId === message.id && editingMessageId !== message.id && (
-                    <div className="absolute top-0 right-2 -translate-y-1/2 flex items-center gap-0.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
+                    <div className="absolute top-0 right-2 -translate-y-1/2 flex items-center gap-0.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm">
                       {quickReactions.slice(0, 3).map((emoji) => (
                         <button
                           key={emoji}
                           onClick={() => onReaction(message.id, emoji)}
-                          className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                          className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
                         >
                           {emoji}
                         </button>
                       ))}
-                      <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
-                        <Reply className="w-4 h-4 text-gray-500" />
+                      <button className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded">
+                        <Reply className="w-4 h-4 text-slate-500" />
                       </button>
                       {isOwn && (
                         <>
                           <button
                             onClick={() => startEditing(message)}
-                            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
                           >
-                            <Edit2 className="w-4 h-4 text-gray-500" />
+                            <Edit2 className="w-4 h-4 text-slate-500" />
                           </button>
                           <button
                             onClick={() => onDeleteMessage(message.id)}
-                            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
                           >
                             <Trash2 className="w-4 h-4 text-red-500" />
                           </button>
@@ -350,9 +350,9 @@ export function ChatArea({
                       )}
                       <button
                         onClick={() => onPinMessage(message.id)}
-                        className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
                       >
-                        <Pin className={cn('w-4 h-4', message.isPinned ? 'text-amber-500' : 'text-gray-500')} />
+                        <Pin className={cn('w-4 h-4', message.isPinned ? 'text-amber-500' : 'text-slate-500')} />
                       </button>
                     </div>
                   )}
@@ -366,15 +366,15 @@ export function ChatArea({
 
       {/* Typing indicator */}
       {typingUsers.length > 0 && (
-        <div className="px-4 py-2 text-sm text-gray-500">
+        <div className="px-4 py-2 text-sm text-slate-500">
           {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
         </div>
       )}
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200 dark:border-gray-800">
-        <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-900 rounded-lg px-3 py-2">
-          <button type="button" className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+      <form onSubmit={handleSubmit} className="p-4 border-t border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-900 rounded-lg px-3 py-2">
+          <button type="button" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
             <Paperclip className="w-5 h-5" />
           </button>
           <input
@@ -382,13 +382,13 @@ export function ChatArea({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={`Message #${channelName}`}
-            className="flex-1 bg-transparent outline-none text-gray-900 dark:text-white placeholder-gray-500"
+            className="flex-1 bg-transparent outline-none text-slate-900 dark:text-white placeholder-slate-500"
             data-testid="message-input"
           />
-          <button type="button" className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          <button type="button" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
             <AtSign className="w-5 h-5" />
           </button>
-          <button type="button" className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          <button type="button" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
             <Smile className="w-5 h-5" />
           </button>
           <Button type="submit" size="icon" disabled={!inputValue.trim()}>

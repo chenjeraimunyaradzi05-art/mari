@@ -146,10 +146,10 @@ export default function SalaryEquityPage() {
           <DollarSign className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">SalaryEquity</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Pay Gap Analysis & Negotiation
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Know your worth. Detect gender pay gaps. Get negotiation coaching.
         </p>
       </div>
@@ -163,8 +163,8 @@ export default function SalaryEquityPage() {
       )}
 
       {/* Analysis Form */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-        <h2 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
           <BarChart3 className="w-5 h-5 text-emerald-600" />
           Analyze Market Salary
         </h2>
@@ -174,14 +174,14 @@ export default function SalaryEquityPage() {
             value={role}
             onChange={(e) => setRole(e.target.value)}
             placeholder="Job title (e.g., Software Engineer)"
-            className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+            className="flex-1 px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
           />
           <input
             type="text"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             placeholder="Location (optional)"
-            className="md:w-48 px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+            className="md:w-48 px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
           />
           <button
             onClick={handleAnalyze}
@@ -231,40 +231,40 @@ export default function SalaryEquityPage() {
                 value={contributeForm.jobTitle}
                 onChange={(e) => setContributeForm(prev => ({ ...prev, jobTitle: e.target.value }))}
                 placeholder="Job title *"
-                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-900"
+                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-slate-900"
               />
               <input
                 type="text"
                 value={contributeForm.company}
                 onChange={(e) => setContributeForm(prev => ({ ...prev, company: e.target.value }))}
                 placeholder="Company (optional)"
-                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-900"
+                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-slate-900"
               />
               <input
                 type="number"
                 value={contributeForm.baseSalary}
                 onChange={(e) => setContributeForm(prev => ({ ...prev, baseSalary: e.target.value }))}
                 placeholder="Base salary (AUD) *"
-                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-900"
+                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-slate-900"
               />
               <input
                 type="text"
                 value={contributeForm.city}
                 onChange={(e) => setContributeForm(prev => ({ ...prev, city: e.target.value }))}
                 placeholder="City (optional)"
-                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-900"
+                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-slate-900"
               />
               <input
                 type="number"
                 value={contributeForm.yearsExperience}
                 onChange={(e) => setContributeForm(prev => ({ ...prev, yearsExperience: e.target.value }))}
                 placeholder="Years of experience (optional)"
-                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-900"
+                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-slate-900"
               />
               <select
                 value={contributeForm.gender}
                 onChange={(e) => setContributeForm(prev => ({ ...prev, gender: e.target.value }))}
-                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-900"
+                className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-slate-900"
               >
                 <option value="">Gender (optional)</option>
                 <option value="WOMAN">Woman</option>
@@ -286,7 +286,7 @@ export default function SalaryEquityPage() {
 
       {/* Recent Analyses */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Your Salary Analyses
         </h2>
 
@@ -295,36 +295,36 @@ export default function SalaryEquityPage() {
             <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
           </div>
         ) : analyses.length === 0 ? (
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-8 text-center">
-            <DollarSign className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">No analyses yet</h3>
-            <p className="text-sm text-gray-500">Enter a role above to get started</p>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
+            <DollarSign className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <h3 className="font-semibold text-slate-900 dark:text-white mb-2">No analyses yet</h3>
+            <p className="text-sm text-slate-500">Enter a role above to get started</p>
           </div>
         ) : (
           <div className="space-y-4">
             {analyses.map((analysis) => (
               <div
                 key={analysis.id}
-                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{analysis.targetRole}</h3>
+                    <h3 className="font-semibold text-slate-900 dark:text-white">{analysis.targetRole}</h3>
                     {analysis.targetLocation && (
-                      <p className="text-sm text-gray-500">{analysis.targetLocation}</p>
+                      <p className="text-sm text-slate-500">{analysis.targetLocation}</p>
                     )}
                   </div>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-slate-400">
                     {new Date(analysis.generatedAt).toLocaleDateString()}
                   </span>
                 </div>
 
                 {/* Salary Bands */}
                 <div className="mb-4">
-                  <p className="text-sm text-gray-500 mb-2">Salary distribution (n={analysis.sampleSize})</p>
+                  <p className="text-sm text-slate-500 mb-2">Salary distribution (n={analysis.sampleSize})</p>
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">10th</span>
-                    <div className="flex-1 h-3 bg-gray-100 dark:bg-gray-800 rounded-full relative overflow-hidden">
+                    <span className="text-slate-500">10th</span>
+                    <div className="flex-1 h-3 bg-slate-100 dark:bg-slate-800 rounded-full relative overflow-hidden">
                       <div
                         className="absolute h-full bg-gradient-to-r from-emerald-300 to-emerald-500 rounded-full"
                         style={{ left: '10%', right: '10%' }}
@@ -334,9 +334,9 @@ export default function SalaryEquityPage() {
                         style={{ left: '50%' }}
                       />
                     </div>
-                    <span className="text-gray-500">90th</span>
+                    <span className="text-slate-500">90th</span>
                   </div>
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <div className="flex justify-between text-xs text-slate-500 mt-1">
                     <span>{formatCurrency(analysis.salaryBands.p10)}</span>
                     <span className="font-semibold text-emerald-600">{formatCurrency(analysis.salaryBands.p50)} median</span>
                     <span>{formatCurrency(analysis.salaryBands.p90)}</span>
@@ -361,13 +361,13 @@ export default function SalaryEquityPage() {
                 {/* Negotiation Tips */}
                 {analysis.negotiationTips && analysis.negotiationTips.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-1">
+                    <p className="text-sm font-medium text-slate-900 dark:text-white mb-2 flex items-center gap-1">
                       <Lightbulb className="w-4 h-4 text-amber-500" />
                       Negotiation Tips
                     </p>
                     <ul className="space-y-1">
                       {analysis.negotiationTips.map((tip, idx) => (
-                        <li key={idx} className="text-sm text-gray-600 dark:text-gray-400 flex items-start gap-2">
+                        <li key={idx} className="text-sm text-slate-600 dark:text-slate-400 flex items-start gap-2">
                           <span className="text-emerald-600 font-medium">{idx + 1}.</span>
                           {tip.tip}
                         </li>

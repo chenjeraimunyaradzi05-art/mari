@@ -63,8 +63,8 @@ export default function FinanceOverviewPage() {
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Finance & Wellness Hub</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Finance & Wellness Hub</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Build financial security with savings, insurance, super, and business tools.
         </p>
       </div>
@@ -89,14 +89,14 @@ export default function FinanceOverviewPage() {
               )} />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 {tile.title}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 {tile.description}
               </p>
             </div>
-            <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-primary-500" />
+            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-primary-500" />
           </Link>
         ))}
       </div>

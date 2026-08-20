@@ -87,10 +87,10 @@ export default function IndigenousPage() {
           <Heart className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">First Nations</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Indigenous Women Empowerment
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Connect with First Nations communities, mentors, and resources
         </p>
       </div>
@@ -112,7 +112,7 @@ export default function IndigenousPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading...
         </div>
@@ -120,21 +120,21 @@ export default function IndigenousPage() {
         <>
           {/* Communities */}
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Women&apos;s Communities
             </h2>
             {communities.length === 0 ? (
-              <p className="text-sm text-gray-500">No communities available yet.</p>
+              <p className="text-sm text-slate-500">No communities available yet.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {communities.map((community) => (
                   <div
                     key={community.id}
-                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white">{community.name}</h3>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">{community.name}</h3>
                         {community.nation && (
                           <p className="text-xs text-amber-600">{community.nation}</p>
                         )}
@@ -147,10 +147,10 @@ export default function IndigenousPage() {
                     </div>
 
                     {community.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">{community.description}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">{community.description}</p>
                     )}
 
-                    <div className="flex items-center gap-4 text-xs text-gray-500 mb-4">
+                    <div className="flex items-center gap-4 text-xs text-slate-500 mb-4">
                       <span className="flex items-center gap-1">
                         <Users className="w-3 h-3" /> {community.membersCount} members
                       </span>
@@ -175,13 +175,13 @@ export default function IndigenousPage() {
           {/* Resources */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Resources & Support
               </h2>
               <select
                 value={resourceType}
                 onChange={(e) => setResourceType(e.target.value)}
-                className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
               >
                 <option value="">All types</option>
                 {Object.entries(resourceTypeLabels).map(([value, label]) => (
@@ -191,33 +191,33 @@ export default function IndigenousPage() {
             </div>
 
             {resources.length === 0 ? (
-              <p className="text-sm text-gray-500">No resources available in this category.</p>
+              <p className="text-sm text-slate-500">No resources available in this category.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {resources.map((resource) => (
                   <div
                     key={resource.id}
-                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col"
                   >
                     <div className="flex items-start justify-between mb-2">
                       <span className="text-xs font-medium text-amber-600">
                         {resourceTypeLabels[resource.type] || resource.type}
                       </span>
                       {resource.isNational && (
-                        <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 px-2 py-1 rounded-full">
+                        <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 px-2 py-1 rounded-full">
                           National
                         </span>
                       )}
                     </div>
 
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{resource.title}</h3>
+                    <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{resource.title}</h3>
 
                     {resource.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">{resource.description}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">{resource.description}</p>
                     )}
 
                     {resource.partnerOrg && (
-                      <p className="text-xs text-gray-500 mb-3">
+                      <p className="text-xs text-slate-500 mb-3">
                         <BookOpen className="w-3 h-3 inline mr-1" />
                         {resource.partnerOrg}
                       </p>
@@ -242,26 +242,26 @@ export default function IndigenousPage() {
       )}
 
       {/* Partner Organizations */}
-      <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Our Partners
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
           <div className="p-4">
-            <p className="font-medium text-gray-900 dark:text-white">Reconciliation Australia</p>
-            <p className="text-xs text-gray-500">National reconciliation</p>
+            <p className="font-medium text-slate-900 dark:text-white">Reconciliation Australia</p>
+            <p className="text-xs text-slate-500">National reconciliation</p>
           </div>
           <div className="p-4">
-            <p className="font-medium text-gray-900 dark:text-white">Indigenous Mentors</p>
-            <p className="text-xs text-gray-500">Career guidance</p>
+            <p className="font-medium text-slate-900 dark:text-white">Indigenous Mentors</p>
+            <p className="text-xs text-slate-500">Career guidance</p>
           </div>
           <div className="p-4">
-            <p className="font-medium text-gray-900 dark:text-white">First Australians Capital</p>
-            <p className="text-xs text-gray-500">Business funding</p>
+            <p className="font-medium text-slate-900 dark:text-white">First Australians Capital</p>
+            <p className="text-xs text-slate-500">Business funding</p>
           </div>
           <div className="p-4">
-            <p className="font-medium text-gray-900 dark:text-white">NIAA</p>
-            <p className="text-xs text-gray-500">Government support</p>
+            <p className="font-medium text-slate-900 dark:text-white">NIAA</p>
+            <p className="text-xs text-slate-500">Government support</p>
           </div>
         </div>
       </div>

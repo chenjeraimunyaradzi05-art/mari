@@ -146,10 +146,10 @@ export default function HousingPage() {
             <Home className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Housing</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Safe, flexible housing for women
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             {headerLabel}. Verified landlords, privacy-first.
           </p>
         </div>
@@ -158,13 +158,13 @@ export default function HousingPage() {
         </Link>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 grid gap-4 md:grid-cols-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-6">
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Type</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Type</label>
           <select
             value={type}
             onChange={(event) => setType(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {listingTypes.map((option) => (
               <option key={option.value} value={option.value}>
@@ -174,11 +174,11 @@ export default function HousingPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">State</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">State</label>
           <select
             value={state}
             onChange={(event) => setState(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {australianStates.map((option) => (
               <option key={option.value} value={option.value}>
@@ -188,40 +188,40 @@ export default function HousingPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">City</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">City</label>
           <input
             value={city}
             onChange={(event) => setCity(event.target.value)}
             placeholder="e.g. Sydney"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Min rent/wk</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Min rent/wk</label>
           <input
             value={minRent}
             onChange={(event) => setMinRent(event.target.value)}
             type="number"
             placeholder="$0"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Max rent/wk</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Max rent/wk</label>
           <input
             value={maxRent}
             onChange={(event) => setMaxRent(event.target.value)}
             type="number"
             placeholder="$1000"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Bedrooms</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Bedrooms</label>
           <select
             value={bedrooms}
             onChange={(event) => setBedrooms(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             <option value="">Any</option>
             <option value="1">1+</option>
@@ -233,30 +233,30 @@ export default function HousingPage() {
       </div>
 
       <div className="flex flex-wrap gap-4 items-center">
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <input
             type="checkbox"
             checked={dvSafe}
             onChange={(event) => setDvSafe(event.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-slate-300"
           />
           <ShieldCheck className="w-4 h-4 text-emerald-600" /> DV-safe
         </label>
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <input
             type="checkbox"
             checked={petFriendly}
             onChange={(event) => setPetFriendly(event.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-slate-300"
           />
           <Heart className="w-4 h-4 text-pink-500" /> Pet friendly
         </label>
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <input
             type="checkbox"
             checked={accessible}
             onChange={(event) => setAccessible(event.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-slate-300"
           />
           Accessible
         </label>
@@ -270,22 +270,22 @@ export default function HousingPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading listings...
         </div>
       ) : listings.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
           No listings found. Try adjusting your filters.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {listings.map((listing) => (
-            <div key={listing.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-4">
+            <div key={listing.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{listing.title}</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-1">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{listing.title}</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1">
                     <MapPin className="w-4 h-4" />
                     {listing.suburb || listing.city || 'Location TBD'}, {listing.state || 'Australia'}
                   </p>
@@ -294,13 +294,13 @@ export default function HousingPage() {
                   {listing.type}
                 </span>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{listing.description}</p>
-              <div className="flex flex-wrap gap-3 text-sm text-gray-600 dark:text-gray-300">
+              <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-2">{listing.description}</p>
+              <div className="flex flex-wrap gap-3 text-sm text-slate-600 dark:text-slate-300">
                 <div className="flex items-center gap-1">
                   <BedDouble className="w-4 h-4" />
                   {listing.bedrooms ?? '?'} bed · {listing.bathrooms ?? '?'} bath
                 </div>
-                <div className="font-semibold text-gray-900 dark:text-white">
+                <div className="font-semibold text-slate-900 dark:text-white">
                   {formatCurrency(toNumber(listing.rentWeekly))}/wk
                 </div>
               </div>
@@ -319,7 +319,7 @@ export default function HousingPage() {
                 )}
               </div>
               {listing.availableFrom && (
-                <p className="text-xs text-gray-500">Available from {formatDate(listing.availableFrom)}</p>
+                <p className="text-xs text-slate-500">Available from {formatDate(listing.availableFrom)}</p>
               )}
               <button
                 onClick={() => handleInquire(listing.id)}
@@ -333,18 +333,18 @@ export default function HousingPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Your inquiries</h2>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your inquiries</h2>
         {inquiries.length === 0 ? (
-          <p className="text-sm text-gray-500">No inquiries yet.</p>
+          <p className="text-sm text-slate-500">No inquiries yet.</p>
         ) : (
           <div className="space-y-3">
             {inquiries.map((inquiry) => (
-              <div key={inquiry.id} className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+              <div key={inquiry.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-semibold text-gray-900 dark:text-white">{inquiry.listing.title}</div>
-                    <div className="text-xs text-gray-500">Inquired {formatDate(inquiry.createdAt)}</div>
+                    <div className="font-semibold text-slate-900 dark:text-white">{inquiry.listing.title}</div>
+                    <div className="text-xs text-slate-500">Inquired {formatDate(inquiry.createdAt)}</div>
                   </div>
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary-50 text-primary-700">
                     {inquiry.status.replace('_', ' ')}

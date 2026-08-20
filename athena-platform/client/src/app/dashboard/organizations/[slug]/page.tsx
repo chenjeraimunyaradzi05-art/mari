@@ -57,11 +57,11 @@ export default function OrganizationDetailPage() {
     const suggestions = orgListData?.data || [];
     return (
       <div className="max-w-3xl mx-auto p-6 space-y-6">
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-center">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-2">
             Company Not Found
           </h2>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">
+          <p className="text-slate-500 dark:text-slate-400 mb-6">
             The company you're looking for doesn't exist or hasn’t been published yet.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
@@ -75,8 +75,8 @@ export default function OrganizationDetailPage() {
         </div>
 
         {suggestions.length > 0 && (
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Suggested organizations
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -84,11 +84,11 @@ export default function OrganizationDetailPage() {
                 <Link
                   key={item.id}
                   href={`/dashboard/organizations/${item.slug}`}
-                  className="flex items-center justify-between gap-3 p-4 rounded-lg border border-gray-200 dark:border-gray-800 hover:border-primary-500 transition"
+                  className="flex items-center justify-between gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-primary-500 transition"
                 >
                   <div>
-                    <div className="font-semibold text-gray-900 dark:text-white">{item.name}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="font-semibold text-slate-900 dark:text-white">{item.name}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
                       {item.industry || item.type || 'Organization'}
                     </div>
                   </div>
@@ -109,7 +109,7 @@ export default function OrganizationDetailPage() {
       {/* Back Button */}
       <Link
         href="/dashboard/jobs"
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Jobs
@@ -130,7 +130,7 @@ export default function OrganizationDetailPage() {
 
         {/* Logo and Info */}
         <div className="flex flex-col md:flex-row md:items-end gap-4 -mt-16 md:-mt-20 relative z-10 px-4">
-          <div className="w-24 h-24 md:w-32 md:h-32 bg-white dark:bg-gray-800 rounded-xl border-4 border-white dark:border-gray-900 shadow-lg flex items-center justify-center overflow-hidden">
+          <div className="w-24 h-24 md:w-32 md:h-32 bg-white dark:bg-slate-800 rounded-xl border-4 border-white dark:border-slate-900 shadow-lg flex items-center justify-center overflow-hidden">
             {org.logoUrl ? (
               <img
                 src={org.logoUrl}
@@ -138,17 +138,17 @@ export default function OrganizationDetailPage() {
                 className="w-full h-full object-contain p-2"
               />
             ) : (
-              <Building className="w-12 h-12 text-gray-400" />
+              <Building className="w-12 h-12 text-slate-400" />
             )}
           </div>
 
           <div className="flex-1">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
                   {org.name}
                 </h1>
-                <p className="text-gray-600 dark:text-gray-300">
+                <p className="text-slate-600 dark:text-slate-300">
                   {org.industry}
                 </p>
               </div>
@@ -169,7 +169,7 @@ export default function OrganizationDetailPage() {
         </div>
 
         {/* Stats */}
-        <div className="flex flex-wrap items-center gap-6 mt-6 pt-4 border-t border-gray-100 dark:border-gray-800 text-sm text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap items-center gap-6 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
           {org.location && (
             <span className="flex items-center">
               <MapPin className="w-4 h-4 mr-1" />
@@ -200,10 +200,10 @@ export default function OrganizationDetailPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* About */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               About {org.name}
             </h2>
-            <p className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+            <p className="text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
               {org.description || 'No description available.'}
             </p>
           </div>
@@ -211,14 +211,14 @@ export default function OrganizationDetailPage() {
           {/* Culture & Benefits */}
           {org.benefits?.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Benefits & Perks
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 {org.benefits.map((benefit: string, index: number) => (
                   <div
                     key={index}
-                    className="flex items-center space-x-2 text-gray-600 dark:text-gray-300"
+                    className="flex items-center space-x-2 text-slate-600 dark:text-slate-300"
                   >
                     <Star className="w-4 h-4 text-yellow-400" />
                     <span className="text-sm">{benefit}</span>
@@ -230,7 +230,7 @@ export default function OrganizationDetailPage() {
 
           {/* Open Positions */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Open Positions ({jobs.length})
             </h2>
             {loadingJobs ? (
@@ -244,14 +244,14 @@ export default function OrganizationDetailPage() {
                   <Link
                     key={job.id}
                     href={`/dashboard/jobs/${job.id}`}
-                    className="block p-4 border border-gray-100 dark:border-gray-800 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 transition"
+                    className="block p-4 border border-slate-100 dark:border-slate-800 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="font-medium text-gray-900 dark:text-white">
+                        <h3 className="font-medium text-slate-900 dark:text-white">
                           {job.title}
                         </h3>
-                        <div className="flex items-center space-x-2 mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        <div className="flex items-center space-x-2 mt-1 text-sm text-slate-500 dark:text-slate-400">
                           <span>{job.location}</span>
                           <span>•</span>
                           <span>{job.type}</span>
@@ -265,7 +265,7 @@ export default function OrganizationDetailPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+              <p className="text-slate-500 dark:text-slate-400 text-center py-8">
                 No open positions at the moment
               </p>
             )}
@@ -276,31 +276,31 @@ export default function OrganizationDetailPage() {
         <div className="space-y-6">
           {/* Quick Info */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Company Info
             </h2>
             <dl className="space-y-4">
               <div>
-                <dt className="text-sm text-gray-500 dark:text-gray-400">Industry</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-sm text-slate-500 dark:text-slate-400">Industry</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {org.industry || 'Not specified'}
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500 dark:text-gray-400">Company Size</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-sm text-slate-500 dark:text-slate-400">Company Size</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {org.size || 'Not specified'}
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500 dark:text-gray-400">Headquarters</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-sm text-slate-500 dark:text-slate-400">Headquarters</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {org.location || 'Not specified'}
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500 dark:text-gray-400">Founded</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-sm text-slate-500 dark:text-slate-400">Founded</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {org.founded || 'Not specified'}
                 </dd>
               </div>
@@ -310,7 +310,7 @@ export default function OrganizationDetailPage() {
           {/* Social Links */}
           {(org.linkedinUrl || org.twitterUrl) && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Connect
               </h2>
               <div className="space-y-2">
@@ -319,7 +319,7 @@ export default function OrganizationDetailPage() {
                     href={org.linkedinUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center text-gray-600 dark:text-gray-300 hover:text-primary-600 transition"
+                    className="flex items-center text-slate-600 dark:text-slate-300 hover:text-primary-600 transition"
                   >
                     <span>LinkedIn</span>
                     <ExternalLink className="w-3 h-3 ml-1" />
@@ -330,7 +330,7 @@ export default function OrganizationDetailPage() {
                     href={org.twitterUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center text-gray-600 dark:text-gray-300 hover:text-primary-600 transition"
+                    className="flex items-center text-slate-600 dark:text-slate-300 hover:text-primary-600 transition"
                   >
                     <span>Twitter</span>
                     <ExternalLink className="w-3 h-3 ml-1" />

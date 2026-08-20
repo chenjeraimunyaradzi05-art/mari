@@ -58,13 +58,13 @@ export default function ConversationList() {
   }
 
   if (conversations.length === 0) {
-    return <div className="p-4 text-gray-500">No conversations yet.</div>;
+    return <div className="p-4 text-slate-500">No conversations yet.</div>;
   }
 
   return (
-    <div className="flex flex-col h-full border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 w-full max-w-xs overflow-y-auto">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Messages</h2>
+    <div className="flex flex-col h-full border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 w-full max-w-xs overflow-y-auto">
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white">Messages</h2>
       </div>
       <div className="flex-1 overflow-y-auto">
         {conversations.map((conversation) => {
@@ -81,7 +81,7 @@ export default function ConversationList() {
             <Link
               key={conversation.id}
               href={`/dashboard/messages/${conversation.id}`}
-              className={`block p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+              className={`block p-4 border-b border-slate-100 hover:bg-slate-50 transition-colors ${
                 isActive ? 'bg-blue-50 border-l-4 border-l-blue-600' : ''
               }`}
             >
@@ -94,24 +94,24 @@ export default function ConversationList() {
                             className="w-10 h-10 rounded-full object-cover"
                         />
                     ) : (
-                        <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
+                        <div className="w-10 h-10 rounded-full bg-slate-300 flex items-center justify-center text-slate-600 font-bold">
                             {initials}
                         </div>
                     )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
-                    <h3 className="text-sm font-medium text-gray-900 truncate">
+                    <h3 className="text-sm font-medium text-slate-900 truncate">
                       {participant.name}
                     </h3>
                     {conversation.lastMessage && (
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-slate-400">
                         {formatDistanceToNow(new Date(conversation.lastMessage.createdAt), { addSuffix: false })}
                         </span>
                     )}
                   </div>
                   <div className="flex justify-between items-center mt-1">
-                    <p className={`text-sm truncate ${conversation.unreadCount > 0 ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
+                    <p className={`text-sm truncate ${conversation.unreadCount > 0 ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
                         {conversation.lastMessage ? conversation.lastMessage.content : 'Started a conversation'}
                     </p>
                     {conversation.unreadCount > 0 && (

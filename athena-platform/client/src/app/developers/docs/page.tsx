@@ -31,8 +31,8 @@ const setupSteps = [
 
 export default function DeveloperDocsPage() {
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-white">
-      <section className="border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-gray-950/80">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <section className="border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-1.5 text-sm font-medium text-primary-700 dark:border-primary-900/40 dark:bg-primary-950/40 dark:text-primary-300">
             <BookOpen className="h-4 w-4" />
@@ -41,7 +41,7 @@ export default function DeveloperDocsPage() {
           <h1 className="mt-6 max-w-4xl text-4xl font-semibold tracking-tight sm:text-5xl">
             Build on ATHENA without guessing the integration path.
           </h1>
-          <p className="mt-4 max-w-3xl text-lg leading-8 text-gray-600 dark:text-gray-300">
+          <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
             This documentation hub outlines how teams integrate ATHENA jobs, mentoring, community, and AI-powered
             workflows into external products and internal platforms.
           </p>
@@ -55,7 +55,7 @@ export default function DeveloperDocsPage() {
             </Link>
             <Link
               href="/contact-sales"
-              className="inline-flex items-center rounded-full border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:hover:bg-gray-800"
+              className="inline-flex items-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
             >
               Request access
             </Link>
@@ -68,13 +68,13 @@ export default function DeveloperDocsPage() {
           <Link
             key={item.title}
             href={item.href}
-            className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-gray-800 dark:bg-gray-900"
+            className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
               <item.icon className="h-5 w-5" />
             </div>
             <h2 className="mt-5 text-xl font-semibold">{item.title}</h2>
-            <p className="mt-3 text-sm leading-7 text-gray-600 dark:text-gray-300">{item.description}</p>
+            <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">{item.description}</p>
             <span className="mt-5 inline-flex items-center text-sm font-semibold text-primary-700 dark:text-primary-300">
               Open section
               <ArrowRight className="ml-2 h-4 w-4" />
@@ -85,37 +85,37 @@ export default function DeveloperDocsPage() {
 
       <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 lg:px-8">
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h2 className="text-2xl font-semibold">Integration checklist</h2>
             <div className="mt-6 space-y-4">
               {setupSteps.map((step, index) => (
                 <div
                   key={step}
-                  className="flex gap-4 rounded-2xl border border-gray-100 bg-gray-50/80 p-4 dark:border-gray-800 dark:bg-gray-950/50"
+                  className="flex gap-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/50"
                 >
                   <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">
                     {index + 1}
                   </div>
-                  <p className="text-sm leading-7 text-gray-700 dark:text-gray-300">{step}</p>
+                  <p className="text-sm leading-7 text-slate-700 dark:text-slate-300">{step}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
               <ShieldCheck className="h-4 w-4" />
               Access model
             </div>
             <h2 className="mt-5 text-2xl font-semibold">Current developer program</h2>
-            <p className="mt-4 text-sm leading-7 text-gray-600 dark:text-gray-300">
+            <p className="mt-4 text-sm leading-7 text-slate-600 dark:text-slate-300">
               ATHENA developer access is currently managed to keep jobs, messaging, and community integrations aligned
               with trust and safety controls. Public documentation is live, while production credentials are issued
               through onboarding.
             </p>
-            <div className="mt-6 rounded-2xl border border-gray-100 bg-gray-50 p-5 dark:border-gray-800 dark:bg-gray-950/50">
-              <p className="text-sm font-medium text-gray-900 dark:text-white">Need enterprise or partner access?</p>
-              <p className="mt-2 text-sm leading-7 text-gray-600 dark:text-gray-300">
+            <div className="mt-6 rounded-2xl border border-slate-100 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950/50">
+              <p className="text-sm font-medium text-slate-900 dark:text-white">Need enterprise or partner access?</p>
+              <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-300">
                 Contact the ATHENA team with your use case, timeline, expected traffic, and the surface you want to
                 integrate.
               </p>

@@ -128,10 +128,10 @@ export default function SavingsPage() {
             <PiggyBank className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Savings</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Build your financial safety net
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Total saved: {formatCurrency(totalSaved)}
           </p>
         </div>
@@ -141,19 +141,19 @@ export default function SavingsPage() {
       </div>
 
       {showForm && (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Create savings goal</h2>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Create savings goal</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="Goal name"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
             <select
               value={type}
               onChange={(event) => setType(event.target.value)}
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             >
               {goalTypes.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -166,20 +166,20 @@ export default function SavingsPage() {
               onChange={(event) => setTargetAmount(event.target.value)}
               type="number"
               placeholder="Target amount ($)"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
             <input
               value={targetDate}
               onChange={(event) => setTargetDate(event.target.value)}
               type="date"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
             <input
               value={monthlyTarget}
               onChange={(event) => setMonthlyTarget(event.target.value)}
               type="number"
               placeholder="Monthly target (optional)"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
           </div>
           <div className="flex gap-2">
@@ -198,12 +198,12 @@ export default function SavingsPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading goals...
         </div>
       ) : goals.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500 text-center">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500 text-center">
           No savings goals yet. Create one to start tracking your progress!
         </div>
       ) : (
@@ -214,11 +214,11 @@ export default function SavingsPage() {
             const progress = goal.progressPct ?? (target > 0 ? Math.round((current / target) * 100) : 0);
 
             return (
-              <div key={goal.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-4">
+              <div key={goal.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{goal.name}</h3>
-                    <p className="text-xs text-gray-500">{goal.type.replace('_', ' ')}</p>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{goal.name}</h3>
+                    <p className="text-xs text-slate-500">{goal.type.replace('_', ' ')}</p>
                   </div>
                   <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                     goal.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700' : 'bg-primary-50 text-primary-700'
@@ -230,19 +230,19 @@ export default function SavingsPage() {
                 <div>
                   <div className="flex items-center justify-between text-sm mb-2">
                     <span>{formatCurrency(current)} saved</span>
-                    <span className="text-gray-500">of {formatCurrency(target)}</span>
+                    <span className="text-slate-500">of {formatCurrency(target)}</span>
                   </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                  <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
                     <div
                       className="bg-emerald-500 h-3 rounded-full transition-all"
                       style={{ width: `${Math.min(progress, 100)}%` }}
                     />
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">{progress}% complete</p>
+                  <p className="text-xs text-slate-500 mt-1">{progress}% complete</p>
                 </div>
 
                 {goal.targetDate && (
-                  <p className="text-xs text-gray-500 flex items-center gap-1">
+                  <p className="text-xs text-slate-500 flex items-center gap-1">
                     <Target className="w-3 h-3" /> Target date: {formatDate(goal.targetDate)}
                   </p>
                 )}
@@ -254,7 +254,7 @@ export default function SavingsPage() {
                       onChange={(event) => setContributionAmount(event.target.value)}
                       type="number"
                       placeholder="Amount"
-                      className="flex-1 bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                      className="flex-1 bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                     />
                     <button
                       onClick={() => handleContribute(goal.id)}

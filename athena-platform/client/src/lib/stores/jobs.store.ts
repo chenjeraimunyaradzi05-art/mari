@@ -245,7 +245,7 @@ type JobsStore = JobsState & JobsActions;
 // ============================================
 
 const defaultKanbanColumns: KanbanColumn[] = [
-  { id: 'applied', title: 'Applied', color: 'bg-gray-100', candidateCount: 0 },
+  { id: 'applied', title: 'Applied', color: 'bg-slate-100', candidateCount: 0 },
   { id: 'screening', title: 'Screening', color: 'bg-blue-100', candidateCount: 0 },
   { id: 'interview', title: 'Interview', color: 'bg-purple-100', candidateCount: 0 },
   { id: 'offer', title: 'Offer', color: 'bg-yellow-100', candidateCount: 0 },

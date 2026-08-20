@@ -84,10 +84,10 @@ export default function MentorsPage() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
             Find Your Mentor
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Connect with experienced professionals who can guide your next move.
           </p>
         </div>
@@ -101,7 +101,7 @@ export default function MentorsPage() {
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             placeholder="Search mentors by name or expertise..."
@@ -123,7 +123,7 @@ export default function MentorsPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           </div>
           <div className="relative">
             <select
@@ -137,7 +137,7 @@ export default function MentorsPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           </div>
         </div>
       </div>
@@ -185,10 +185,10 @@ export default function MentorsPage() {
                       </div>
                     )}
                     <div className="min-w-0">
-                      <h3 className="truncate font-semibold text-gray-900 dark:text-white">
+                      <h3 className="truncate font-semibold text-slate-900 dark:text-white">
                         {displayName}
                       </h3>
-                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                         {headline}
                       </p>
                     </div>
@@ -199,7 +199,7 @@ export default function MentorsPage() {
                       'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium',
                       mentor.isAvailable
                         ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                     )}
                   >
                     <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
@@ -213,16 +213,16 @@ export default function MentorsPage() {
                     <span className="font-medium">
                       {rating ? rating.toFixed(1) : 'New'}
                     </span>
-                    <span className="ml-1 text-gray-400">
+                    <span className="ml-1 text-slate-400">
                       ({mentor.reviewCount || 0})
                     </span>
                   </div>
-                  <div className="flex items-center text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center text-slate-500 dark:text-slate-400">
                     <Users className="mr-1 h-4 w-4" />
                     <span>{mentor.sessionCount || 0} sessions</span>
                   </div>
                   {mentor.yearsExperience ? (
-                    <div className="flex items-center text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center text-slate-500 dark:text-slate-400">
                       <Award className="mr-1 h-4 w-4" />
                       <span>{mentor.yearsExperience}+ years</span>
                     </div>
@@ -240,23 +240,23 @@ export default function MentorsPage() {
                       </span>
                     ))}
                     {specializationsList.length > 3 ? (
-                      <span className="px-2 py-1 text-xs font-medium text-gray-500">
+                      <span className="px-2 py-1 text-xs font-medium text-slate-500">
                         +{specializationsList.length - 3} more
                       </span>
                     ) : null}
                   </div>
                 ) : null}
 
-                <p className="mb-4 line-clamp-3 text-sm text-gray-600 dark:text-gray-300">
+                <p className="mb-4 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">
                   {mentor.user?.bio || 'This mentor has not added a public bio yet.'}
                 </p>
 
                 <div className="mb-4 flex items-center justify-between text-sm">
-                  <div className="flex items-center text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center text-slate-500 dark:text-slate-400">
                     <Clock className="mr-1 h-4 w-4" />
                     <span>30 or 60 minute sessions</span>
                   </div>
-                  <div className="font-semibold text-gray-900 dark:text-white">
+                  <div className="font-semibold text-slate-900 dark:text-white">
                     {hourlyRate ? `${formatCurrency(hourlyRate)}/hour` : 'Rate on request'}
                   </div>
                 </div>
@@ -280,11 +280,11 @@ export default function MentorsPage() {
           })
         ) : (
           <div className="col-span-full card py-12 text-center">
-            <Users className="mx-auto mb-4 h-12 w-12 text-gray-400" />
-            <h3 className="mb-2 text-lg font-medium text-gray-900 dark:text-white">
+            <Users className="mx-auto mb-4 h-12 w-12 text-slate-400" />
+            <h3 className="mb-2 text-lg font-medium text-slate-900 dark:text-white">
               No mentors found
             </h3>
-            <p className="mb-4 text-gray-500 dark:text-gray-400">
+            <p className="mb-4 text-slate-500 dark:text-slate-400">
               Try adjusting your search or filters.
             </p>
             <button
@@ -310,7 +310,7 @@ export default function MentorsPage() {
           </div>
           <Link
             href="/dashboard/mentors/become-mentor"
-            className="btn flex-shrink-0 bg-white px-6 py-3 text-primary-600 hover:bg-gray-100"
+            className="btn flex-shrink-0 bg-white px-6 py-3 text-primary-600 hover:bg-slate-100"
           >
             Apply to Mentor
           </Link>

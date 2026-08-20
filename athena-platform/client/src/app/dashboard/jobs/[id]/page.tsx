@@ -155,10 +155,10 @@ export default function JobDetailPage() {
   if (error || !job) {
     return (
       <div className="p-6 text-center">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
           Job Not Found
         </h2>
-        <p className="text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-slate-500 dark:text-slate-400 mb-4">
           The job you're looking for doesn't exist or has been removed.
         </p>
         <Link href="/dashboard/jobs" className="btn-primary px-4 py-2">
@@ -173,7 +173,7 @@ export default function JobDetailPage() {
       {/* Back Button */}
       <Link
         href="/dashboard/jobs"
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Jobs
@@ -183,7 +183,7 @@ export default function JobDetailPage() {
       <div className="card">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="flex items-start space-x-4">
-            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+            <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center flex-shrink-0">
               {getOrganizationLogo(job) ? (
                 <img
                   src={getOrganizationLogo(job)!}
@@ -191,11 +191,11 @@ export default function JobDetailPage() {
                   className="w-12 h-12 rounded-lg object-contain"
                 />
               ) : (
-                <Building className="w-8 h-8 text-gray-400" />
+                <Building className="w-8 h-8 text-slate-400" />
               )}
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
                 {job.title}
               </h1>
               {job.organization?.slug ? (
@@ -206,11 +206,11 @@ export default function JobDetailPage() {
                   {job.organization?.name || 'Company not listed'}
                 </Link>
               ) : (
-                <p className="text-lg text-gray-600 dark:text-gray-400">
+                <p className="text-lg text-slate-600 dark:text-slate-400">
                   {job.organization?.name || 'Company not listed'}
                 </p>
               )}
-              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500 dark:text-gray-400">
+              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-slate-500 dark:text-slate-400">
                 <span className="flex items-center">
                   <MapPin className="w-4 h-4 mr-1" />
                   {getJobLocation(job)}
@@ -236,7 +236,7 @@ export default function JobDetailPage() {
                 'p-2.5 rounded-lg transition disabled:opacity-50',
                 isSaved
                   ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700'
               )}
             >
               <Bookmark className={cn('w-5 h-5', isSaved && 'fill-current')} />
@@ -244,7 +244,7 @@ export default function JobDetailPage() {
             <button
               onClick={handleShare}
               aria-label="Share job"
-              className="p-2.5 bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg transition"
+              className="p-2.5 bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition"
             >
               <Share2 className="w-5 h-5" />
             </button>
@@ -264,13 +264,13 @@ export default function JobDetailPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Job Description */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Job Description
             </h2>
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <div
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(job.description || '') }}
-                className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap"
+                className="text-slate-600 dark:text-slate-300 whitespace-pre-wrap"
               />
             </div>
           </div>
@@ -278,7 +278,7 @@ export default function JobDetailPage() {
           {/* Requirements */}
           {job.requirements && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Requirements
               </h2>
               <ul className="space-y-2">
@@ -288,7 +288,7 @@ export default function JobDetailPage() {
                 ).map((req: string, index: number) => (
                   <li key={index} className="flex items-start space-x-2">
                     <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-gray-600 dark:text-gray-300">{req}</span>
+                    <span className="text-slate-600 dark:text-slate-300">{req}</span>
                   </li>
                 ))}
               </ul>
@@ -298,7 +298,7 @@ export default function JobDetailPage() {
           {/* Skills */}
           {skillNames.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Required Skills
               </h2>
               <div className="flex flex-wrap gap-2">
@@ -314,14 +314,14 @@ export default function JobDetailPage() {
           {/* Benefits */}
           {job.benefits?.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Benefits
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 {job.benefits.map((benefit: string, index: number) => (
                   <div
                     key={index}
-                    className="flex items-center space-x-2 text-gray-600 dark:text-gray-300"
+                    className="flex items-center space-x-2 text-slate-600 dark:text-slate-300"
                   >
                     <Heart className="w-4 h-4 text-red-400" />
                     <span className="text-sm">{benefit}</span>
@@ -336,45 +336,45 @@ export default function JobDetailPage() {
         <div className="space-y-6">
           {/* Job Details */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Job Details
             </h2>
             <dl className="space-y-4">
               <div className="flex justify-between">
-                <dt className="text-gray-500 dark:text-gray-400">Salary</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-slate-500 dark:text-slate-400">Salary</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {job.showSalary === false
                     ? 'Not disclosed'
                     : formatSalaryRange(job.salaryMin ?? undefined, job.salaryMax ?? undefined)}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500 dark:text-gray-400">Job Type</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-slate-500 dark:text-slate-400">Job Type</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {JOB_TYPE_LABELS[job.type] || job.type}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500 dark:text-gray-400">Experience</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-slate-500 dark:text-slate-400">Experience</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {getExperienceLabel(job)}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500 dark:text-gray-400">Remote</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-slate-500 dark:text-slate-400">Remote</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {job.isRemote || job.remote ? 'Yes' : 'No'}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500 dark:text-gray-400">Posted</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-slate-500 dark:text-slate-400">Posted</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {formatDate(job.createdAt)}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500 dark:text-gray-400">Applicants</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
+                <dt className="text-slate-500 dark:text-slate-400">Applicants</dt>
+                <dd className="font-medium text-slate-900 dark:text-white">
                   {job._count?.applications || 0}
                 </dd>
               </div>
@@ -383,21 +383,21 @@ export default function JobDetailPage() {
 
           {/* Company Info */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               About {job.organization?.name}
             </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
               {job.organization?.description || 'Company description not available.'}
             </p>
             <div className="space-y-2 text-sm">
               {job.organization?.industry && (
-                <div className="flex items-center text-gray-500 dark:text-gray-400">
+                <div className="flex items-center text-slate-500 dark:text-slate-400">
                   <Briefcase className="w-4 h-4 mr-2" />
                   {job.organization.industry}
                 </div>
               )}
               {job.organization?.size && (
-                <div className="flex items-center text-gray-500 dark:text-gray-400">
+                <div className="flex items-center text-slate-500 dark:text-slate-400">
                   <Users className="w-4 h-4 mr-2" />
                   {job.organization.size} employees
                 </div>
@@ -427,17 +427,17 @@ export default function JobDetailPage() {
 
           {/* Recommended Jobs */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
               Recommended Jobs
             </h2>
             {isLoadingRecommendations ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((item) => (
-                  <div key={item} className="h-20 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />
+                  <div key={item} className="h-20 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" />
                 ))}
               </div>
             ) : recommendationsError ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+              <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">
                 Recommendations could not be loaded.
               </p>
             ) : relatedJobs.length > 0 ? (
@@ -446,14 +446,14 @@ export default function JobDetailPage() {
                   <Link
                     key={recommendation.id}
                     href={`/dashboard/jobs/${recommendation.id}`}
-                    className="block rounded-lg border border-gray-200 p-3 transition hover:border-primary-300 hover:bg-primary-50/60 dark:border-gray-800 dark:hover:border-primary-800 dark:hover:bg-primary-950/20"
+                    className="block rounded-lg border border-slate-200 p-3 transition hover:border-primary-300 hover:bg-primary-50/60 dark:border-slate-800 dark:hover:border-primary-800 dark:hover:bg-primary-950/20"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                           {recommendation.title}
                         </h3>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                           {recommendation.organization?.name || 'Company not listed'}
                         </p>
                       </div>
@@ -463,7 +463,7 @@ export default function JobDetailPage() {
                         </span>
                       )}
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
                       <span className="flex items-center">
                         <MapPin className="mr-1 h-3 w-3" />
                         {getJobLocation(recommendation)}
@@ -482,7 +482,7 @@ export default function JobDetailPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+              <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">
                 No live recommendations available for this profile yet.
               </p>
             )}
@@ -493,17 +493,17 @@ export default function JobDetailPage() {
       {/* Apply Modal */}
       {showApplyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-900 rounded-lg max-w-lg w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+          <div className="bg-white dark:bg-slate-900 rounded-lg max-w-lg w-full p-6">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
               Apply to {job.title}
             </h3>
-            <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
+            <p className="text-slate-500 dark:text-slate-400 text-sm mb-4">
               at {job.organization?.name}
             </p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Cover Letter (Optional)
                 </label>
                 <textarea
@@ -515,8 +515,8 @@ export default function JobDetailPage() {
                 />
               </div>
 
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                <p className="text-sm text-gray-600 dark:text-gray-300">
+              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
+                <p className="text-sm text-slate-600 dark:text-slate-300">
                   <strong>Your resume</strong> and <strong>profile</strong> will be shared
                   with the employer.
                 </p>

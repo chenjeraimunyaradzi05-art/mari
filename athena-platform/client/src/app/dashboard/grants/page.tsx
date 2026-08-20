@@ -110,23 +110,23 @@ export default function GrantsPage() {
             <BadgeCheck className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Grants</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Funding programs for women-led businesses
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">{activeLabel} tailored to your growth stage.</p>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">{activeLabel} tailored to your growth stage.</p>
         </div>
         <Link href="/dashboard/investors" className="btn-primary inline-flex items-center gap-2">
           Meet investors <ChevronRight className="w-4 h-4" />
         </Link>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Provider</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Provider</label>
           <select
             value={providerType}
             onChange={(event) => setProviderType(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {providerTypes.map((option) => (
               <option key={option.value} value={option.value}>
@@ -136,29 +136,29 @@ export default function GrantsPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Industry</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Industry</label>
           <input
             value={industry}
             onChange={(event) => setIndustry(event.target.value)}
             placeholder="e.g. Fintech"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Region</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Region</label>
           <input
             value={region}
             onChange={(event) => setRegion(event.target.value)}
             placeholder="e.g. ANZ"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 mt-6">
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 mt-6">
           <input
             type="checkbox"
             checked={activeOnly}
             onChange={(event) => setActiveOnly(event.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-slate-300"
           />
           Active only
         </label>
@@ -169,34 +169,34 @@ export default function GrantsPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading grants...
         </div>
       ) : grants.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
           No grants found. Try different filters.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {grants.map((grant) => (
-            <div key={grant.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-4">
+            <div key={grant.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-4">
               <div>
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{grant.name}</h3>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{grant.name}</h3>
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
                     {grant.providerType.replace('_', ' ')}
                   </span>
                 </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{grant.provider}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{grant.provider}</p>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">{grant.description}</p>
-              <div className="text-sm text-gray-600 dark:text-gray-300">
+              <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-3">{grant.description}</p>
+              <div className="text-sm text-slate-600 dark:text-slate-300">
                 Funding: {grant.minFunding || grant.maxFunding
                   ? `${formatCurrency(toNumber(grant.minFunding))} - ${formatCurrency(toNumber(grant.maxFunding))}`
                   : 'Varies'}
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                 <Calendar className="w-4 h-4" />
                 {grant.isRolling ? 'Rolling applications' : grant.deadline ? `Deadline ${formatDate(grant.deadline)}` : 'Deadline TBD'}
               </div>
@@ -212,18 +212,18 @@ export default function GrantsPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Your applications</h2>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your applications</h2>
         {applications.length === 0 ? (
-          <p className="text-sm text-gray-500">No grant applications yet.</p>
+          <p className="text-sm text-slate-500">No grant applications yet.</p>
         ) : (
           <div className="space-y-3">
             {applications.map((app) => (
-              <div key={app.id} className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+              <div key={app.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-semibold text-gray-900 dark:text-white">{app.grant.name}</div>
-                    <div className="text-xs text-gray-500">{app.grant.provider}</div>
+                    <div className="font-semibold text-slate-900 dark:text-white">{app.grant.name}</div>
+                    <div className="text-xs text-slate-500">{app.grant.provider}</div>
                   </div>
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary-50 text-primary-700">
                     {app.status.replace('_', ' ')}

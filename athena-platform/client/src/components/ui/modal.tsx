@@ -66,22 +66,22 @@ export function Modal({
       <div className="flex min-h-full items-center justify-center p-4">
         <div
           className={cn(
-            'relative w-full bg-white dark:bg-gray-900 rounded-xl shadow-xl transform transition-all',
+            'relative w-full bg-white dark:bg-slate-900 rounded-xl shadow-xl transform transition-all',
             sizeClasses[size]
           )}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           {(title || showCloseButton) && (
-            <div className="flex items-start justify-between p-6 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-start justify-between p-6 border-b border-slate-100 dark:border-slate-800">
               <div>
                 {title && (
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
                     {title}
                   </h3>
                 )}
                 {description && (
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                     {description}
                   </p>
                 )}
@@ -89,7 +89,7 @@ export function Modal({
               {showCloseButton && (
                 <button
                   onClick={onClose}
-                  className="p-1 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition"
+                  className="p-1 text-slate-400 hover:text-slate-500 dark:hover:text-slate-300 transition"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -125,7 +125,7 @@ export function ModalFooter({ children, className }: ModalFooterProps) {
   return (
     <div
       className={cn(
-        'flex items-center justify-end space-x-3 p-6 border-t border-gray-100 dark:border-gray-800',
+        'flex items-center justify-end space-x-3 p-6 border-t border-slate-100 dark:border-slate-800',
         className
       )}
     >
@@ -161,10 +161,10 @@ export function AlertDialog({
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="sm" showCloseButton={false}>
       <ModalContent>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
           {title}
         </h3>
-        <p className="text-gray-500 dark:text-gray-400">{description}</p>
+        <p className="text-slate-500 dark:text-slate-400">{description}</p>
       </ModalContent>
       <ModalFooter>
         <button onClick={onClose} className="btn-outline px-4 py-2">

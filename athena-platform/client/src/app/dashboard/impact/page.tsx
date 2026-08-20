@@ -93,10 +93,10 @@ export default function ImpactPage() {
           <Heart className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Social Impact</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Community Support Hub
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Tailored programs and resources for marginalized communities
         </p>
       </div>
@@ -104,45 +104,45 @@ export default function ImpactPage() {
       {/* Impact Summary */}
       {!loading && summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 text-purple-600 mb-2">
               <Award className="w-4 h-4" />
               <span className="text-xs font-medium">Achievements</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{summary.totalMetrics}</p>
-            <p className="text-xs text-gray-500">Impact milestones</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{summary.totalMetrics}</p>
+            <p className="text-xs text-slate-500">Impact milestones</p>
           </div>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 text-blue-600 mb-2">
               <Users className="w-4 h-4" />
               <span className="text-xs font-medium">Programs</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{summary.programsEnrolled}</p>
-            <p className="text-xs text-gray-500">Enrolled</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{summary.programsEnrolled}</p>
+            <p className="text-xs text-slate-500">Enrolled</p>
           </div>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 text-emerald-600 mb-2">
               <TrendingUp className="w-4 h-4" />
               <span className="text-xs font-medium">Completed</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{summary.programsCompleted}</p>
-            <p className="text-xs text-gray-500">Programs finished</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{summary.programsCompleted}</p>
+            <p className="text-xs text-slate-500">Programs finished</p>
           </div>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 text-amber-600 mb-2">
               <Heart className="w-4 h-4" />
               <span className="text-xs font-medium">Community</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">
               {Object.keys(summary.metricsSummary).length}
             </p>
-            <p className="text-xs text-gray-500">Impact areas</p>
+            <p className="text-xs text-slate-500">Impact areas</p>
           </div>
         </div>
       )}
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading your impact summary...
         </div>
@@ -156,15 +156,15 @@ export default function ImpactPage() {
             <Link
               key={tile.href}
               href={tile.href}
-              className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:shadow-lg hover:border-purple-300 dark:hover:border-purple-700 transition-all"
+              className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 hover:shadow-lg hover:border-purple-300 dark:hover:border-purple-700 transition-all"
             >
               <div className={`w-12 h-12 ${tile.color} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
                 <Icon className="w-6 h-6 text-white" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white group-hover:text-purple-600 transition-colors">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white group-hover:text-purple-600 transition-colors">
                 {tile.title}
               </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{tile.description}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{tile.description}</p>
             </Link>
           );
         })}
@@ -172,27 +172,27 @@ export default function ImpactPage() {
 
       {/* Partner Info */}
       <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
           Our Impact Partners
         </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
           We work with government agencies, NGOs, and community organizations to deliver
           evidence-based support programs and track real outcomes for women from all backgrounds.
         </p>
         <div className="flex flex-wrap gap-2 text-xs">
-          <span className="px-3 py-1 bg-white dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300">
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-300">
             Reconciliation Australia
           </span>
-          <span className="px-3 py-1 bg-white dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300">
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-300">
             Settlement Council
           </span>
-          <span className="px-3 py-1 bg-white dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300">
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-300">
             1800RESPECT
           </span>
-          <span className="px-3 py-1 bg-white dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300">
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-300">
             Vision Australia
           </span>
-          <span className="px-3 py-1 bg-white dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300">
+          <span className="px-3 py-1 bg-white dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-300">
             Beyond Blue
           </span>
         </div>

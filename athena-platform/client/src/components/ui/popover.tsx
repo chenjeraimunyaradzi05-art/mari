@@ -56,7 +56,7 @@ const PopoverContent = React.forwardRef<
     <HeadlessPopover.Panel
       ref={ref}
       className={cn(
-        'absolute z-50 w-72 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-md outline-none',
+        'absolute z-50 w-72 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-md outline-none',
         align === 'start' && 'left-0',
         align === 'center' && 'left-1/2 -translate-x-1/2',
         align === 'end' && 'right-0',

@@ -61,7 +61,7 @@ export function TabsList({ children, className }: TabsListProps) {
   return (
     <div
       className={cn(
-        'flex items-center space-x-1 border-b border-gray-200 dark:border-gray-800',
+        'flex items-center space-x-1 border-b border-slate-200 dark:border-slate-800',
         className
       )}
     >
@@ -105,7 +105,7 @@ export function TabsTrigger({
         'flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition',
         isSelected
           ? 'text-primary-600 border-primary-600'
-          : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300',
+          : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300',
         disabled && 'opacity-50 cursor-not-allowed',
         className
       )}
@@ -144,7 +144,7 @@ export function PillTabs({ tabs, value, onChange, className }: PillTabsProps) {
   return (
     <div
       className={cn(
-        'inline-flex items-center p-1 bg-gray-100 dark:bg-gray-800 rounded-lg',
+        'inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg',
         className
       )}
     >
@@ -155,8 +155,8 @@ export function PillTabs({ tabs, value, onChange, className }: PillTabsProps) {
           className={cn(
             'flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition',
             value === tab.id
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           )}
         >
           {tab.icon && <span className="w-4 h-4">{tab.icon}</span>}

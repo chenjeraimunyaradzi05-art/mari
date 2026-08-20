@@ -114,10 +114,10 @@ export default function HealthScorePage() {
             <Activity className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Health Score</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Your financial wellness
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Get a personalized snapshot of your financial health
           </p>
         </div>
@@ -136,22 +136,22 @@ export default function HealthScorePage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading your score...
         </div>
       ) : !score ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-8 text-center">
-          <Activity className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">No score yet</h2>
-          <p className="text-sm text-gray-500 mt-2 mb-6 max-w-md mx-auto">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
+          <Activity className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">No score yet</h2>
+          <p className="text-sm text-slate-500 mt-2 mb-6 max-w-md mx-auto">
             Click &ldquo;Calculate score&rdquo; to analyze your financial data and get personalized recommendations.
           </p>
         </div>
       ) : (
         <div className="space-y-6">
           {/* Overall score */}
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-8 text-center">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
             <div className="relative inline-flex items-center justify-center">
               <svg className="w-40 h-40" viewBox="0 0 100 100">
                 <circle
@@ -161,7 +161,7 @@ export default function HealthScorePage() {
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="8"
-                  className="text-gray-200 dark:text-gray-700"
+                  className="text-slate-200 dark:text-slate-700"
                 />
                 <circle
                   cx="50"
@@ -178,13 +178,13 @@ export default function HealthScorePage() {
               </svg>
               <div className="absolute flex flex-col items-center">
                 <span className={`text-4xl font-bold ${scoreColor(score.overallScore)}`}>{score.overallScore}</span>
-                <span className="text-sm text-gray-500">/ 100</span>
+                <span className="text-sm text-slate-500">/ 100</span>
               </div>
             </div>
             <p className={`text-lg font-semibold mt-4 ${scoreColor(score.overallScore)}`}>
               {scoreLabel(score.overallScore)}
             </p>
-            <p className="text-xs text-gray-500 mt-2">Last calculated: {formatDate(score.calculatedAt)}</p>
+            <p className="text-xs text-slate-500 mt-2">Last calculated: {formatDate(score.calculatedAt)}</p>
           </div>
 
           {/* Component scores */}
@@ -194,17 +194,17 @@ export default function HealthScorePage() {
               return (
                 <div
                   key={component.label}
-                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4"
                 >
                   <div className="flex items-center gap-2 mb-3">
                     <Icon className={`w-4 h-4 ${scoreColor(component.value)}`} />
-                    <span className="text-xs text-gray-500">{component.label}</span>
+                    <span className="text-xs text-slate-500">{component.label}</span>
                   </div>
                   <div className="flex items-end justify-between">
                     <span className={`text-2xl font-bold ${scoreColor(component.value)}`}>{component.value}</span>
-                    <span className="text-xs text-gray-400">/ 100</span>
+                    <span className="text-xs text-slate-400">/ 100</span>
                   </div>
-                  <div className="mt-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div className="mt-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
                     <div
                       className={`h-2 rounded-full ${scoreBgColor(component.value)}`}
                       style={{ width: `${component.value}%` }}
@@ -217,15 +217,15 @@ export default function HealthScorePage() {
 
           {/* Recommendations */}
           {score.recommendations && score.recommendations.length > 0 && (
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Personalized recommendations</h2>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Personalized recommendations</h2>
               <ul className="space-y-3">
                 {score.recommendations.map((rec, idx) => (
                   <li key={idx} className="flex items-start gap-3">
                     <div className="mt-1 w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center flex-shrink-0">
                       <span className="text-xs font-semibold text-emerald-600">{idx + 1}</span>
                     </div>
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{rec}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{rec}</span>
                   </li>
                 ))}
               </ul>

@@ -165,8 +165,8 @@ export default function MoneyPage() {
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Money Ledger</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Money Ledger</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Review payments, payouts, and adjustments.
           </p>
         </div>
@@ -183,35 +183,35 @@ export default function MoneyPage() {
         )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
             <input
               value={form.organizationId}
               onChange={(e) => setForm({ ...form, organizationId: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Amount</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Amount</label>
             <input
               value={form.amount}
               onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Currency</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Currency</label>
             <input
               value={form.currency}
               onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Type</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Type</label>
             <select
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             >
               {['PAYMENT', 'REFUND', 'PAYOUT', 'TRANSFER', 'ADJUSTMENT'].map((type) => (
                 <option key={type} value={type}>
@@ -221,11 +221,11 @@ export default function MoneyPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Status</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Status</label>
             <select
               value={form.status}
               onChange={(e) => setForm({ ...form, status: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             >
               {['PENDING', 'COMPLETED', 'FAILED', 'CANCELED'].map((status) => (
                 <option key={status} value={status}>
@@ -235,19 +235,19 @@ export default function MoneyPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Provider</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Provider</label>
             <input
               value={form.provider}
               onChange={(e) => setForm({ ...form, provider: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Reference</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Reference</label>
             <input
               value={form.reference}
               onChange={(e) => setForm({ ...form, reference: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
         </div>
@@ -258,42 +258,42 @@ export default function MoneyPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Transactions</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Recent Transactions</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading transactions...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading transactions...</p>
         ) : transactions.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No transactions logged.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No transactions logged.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Date</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Amount</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Status</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Date</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Type</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Amount</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Status</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {transactions.slice(0, 8).map((tx) => (
-                  <tr key={tx.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">
+                  <tr key={tx.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">
                       {formatDate(tx.createdAt)}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {tx.type}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {formatCurrency(tx.amount || 0, tx.currency || 'AUD')}
                     </td>
-                    <td className="py-2 text-xs text-gray-500 dark:text-gray-400">
+                    <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
                       {editingId === tx.id ? (
                         <select
                           value={editing.status}
                           onChange={(e) => setEditing({ ...editing, status: e.target.value })}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-xs"
                         >
                           {['PENDING', 'COMPLETED', 'FAILED', 'CANCELED'].map((status) => (
                             <option key={status} value={status}>
@@ -317,7 +317,7 @@ export default function MoneyPage() {
                             </button>
                             <button
                               onClick={() => setEditingId(null)}
-                              className="text-xs text-gray-500 hover:underline"
+                              className="text-xs text-slate-500 hover:underline"
                             >
                               Cancel
                             </button>
@@ -334,7 +334,7 @@ export default function MoneyPage() {
                             )}
                             <button
                               onClick={() => startEdit(tx)}
-                              className="text-xs text-gray-600 hover:underline"
+                              className="text-xs text-slate-600 hover:underline"
                             >
                               Edit
                             </button>

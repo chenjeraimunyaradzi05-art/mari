@@ -3,7 +3,7 @@ import { Home, Search, ArrowLeft } from 'lucide-react';
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 px-4">
       <div className="text-center">
         {/* Illustration */}
         <div className="w-64 h-64 mx-auto mb-8 relative">
@@ -16,10 +16,10 @@ export default function NotFound() {
         </div>
 
         {/* Content */}
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
           Page Not Found
         </h1>
-        <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-md mx-auto">
+        <p className="text-lg text-slate-600 dark:text-slate-300 mb-8 max-w-md mx-auto">
           Oops! The page you're looking for doesn't exist or has been moved.
         </p>
 
@@ -34,7 +34,7 @@ export default function NotFound() {
           </Link>
           <Link
             href="/dashboard"
-            className="flex items-center space-x-2 px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            className="flex items-center space-x-2 px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           >
             <ArrowLeft className="w-5 h-5" />
             <span>Back to Dashboard</span>
@@ -43,22 +43,22 @@ export default function NotFound() {
 
         {/* Search Suggestion */}
         <div className="mt-12">
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
             Or try searching for what you need:
           </p>
           <div className="relative max-w-md mx-auto">
-            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
               placeholder="Search..."
-              className="w-full pl-12 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+              className="w-full pl-12 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
             />
           </div>
         </div>
 
         {/* Helpful Links */}
-        <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
             Here are some helpful links:
           </p>
           <div className="flex flex-wrap justify-center gap-6 text-sm">

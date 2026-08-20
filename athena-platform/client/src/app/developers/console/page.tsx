@@ -21,8 +21,8 @@ const consoleSections = [
 
 export default function DeveloperConsolePage() {
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-white">
-      <section className="border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-gray-950/80">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <section className="border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300">
             <ShieldCheck className="h-4 w-4" />
@@ -31,7 +31,7 @@ export default function DeveloperConsolePage() {
           <h1 className="mt-6 max-w-4xl text-4xl font-semibold tracking-tight sm:text-5xl">
             The managed ATHENA console is opening in stages.
           </h1>
-          <p className="mt-4 max-w-3xl text-lg leading-8 text-gray-600 dark:text-gray-300">
+          <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300">
             This page explains what the developer console will provide and how to request early access while the
             platform is still in controlled rollout.
           </p>
@@ -43,21 +43,21 @@ export default function DeveloperConsolePage() {
           {consoleSections.map((section) => (
             <div
               key={section.title}
-              className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+              className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
             >
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                 <section.icon className="h-5 w-5" />
               </div>
               <h2 className="mt-5 text-xl font-semibold">{section.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-gray-600 dark:text-gray-300">{section.description}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">{section.description}</p>
             </div>
           ))}
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h2 className="text-2xl font-semibold">What you can do right now</h2>
-            <div className="mt-6 space-y-4 text-sm leading-7 text-gray-700 dark:text-gray-300">
+            <div className="mt-6 space-y-4 text-sm leading-7 text-slate-700 dark:text-slate-300">
               <p>
                 Use the developer docs to review the current integration surface, then contact the ATHENA team for
                 credential issuance and implementation review.
@@ -77,16 +77,16 @@ export default function DeveloperConsolePage() {
               </Link>
               <Link
                 href="/contact-sales"
-                className="inline-flex items-center rounded-full border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:hover:bg-gray-800"
+                className="inline-flex items-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
               >
                 Request access
               </Link>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h2 className="text-2xl font-semibold">Access request checklist</h2>
-            <ul className="mt-6 space-y-3 text-sm leading-7 text-gray-700 dark:text-gray-300">
+            <ul className="mt-6 space-y-3 text-sm leading-7 text-slate-700 dark:text-slate-300">
               <li>Share your company or product name.</li>
               <li>Describe the user workflow you want to connect to ATHENA.</li>
               <li>Specify whether you need staging, production, or both.</li>

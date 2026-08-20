@@ -165,42 +165,42 @@ export default function AdminWomenGatePage() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Women-only Gate</h1>
-              <p className="text-gray-600 dark:text-gray-400">Invite codes and verification approvals</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Women-only Gate</h1>
+              <p className="text-slate-600 dark:text-slate-400">Invite codes and verification approvals</p>
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <div className="flex items-center gap-2 mb-4">
             <KeyRound className="h-5 w-5 text-purple-600" />
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Create Invite Codes</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Create Invite Codes</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Count</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Count</label>
               <Input value={count} onChange={(e) => setCount(e.target.value)} />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Max Uses</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Max Uses</label>
               <Input value={maxUses} onChange={(e) => setMaxUses(e.target.value)} />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Expires At</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Expires At</label>
               <Input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Prefix</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Prefix</label>
               <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} />
             </div>
           </div>
@@ -211,11 +211,11 @@ export default function AdminWomenGatePage() {
           </div>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-indigo-600" />
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Invite Codes</h2>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Invite Codes</h2>
             </div>
             <select
               value={inviteActiveFilter}
@@ -223,7 +223,7 @@ export default function AdminWomenGatePage() {
                 setInviteActiveFilter(e.target.value);
                 setInvitePage(1);
               }}
-              className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700"
+              className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700"
             >
               <option value="">All</option>
               <option value="true">Active</option>
@@ -237,30 +237,30 @@ export default function AdminWomenGatePage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead className="bg-gray-50 dark:bg-gray-900">
+              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                <thead className="bg-slate-50 dark:bg-slate-900">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Uses</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Expires</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Active</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Code</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Uses</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Expires</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Active</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                   {inviteData?.inviteCodes.map((code) => (
                     <tr key={code.id}>
-                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{code.code}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                      <td className="px-4 py-3 text-sm text-slate-900 dark:text-white font-medium">{code.code}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                         {code.usesCount}/{code.maxUses ?? '∞'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                         {code.expiresAt ? new Date(code.expiresAt).toLocaleDateString() : '—'}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <span
                           className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            code.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                            code.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
                           }`}
                         >
                           {code.isActive ? 'Active' : 'Inactive'}
@@ -283,11 +283,11 @@ export default function AdminWomenGatePage() {
           )}
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-purple-600" />
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Verification Requests</h2>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Verification Requests</h2>
             </div>
             <select
               value={verificationStatus}
@@ -295,7 +295,7 @@ export default function AdminWomenGatePage() {
                 setVerificationStatus(e.target.value);
                 setVerificationPage(1);
               }}
-              className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700"
+              className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700"
             >
               <option value="PENDING">Pending</option>
               <option value="VERIFIED">Verified</option>
@@ -310,27 +310,27 @@ export default function AdminWomenGatePage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead className="bg-gray-50 dark:bg-gray-900">
+              <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                <thead className="bg-slate-50 dark:bg-slate-900">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subscription</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Subscription</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                   {verificationData?.users.map((user) => (
                     <tr key={user.id}>
-                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                      <td className="px-4 py-3 text-sm text-slate-900 dark:text-white">
                         <div className="font-medium">{user.firstName} {user.lastName}</div>
-                        <div className="text-xs text-gray-500">{user.email}</div>
+                        <div className="text-xs text-slate-500">{user.email}</div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                         {user.subscription?.tier || 'FREE'} ({user.subscription?.status || 'INACTIVE'})
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
                           {user.womanVerificationStatus}
                         </span>
                       </td>
@@ -354,7 +354,7 @@ export default function AdminWomenGatePage() {
                             </Button>
                           </div>
                         ) : (
-                          <span className="text-xs text-gray-500">No actions</span>
+                          <span className="text-xs text-slate-500">No actions</span>
                         )}
                       </td>
                     </tr>

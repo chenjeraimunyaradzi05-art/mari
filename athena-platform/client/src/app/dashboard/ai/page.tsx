@@ -147,11 +147,11 @@ export default function AIToolsPage() {
     <div className="p-6 space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center">
           <Sparkles className="w-7 h-7 mr-2 text-primary-500" />
           AI Career Tools
         </h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">
+        <p className="text-slate-600 dark:text-slate-400 mt-1">
           Supercharge your career with AI-powered insights and automation
         </p>
       </div>
@@ -172,7 +172,7 @@ export default function AIToolsPage() {
             </div>
             <Link
               href="/dashboard/settings/billing"
-              className="mt-4 md:mt-0 inline-flex items-center px-6 py-3 bg-white text-primary-600 rounded-lg font-semibold hover:bg-gray-100 transition"
+              className="mt-4 md:mt-0 inline-flex items-center px-6 py-3 bg-white text-primary-600 rounded-lg font-semibold hover:bg-slate-100 transition"
             >
               Upgrade Now
               <ArrowRight className="w-5 h-5 ml-2" />
@@ -188,10 +188,10 @@ export default function AIToolsPage() {
             <Zap className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-gray-900 dark:text-white">
+            <h3 className="font-semibold text-slate-900 dark:text-white">
               Ask ATHENA Anything
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">
+            <p className="text-slate-600 dark:text-slate-400 text-sm mt-1">
               Get instant career advice from your AI assistant
             </p>
             <div className="mt-4">
@@ -236,11 +236,11 @@ export default function AIToolsPage() {
               <tool.icon className="w-6 h-6 text-white" />
             </div>
             
-            <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 transition">
+            <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition">
               {tool.name}
             </h3>
             
-            <p className="text-gray-600 dark:text-gray-400 text-sm mt-2">
+            <p className="text-slate-600 dark:text-slate-400 text-sm mt-2">
               {tool.description}
             </p>
             
@@ -254,7 +254,7 @@ export default function AIToolsPage() {
 
       {/* How it works */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">
           How Our AI Tools Work
         </h2>
         <div className="grid md:grid-cols-3 gap-6">
@@ -262,8 +262,8 @@ export default function AIToolsPage() {
             <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-xl font-bold text-primary-600">1</span>
             </div>
-            <h3 className="font-medium text-gray-900 dark:text-white">Tell us your goals</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            <h3 className="font-medium text-slate-900 dark:text-white">Tell us your goals</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Share your career aspirations and current situation
             </p>
           </div>
@@ -271,8 +271,8 @@ export default function AIToolsPage() {
             <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-xl font-bold text-primary-600">2</span>
             </div>
-            <h3 className="font-medium text-gray-900 dark:text-white">AI analyzes your profile</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            <h3 className="font-medium text-slate-900 dark:text-white">AI analyzes your profile</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Our AI creates personalized recommendations just for you
             </p>
           </div>
@@ -280,8 +280,8 @@ export default function AIToolsPage() {
             <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-xl font-bold text-primary-600">3</span>
             </div>
-            <h3 className="font-medium text-gray-900 dark:text-white">Take action</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            <h3 className="font-medium text-slate-900 dark:text-white">Take action</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Apply the insights to accelerate your career growth
             </p>
           </div>

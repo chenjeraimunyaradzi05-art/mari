@@ -73,10 +73,10 @@ export default function CompaniesPage() {
             <Building2 className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Companies</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Discover hiring teams, schools, and verified partners
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             {totalLabel}. Follow organizations to get tailored updates.
           </p>
         </div>
@@ -94,22 +94,22 @@ export default function CompaniesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-6">
         <div className="space-y-4">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3 flex-1">
               <div className="w-10 h-10 rounded-lg bg-primary-50 dark:bg-primary-900/30 text-primary-600 flex items-center justify-center">
                 <Search className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Search</label>
+                <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Search</label>
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search by name, industry, or city"
-                  className="w-full bg-transparent text-sm text-gray-900 dark:text-white focus:outline-none"
+                  className="w-full bg-transparent text-sm text-slate-900 dark:text-white focus:outline-none"
                 />
               </div>
             </div>
-            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <Filter className="w-4 h-4" />
               Filter by type
             </div>
@@ -124,7 +124,7 @@ export default function CompaniesPage() {
                   'px-3 py-1.5 rounded-full text-xs font-semibold border transition',
                   activeType === type.id
                     ? 'bg-primary-600 text-white border-primary-600'
-                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-primary-500'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-primary-500'
                 )}
               >
                 {type.label}
@@ -137,11 +137,11 @@ export default function CompaniesPage() {
               {Array.from({ length: 6 }).map((_, index) => (
                 <div
                   key={`skeleton-${index}`}
-                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 animate-pulse"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 animate-pulse"
                 >
-                  <div className="h-4 w-1/2 bg-gray-200 dark:bg-gray-700 rounded" />
-                  <div className="mt-3 h-3 w-full bg-gray-200 dark:bg-gray-700 rounded" />
-                  <div className="mt-2 h-3 w-3/4 bg-gray-200 dark:bg-gray-700 rounded" />
+                  <div className="h-4 w-1/2 bg-slate-200 dark:bg-slate-700 rounded" />
+                  <div className="mt-3 h-3 w-full bg-slate-200 dark:bg-slate-700 rounded" />
+                  <div className="mt-2 h-3 w-3/4 bg-slate-200 dark:bg-slate-700 rounded" />
                 </div>
               ))}
             </div>
@@ -150,7 +150,7 @@ export default function CompaniesPage() {
               Failed to load organizations. Please try again later.
             </div>
           ) : organizations.length === 0 ? (
-            <div className="bg-white p-8 rounded-lg border border-gray-200 text-center text-gray-500">
+            <div className="bg-white p-8 rounded-lg border border-slate-200 text-center text-slate-500">
               No organizations found. Try adjusting your filters.
             </div>
           ) : (
@@ -158,7 +158,7 @@ export default function CompaniesPage() {
               {organizations.map((org) => (
                 <div
                   key={org.id}
-                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-4"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3">
@@ -167,12 +167,12 @@ export default function CompaniesPage() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{org.name}</h3>
+                          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{org.name}</h3>
                           {org.isVerified && (
                             <ShieldCheck className="w-4 h-4 text-emerald-500" />
                           )}
                         </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           {org.industry || 'General'} · {org.size || 'Growing team'}
                         </p>
                       </div>
@@ -186,12 +186,12 @@ export default function CompaniesPage() {
                   </div>
 
                   {org.description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+                    <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-2">
                       {org.description}
                     </p>
                   )}
 
-                  <div className="flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex flex-wrap gap-3 text-xs text-slate-500 dark:text-slate-400">
                     <div className="flex items-center gap-1">
                       <MapPin className="w-3.5 h-3.5" />
                       {org.city || org.state ? `${org.city || ''}${org.city && org.state ? ', ' : ''}${org.state || ''}` : org.country || 'Remote'}
@@ -214,9 +214,9 @@ export default function CompaniesPage() {
         </div>
 
         <aside className="space-y-4">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">Why follow companies?</h2>
-            <ul className="mt-3 space-y-3 text-sm text-gray-600 dark:text-gray-300">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Why follow companies?</h2>
+            <ul className="mt-3 space-y-3 text-sm text-slate-600 dark:text-slate-300">
               <li className="flex items-start gap-2">
                 <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary-600" />
                 Get early access to hiring updates and role alerts.

@@ -29,13 +29,13 @@ export function Loading({ message = 'Loading...', fullScreen = false }: LoadingP
   const content = (
     <div className="flex flex-col items-center justify-center space-y-4">
       <Spinner size="lg" />
-      <p className="text-gray-600 dark:text-gray-400">{message}</p>
+      <p className="text-slate-600 dark:text-slate-400">{message}</p>
     </div>
   );
 
   if (fullScreen) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm z-50">
+      <div className="fixed inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm z-50">
         {content}
       </div>
     );
@@ -54,7 +54,7 @@ export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
       className={cn(
-        'animate-pulse rounded bg-gray-200 dark:bg-gray-700',
+        'animate-pulse rounded bg-slate-200 dark:bg-slate-700',
         className
       )}
     />
@@ -63,7 +63,7 @@ export function Skeleton({ className }: SkeletonProps) {
 
 export function CardSkeleton() {
   return (
-    <div className="rounded-xl bg-white dark:bg-gray-900 p-6 shadow-sm border border-gray-100 dark:border-gray-800">
+    <div className="rounded-xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-100 dark:border-slate-800">
       <div className="flex items-start space-x-4">
         <Skeleton className="w-12 h-12 rounded-lg" />
         <div className="flex-1 space-y-3">
@@ -84,7 +84,7 @@ export function ProfileSkeleton() {
       
       {/* Avatar and name */}
       <div className="flex items-end -mt-16 px-6">
-        <Skeleton className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-900" />
+        <Skeleton className="w-24 h-24 rounded-full border-4 border-white dark:border-slate-900" />
         <div className="ml-4 pb-2 space-y-2">
           <Skeleton className="h-6 w-40" />
           <Skeleton className="h-4 w-32" />
@@ -103,7 +103,7 @@ export function ProfileSkeleton() {
 
 export function JobCardSkeleton() {
   return (
-    <div className="rounded-xl bg-white dark:bg-gray-900 p-6 shadow-sm border border-gray-100 dark:border-gray-800">
+    <div className="rounded-xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-100 dark:border-slate-800">
       <div className="flex items-start space-x-4">
         <Skeleton className="w-14 h-14 rounded-lg" />
         <div className="flex-1 space-y-3">
@@ -122,7 +122,7 @@ export function JobCardSkeleton() {
 
 export function PostSkeleton() {
   return (
-    <div className="rounded-xl bg-white dark:bg-gray-900 p-6 shadow-sm border border-gray-100 dark:border-gray-800">
+    <div className="rounded-xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-100 dark:border-slate-800">
       <div className="flex items-start space-x-4">
         <Skeleton className="w-10 h-10 rounded-full" />
         <div className="flex-1 space-y-3">

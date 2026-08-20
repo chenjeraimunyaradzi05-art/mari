@@ -372,16 +372,16 @@ export default function InterviewCoachPage() {
         <div className="flex items-center space-x-4">
           <Link
             href="/dashboard/ai"
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
           >
-            <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center space-x-2">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center space-x-2">
               <span className="text-3xl">🎯</span>
               <span>Interview Coach</span>
             </h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-slate-500 dark:text-slate-400 mt-1">
               Practice interviews with AI feedback
             </p>
           </div>
@@ -389,13 +389,13 @@ export default function InterviewCoachPage() {
 
         {/* Setup */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">
             Set Up Your Practice Session
           </h2>
 
           {/* Job Role */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Target Job Role
             </label>
             <input
@@ -403,13 +403,13 @@ export default function InterviewCoachPage() {
               value={jobRole}
               onChange={(e) => setJobRole(e.target.value)}
               placeholder="e.g., Product Manager, Software Engineer, Marketing Director"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           {/* Interview Type */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Interview Type
             </label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -421,11 +421,11 @@ export default function InterviewCoachPage() {
                     'p-4 rounded-lg border-2 text-center transition',
                     interviewType === type.id
                       ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   )}
                 >
                   <span className="text-2xl block mb-2">{type.icon}</span>
-                  <span className="font-medium text-gray-900 dark:text-white">
+                  <span className="font-medium text-slate-900 dark:text-white">
                     {type.name}
                   </span>
                 </button>
@@ -435,7 +435,7 @@ export default function InterviewCoachPage() {
 
           {/* Difficulty */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Difficulty Level
             </label>
             <div className="grid md:grid-cols-3 gap-3">
@@ -447,13 +447,13 @@ export default function InterviewCoachPage() {
                     'p-4 rounded-lg border-2 text-left transition',
                     difficulty === level.id
                       ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   )}
                 >
-                  <span className="font-medium text-gray-900 dark:text-white block">
+                  <span className="font-medium text-slate-900 dark:text-white block">
                     {level.name}
                   </span>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
                     {level.description}
                   </span>
                 </button>
@@ -473,11 +473,11 @@ export default function InterviewCoachPage() {
 
         {/* Tips */}
         <div className="card bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center space-x-2">
+          <h3 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center space-x-2">
             <Lightbulb className="w-5 h-5 text-yellow-500" />
             <span>Interview Tips</span>
           </h3>
-          <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+          <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
             <li>• Use the STAR method (Situation, Task, Action, Result) for behavioral questions</li>
             <li>• Be specific with examples and quantify your achievements when possible</li>
             <li>• Practice speaking your answers out loud, not just typing</li>
@@ -495,21 +495,21 @@ export default function InterviewCoachPage() {
         <div className="flex items-center space-x-4">
           <button
             onClick={() => setSessionStarted(false)}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
           >
-            <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h1 className="text-lg font-semibold text-slate-900 dark:text-white">
               Interview Practice: {jobRole}
             </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {interviewTypes.find((t) => t.id === interviewType)?.name} Interview • {difficultyLevels.find((d) => d.id === difficulty)?.name}
             </p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          <span className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+          <span className="flex items-center text-sm text-slate-500 dark:text-slate-400">
             <Clock className="w-4 h-4 mr-1" />
             {Math.floor(messages.filter((m) => m.role === 'user').length)} answers
           </span>
@@ -526,11 +526,11 @@ export default function InterviewCoachPage() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto space-y-4 mb-4 card bg-gray-50 dark:bg-gray-900">
+      <div className="flex-1 overflow-y-auto space-y-4 mb-4 card bg-slate-50 dark:bg-slate-900">
         {messages.map((message) => (
           <div key={message.id}>
             {message.role === 'system' ? (
-              <div className="text-center text-sm text-gray-500 dark:text-gray-400 py-2">
+              <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-2">
                 {message.content}
               </div>
             ) : (
@@ -559,18 +559,18 @@ export default function InterviewCoachPage() {
                     'max-w-[80%] rounded-lg p-4',
                     message.role === 'user'
                       ? 'bg-primary-500 text-white'
-                      : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'
                   )}
                 >
-                  <p className={message.role === 'user' ? 'text-white' : 'text-gray-700 dark:text-gray-300'}>
+                  <p className={message.role === 'user' ? 'text-white' : 'text-slate-700 dark:text-slate-300'}>
                     {message.content}
                   </p>
 
                   {/* Feedback Section */}
                   {message.feedback && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                    <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-600">
                       <div className="flex items-center space-x-2 mb-3">
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">
                           Performance Rating:
                         </span>
                         <div className="flex">
@@ -581,7 +581,7 @@ export default function InterviewCoachPage() {
                                 'text-lg',
                                 star <= message.feedback!.rating
                                   ? 'text-yellow-500'
-                                  : 'text-gray-300'
+                                  : 'text-slate-300'
                               )}
                             >
                               ★
@@ -596,7 +596,7 @@ export default function InterviewCoachPage() {
                             <ThumbsUp className="w-4 h-4 mr-1" />
                             Strengths
                           </p>
-                          <ul className="text-sm text-gray-600 dark:text-gray-300 space-y-1">
+                          <ul className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
                             {message.feedback.strengths.map((s, i) => (
                               <li key={i}>• {s}</li>
                             ))}
@@ -607,7 +607,7 @@ export default function InterviewCoachPage() {
                             <ThumbsDown className="w-4 h-4 mr-1" />
                             Improvements
                           </p>
-                          <ul className="text-sm text-gray-600 dark:text-gray-300 space-y-1">
+                          <ul className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
                             {message.feedback.improvements.map((s, i) => (
                               <li key={i}>• {s}</li>
                             ))}
@@ -627,8 +627,8 @@ export default function InterviewCoachPage() {
             <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center">
               <Bot className="w-4 h-4 text-white" />
             </div>
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <div className="flex items-center space-x-2 text-gray-500">
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
+              <div className="flex items-center space-x-2 text-slate-500">
                 <RefreshCw className="w-4 h-4 animate-spin" />
                 <span>Analyzing your response...</span>
               </div>
@@ -657,7 +657,7 @@ export default function InterviewCoachPage() {
                 }
               }}
               placeholder="Type your answer... (Press Enter to send)"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
               rows={3}
             />
           </div>
@@ -669,7 +669,7 @@ export default function InterviewCoachPage() {
                 'p-3 rounded-lg transition',
                 isRecording
                   ? 'bg-red-500 text-white animate-pulse'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600',
                 isPending && 'cursor-not-allowed opacity-50'
               )}
               title={isRecording ? 'Stop recording' : 'Start voice recording'}
@@ -690,7 +690,7 @@ export default function InterviewCoachPage() {
           </div>
         </div>
         {(isRecording || recordingStatus) && (
-          <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             <div className="flex items-center justify-between gap-3">
               <span>{recordingStatus}</span>
               {isRecording && (
@@ -707,8 +707,8 @@ export default function InterviewCoachPage() {
           </p>
         )}
         {recordedAnswerUrl && !isRecording && (
-          <div className="mt-3 flex flex-col gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          <div className="mt-3 flex flex-col gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
               <Volume2 className="h-4 w-4" />
               Recorded answer
             </div>
@@ -716,13 +716,13 @@ export default function InterviewCoachPage() {
             <button
               type="button"
               onClick={clearRecordedAnswer}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               Clear
             </button>
           </div>
         )}
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
           💡 Tip: Use specific examples and structure your answers with the STAR method
         </p>
       </div>

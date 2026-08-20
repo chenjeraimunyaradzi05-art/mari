@@ -60,11 +60,11 @@ export default function EmployerDashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Building2 className="h-7 w-7 text-blue-600" />
             Employer Dashboard
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
             Manage your organizations, job postings, and applications
           </p>
         </div>
@@ -78,12 +78,12 @@ export default function EmployerDashboardPage() {
 
       {!hasOrgs ? (
         /* Empty State */
-        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <Building2 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+        <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+          <Building2 className="h-16 w-16 text-slate-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
             No Organizations Yet
           </h2>
-          <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+          <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
             Create your first organization to start posting jobs and managing your employer presence on ATHENA.
           </p>
           <Link href="/employer/organizations/new">
@@ -99,7 +99,7 @@ export default function EmployerDashboardPage() {
           {organizations.map((org) => (
             <div
               key={org.id}
-              className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -111,7 +111,7 @@ export default function EmployerDashboardPage() {
                     )}
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
                       {org.name}
                     </h3>
                     <div className="flex items-center gap-3 mt-1">
@@ -129,45 +129,45 @@ export default function EmployerDashboardPage() {
               </div>
 
               {/* Quick Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-100 dark:border-gray-700">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-100 dark:border-slate-700">
                 <Link
                   href={`/employer/organizations/${org.id}/jobs`}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                 >
                   <Briefcase className="h-5 w-5 text-blue-500" />
                   <div>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-white">{org.jobCount}</p>
-                    <p className="text-sm text-gray-500">Jobs</p>
+                    <p className="text-lg font-semibold text-slate-900 dark:text-white">{org.jobCount}</p>
+                    <p className="text-sm text-slate-500">Jobs</p>
                   </div>
                 </Link>
                 <Link
                   href={`/employer/organizations/${org.id}/team`}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                 >
                   <Users className="h-5 w-5 text-green-500" />
                   <div>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-white">{org.memberCount}</p>
-                    <p className="text-sm text-gray-500">Team</p>
+                    <p className="text-lg font-semibold text-slate-900 dark:text-white">{org.memberCount}</p>
+                    <p className="text-sm text-slate-500">Team</p>
                   </div>
                 </Link>
                 <Link
                   href={`/employer/organizations/${org.id}/applications`}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                 >
                   <FileText className="h-5 w-5 text-orange-500" />
                   <div>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-white">View</p>
-                    <p className="text-sm text-gray-500">Applications</p>
+                    <p className="text-lg font-semibold text-slate-900 dark:text-white">View</p>
+                    <p className="text-sm text-slate-500">Applications</p>
                   </div>
                 </Link>
                 <Link
                   href={`/employer/organizations/${org.id}/analytics`}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                 >
                   <TrendingUp className="h-5 w-5 text-purple-500" />
                   <div>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-white">View</p>
-                    <p className="text-sm text-gray-500">Analytics</p>
+                    <p className="text-lg font-semibold text-slate-900 dark:text-white">View</p>
+                    <p className="text-sm text-slate-500">Analytics</p>
                   </div>
                 </Link>
               </div>

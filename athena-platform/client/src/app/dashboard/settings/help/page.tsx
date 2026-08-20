@@ -179,24 +179,24 @@ export default function HelpSupportPage() {
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center justify-center space-x-2">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center justify-center space-x-2">
           <HelpCircle className="w-6 h-6 text-primary-500" />
           <span>Help & Support</span>
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-2">
+        <p className="text-slate-500 dark:text-slate-400 mt-2">
           Find answers to common questions or get in touch with our team
         </p>
       </div>
 
       {/* Search */}
       <div className="relative max-w-xl mx-auto">
-        <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
         <input
           type="text"
           placeholder="Search for help..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-12 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 text-lg"
+          className="w-full pl-12 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 text-lg"
         />
       </div>
 
@@ -211,10 +211,10 @@ export default function HelpSupportPage() {
             <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mb-3">
               <link.icon className="w-6 h-6 text-primary-500" />
             </div>
-            <h3 className="font-medium text-gray-900 dark:text-white text-sm">
+            <h3 className="font-medium text-slate-900 dark:text-white text-sm">
               {link.title}
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               {link.description}
             </p>
           </Link>
@@ -223,7 +223,7 @@ export default function HelpSupportPage() {
 
       {/* FAQs */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Frequently Asked Questions
         </h2>
 
@@ -231,7 +231,7 @@ export default function HelpSupportPage() {
           {filteredCategories.map((category) => (
             <div
               key={category.id}
-              className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
+              className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden"
             >
               {/* Category Header */}
               <button
@@ -240,27 +240,27 @@ export default function HelpSupportPage() {
                     expandedCategory === category.id ? null : category.id
                   )
                 }
-                className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition"
+                className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
               >
                 <div className="flex items-center space-x-3">
                   <category.icon className="w-5 h-5 text-primary-500" />
-                  <span className="font-medium text-gray-900 dark:text-white">
+                  <span className="font-medium text-slate-900 dark:text-white">
                     {category.name}
                   </span>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
                     ({category.faqs.length})
                   </span>
                 </div>
                 {expandedCategory === category.id ? (
-                  <ChevronUp className="w-5 h-5 text-gray-400" />
+                  <ChevronUp className="w-5 h-5 text-slate-400" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-400" />
+                  <ChevronDown className="w-5 h-5 text-slate-400" />
                 )}
               </button>
 
               {/* FAQs */}
               {expandedCategory === category.id && (
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                <div className="divide-y divide-slate-100 dark:divide-slate-700">
                   {category.faqs.map((faq, index) => {
                     const faqId = `${category.id}-${index}`;
                     const isExpanded = expandedFaqs.includes(faqId);
@@ -269,19 +269,19 @@ export default function HelpSupportPage() {
                       <div key={faqId}>
                         <button
                           onClick={() => toggleFaq(faqId)}
-                          className="w-full flex items-start justify-between p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+                          className="w-full flex items-start justify-between p-4 text-left hover:bg-slate-50 dark:hover:bg-slate-800 transition"
                         >
-                          <span className="text-gray-700 dark:text-gray-300 pr-4">
+                          <span className="text-slate-700 dark:text-slate-300 pr-4">
                             {faq.question}
                           </span>
                           {isExpanded ? (
-                            <ChevronUp className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                            <ChevronUp className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
                           ) : (
-                            <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                            <ChevronDown className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
                           )}
                         </button>
                         {isExpanded && (
-                          <div className="px-4 pb-4 text-gray-500 dark:text-gray-400 text-sm">
+                          <div className="px-4 pb-4 text-slate-500 dark:text-slate-400 text-sm">
                             {faq.answer}
                           </div>
                         )}
@@ -298,10 +298,10 @@ export default function HelpSupportPage() {
       {/* Contact Support */}
       <div className="card bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20 text-center">
         <MessageCircle className="w-12 h-12 text-primary-500 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
           Still need help?
         </h3>
-        <p className="text-gray-600 dark:text-gray-300 mb-4">
+        <p className="text-slate-600 dark:text-slate-300 mb-4">
           Our support team is available 24/7 to assist you
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -317,44 +317,44 @@ export default function HelpSupportPage() {
             <span>Live Chat</span>
           </button>
         </div>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-4">
           Average response time: &lt; 2 hours
         </p>
       </div>
 
       {/* Resources */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Additional Resources
         </h2>
         <div className="space-y-3">
           <a
             href="/terms"
-            className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
           >
-            <span className="text-gray-700 dark:text-gray-300">Terms of Service</span>
-            <ExternalLink className="w-4 h-4 text-gray-400" />
+            <span className="text-slate-700 dark:text-slate-300">Terms of Service</span>
+            <ExternalLink className="w-4 h-4 text-slate-400" />
           </a>
           <a
             href="/privacy"
-            className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
           >
-            <span className="text-gray-700 dark:text-gray-300">Privacy Policy</span>
-            <ExternalLink className="w-4 h-4 text-gray-400" />
+            <span className="text-slate-700 dark:text-slate-300">Privacy Policy</span>
+            <ExternalLink className="w-4 h-4 text-slate-400" />
           </a>
           <a
             href="/cookies"
-            className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
           >
-            <span className="text-gray-700 dark:text-gray-300">Cookie Policy</span>
-            <ExternalLink className="w-4 h-4 text-gray-400" />
+            <span className="text-slate-700 dark:text-slate-300">Cookie Policy</span>
+            <ExternalLink className="w-4 h-4 text-slate-400" />
           </a>
           <a
             href="/accessibility"
-            className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
           >
-            <span className="text-gray-700 dark:text-gray-300">Accessibility Statement</span>
-            <ExternalLink className="w-4 h-4 text-gray-400" />
+            <span className="text-slate-700 dark:text-slate-300">Accessibility Statement</span>
+            <ExternalLink className="w-4 h-4 text-slate-400" />
           </a>
         </div>
       </div>

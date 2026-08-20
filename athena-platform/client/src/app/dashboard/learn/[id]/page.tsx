@@ -101,9 +101,9 @@ export default function CourseDetailPage() {
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
-          <div className="h-64 bg-gray-200 dark:bg-gray-700 rounded-xl" />
-          <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded-xl" />
+          <div className="h-8 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+          <div className="h-64 bg-slate-200 dark:bg-slate-700 rounded-xl" />
+          <div className="h-32 bg-slate-200 dark:bg-slate-700 rounded-xl" />
         </div>
       </div>
     );
@@ -116,17 +116,17 @@ export default function CourseDetailPage() {
       <div className="max-w-3xl mx-auto p-6 space-y-6">
         <Link
           href="/dashboard/learn"
-          className="inline-flex items-center text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+          className="inline-flex items-center text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Courses
         </Link>
         <div className="card text-center py-12">
-          <BookOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          <BookOpen className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
             Course unavailable
           </h1>
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-slate-500 dark:text-slate-400">
             This course could not be found or is no longer active.
           </p>
         </div>
@@ -167,7 +167,7 @@ export default function CourseDetailPage() {
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <Link
         href="/dashboard/learn"
-        className="inline-flex items-center text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+        className="inline-flex items-center text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Courses
@@ -186,13 +186,13 @@ export default function CourseDetailPage() {
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
               {displayCourse.title}
             </h1>
-            <p className="text-gray-600 dark:text-gray-300 mb-5">
+            <p className="text-slate-600 dark:text-slate-300 mb-5">
               {displayCourse.description}
             </p>
-            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+            <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
               <span className="flex items-center">
                 <BookOpen className="w-4 h-4 mr-1" />
                 {providerName}
@@ -215,15 +215,15 @@ export default function CourseDetailPage() {
           <div className="card">
             <div className="grid sm:grid-cols-2 gap-4">
               {highlights.map((item) => (
-                <div key={item.label} className="rounded-lg border border-gray-100 dark:border-gray-700 p-4">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{item.label}</p>
-                  <p className="mt-1 font-semibold text-gray-900 dark:text-white">{item.value}</p>
+                <div key={item.label} className="rounded-lg border border-slate-100 dark:border-slate-700 p-4">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{item.label}</p>
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{item.value}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="border-b border-gray-200 dark:border-gray-700">
+          <div className="border-b border-slate-200 dark:border-slate-700">
             <nav className="flex space-x-8">
               {['overview', 'curriculum', 'provider', 'outcomes'].map((tab) => (
                 <button
@@ -233,7 +233,7 @@ export default function CourseDetailPage() {
                     'py-4 px-1 border-b-2 font-medium text-sm transition',
                     activeTab === tab
                       ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                      : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                   )}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -245,22 +245,22 @@ export default function CourseDetailPage() {
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <div className="card">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                   Course Summary
                 </h2>
-                <p className="text-gray-600 dark:text-gray-300">
+                <p className="text-slate-600 dark:text-slate-300">
                   {displayCourse.description}
                 </p>
               </div>
 
               {fundingOptions.length > 0 && (
                 <div className="card">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                     Funding Options
                   </h2>
                   <div className="grid md:grid-cols-2 gap-3">
                     {fundingOptions.map((item) => (
-                      <div key={item} className="flex items-center space-x-2 text-gray-600 dark:text-gray-300">
+                      <div key={item} className="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
                         <CheckCircle2 className="w-4 h-4 text-primary-500" />
                         <span>{item}</span>
                       </div>
@@ -271,12 +271,12 @@ export default function CourseDetailPage() {
 
               {intakeDates.length > 0 && (
                 <div className="card">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                     Intake Dates
                   </h2>
                   <div className="grid md:grid-cols-2 gap-3">
                     {intakeDates.map((date) => (
-                      <div key={date} className="flex items-center space-x-2 text-gray-600 dark:text-gray-300">
+                      <div key={date} className="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
                         <Calendar className="w-4 h-4 text-primary-500" />
                         <span>{date}</span>
                       </div>
@@ -289,11 +289,11 @@ export default function CourseDetailPage() {
 
           {activeTab === 'curriculum' && (
             <div className="card text-center py-12">
-              <BookOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+              <BookOpen className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
                 Curriculum details are not published yet
               </h2>
-              <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+              <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
                 The current course API provides program-level details only. Lesson modules will appear here when the provider publishes them.
               </p>
             </div>
@@ -306,10 +306,10 @@ export default function CourseDetailPage() {
                   {providerName.charAt(0)}
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                     {providerName}
                   </h2>
-                  <p className="mt-2 text-gray-600 dark:text-gray-300">
+                  <p className="mt-2 text-slate-600 dark:text-slate-300">
                     Provider profile details are not published for this course yet.
                   </p>
                 </div>
@@ -319,25 +319,25 @@ export default function CourseDetailPage() {
 
           {activeTab === 'outcomes' && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Outcomes
               </h2>
               <div className="grid md:grid-cols-2 gap-4">
-                <div className="rounded-lg border border-gray-100 dark:border-gray-700 p-4">
-                  <div className="flex items-center text-gray-500 dark:text-gray-400 mb-2">
+                <div className="rounded-lg border border-slate-100 dark:border-slate-700 p-4">
+                  <div className="flex items-center text-slate-500 dark:text-slate-400 mb-2">
                     <BarChart className="w-4 h-4 mr-2" />
                     Employment rate
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {typeof displayCourse.employmentRate === 'number' ? `${displayCourse.employmentRate}%` : 'Not listed'}
                   </p>
                 </div>
-                <div className="rounded-lg border border-gray-100 dark:border-gray-700 p-4">
-                  <div className="flex items-center text-gray-500 dark:text-gray-400 mb-2">
+                <div className="rounded-lg border border-slate-100 dark:border-slate-700 p-4">
+                  <div className="flex items-center text-slate-500 dark:text-slate-400 mb-2">
                     <Award className="w-4 h-4 mr-2" />
                     Average starting salary
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {typeof displayCourse.avgStartingSalary === 'number'
                       ? formatCurrency(displayCourse.avgStartingSalary)
                       : 'Not listed'}
@@ -351,18 +351,18 @@ export default function CourseDetailPage() {
         <div className="lg:col-span-1">
           <div className="card sticky top-6">
             <div className="mb-6">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Course cost</p>
-              <p className="text-3xl font-bold text-gray-900 dark:text-white">
+              <p className="text-sm text-slate-500 dark:text-slate-400">Course cost</p>
+              <p className="text-3xl font-bold text-slate-900 dark:text-white">
                 {typeof displayCourse.cost === 'number' ? formatCurrency(displayCourse.cost) : 'Contact provider'}
               </p>
             </div>
 
             {isEnrolled ? (
               <div className="space-y-3">
-                <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                   <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
                 </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{progress}% complete</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{progress}% complete</p>
                 <button className="w-full btn-primary py-3 flex items-center justify-center space-x-2">
                   <BookOpen className="w-5 h-5" />
                   <span>Continue Learning</span>
@@ -379,26 +379,26 @@ export default function CourseDetailPage() {
               </button>
             )}
 
-            <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 space-y-3 text-sm text-gray-600 dark:text-gray-300">
+            <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700 space-y-3 text-sm text-slate-600 dark:text-slate-300">
               {duration && (
                 <p className="flex items-center">
-                  <Clock className="w-4 h-4 mr-2 text-gray-400" />
+                  <Clock className="w-4 h-4 mr-2 text-slate-400" />
                   {duration}
                 </p>
               )}
               {studyModes.length > 0 && (
                 <p className="flex items-center">
-                  <Globe className="w-4 h-4 mr-2 text-gray-400" />
+                  <Globe className="w-4 h-4 mr-2 text-slate-400" />
                   {studyModes.map(formatLabel).join(', ')}
                 </p>
               )}
             </div>
 
-            <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 flex justify-center space-x-4">
-              <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Share course">
+            <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-center space-x-4">
+              <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Share course">
                 <Share2 className="w-5 h-5" />
               </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" aria-label="Download course information">
+              <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Download course information">
                 <Download className="w-5 h-5" />
               </button>
             </div>

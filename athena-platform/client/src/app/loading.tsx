@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
       <div className="text-center">
         {/* Logo Animation */}
         <div className="relative w-20 h-20 mx-auto mb-6">
@@ -18,7 +18,7 @@ export default function Loading() {
         </div>
 
         {/* Loading Text */}
-        <p className="mt-4 text-gray-500 dark:text-gray-400 text-sm">
+        <p className="mt-4 text-slate-500 dark:text-slate-400 text-sm">
           Loading ATHENA...
         </p>
       </div>

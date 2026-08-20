@@ -65,8 +65,8 @@ export default function AdminDashboardPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
         <AlertTriangle className="h-16 w-16 text-red-500" />
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Access Denied</h1>
-        <p className="text-gray-600 dark:text-gray-400">You don't have permission to access the admin dashboard.</p>
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-white">Access Denied</h1>
+        <p className="text-slate-600 dark:text-slate-400">You don't have permission to access the admin dashboard.</p>
         <Button asChild>
           <Link href="/dashboard">Return to Dashboard</Link>
         </Button>
@@ -102,14 +102,14 @@ export default function AdminDashboardPage() {
   const mrr = ((stats?.subscriptions.pro || 0) * 29) + ((stats?.subscriptions.business || 0) * 99);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
-              <p className="text-gray-600 dark:text-gray-400">ATHENA Platform Management</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Admin Dashboard</h1>
+              <p className="text-slate-600 dark:text-slate-400">ATHENA Platform Management</p>
             </div>
             <Button asChild variant="outline">
               <Link href="/dashboard">Back to App</Link>
@@ -122,14 +122,14 @@ export default function AdminDashboardPage() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {statCards.map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
               <div className="flex items-center gap-4">
                 <div className={`${stat.color} p-3 rounded-lg`}>
                   <stat.icon className="h-6 w-6 text-white" />
                 </div>
                 <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {stat.value.toLocaleString()}
                   </p>
                 </div>
@@ -154,29 +154,29 @@ export default function AdminDashboardPage() {
 
         {/* User Breakdown */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Users by Persona</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Users by Persona</h3>
             <div className="space-y-3">
               {stats?.userBreakdown.byPersona.map((item) => (
                 <div key={item.persona} className="flex items-center justify-between">
-                  <span className="text-gray-600 dark:text-gray-400 capitalize">
+                  <span className="text-slate-600 dark:text-slate-400 capitalize">
                     {item.persona.toLowerCase().replace('_', ' ')}
                   </span>
-                  <span className="font-medium text-gray-900 dark:text-white">{item._count}</span>
+                  <span className="font-medium text-slate-900 dark:text-white">{item._count}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Users by Role</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Users by Role</h3>
             <div className="space-y-3">
               {stats?.userBreakdown.byRole.map((item) => (
                 <div key={item.role} className="flex items-center justify-between">
-                  <span className="text-gray-600 dark:text-gray-400 capitalize">
+                  <span className="text-slate-600 dark:text-slate-400 capitalize">
                     {item.role.toLowerCase()}
                   </span>
-                  <span className="font-medium text-gray-900 dark:text-white">{item._count}</span>
+                  <span className="font-medium text-slate-900 dark:text-white">{item._count}</span>
                 </div>
               ))}
             </div>
@@ -184,21 +184,21 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Quick Actions */}
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Quick Actions</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {adminLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+              className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
             >
               <div className="flex items-start gap-4">
-                <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
-                  <link.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+                <div className="bg-slate-100 dark:bg-slate-700 p-3 rounded-lg">
+                  <link.icon className="h-6 w-6 text-slate-700 dark:text-slate-300" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">{link.label}</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{link.description}</p>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{link.label}</h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{link.description}</p>
                 </div>
               </div>
             </Link>

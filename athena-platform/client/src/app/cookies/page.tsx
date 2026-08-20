@@ -74,7 +74,7 @@ export default function CookiesPage() {
   const [expandedCategory, setExpandedCategory] = useState<string | null>('essential');
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white">
         <div className="max-w-4xl mx-auto px-4 py-12">
@@ -93,13 +93,13 @@ export default function CookiesPage() {
 
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Introduction */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">What are Cookies?</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-4">What are Cookies?</h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
             Cookies are small text files that are placed on your device when you visit a website. They are widely used to make 
             websites work more efficiently and provide information to the site owners.
           </p>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-slate-600 dark:text-slate-400">
             We use cookies and similar technologies (such as local storage and pixels) to operate our platform, remember your 
             preferences, understand how you use our services, and improve your experience.
           </p>
@@ -108,8 +108,8 @@ export default function CookiesPage() {
         {/* Cookie Settings Button */}
         <section className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-xl p-6 mb-8 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Manage Your Cookie Preferences</h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Update your cookie settings at any time</p>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Manage Your Cookie Preferences</h3>
+            <p className="text-slate-600 dark:text-slate-400 text-sm">Update your cookie settings at any time</p>
           </div>
           <button
             onClick={() => {
@@ -125,21 +125,21 @@ export default function CookiesPage() {
         </section>
 
         {/* Cookie Categories */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden mb-8">
-          <div className="p-6 border-b border-gray-100 dark:border-gray-700">
-            <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">Types of Cookies We Use</h2>
+        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden mb-8">
+          <div className="p-6 border-b border-slate-100 dark:border-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900 dark:text-white">Types of Cookies We Use</h2>
           </div>
           
           {COOKIE_CATEGORIES.map((category) => (
-            <div key={category.id} className="border-b border-gray-100 dark:border-gray-700 last:border-0">
+            <div key={category.id} className="border-b border-slate-100 dark:border-slate-700 last:border-0">
               <button
                 onClick={() => setExpandedCategory(expandedCategory === category.id ? null : category.id)}
-                className="w-full flex items-center justify-between p-6 hover:bg-gray-50 dark:hover:bg-gray-750 transition text-left"
+                className="w-full flex items-center justify-between p-6 hover:bg-slate-50 dark:hover:bg-slate-700 transition text-left"
               >
                 <div className="flex items-center gap-4">
-                  <div className={`w-3 h-3 rounded-full ${category.required ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                  <div className={`w-3 h-3 rounded-full ${category.required ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                   <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                       {category.title}
                       {category.required && (
                         <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded">
@@ -147,13 +147,13 @@ export default function CookiesPage() {
                         </span>
                       )}
                     </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{category.description}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{category.description}</p>
                   </div>
                 </div>
                 {expandedCategory === category.id ? (
-                  <ChevronUp className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <ChevronUp className="w-5 h-5 text-slate-400 flex-shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <ChevronDown className="w-5 h-5 text-slate-400 flex-shrink-0" />
                 )}
               </button>
               
@@ -162,19 +162,19 @@ export default function CookiesPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                        <tr className="text-left text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
                           <th className="pb-3 font-medium">Cookie Name</th>
                           <th className="pb-3 font-medium">Purpose</th>
                           <th className="pb-3 font-medium">Duration</th>
                           <th className="pb-3 font-medium">Type</th>
                         </tr>
                       </thead>
-                      <tbody className="text-gray-600 dark:text-gray-300">
+                      <tbody className="text-slate-600 dark:text-slate-300">
                         {category.cookies.map((cookie) => (
-                          <tr key={cookie.name} className="border-b border-gray-50 dark:border-gray-750 last:border-0">
+                          <tr key={cookie.name} className="border-b border-slate-50 dark:border-slate-700 last:border-0">
                             <td className="py-3 font-mono text-xs">{cookie.name}</td>
                             <td className="py-3">{cookie.purpose}</td>
-                            <td className="py-3 text-gray-400">{cookie.duration}</td>
+                            <td className="py-3 text-slate-400">{cookie.duration}</td>
                             <td className="py-3">
                               <span className={`text-xs px-2 py-0.5 rounded ${
                                 cookie.type === 'First-party' 
@@ -196,12 +196,12 @@ export default function CookiesPage() {
         </section>
 
         {/* How to Control Cookies */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">How to Control Cookies</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-4">How to Control Cookies</h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
             You can control and manage cookies in several ways:
           </p>
-          <ul className="space-y-3 text-gray-600 dark:text-gray-400">
+          <ul className="space-y-3 text-slate-600 dark:text-slate-400">
             <li className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 flex-shrink-0" />
               <span><strong>Cookie Settings:</strong> Use our cookie settings panel to accept or reject optional cookies.</span>
@@ -215,15 +215,15 @@ export default function CookiesPage() {
               <span><strong>Third-Party Opt-Outs:</strong> For analytics and advertising cookies, you can opt out through industry programs like <a href="https://optout.aboutads.info/" target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">DAA</a> or <a href="https://www.youronlinechoices.eu/" target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">Your Online Choices (EU)</a>.</span>
             </li>
           </ul>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-4">
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-4">
             Please note that disabling certain cookies may affect the functionality of our platform.
           </p>
         </section>
 
         {/* Updates */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Updates to This Policy</h2>
-          <p className="text-gray-600 dark:text-gray-400">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-4">Updates to This Policy</h2>
+          <p className="text-slate-600 dark:text-slate-400">
             We may update this Cookie Policy from time to time to reflect changes in our practices or for operational, legal, 
             or regulatory reasons. We will notify you of any material changes by posting the updated policy on this page with 
             a new "Last updated" date.
@@ -231,9 +231,9 @@ export default function CookiesPage() {
         </section>
 
         {/* Contact */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 shadow-sm">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Contact Us</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-4">Contact Us</h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
             If you have any questions about our use of cookies, please contact us:
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
@@ -256,9 +256,9 @@ export default function CookiesPage() {
         {/* Related Links */}
         <div className="mt-8 flex flex-wrap gap-4 text-sm">
           <Link href="/privacy" className="text-purple-600 hover:underline">Privacy Policy</Link>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <span className="text-slate-300 dark:text-slate-600">|</span>
           <Link href="/privacy/uk" className="text-purple-600 hover:underline">UK Privacy Addendum</Link>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <span className="text-slate-300 dark:text-slate-600">|</span>
           <Link href="/terms" className="text-purple-600 hover:underline">Terms of Service</Link>
         </div>
       </div>

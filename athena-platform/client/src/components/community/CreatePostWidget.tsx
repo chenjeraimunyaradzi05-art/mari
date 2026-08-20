@@ -59,7 +59,7 @@ export default function CreatePostWidget() {
   if (!user) return null;
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
       <div className="flex gap-4">
         <div className="flex-shrink-0">
           {/* Avatar */}
@@ -74,7 +74,7 @@ export default function CreatePostWidget() {
           {!isExpanded ? (
             <button
               onClick={() => setIsExpanded(true)}
-              className="w-full text-left bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 rounded-full px-4 py-2.5 transition-colors"
+              className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-500 rounded-full px-4 py-2.5 transition-colors"
             >
               Start a post...
             </button>
@@ -85,14 +85,14 @@ export default function CreatePostWidget() {
                 onChange={(e) => setContent(e.target.value)}
                 placeholder="What do you want to talk about?"
                 rows={4}
-                className="w-full border-none focus:ring-0 resize-none p-0 text-gray-900 placeholder-gray-500 text-base"
+                className="w-full border-none focus:ring-0 resize-none p-0 text-slate-900 placeholder-slate-500 text-base"
                 autoFocus
               />
-              <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-100">
                 <div className="flex space-x-2">
                   <button
                     type="button"
-                    className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
+                    className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
                     title="Add Image"
                     onClick={() => handlePickFile('image/*')}
                   >
@@ -100,7 +100,7 @@ export default function CreatePostWidget() {
                   </button>
                     <button
                     type="button"
-                    className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
+                    className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
                     title="Add Video"
                     onClick={() => handlePickFile('video/*')}
                   >
@@ -111,7 +111,7 @@ export default function CreatePostWidget() {
                     <button
                         type="button"
                         onClick={() => setIsExpanded(false)}
-                        className="px-4 py-1.5 text-gray-600 font-medium hover:bg-gray-100 rounded-full"
+                        className="px-4 py-1.5 text-slate-600 font-medium hover:bg-slate-100 rounded-full"
                     >
                         Cancel
                     </button>
@@ -127,7 +127,7 @@ export default function CreatePostWidget() {
               </div>
 
               {mediaUrls.length > 0 && (
-                <div className="mt-3 text-xs text-gray-500">
+                <div className="mt-3 text-xs text-slate-500">
                   Attached: {postType === 'VIDEO' ? 'Video' : 'Image'}
                 </div>
               )}

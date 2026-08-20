@@ -32,7 +32,7 @@ const notificationColors: Record<StoreNotification['type'], string> = {
   APPLICATION_UPDATE: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
   MESSAGE: 'bg-green-100 dark:bg-green-900/30 text-green-500',
   MENTION: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500',
-  SYSTEM: 'bg-gray-100 dark:bg-gray-700 text-gray-500',
+  SYSTEM: 'bg-slate-100 dark:bg-slate-700 text-slate-500',
   MENTOR_SESSION: 'bg-orange-100 dark:bg-orange-900/30 text-orange-500',
 };
 
@@ -83,7 +83,7 @@ export default function NotificationDropdown() {
       {/* Bell Button */}
       <button
         onClick={togglePanel}
-        className="relative p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+        className="relative p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
         aria-label="Notifications"
       >
         <Bell className="w-5 h-5" />
@@ -96,11 +96,11 @@ export default function NotificationDropdown() {
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-96 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden z-50">
+        <div className="absolute right-0 mt-2 w-96 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden z-50">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
             <div className="flex items-center space-x-2">
-              <h3 className="font-semibold text-gray-900 dark:text-white">
+              <h3 className="font-semibold text-slate-900 dark:text-white">
                 Notifications
               </h3>
               {unreadCount > 0 && (
@@ -124,7 +124,7 @@ export default function NotificationDropdown() {
               )}
               <Link
                 href="/dashboard/settings/notifications"
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 title="Notification settings"
               >
                 <Settings className="w-4 h-4" />
@@ -136,16 +136,16 @@ export default function NotificationDropdown() {
           <div className="max-h-96 overflow-y-auto">
             {notifications.length === 0 ? (
               <div className="p-8 text-center">
-                <Bell className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                <p className="text-gray-500 dark:text-gray-400">
+                <Bell className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+                <p className="text-slate-500 dark:text-slate-400">
                   No notifications yet
                 </p>
-                <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
                   We'll notify you when something happens
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              <div className="divide-y divide-slate-100 dark:divide-slate-700">
                 {notifications.map((notification) => {
                   const Icon = notificationIcons[notification.type] || AlertCircle;
                   const colorClass = notificationColors[notification.type] || notificationColors.SYSTEM;
@@ -154,7 +154,7 @@ export default function NotificationDropdown() {
                     <div
                       key={notification.id}
                       className={cn(
-                        'relative group px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition',
+                        'relative group px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition',
                         !notification.isRead && 'bg-primary-50/50 dark:bg-primary-900/10'
                       )}
                     >
@@ -176,13 +176,13 @@ export default function NotificationDropdown() {
                           <Icon className="w-5 h-5" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">
                             {notification.title}
                           </p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                          <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2">
                             {notification.message}
                           </p>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
                             {formatDistanceToNow(new Date(notification.createdAt), {
                               addSuffix: true,
                             })}
@@ -202,7 +202,7 @@ export default function NotificationDropdown() {
                               markAsRead(notification.id);
                               markRead.mutate(notification.id);
                             }}
-                            className="p-1 text-gray-400 hover:text-primary-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                            className="p-1 text-slate-400 hover:text-primary-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                             title="Mark as read"
                           >
                             <Check className="w-4 h-4" />
@@ -214,7 +214,7 @@ export default function NotificationDropdown() {
                             removeNotification(notification.id);
                             deleteNotification.mutate(notification.id);
                           }}
-                          className="p-1 text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                          className="p-1 text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                           title="Remove"
                         >
                           <X className="w-4 h-4" />
@@ -229,7 +229,7 @@ export default function NotificationDropdown() {
 
           {/* Footer */}
           {notifications.length > 0 && (
-            <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+            <div className="p-3 border-t border-slate-200 dark:border-slate-700">
               <Link
                 href="/dashboard/notifications"
                 onClick={() => setPanelOpen(false)}

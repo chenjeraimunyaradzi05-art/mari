@@ -122,16 +122,16 @@ export default function ContentGeneratorPage() {
       <div className="flex items-center space-x-4">
         <Link
           href="/dashboard/ai"
-          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
         >
-          <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center space-x-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center space-x-2">
             <span className="text-3xl">✍️</span>
             <span>Content Generator</span>
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             AI-powered content creation for professional communication
           </p>
         </div>
@@ -142,7 +142,7 @@ export default function ContentGeneratorPage() {
         <div className="space-y-6">
           {/* Content Type */}
           <div className="card">
-            <h2 className="font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="font-semibold text-slate-900 dark:text-white mb-4">
               Content Type
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -154,7 +154,7 @@ export default function ContentGeneratorPage() {
                     'flex items-start space-x-3 p-4 rounded-lg border-2 text-left transition',
                     contentType === type.id
                       ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   )}
                 >
                   <type.icon
@@ -162,14 +162,14 @@ export default function ContentGeneratorPage() {
                       'w-5 h-5 mt-0.5',
                       contentType === type.id
                         ? 'text-primary-500'
-                        : 'text-gray-400'
+                        : 'text-slate-400'
                     )}
                   />
                   <div>
-                    <span className="font-medium text-gray-900 dark:text-white block">
+                    <span className="font-medium text-slate-900 dark:text-white block">
                       {type.name}
                     </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
                       {type.description}
                     </span>
                   </div>
@@ -180,20 +180,20 @@ export default function ContentGeneratorPage() {
 
           {/* Topic */}
           <div className="card">
-            <h2 className="font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="font-semibold text-slate-900 dark:text-white mb-4">
               Topic or Key Message
             </h2>
             <textarea
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               placeholder="e.g., I just got promoted to Senior Product Manager and want to share my journey..."
-              className="w-full h-24 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
+              className="w-full h-24 p-4 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
             />
           </div>
 
           {/* Tone */}
           <div className="card">
-            <h2 className="font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="font-semibold text-slate-900 dark:text-white mb-4">
               Tone
             </h2>
             <div className="flex flex-wrap gap-2">
@@ -205,7 +205,7 @@ export default function ContentGeneratorPage() {
                     'px-4 py-2 rounded-full text-sm transition',
                     tone === t.id
                       ? 'bg-primary-500 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                   )}
                 >
                   {t.name}
@@ -216,14 +216,14 @@ export default function ContentGeneratorPage() {
 
           {/* Additional Context */}
           <div className="card">
-            <h2 className="font-semibold text-gray-900 dark:text-white mb-4">
+            <h2 className="font-semibold text-slate-900 dark:text-white mb-4">
               Additional Context (Optional)
             </h2>
             <textarea
               value={additionalContext}
               onChange={(e) => setAdditionalContext(e.target.value)}
               placeholder="Any specific points you want to include, your industry, target audience, etc."
-              className="w-full h-20 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
+              className="w-full h-20 p-4 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
             />
           </div>
 
@@ -257,10 +257,10 @@ export default function ContentGeneratorPage() {
               )}>
                 <Sparkles className="w-8 h-8 text-primary-500" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                 {generationError ? 'Generation Failed' : 'Ready to Create'}
               </h3>
-              <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+              <p className="text-slate-500 dark:text-slate-400 max-w-sm">
                 {generationError ||
                   'Select a content type, enter your topic, and let AI craft the perfect message for you'}
               </p>
@@ -270,10 +270,10 @@ export default function ContentGeneratorPage() {
               <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mb-4 animate-pulse">
                 <Wand2 className="w-8 h-8 text-primary-500" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                 Creating Your Content
               </h3>
-              <p className="text-gray-500 dark:text-gray-400">
+              <p className="text-slate-500 dark:text-slate-400">
                 Crafting the perfect {selectedType?.name.toLowerCase()}...
               </p>
             </div>
@@ -281,7 +281,7 @@ export default function ContentGeneratorPage() {
             <>
               <div className="card">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                  <h3 className="font-semibold text-slate-900 dark:text-white flex items-center space-x-2">
                     {selectedType && <selectedType.icon className="w-5 h-5 text-primary-500" />}
                     <span>{selectedType?.name}</span>
                   </h3>
@@ -312,13 +312,13 @@ export default function ContentGeneratorPage() {
                   </div>
                 </div>
 
-                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                  <pre className="whitespace-pre-wrap font-sans text-gray-700 dark:text-gray-300 text-sm leading-relaxed">
+                <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4">
+                  <pre className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-sm leading-relaxed">
                     {generatedContent}
                   </pre>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+                <div className="mt-4 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
                   <span>{generatedContent.length} characters</span>
                   {selectedType && generatedContent.length > selectedType.maxLength && (
                     <span className="text-yellow-600 dark:text-yellow-400">
@@ -331,7 +331,7 @@ export default function ContentGeneratorPage() {
               {/* Variations */}
               {variations.length > 0 && (
                 <div className="card">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4">
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-4">
                     Alternative Variations
                   </h3>
                   <div className="space-y-2">
@@ -346,10 +346,10 @@ export default function ContentGeneratorPage() {
                           'w-full text-left p-3 rounded-lg border transition',
                           selectedVariation === index
                             ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                         )}
                       >
-                        <span className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+                        <span className="text-sm text-slate-600 dark:text-slate-300 line-clamp-2">
                           {variation}
                         </span>
                       </button>
@@ -364,14 +364,14 @@ export default function ContentGeneratorPage() {
 
       {/* Tips */}
       <div className="card bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center space-x-2">
+        <h3 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center space-x-2">
           <Lightbulb className="w-5 h-5 text-yellow-500" />
           <span>Content Tips</span>
         </h3>
-        <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-300">
+        <div className="grid md:grid-cols-2 gap-4 text-sm text-slate-600 dark:text-slate-300">
           <div>
             <p className="font-medium mb-1">LinkedIn Best Practices</p>
-            <ul className="space-y-1 text-gray-500 dark:text-gray-400">
+            <ul className="space-y-1 text-slate-500 dark:text-slate-400">
               <li>• Use emojis sparingly for visual breaks</li>
               <li>• End with a question to encourage engagement</li>
               <li>• Include relevant hashtags (3-5 max)</li>
@@ -379,7 +379,7 @@ export default function ContentGeneratorPage() {
           </div>
           <div>
             <p className="font-medium mb-1">Email Best Practices</p>
-            <ul className="space-y-1 text-gray-500 dark:text-gray-400">
+            <ul className="space-y-1 text-slate-500 dark:text-slate-400">
               <li>• Keep subject lines under 50 characters</li>
               <li>• Get to the point in the first paragraph</li>
               <li>• Include a clear call-to-action</li>

@@ -61,9 +61,9 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero Section */}
-      <section className="relative bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white overflow-hidden">
+      <section className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
         <div className="container mx-auto px-4 py-20 relative z-10">
           <div className="max-w-4xl">
@@ -74,7 +74,7 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
             <h1 className="text-4xl md:text-5xl font-bold mb-6">
               Build with the ATHENA API
             </h1>
-            <p className="text-xl text-gray-300 mb-8 max-w-2xl">
+            <p className="text-xl text-slate-300 mb-8 max-w-2xl">
               Access jobs, mentors, AI tools, and more. Integrate ATHENA&apos;s powerful career platform into your applications.
             </p>
             <div className="flex flex-wrap gap-4">
@@ -87,7 +87,7 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
               </Link>
               <Link
                 href="/developers/console"
-                className="px-6 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-600 transition flex items-center gap-2"
+                className="px-6 py-3 bg-slate-700 text-white font-semibold rounded-lg hover:bg-slate-600 transition flex items-center gap-2"
               >
                 <Terminal className="w-5 h-5" />
                 API Console
@@ -101,33 +101,33 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
       <section className="container mx-auto px-4 py-16">
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           {features.map((feature) => (
-            <div key={feature.title} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+            <div key={feature.title} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
               <feature.icon className="w-10 h-10 text-green-500 mb-4" />
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{feature.title}</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">{feature.description}</p>
+              <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{feature.title}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{feature.description}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Code Examples */}
-      <section className="bg-gray-900 py-16">
+      <section className="bg-slate-900 py-16">
         <div className="container mx-auto px-4">
           <h2 className="text-3xl font-bold text-white mb-8 text-center">Quick Start</h2>
           <div className="max-w-4xl mx-auto space-y-6">
             {Object.entries(codeExamples).map(([key, code]) => (
-              <div key={key} className="bg-gray-800 rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900/80 px-4 py-2">
-                  <span className="text-sm text-gray-400 capitalize">{key === 'auth' ? 'Authentication' : key === 'jobs' ? 'Search Jobs' : 'AI Analysis'}</span>
+              <div key={key} className="bg-slate-800 rounded-xl overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900/80 px-4 py-2">
+                  <span className="text-sm text-slate-400 capitalize">{key === 'auth' ? 'Authentication' : key === 'jobs' ? 'Search Jobs' : 'AI Analysis'}</span>
                   <button
                     onClick={() => copyToClipboard(code, key)}
-                    className="flex items-center gap-1 text-sm text-gray-400 hover:text-white"
+                    className="flex items-center gap-1 text-sm text-slate-400 hover:text-white"
                   >
                     {copied === key ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
                     {copied === key ? 'Copied!' : 'Copy'}
                   </button>
                 </div>
-                <pre className="p-4 text-sm text-gray-300 overflow-x-auto">
+                <pre className="p-4 text-sm text-slate-300 overflow-x-auto">
                   <code>{code}</code>
                 </pre>
               </div>
@@ -138,19 +138,19 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
 
       {/* API Endpoints */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">API Endpoints</h2>
-        <div className="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">API Endpoints</h2>
+        <div className="max-w-4xl mx-auto bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="divide-y divide-slate-200 dark:divide-slate-700">
             {endpoints.map((endpoint, i) => (
-              <div key={i} className="flex items-center gap-4 p-4 hover:bg-gray-50 dark:hover:bg-gray-700/60">
+              <div key={i} className="flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/60">
                 <span className={`px-2 py-1 text-xs font-mono font-bold rounded ${
                   endpoint.method === 'GET' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
                   'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                 }`}>
                   {endpoint.method}
                 </span>
-                <code className="text-sm font-mono text-gray-900 dark:text-white flex-1">{endpoint.path}</code>
-                <span className="text-sm text-gray-600 dark:text-gray-400 hidden md:block">{endpoint.description}</span>
+                <code className="text-sm font-mono text-slate-900 dark:text-white flex-1">{endpoint.path}</code>
+                <span className="text-sm text-slate-600 dark:text-slate-400 hidden md:block">{endpoint.description}</span>
               </div>
             ))}
           </div>
@@ -163,19 +163,19 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
       </section>
 
       {/* SDKs */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">Official SDKs</h2>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">Official SDKs</h2>
           <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             {[
               { name: 'JavaScript/TypeScript', icon: '🟨', pkg: 'npm install @athena/sdk' },
               { name: 'Python', icon: '🐍', pkg: 'pip install athena-sdk' },
               { name: 'Ruby', icon: '💎', pkg: 'gem install athena-sdk' },
             ].map((sdk) => (
-              <div key={sdk.name} className="bg-gray-50 dark:bg-gray-900 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+              <div key={sdk.name} className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
                 <span className="text-3xl mb-4 block">{sdk.icon}</span>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{sdk.name}</h3>
-                <code className="text-sm text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded block">
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{sdk.name}</h3>
+                <code className="text-sm text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded block">
                   {sdk.pkg}
                 </code>
               </div>
@@ -192,7 +192,7 @@ const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
             Get your API keys and start integrating ATHENA into your application today.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
-            <Link href="/register" className="px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-gray-100 transition">
+            <Link href="/register" className="px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition">
               Create Free Account
             </Link>
             <Link href="/contact-sales" className="px-8 py-3 bg-green-700 text-white font-semibold rounded-lg hover:bg-green-800 transition flex items-center gap-2">

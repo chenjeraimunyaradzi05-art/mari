@@ -50,7 +50,7 @@ export default function CapitalPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-emerald-600 via-green-600 to-teal-600 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -69,7 +69,7 @@ export default function CapitalPage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="/capital/investors"
-                className="px-6 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+                className="px-6 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition"
               >
                 Apply for Funding
               </Link>
@@ -88,9 +88,9 @@ export default function CapitalPage() {
       <section className="container mx-auto px-4 -mt-8 relative z-20">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {stats.map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <div className="text-3xl font-bold text-green-600">{stat.value}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -98,22 +98,22 @@ export default function CapitalPage() {
 
       {/* Funding Options */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Funding Stages
         </h2>
         <div className="grid md:grid-cols-3 gap-6">
           {fundingOptions.map((option) => (
-            <div key={option.title} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+            <div key={option.title} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
               <div className="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center mb-4">
                 <option.icon className="w-7 h-7 text-green-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">{option.title}</h3>
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-1">{option.title}</h3>
               <p className="text-2xl font-bold text-green-600 mb-3">{option.amount}</p>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{option.description}</p>
-              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Requirements:</h4>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">{option.description}</p>
+              <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-2">Requirements:</h4>
               <ul className="space-y-2">
                 {option.requirements.map((req) => (
-                  <li key={req} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <li key={req} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                     <CheckCircle className="w-4 h-4 text-green-500" />
                     {req}
                   </li>
@@ -125,9 +125,9 @@ export default function CapitalPage() {
       </section>
 
       {/* Benefits */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
             More Than Just Capital
           </h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
@@ -136,8 +136,8 @@ export default function CapitalPage() {
                 <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <benefit.icon className="w-8 h-8 text-green-600" />
                 </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{benefit.title}</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{benefit.description}</p>
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{benefit.title}</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400">{benefit.description}</p>
               </div>
             ))}
           </div>
@@ -146,17 +146,17 @@ export default function CapitalPage() {
 
       {/* Portfolio */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Portfolio Highlights
         </h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-4xl mx-auto">
           {portfolio.map((company) => (
-            <div key={company.name} className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+            <div key={company.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
               <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg mb-4 flex items-center justify-center">
                 <Building className="w-6 h-6 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 dark:text-white">{company.name}</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">{company.sector}</p>
+              <h3 className="font-semibold text-slate-900 dark:text-white">{company.name}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{company.sector}</p>
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-green-600 font-medium">{company.raised}</span>
                 <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-full">
@@ -169,16 +169,16 @@ export default function CapitalPage() {
       </section>
 
       {/* Investment Thesis */}
-      <section className="bg-gray-900 text-white py-16">
+      <section className="bg-slate-900 text-white py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
             <h2 className="text-3xl font-bold mb-6">Our Investment Thesis</h2>
-            <p className="text-gray-300 mb-8">
+            <p className="text-slate-300 mb-8">
               We back founders who are building solutions that democratize access to opportunities, leverage AI and technology for good, and create sustainable impact in the future of work.
             </p>
             <div className="grid md:grid-cols-3 gap-6">
               {['Future of Work', 'AI & Automation', 'EdTech & SkillsTech'].map((focus) => (
-                <div key={focus} className="p-4 border border-gray-700 rounded-lg">
+                <div key={focus} className="p-4 border border-slate-700 rounded-lg">
                   <span className="text-green-400 font-medium">{focus}</span>
                 </div>
               ))}
@@ -197,7 +197,7 @@ export default function CapitalPage() {
           <div className="flex flex-wrap justify-center gap-4">
             <Link
               href="/capital/investors"
-              className="px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+              className="px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition"
             >
               Apply Now
             </Link>

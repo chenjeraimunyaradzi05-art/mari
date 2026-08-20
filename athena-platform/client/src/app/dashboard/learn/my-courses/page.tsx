@@ -146,10 +146,10 @@ export default function MyCoursesPage() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           My Learning
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Track your progress and continue where you left off
         </p>
       </div>
@@ -157,31 +157,31 @@ export default function MyCoursesPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card text-center">
           <BookOpen className="w-8 h-8 text-primary-500 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {stats.totalCourses}
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Total Courses</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Total Courses</p>
         </div>
         <div className="card text-center">
           <Play className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {stats.inProgress}
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">In Progress</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">In Progress</p>
         </div>
         <div className="card text-center">
           <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {stats.completed}
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Completed</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Completed</p>
         </div>
         <div className="card text-center">
           <Building2 className="w-8 h-8 text-purple-500 mx-auto mb-2" />
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {stats.providers}
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Providers</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Providers</p>
         </div>
       </div>
 
@@ -193,7 +193,7 @@ export default function MyCoursesPage() {
               'px-4 py-2 rounded-lg text-sm font-medium transition',
               filter === 'all'
                 ? 'bg-primary-500 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
             )}
           >
             All ({courses.length})
@@ -204,7 +204,7 @@ export default function MyCoursesPage() {
               'px-4 py-2 rounded-lg text-sm font-medium transition',
               filter === 'in-progress'
                 ? 'bg-primary-500 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
             )}
           >
             In Progress ({stats.inProgress})
@@ -215,7 +215,7 @@ export default function MyCoursesPage() {
               'px-4 py-2 rounded-lg text-sm font-medium transition',
               filter === 'completed'
                 ? 'bg-primary-500 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
             )}
           >
             Completed ({stats.completed})
@@ -223,13 +223,13 @@ export default function MyCoursesPage() {
         </div>
 
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
             placeholder="Search courses..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm"
+            className="pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-sm"
           />
         </div>
       </div>
@@ -242,11 +242,11 @@ export default function MyCoursesPage() {
         </div>
       ) : isError ? (
         <div className="card text-center py-16">
-          <BookOpen className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <BookOpen className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             Unable to load your courses
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">
+          <p className="text-slate-500 dark:text-slate-400 mb-6">
             Please try again. If you're logged out, sign in first.
           </p>
           <Link href="/login" className="btn-primary">
@@ -255,11 +255,11 @@ export default function MyCoursesPage() {
         </div>
       ) : filteredCourses.length === 0 ? (
         <div className="card text-center py-16">
-          <BookOpen className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <BookOpen className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             No courses found
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">
+          <p className="text-slate-500 dark:text-slate-400 mb-6">
             {filter !== 'all'
               ? "You don't have any courses in this category"
               : "You haven't enrolled in any courses yet"}
@@ -303,11 +303,11 @@ export default function MyCoursesPage() {
                     <div>
                       <Link
                         href={`/dashboard/learn/${course.id}`}
-                        className="font-medium text-gray-900 dark:text-white hover:text-primary-500"
+                        className="font-medium text-slate-900 dark:text-white hover:text-primary-500"
                       >
                         {course.title}
                       </Link>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
                         {providerNameFor(course)}
                       </p>
                     </div>
@@ -318,14 +318,14 @@ export default function MyCoursesPage() {
 
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="text-gray-600 dark:text-gray-300">
+                      <span className="text-slate-600 dark:text-slate-300">
                         Progress
                       </span>
                       <span className="font-medium text-primary-500">
                         {course.progress}%
                       </span>
                     </div>
-                    <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                       <div
                         className={cn(
                           'h-full rounded-full transition-all',
@@ -336,7 +336,7 @@ export default function MyCoursesPage() {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-slate-500 dark:text-slate-400">
                     {duration && (
                       <span className="flex items-center">
                         <Clock className="w-4 h-4 mr-1" />

@@ -98,10 +98,10 @@ export default function EventsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
             Events
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Discover webinars, workshops, and networking opportunities
           </p>
         </div>
@@ -117,17 +117,17 @@ export default function EventsPage() {
           <button
             onClick={() => effectiveWeekStart && setCurrentWeekStart(addDays(effectiveWeekStart, -7))}
             disabled={!effectiveWeekStart}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
-          <h3 className="font-medium text-gray-900 dark:text-white">
+          <h3 className="font-medium text-slate-900 dark:text-white">
             {effectiveWeekStart ? format(effectiveWeekStart, 'MMMM yyyy') : 'Loading calendar'}
           </h3>
           <button
             onClick={() => effectiveWeekStart && setCurrentWeekStart(addDays(effectiveWeekStart, 7))}
             disabled={!effectiveWeekStart}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -135,7 +135,7 @@ export default function EventsPage() {
         {!effectiveWeekStart ? (
           <div className="grid grid-cols-7 gap-2">
             {Array.from({ length: 7 }).map((_, index) => (
-              <div key={index} className="h-20 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+              <div key={index} className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
             ))}
           </div>
         ) : (
@@ -157,7 +157,7 @@ export default function EventsPage() {
                       ? 'bg-primary-500 text-white'
                       : isToday
                       ? 'bg-primary-100 dark:bg-primary-900/30'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                      : 'hover:bg-slate-100 dark:hover:bg-slate-700'
                   )}
                 >
                   <span
@@ -165,7 +165,7 @@ export default function EventsPage() {
                       'text-xs',
                       isSelected
                         ? 'text-white/80'
-                        : 'text-gray-500 dark:text-gray-400'
+                        : 'text-slate-500 dark:text-slate-400'
                     )}
                   >
                     {format(day, 'EEE')}
@@ -173,7 +173,7 @@ export default function EventsPage() {
                   <span
                     className={cn(
                       'text-lg font-semibold',
-                      isSelected ? 'text-white' : 'text-gray-900 dark:text-white'
+                      isSelected ? 'text-white' : 'text-slate-900 dark:text-white'
                     )}
                   >
                     {format(day, 'd')}
@@ -204,7 +204,7 @@ export default function EventsPage() {
                 'px-4 py-2 rounded-lg text-sm font-medium transition',
                 selectedType === type.value
                   ? 'bg-primary-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
               )}
             >
               {type.label}
@@ -213,13 +213,13 @@ export default function EventsPage() {
         </div>
 
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
             placeholder="Search events..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm w-full sm:w-64"
+            className="pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-sm w-full sm:w-64"
           />
         </div>
       </div>
@@ -227,11 +227,11 @@ export default function EventsPage() {
       {/* Events List */}
       {filteredEvents.length === 0 ? (
         <div className="card text-center py-16">
-          <Calendar className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <Calendar className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             No events found
           </h3>
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-slate-500 dark:text-slate-400">
             {selectedDate
               ? `No events on ${format(selectedDate, 'MMMM d, yyyy')}`
               : 'Try adjusting your filters'}
@@ -277,11 +277,11 @@ export default function EventsPage() {
 
               {/* Content */}
               <div>
-                <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-2">
+                <div className="flex items-center space-x-2 text-sm text-slate-500 dark:text-slate-400 mb-2">
                   <Calendar className="w-4 h-4" />
                   <span>{format(event.date, 'EEEE, MMMM d, yyyy')}</span>
                 </div>
-                <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-3">
+                <div className="flex items-center space-x-2 text-sm text-slate-500 dark:text-slate-400 mb-3">
                   <Clock className="w-4 h-4" />
                   <span>
                     {event.startTime} - {event.endTime}
@@ -295,10 +295,10 @@ export default function EventsPage() {
                   )}
                 </div>
 
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-2">
                   {event.title}
                 </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-4 line-clamp-2">
                   {event.description}
                 </p>
 
@@ -311,15 +311,15 @@ export default function EventsPage() {
                       size="sm"
                     />
                     <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">
                         {event.host.name}
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
                         {event.host.title}
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center text-sm text-slate-500 dark:text-slate-400">
                     <Users className="w-4 h-4 mr-1" />
                     {event.attendees}
                     {event.maxAttendees && ` / ${event.maxAttendees}`}
@@ -331,7 +331,7 @@ export default function EventsPage() {
                   {event.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs rounded-full"
+                      className="px-2 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs rounded-full"
                     >
                       {tag}
                     </span>
@@ -339,7 +339,7 @@ export default function EventsPage() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => (event.isSaved ? unsaveEvent.mutate(event.id) : saveEvent.mutate(event.id))}
@@ -348,14 +348,14 @@ export default function EventsPage() {
                         'p-2 rounded-lg transition',
                         event.isSaved
                           ? 'text-red-500 bg-red-50 dark:bg-red-900/20'
-                          : 'text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          : 'text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-700'
                       )}
                     >
                       <Heart
                         className={cn('w-5 h-5', event.isSaved && 'fill-current')}
                       />
                     </button>
-                    <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                    <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition">
                       <Share2 className="w-5 h-5" />
                     </button>
                   </div>

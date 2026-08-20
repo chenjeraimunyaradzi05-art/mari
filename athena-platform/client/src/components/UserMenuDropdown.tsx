@@ -129,7 +129,7 @@ export default function UserMenuDropdown() {
       {/* User Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center space-x-2 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+        className="flex items-center space-x-2 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
       >
         <Avatar
           src={user?.avatar}
@@ -138,7 +138,7 @@ export default function UserMenuDropdown() {
           className="w-8 h-8"
         />
         <div className="hidden md:block text-left">
-          <p className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
+          <p className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[120px]">
             {user?.firstName} {user?.lastName}
           </p>
           <div className="flex items-center">
@@ -148,14 +148,14 @@ export default function UserMenuDropdown() {
                 Pro
               </span>
             )}
-            <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[100px]">
+            <span className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[100px]">
               {user?.email}
             </span>
           </div>
         </div>
         <ChevronDown
           className={cn(
-            'w-4 h-4 text-gray-400 hidden md:block transition-transform',
+            'w-4 h-4 text-slate-400 hidden md:block transition-transform',
             isOpen && 'rotate-180'
           )}
         />
@@ -163,9 +163,9 @@ export default function UserMenuDropdown() {
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden z-50">
+        <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden z-50">
           {/* User Info Header (Mobile) */}
-          <div className="md:hidden p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="md:hidden p-4 border-b border-slate-200 dark:border-slate-700">
             <div className="flex items-center space-x-3">
               <Avatar
                 src={user?.avatar}
@@ -174,10 +174,10 @@ export default function UserMenuDropdown() {
                 className="w-10 h-10"
               />
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 dark:text-white truncate">
+                <p className="font-medium text-slate-900 dark:text-white truncate">
                   {user?.firstName} {user?.lastName}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
                   {user?.email}
                 </p>
               </div>
@@ -197,16 +197,16 @@ export default function UserMenuDropdown() {
             {menuItems.map((item, index) => (
               <div key={item.label}>
                 {item.divider && index > 0 && (
-                  <div className="my-2 border-t border-gray-100 dark:border-gray-700" />
+                  <div className="my-2 border-t border-slate-100 dark:border-slate-700" />
                 )}
                 {item.href ? (
                   <Link
                     href={item.href}
                     onClick={() => setIsOpen(false)}
-                    className="flex items-center justify-between px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                    className="flex items-center justify-between px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
                   >
                     <div className="flex items-center space-x-3">
-                      <item.icon className="w-4 h-4 text-gray-400" />
+                      <item.icon className="w-4 h-4 text-slate-400" />
                       <span>{item.label}</span>
                     </div>
                     {item.badge && (
@@ -223,10 +223,10 @@ export default function UserMenuDropdown() {
                         setIsOpen(false);
                       }
                     }}
-                    className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                    className="w-full flex items-center justify-between px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
                   >
                     <div className="flex items-center space-x-3">
-                      <item.icon className="w-4 h-4 text-gray-400" />
+                      <item.icon className="w-4 h-4 text-slate-400" />
                       <span>{item.label}</span>
                     </div>
                     {item.badge && (
@@ -242,16 +242,16 @@ export default function UserMenuDropdown() {
 
           {/* Pro Upgrade CTA (for non-pro users) */}
           {!isPro && (
-            <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20">
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center">
                   <Crown className="w-5 h-5 text-primary-500" />
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     Upgrade to Pro
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Unlock all AI tools & features
                   </p>
                 </div>

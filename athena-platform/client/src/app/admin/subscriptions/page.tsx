@@ -97,7 +97,7 @@ export default function AdminSubscriptionsPage() {
       case 'PRO':
         return 'bg-blue-100 text-blue-800';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-100 text-slate-800';
     }
   };
 
@@ -112,22 +112,22 @@ export default function AdminSubscriptionsPage() {
       case 'EXPIRED':
         return 'bg-red-100 text-red-800';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-100 text-slate-800';
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+              <Link href="/admin" className="text-slate-500 hover:text-slate-700">
                 <ChevronLeft className="h-5 w-5" />
               </Link>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Subscription Management</h1>
-                <p className="text-gray-600 dark:text-gray-400">
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Subscription Management</h1>
+                <p className="text-slate-600 dark:text-slate-400">
                   {data?.pagination.total.toLocaleString()} subscriptions
                 </p>
               </div>
@@ -142,7 +142,7 @@ export default function AdminSubscriptionsPage() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Filters */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4 mb-6">
           <div className="flex flex-wrap gap-4">
             <select
               value={tierFilter}
@@ -150,7 +150,7 @@ export default function AdminSubscriptionsPage() {
                 setTierFilter(e.target.value);
                 setPage(1);
               }}
-              className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700"
+              className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700"
             >
               <option value="">All Tiers</option>
               {tiers.map((tier) => (
@@ -163,7 +163,7 @@ export default function AdminSubscriptionsPage() {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700"
+              className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700"
             >
               <option value="">All Statuses</option>
               {statuses.map((status) => (
@@ -174,41 +174,41 @@ export default function AdminSubscriptionsPage() {
         </div>
 
         {/* Subscriptions Table */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
             </div>
           ) : (
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
+            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+              <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     User
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Tier
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Period
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                 {data?.subscriptions.map((sub) => (
-                  <tr key={sub.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr key={sub.id} className="hover:bg-slate-50 dark:hover:bg-slate-700">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
+                        <p className="font-medium text-slate-900 dark:text-white">
                           {sub.user.firstName} {sub.user.lastName}
                         </p>
-                        <p className="text-sm text-gray-500">{sub.user.email}</p>
+                        <p className="text-sm text-slate-500">{sub.user.email}</p>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -239,7 +239,7 @@ export default function AdminSubscriptionsPage() {
                         ))}
                       </select>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                       <div>{new Date(sub.periodStart).toLocaleDateString()} -</div>
                       <div>{new Date(sub.periodEnd).toLocaleDateString()}</div>
                     </td>
@@ -268,8 +268,8 @@ export default function AdminSubscriptionsPage() {
 
           {/* Pagination */}
           {data && data.pagination.totalPages > 1 && (
-            <div className="bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-between border-t border-gray-200 dark:border-gray-700">
-              <div className="text-sm text-gray-500">
+            <div className="bg-white dark:bg-slate-800 px-4 py-3 flex items-center justify-between border-t border-slate-200 dark:border-slate-700">
+              <div className="text-sm text-slate-500">
                 Page {page} of {data.pagination.totalPages}
               </div>
               <div className="flex gap-2">
@@ -298,13 +298,13 @@ export default function AdminSubscriptionsPage() {
       {/* Grant Subscription Modal */}
       {showGrantModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
               Grant Subscription
             </h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   User Email
                 </label>
                 <Input
@@ -315,20 +315,20 @@ export default function AdminSubscriptionsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Tier
                 </label>
                 <select
                   value={grantTier}
                   onChange={(e) => setGrantTier(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md bg-white dark:bg-gray-700"
+                  className="w-full px-3 py-2 border rounded-md bg-white dark:bg-slate-700"
                 >
                   <option value="PRO">PRO</option>
                   <option value="BUSINESS">BUSINESS</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Duration (days)
                 </label>
                 <Input

@@ -85,25 +85,25 @@ export default function AdminJobsPage() {
       case 'PENDING':
         return 'bg-yellow-100 text-yellow-800';
       case 'CLOSED':
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-100 text-slate-800';
       case 'DRAFT':
         return 'bg-blue-100 text-blue-800';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-100 text-slate-800';
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Job Management</h1>
-              <p className="text-gray-600 dark:text-gray-400">
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Job Management</h1>
+              <p className="text-slate-600 dark:text-slate-400">
                 {data?.pagination.total.toLocaleString()} total jobs
               </p>
             </div>
@@ -113,11 +113,11 @@ export default function AdminJobsPage() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Filters */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4 mb-6">
           <div className="flex flex-wrap gap-4">
             <div className="flex-1 min-w-[200px]">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
                   placeholder="Search jobs..."
                   value={search}
@@ -135,7 +135,7 @@ export default function AdminJobsPage() {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700"
+              className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700"
             >
               <option value="">All Statuses</option>
               {statuses.map((status) => (
@@ -146,42 +146,42 @@ export default function AdminJobsPage() {
         </div>
 
         {/* Jobs Table */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
             </div>
           ) : (
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
+            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+              <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Job
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Posted By
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Stats
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Date
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                 {data?.jobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr key={job.id} className="hover:bg-slate-50 dark:hover:bg-slate-700">
                     <td className="px-6 py-4">
                       <div>
                         <div className="flex items-center gap-2">
-                          <p className="font-medium text-gray-900 dark:text-white">{job.title}</p>
+                          <p className="font-medium text-slate-900 dark:text-white">{job.title}</p>
                           {job.isSponsored && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
                               <Star className="h-3 w-3 mr-1" />
@@ -189,15 +189,15 @@ export default function AdminJobsPage() {
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500">{job.company} • {job.location}</p>
-                        <p className="text-xs text-gray-400 capitalize">{job.type.toLowerCase().replace('_', ' ')}</p>
+                        <p className="text-sm text-slate-500">{job.company} • {job.location}</p>
+                        <p className="text-xs text-slate-400 capitalize">{job.type.toLowerCase().replace('_', ' ')}</p>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <p className="text-sm text-gray-900 dark:text-white">
+                      <p className="text-sm text-slate-900 dark:text-white">
                         {job.postedBy.firstName} {job.postedBy.lastName}
                       </p>
-                      <p className="text-xs text-gray-500">{job.postedBy.email}</p>
+                      <p className="text-xs text-slate-500">{job.postedBy.email}</p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <select
@@ -213,18 +213,18 @@ export default function AdminJobsPage() {
                         ))}
                       </select>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                       <div>{job.viewCount.toLocaleString()} views</div>
                       <div>{job.applicationCount} applications</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                       {new Date(job.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Link
                           href={`/dashboard/jobs/${job.id}`}
-                          className="p-2 text-gray-500 hover:text-gray-700"
+                          className="p-2 text-slate-500 hover:text-slate-700"
                           title="View Job"
                         >
                           <Eye className="h-4 w-4" />
@@ -234,7 +234,7 @@ export default function AdminJobsPage() {
                             jobId: job.id,
                             updates: { isSponsored: !job.isSponsored }
                           })}
-                          className={`p-2 ${job.isSponsored ? 'text-purple-600' : 'text-gray-400'} hover:text-purple-800`}
+                          className={`p-2 ${job.isSponsored ? 'text-purple-600' : 'text-slate-400'} hover:text-purple-800`}
                           title={job.isSponsored ? 'Remove Sponsor' : 'Make Sponsored'}
                         >
                           <Star className="h-4 w-4" />
@@ -249,8 +249,8 @@ export default function AdminJobsPage() {
 
           {/* Pagination */}
           {data && data.pagination.totalPages > 1 && (
-            <div className="bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-between border-t border-gray-200 dark:border-gray-700">
-              <div className="text-sm text-gray-500">
+            <div className="bg-white dark:bg-slate-800 px-4 py-3 flex items-center justify-between border-t border-slate-200 dark:border-slate-700">
+              <div className="text-sm text-slate-500">
                 Page {page} of {data.pagination.totalPages}
               </div>
               <div className="flex gap-2">

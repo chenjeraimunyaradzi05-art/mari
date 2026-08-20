@@ -48,8 +48,8 @@ const Avatar = React.forwardRef<
         {online !== undefined && (
           <span
             className={cn(
-              'absolute bottom-0 right-0 rounded-full border-white dark:border-gray-900',
-              online ? 'bg-green-500' : 'bg-gray-400',
+              'absolute bottom-0 right-0 rounded-full border-white dark:border-slate-900',
+              online ? 'bg-green-500' : 'bg-slate-400',
               onlineIndicatorClasses[size]
             )}
           />
@@ -83,8 +83,8 @@ const Avatar = React.forwardRef<
       {online !== undefined && (
         <span
           className={cn(
-            'absolute bottom-0 right-0 rounded-full border-white dark:border-gray-900',
-            online ? 'bg-green-500' : 'bg-gray-400',
+            'absolute bottom-0 right-0 rounded-full border-white dark:border-slate-900',
+            online ? 'bg-green-500' : 'bg-slate-400',
             onlineIndicatorClasses[size]
           )}
         />
@@ -164,7 +164,7 @@ const AvatarFallback = React.forwardRef<HTMLSpanElement, AvatarFallbackProps>(
       <span
         ref={ref}
         className={cn(
-          'flex h-full w-full items-center justify-center rounded-full bg-muted bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-medium',
+          'flex h-full w-full items-center justify-center rounded-full bg-muted bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium',
           className
         )}
         {...props}
@@ -192,7 +192,7 @@ function AvatarGroup({ children, max = 4, size = 'md' }: AvatarGroupProps) {
       {visibleAvatars.map((child, index) => (
         <div
           key={index}
-          className="relative rounded-full ring-2 ring-white dark:ring-gray-900"
+          className="relative rounded-full ring-2 ring-white dark:ring-slate-900"
         >
           {child}
         </div>
@@ -200,7 +200,7 @@ function AvatarGroup({ children, max = 4, size = 'md' }: AvatarGroupProps) {
       {remainingCount > 0 && (
         <div
           className={cn(
-            'relative rounded-full ring-2 ring-white dark:ring-gray-900 bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 font-medium',
+            'relative rounded-full ring-2 ring-white dark:ring-slate-900 bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 font-medium',
             sizeClasses[size]
           )}
         >

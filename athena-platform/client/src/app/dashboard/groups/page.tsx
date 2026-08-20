@@ -45,8 +45,8 @@ export default function GroupsPage() {
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Groups</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Groups</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Discover and join communities.
           </p>
         </div>
@@ -61,19 +61,19 @@ export default function GroupsPage() {
 
       <div className="card p-4">
         <div className="flex items-center gap-2">
-          <Search className="w-4 h-4 text-gray-400" />
+          <Search className="w-4 h-4 text-slate-400" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search groups"
-            className="w-full bg-transparent outline-none text-sm text-gray-900 dark:text-white"
+            className="w-full bg-transparent outline-none text-sm text-slate-900 dark:text-white"
           />
         </div>
       </div>
 
       {showCreate && (
         <div className="card p-4 space-y-3">
-          <div className="font-medium text-gray-900 dark:text-white">Create a group</div>
+          <div className="font-medium text-slate-900 dark:text-white">Create a group</div>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -114,28 +114,28 @@ export default function GroupsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isLoading ? (
-          <div className="text-gray-500">Loading…</div>
+          <div className="text-slate-500">Loading…</div>
         ) : list.length === 0 ? (
-          <div className="text-gray-500">No groups found.</div>
+          <div className="text-slate-500">No groups found.</div>
         ) : (
           list.map((g) => (
             <Link
               key={g.id}
               href={`/dashboard/groups/${g.id}`}
-              className={cn('card p-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition')}
+              className={cn('card p-4 hover:bg-slate-50 dark:hover:bg-slate-800 transition')}
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold text-gray-900 dark:text-white">{g.name}</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-300 mt-1 line-clamp-2">
+                  <div className="font-semibold text-slate-900 dark:text-white">{g.name}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-300 mt-1 line-clamp-2">
                     {g.description}
                   </div>
                 </div>
-                <div className="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-600 dark:text-gray-300">
+                <div className="text-xs px-2 py-1 rounded-full border border-slate-200 text-slate-600 dark:text-slate-300">
                   {g.privacy}
                 </div>
               </div>
-              <div className="mt-3 flex items-center gap-2 text-sm text-gray-500">
+              <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
                 <Users className="w-4 h-4" />
                 <span>{g.memberCount} members</span>
                 {g.isMember && (

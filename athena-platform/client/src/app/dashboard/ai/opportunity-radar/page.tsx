@@ -121,16 +121,16 @@ export default function OpportunityRadarPage() {
       <div className="flex items-center space-x-4">
         <Link
           href="/dashboard/ai"
-          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
         >
-          <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center space-x-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center space-x-2">
             <span className="text-3xl">🎯</span>
             <span>Opportunity Radar</span>
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             AI-powered job matching based on your profile and preferences
           </p>
         </div>
@@ -142,10 +142,10 @@ export default function OpportunityRadarPage() {
           <div className="w-10 h-10 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-2">
             <Radar className="w-5 h-5 text-primary-500" />
           </div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
             {opportunities.length}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             Opportunities Found
           </div>
         </div>
@@ -153,10 +153,10 @@ export default function OpportunityRadarPage() {
           <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-2">
             <Target className="w-5 h-5 text-green-500" />
           </div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
             {opportunities.filter((o) => o.matchScore >= 80).length}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             High Match (80%+)
           </div>
         </div>
@@ -164,10 +164,10 @@ export default function OpportunityRadarPage() {
           <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-2">
             <TrendingUp className="w-5 h-5 text-blue-500" />
           </div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
             {opportunities.filter((o) => o.postedAt.includes('hour')).length}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             New Today
           </div>
         </div>
@@ -175,10 +175,10 @@ export default function OpportunityRadarPage() {
           <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mx-auto mb-2">
             <DollarSign className="w-5 h-5 text-purple-500" />
           </div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
             {averageSalary > 0 ? formatSalary(averageSalary) : 'N/A'}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             Avg Salary
           </div>
         </div>
@@ -188,17 +188,17 @@ export default function OpportunityRadarPage() {
       <div className="card">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-white">
+            <h2 className="font-semibold text-slate-900 dark:text-white">
               Scan Settings
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Customize your opportunity search
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-4">
             {/* Min Match Filter */}
             <div className="flex items-center space-x-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400">
+              <label className="text-sm text-slate-600 dark:text-slate-400">
                 Min Match:
               </label>
               <select
@@ -206,7 +206,7 @@ export default function OpportunityRadarPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, minMatch: Number(e.target.value) })
                 }
-                className="border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm px-2 py-1"
+                className="border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-sm px-2 py-1"
               >
                 <option value={50}>50%</option>
                 <option value={60}>60%</option>
@@ -226,7 +226,7 @@ export default function OpportunityRadarPage() {
                 }
                 className="w-4 h-4 text-primary-500 rounded"
               />
-              <span className="text-sm text-gray-600 dark:text-gray-400">
+              <span className="text-sm text-slate-600 dark:text-slate-400">
                 Remote Only
               </span>
             </label>
@@ -258,10 +258,10 @@ export default function OpportunityRadarPage() {
           <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
             <Radar className="w-8 h-8 text-primary-500" />
           </div>
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             {scanError ? 'Scan Could Not Complete' : 'Ready to Find Your Next Opportunity'}
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
+          <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
             {scanError ||
               'Click "Scan Opportunities" to discover jobs that match your skills, experience, and career goals'}
           </p>
@@ -275,13 +275,13 @@ export default function OpportunityRadarPage() {
           <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
             <Zap className="w-8 h-8 text-primary-500" />
           </div>
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             Scanning Opportunities
           </h3>
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-slate-500 dark:text-slate-400">
             Analyzing job listings and matching them to your profile...
           </p>
-          <div className="mt-6 flex items-center justify-center space-x-4 text-sm text-gray-500">
+          <div className="mt-6 flex items-center justify-center space-x-4 text-sm text-slate-500">
             <span className="flex items-center">
               <CheckCircle2 className="w-4 h-4 text-green-500 mr-1" />
               Profile analyzed
@@ -296,13 +296,13 @@ export default function OpportunityRadarPage() {
         <div className="space-y-4">
           {visibleOpportunities.length === 0 ? (
             <div className="card text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Filter className="w-8 h-8 text-gray-400" />
+              <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Filter className="w-8 h-8 text-slate-400" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                 No Matches With These Filters
               </h3>
-              <p className="text-gray-500 dark:text-gray-400">
+              <p className="text-slate-500 dark:text-slate-400">
                 Lower the minimum match score or broaden your scan settings.
               </p>
             </div>
@@ -315,7 +315,7 @@ export default function OpportunityRadarPage() {
                 <div className="flex flex-col lg:flex-row gap-4">
                   {/* Company Info */}
                   <div className="flex items-start space-x-4 flex-1">
-                    <div className="w-14 h-14 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+                    <div className="w-14 h-14 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
                       {opportunity.companyLogo ? (
                         <img
                           src={opportunity.companyLogo}
@@ -323,17 +323,17 @@ export default function OpportunityRadarPage() {
                           className="w-full h-full object-cover rounded-lg"
                         />
                       ) : (
-                        <Building2 className="w-7 h-7 text-gray-400" />
+                        <Building2 className="w-7 h-7 text-slate-400" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 dark:text-white text-lg">
+                      <h3 className="font-semibold text-slate-900 dark:text-white text-lg">
                         {opportunity.title}
                       </h3>
-                      <p className="text-gray-600 dark:text-gray-400">
+                      <p className="text-slate-600 dark:text-slate-400">
                         {opportunity.company}
                       </p>
-                      <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500 dark:text-gray-400">
+                      <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-slate-500 dark:text-slate-400">
                         <span className="flex items-center">
                           <MapPin className="w-4 h-4 mr-1" />
                           {opportunity.location}
@@ -380,11 +380,11 @@ export default function OpportunityRadarPage() {
                 </div>
 
                 {/* Match Reasons & Skills */}
-                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                   <div className="flex flex-col md:flex-row gap-4">
                     {/* Match Reasons */}
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         Why you match:
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -402,14 +402,14 @@ export default function OpportunityRadarPage() {
 
                     {/* Required Skills */}
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         Key skills:
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {opportunity.skills.map((skill, i) => (
                           <span
                             key={i}
-                            className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                            className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full"
                           >
                             {skill}
                           </span>
@@ -426,10 +426,10 @@ export default function OpportunityRadarPage() {
 
       {/* Pro Tips */}
       <div className="card bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20 border-primary-200 dark:border-primary-800">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
+        <h3 className="font-semibold text-slate-900 dark:text-white mb-3">
           🚀 Improve Your Match Score
         </h3>
-        <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-300">
+        <div className="grid md:grid-cols-2 gap-4 text-sm text-slate-600 dark:text-slate-300">
           <div className="flex items-start space-x-2">
             <CheckCircle2 className="w-4 h-4 text-primary-500 mt-0.5 flex-shrink-0" />
             <span>Complete your profile with detailed work experience</span>

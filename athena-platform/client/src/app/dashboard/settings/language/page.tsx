@@ -195,10 +195,10 @@ export default function LanguageSettingsPage() {
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Language & Region
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Set your preferred language, timezone, and date formats
         </p>
       </div>
@@ -207,23 +207,23 @@ export default function LanguageSettingsPage() {
       <div className="card">
         <div className="flex items-center space-x-2 mb-4">
           <Globe className="w-5 h-5 text-primary-500" />
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Language
           </h2>
         </div>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
           Select the language for the ATHENA interface
         </p>
 
         {/* Search */}
         <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
             type="text"
             placeholder="Search languages..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+            className="w-full pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
           />
         </div>
 
@@ -237,16 +237,16 @@ export default function LanguageSettingsPage() {
                 'w-full flex items-center justify-between p-3 rounded-lg transition',
                 selectedLanguage === lang.code
                   ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                  : 'hover:bg-slate-50 dark:hover:bg-slate-800'
               )}
             >
               <div className="flex items-center space-x-3">
                 <span className="text-lg">{getLanguageFlag(lang.code)}</span>
                 <div className="text-left">
-                  <p className="font-medium text-gray-900 dark:text-white">
+                  <p className="font-medium text-slate-900 dark:text-white">
                     {lang.name}
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
                     {lang.nativeName}
                   </p>
                 </div>
@@ -261,16 +261,16 @@ export default function LanguageSettingsPage() {
 
       {/* Timezone */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Timezone
         </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
           Used for displaying dates and scheduling
         </p>
         <select
           value={selectedTimezone}
           onChange={(e) => setSelectedTimezone(e.target.value)}
-          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
         >
           {timezones.map((tz) => (
             <option key={tz.value} value={tz.value}>
@@ -278,7 +278,7 @@ export default function LanguageSettingsPage() {
             </option>
           ))}
         </select>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2" suppressHydrationWarning>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2" suppressHydrationWarning>
           Current time:{' '}
           {isHydrated
             ? new Date().toLocaleTimeString(selectedLanguage, { timeZone: selectedTimezone })
@@ -288,16 +288,16 @@ export default function LanguageSettingsPage() {
 
       {/* Region */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Region
         </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
           Used for compliance defaults and regional experiences
         </p>
         <select
           value={selectedRegion}
           onChange={(e) => setSelectedRegion(e.target.value)}
-          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
         >
           {regions.map((region) => (
             <option key={region.value} value={region.value}>
@@ -309,16 +309,16 @@ export default function LanguageSettingsPage() {
 
       {/* Currency */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Currency
         </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
           Used for pricing, billing, and earnings
         </p>
         <select
           value={selectedCurrency}
           onChange={(e) => setSelectedCurrency(e.target.value)}
-          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
         >
           {currencies.map((currency) => (
             <option key={currency.value} value={currency.value}>
@@ -330,7 +330,7 @@ export default function LanguageSettingsPage() {
 
       {/* Date Format */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Date Format
         </h2>
         <div className="space-y-3">
@@ -342,14 +342,14 @@ export default function LanguageSettingsPage() {
                 'w-full flex items-center justify-between p-4 rounded-lg border-2 transition',
                 selectedDateFormat === format.value
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
               )}
             >
               <div className="text-left">
-                <p className="font-medium text-gray-900 dark:text-white">
+                <p className="font-medium text-slate-900 dark:text-white">
                   {format.label}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   {format.description}
                 </p>
               </div>
@@ -363,7 +363,7 @@ export default function LanguageSettingsPage() {
 
       {/* Time Format */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Time Format
         </h2>
         <div className="grid grid-cols-2 gap-4">
@@ -375,13 +375,13 @@ export default function LanguageSettingsPage() {
                 'p-4 rounded-lg border-2 text-center transition',
                 selectedTimeFormat === format.value
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
               )}
             >
-              <p className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
+              <p className="text-xl font-semibold text-slate-900 dark:text-white mb-1">
                 {format.label}
               </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 {format.description}
               </p>
             </button>
@@ -394,10 +394,10 @@ export default function LanguageSettingsPage() {
         <div className="flex items-start space-x-3">
           <Info className="w-5 h-5 text-blue-500 mt-0.5" />
           <div>
-            <p className="font-medium text-gray-900 dark:text-white">
+            <p className="font-medium text-slate-900 dark:text-white">
               Translation Notice
             </p>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+            <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
               Some content may not be fully translated in all languages. We're
               continuously improving our translations. If you notice any issues,
               please let us know.

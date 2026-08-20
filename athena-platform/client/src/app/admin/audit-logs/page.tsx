@@ -98,11 +98,11 @@ export default function AdminAuditLogsPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white flex items-center justify-center">
         <div className="text-center">
           <ShieldAlert className="h-12 w-12 text-red-500 mx-auto mb-3" />
           <h1 className="text-xl font-semibold text-red-600">Access Denied</h1>
-          <p className="text-gray-600 dark:text-gray-400">You don't have permission to access this page.</p>
+          <p className="text-slate-600 dark:text-slate-400">You don't have permission to access this page.</p>
           <div className="mt-4">
             <Button asChild variant="outline">
               <Link href="/admin">Back to Admin</Link>
@@ -114,23 +114,23 @@ export default function AdminAuditLogsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Audit Logs</h1>
-              <p className="text-gray-600 dark:text-gray-400">Compliance exports and account deletions</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Audit Logs</h1>
+              <p className="text-slate-600 dark:text-slate-400">Compliance exports and account deletions</p>
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4 mb-6">
           <div className="flex flex-wrap gap-4">
             <select
               value={action}
@@ -138,7 +138,7 @@ export default function AdminAuditLogsPage() {
                 setAction(e.target.value as '' | AuditAction);
                 setPage(1);
               }}
-              className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
             >
               <option value="">All Actions</option>
               <option value="DSAR_EXPORT">DSAR Export</option>
@@ -185,62 +185,62 @@ export default function AdminAuditLogsPage() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
             </div>
           ) : (
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
+            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+              <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">When</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actor</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Target</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Agent</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Metadata</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">When</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Actor</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Target</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">IP</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">User Agent</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Metadata</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                 {data?.logs.map((log) => {
                   const ua = log.userAgent || '';
                   const meta = log.metadata ? truncate(JSON.stringify(log.metadata), 180) : '—';
                   return (
-                    <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                    <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-700">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 dark:text-slate-300">
                         {new Date(log.createdAt).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <span className="inline-flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-gray-500" />
-                          <span className="font-medium text-gray-900 dark:text-white">{log.action}</span>
+                          <FileText className="h-4 w-4 text-slate-500" />
+                          <span className="font-medium text-slate-900 dark:text-white">{log.action}</span>
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
                         <div className="max-w-[280px] break-words">
                           {formatUser(log.actorUser)}
                         </div>
                         {log.actorUserId && !log.actorUser && (
-                          <div className="text-xs text-gray-500">{log.actorUserId}</div>
+                          <div className="text-xs text-slate-500">{log.actorUserId}</div>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
                         <div className="max-w-[280px] break-words">
                           {formatUser(log.targetUser)}
                         </div>
                         {log.targetUserId && !log.targetUser && (
-                          <div className="text-xs text-gray-500">{log.targetUserId}</div>
+                          <div className="text-xs text-slate-500">{log.targetUserId}</div>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 dark:text-slate-300">
                         {log.ipAddress || '—'}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
                         <span title={ua}>{ua ? truncate(ua, 80) : '—'}</span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
                         <div className="max-w-[360px] break-words" title={log.metadata ? JSON.stringify(log.metadata) : ''}>
                           {meta}
                         </div>
@@ -251,7 +251,7 @@ export default function AdminAuditLogsPage() {
 
                 {data?.logs.length === 0 && (
                   <tr>
-                    <td className="px-6 py-10 text-center text-sm text-gray-500" colSpan={7}>
+                    <td className="px-6 py-10 text-center text-sm text-slate-500" colSpan={7}>
                       No audit logs found.
                     </td>
                   </tr>
@@ -263,7 +263,7 @@ export default function AdminAuditLogsPage() {
 
         {data && data.pagination.totalPages > 1 && (
           <div className="mt-6 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-slate-500">
               Page {data.pagination.page} of {data.pagination.totalPages}
             </div>
             <div className="flex gap-2">

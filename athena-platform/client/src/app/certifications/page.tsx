@@ -74,7 +74,7 @@ const featuredCertifications = [
 
 export default function CertificationsPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950">
+    <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-gradient-to-r from-primary-600 to-primary-800 text-white">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-20"></div>
@@ -93,7 +93,7 @@ export default function CertificationsPage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="/dashboard/learn"
-                className="px-6 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-gray-100 transition flex items-center gap-2"
+                className="px-6 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-slate-100 transition flex items-center gap-2"
               >
                 <BookOpen className="w-5 h-5" />
                 Start Learning
@@ -119,10 +119,10 @@ export default function CertificationsPage() {
             { label: 'Course Hours', value: '10K+', icon: Clock },
             { label: 'Avg. Salary Increase', value: '+25%', icon: TrendingUp },
           ].map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <stat.icon className="w-8 h-8 mx-auto mb-2 text-primary-600" />
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-white">{stat.value}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -131,10 +131,10 @@ export default function CertificationsPage() {
       {/* Categories Section */}
       <section className="container mx-auto px-4 py-16">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
             Explore Certification Categories
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+          <p className="text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
             Choose from a wide range of professional certifications across various industries and skill levels.
           </p>
         </div>
@@ -143,17 +143,17 @@ export default function CertificationsPage() {
           {certificationCategories.map((category) => (
             <div
               key={category.name}
-              className="group bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer border border-gray-200 dark:border-gray-700"
+              className="group bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
             >
               <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${category.color} flex items-center justify-center text-3xl mb-4`}>
                 {category.icon}
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-3 group-hover:text-primary-600 transition">
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-3 group-hover:text-primary-600 transition">
                 {category.name}
               </h3>
               <ul className="space-y-2">
                 {category.certs.map((cert) => (
-                  <li key={cert} className="flex items-center gap-2 text-gray-600 dark:text-gray-400 text-sm">
+                  <li key={cert} className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm">
                     <CheckCircle className="w-4 h-4 text-green-500" />
                     {cert}
                   </li>
@@ -165,13 +165,13 @@ export default function CertificationsPage() {
       </section>
 
       {/* Featured Certifications */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+            <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
               Featured Certifications
             </h2>
-            <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+            <p className="text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
               Start with our most popular certifications designed to accelerate your career growth.
             </p>
           </div>
@@ -180,7 +180,7 @@ export default function CertificationsPage() {
             {featuredCertifications.map((cert) => (
               <div
                 key={cert.title}
-                className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-6 border border-gray-200 dark:border-gray-700 hover:border-primary-500 transition-all"
+                className="bg-slate-50 dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 hover:border-primary-500 transition-all"
               >
                 <div className="flex items-start justify-between mb-4">
                   <span className="text-4xl">{cert.badge}</span>
@@ -188,13 +188,13 @@ export default function CertificationsPage() {
                     {cert.level}
                   </span>
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
                   {cert.title}
                 </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
                   by {cert.provider}
                 </p>
-                <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 mb-4">
+                <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400 mb-4">
                   <span className="flex items-center gap-1">
                     <Clock className="w-4 h-4" />
                     {cert.duration}
@@ -227,7 +227,7 @@ export default function CertificationsPage() {
           <div className="flex flex-wrap justify-center gap-4">
             <Link
               href="/dashboard/learn"
-              className="px-8 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+              className="px-8 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-slate-100 transition"
             >
               Browse All Courses
             </Link>

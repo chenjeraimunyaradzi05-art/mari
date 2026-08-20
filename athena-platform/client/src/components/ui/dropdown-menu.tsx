@@ -57,7 +57,7 @@ const DropdownMenuContent = React.forwardRef<
     <Menu.Items
       ref={ref}
       className={cn(
-        'absolute z-50 min-w-[8rem] overflow-hidden rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-1 shadow-md',
+        'absolute z-50 min-w-[8rem] overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1 shadow-md',
         align === 'start' && 'left-0',
         align === 'center' && 'left-1/2 -translate-x-1/2',
         align === 'end' && 'right-0',
@@ -89,7 +89,7 @@ const DropdownMenuItem = React.forwardRef<HTMLDivElement, DropdownMenuItemProps>
           ref={ref}
           className={cn(
             'relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors',
-            active && 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100',
+            active && 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-slate-100',
             disabled && 'pointer-events-none opacity-50',
             inset && 'pl-8',
             className
@@ -111,7 +111,7 @@ const DropdownMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn('-mx-1 my-1 h-px bg-gray-200 dark:bg-gray-700', className)}
+    className={cn('-mx-1 my-1 h-px bg-slate-200 dark:bg-slate-700', className)}
     {...props}
   />
 ));
@@ -124,7 +124,7 @@ const DropdownMenuLabel = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      'px-2 py-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100',
+      'px-2 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100',
       inset && 'pl-8',
       className
     )}

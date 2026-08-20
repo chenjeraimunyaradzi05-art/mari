@@ -133,23 +133,23 @@ export default function RfpsPage() {
             <ClipboardList className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">RFPs</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Source the right vendors quickly
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">{headline} from founders across the platform.</p>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">{headline} from founders across the platform.</p>
         </div>
         <Link href="/dashboard/vendors" className="btn-secondary inline-flex items-center gap-2">
           Browse vendors
         </Link>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Category</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Category</label>
           <select
             value={category}
             onChange={(event) => setCategory(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {categories.map((option) => (
               <option key={option.value} value={option.value}>
@@ -159,11 +159,11 @@ export default function RfpsPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Status</label>
           <select
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {statusOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -174,19 +174,19 @@ export default function RfpsPage() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Create a new RFP</h2>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Create a new RFP</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Project title"
-            className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
           <select
             value={formCategory}
             onChange={(event) => setFormCategory(event.target.value)}
-            className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {categories.filter((option) => option.value).map((option) => (
               <option key={option.value} value={option.value}>
@@ -198,26 +198,26 @@ export default function RfpsPage() {
             value={budget}
             onChange={(event) => setBudget(event.target.value)}
             placeholder="Budget (optional)"
-            className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
           <input
             value={deadline}
             onChange={(event) => setDeadline(event.target.value)}
             type="date"
-            className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="Describe the scope, deliverables, and timeline"
-          className="w-full min-h-[120px] bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+          className="w-full min-h-[120px] bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
         />
         <textarea
           value={requirements}
           onChange={(event) => setRequirements(event.target.value)}
           placeholder="Requirements or success criteria (optional)"
-          className="w-full min-h-[90px] bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+          className="w-full min-h-[90px] bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
         />
         <button onClick={handleCreate} disabled={saving} className="btn-primary">
           {saving ? 'Creating...' : 'Publish RFP'}
@@ -229,26 +229,26 @@ export default function RfpsPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading RFPs...
         </div>
       ) : rfps.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
           No RFPs found. Try different filters.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {rfps.map((rfp) => (
-            <div key={rfp.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-3">
+            <div key={rfp.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{rfp.title}</h3>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{rfp.title}</h3>
                 <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary-50 text-primary-700">
                   {rfp.status}
                 </span>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">{rfp.description}</p>
-              <div className="text-xs text-gray-500 space-y-1">
+              <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-3">{rfp.description}</p>
+              <div className="text-xs text-slate-500 space-y-1">
                 <div>Category: {rfp.category.replace('_', ' ')}</div>
                 <div>Budget: {rfp.budget || 'Flexible'}</div>
                 <div>Deadline: {rfp.deadline ? formatDate(rfp.deadline) : 'TBD'}</div>
@@ -258,23 +258,23 @@ export default function RfpsPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Your RFPs</h2>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your RFPs</h2>
         {myRfps.length === 0 ? (
-          <p className="text-sm text-gray-500">You have not posted any RFPs yet.</p>
+          <p className="text-sm text-slate-500">You have not posted any RFPs yet.</p>
         ) : (
           <div className="space-y-3">
             {myRfps.map((rfp) => (
-              <div key={rfp.id} className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+              <div key={rfp.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-semibold text-gray-900 dark:text-white">{rfp.title}</div>
-                    <div className="text-xs text-gray-500">Created {formatDate(rfp.createdAt)}</div>
+                    <div className="font-semibold text-slate-900 dark:text-white">{rfp.title}</div>
+                    <div className="text-xs text-slate-500">Created {formatDate(rfp.createdAt)}</div>
                   </div>
                   <select
                     value={rfp.status}
                     onChange={(event) => handleStatusUpdate(rfp.id, event.target.value)}
-                    className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs"
+                    className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-xs"
                   >
                     {statusOptions.filter((option) => option.value).map((option) => (
                       <option key={option.value} value={option.value}>

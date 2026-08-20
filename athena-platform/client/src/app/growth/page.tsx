@@ -45,7 +45,7 @@ export default function GrowthPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-green-600 via-emerald-600 to-teal-600 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -64,7 +64,7 @@ export default function GrowthPage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="#programs"
-                className="px-6 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+                className="px-6 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition"
               >
                 Explore Programs
               </Link>
@@ -83,9 +83,9 @@ export default function GrowthPage() {
       <section className="container mx-auto px-4 -mt-8 relative z-20">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {stats.map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <div className="text-3xl font-bold text-green-600">{stat.value}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -93,29 +93,29 @@ export default function GrowthPage() {
 
       {/* Programs */}
       <section id="programs" className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Growth Programs
         </h2>
         <div className="grid md:grid-cols-3 gap-6">
           {programs.map((program) => (
-            <div key={program.title} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col">
+            <div key={program.title} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
               <div className="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center mb-4">
                 <program.icon className="w-7 h-7 text-green-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">{program.title}</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{program.description}</p>
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">{program.title}</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">{program.description}</p>
               <ul className="space-y-2 mb-6 flex-1">
                 {program.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <li key={feature} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                     <CheckCircle className="w-4 h-4 text-green-500" />
                     {feature}
                   </li>
                 ))}
               </ul>
-              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
                 <div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">{program.duration}</div>
-                  <div className="text-xl font-bold text-gray-900 dark:text-white">{program.price}</div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400">{program.duration}</div>
+                  <div className="text-xl font-bold text-slate-900 dark:text-white">{program.price}</div>
                 </div>
                 <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
                   Enroll
@@ -127,9 +127,9 @@ export default function GrowthPage() {
       </section>
 
       {/* How It Works */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-12 text-center">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-12 text-center">
             How It Works
           </h2>
           <div className="max-w-4xl mx-auto grid md:grid-cols-4 gap-8">
@@ -146,8 +146,8 @@ export default function GrowthPage() {
                     {i + 1}
                   </span>
                 </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{step.title}</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{step.description}</p>
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{step.title}</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400">{step.description}</p>
               </div>
             ))}
           </div>
@@ -156,18 +156,18 @@ export default function GrowthPage() {
 
       {/* Success Stories */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Success Stories
         </h2>
         <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
           {successStories.map((story) => (
-            <div key={story.name} className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+            <div key={story.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
               <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full mx-auto mb-4 flex items-center justify-center">
                 <Users className="w-8 h-8 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 dark:text-white text-center">{story.name}</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-2">{story.role}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-500 text-center mb-3">{story.company}</p>
+              <h3 className="font-semibold text-slate-900 dark:text-white text-center">{story.name}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400 text-center mb-2">{story.role}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-500 text-center mb-3">{story.company}</p>
               <div className="text-center">
                 <span className="inline-block px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium">
                   {story.increase}
@@ -187,7 +187,7 @@ export default function GrowthPage() {
           </p>
           <Link
             href="/contact-sales"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             Get Started <ArrowRight className="w-4 h-4" />
           </Link>

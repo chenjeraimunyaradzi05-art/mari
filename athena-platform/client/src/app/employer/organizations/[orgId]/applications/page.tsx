@@ -51,7 +51,7 @@ interface Application {
 }
 
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
-  PENDING: { label: 'Pending Review', color: 'bg-gray-100 text-gray-700', icon: Clock },
+  PENDING: { label: 'Pending Review', color: 'bg-slate-100 text-slate-700', icon: Clock },
   REVIEWING: { label: 'Under Review', color: 'bg-blue-100 text-blue-700', icon: Eye },
   SHORTLISTED: { label: 'Shortlisted', color: 'bg-purple-100 text-purple-700', icon: Star },
   INTERVIEW: { label: 'Interview Stage', color: 'bg-indigo-100 text-indigo-700', icon: MessageSquare },
@@ -126,7 +126,7 @@ export default function ApplicationsPage() {
       {/* Back Button */}
       <Link
         href={`/employer/organizations/${orgId}`}
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mb-6"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-6"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Dashboard
@@ -134,17 +134,17 @@ export default function ApplicationsPage() {
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <FileText className="h-7 w-7 text-blue-600" />
           Applications
         </h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">
+        <p className="text-slate-600 dark:text-slate-400 mt-1">
           Review and manage candidate applications
         </p>
       </div>
 
       {/* Pipeline Overview */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-6 overflow-x-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 mb-6 overflow-x-auto">
         <div className="flex gap-2 min-w-max">
           {statusOrder.slice(0, 6).map((status) => {
             const config = statusConfig[status];
@@ -156,16 +156,16 @@ export default function ApplicationsPage() {
                 className={`flex-1 min-w-[120px] p-3 rounded-lg border-2 transition ${
                   statusFilter === status
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-center gap-2 mb-1">
-                  <Icon className="h-4 w-4 text-gray-500" />
-                  <span className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <Icon className="h-4 w-4 text-slate-500" />
+                  <span className="text-2xl font-bold text-slate-900 dark:text-white">
                     {statusCounts[status] || 0}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 text-center">{config.label}</p>
+                <p className="text-xs text-slate-500 text-center">{config.label}</p>
               </button>
             );
           })}
@@ -175,7 +175,7 @@ export default function ApplicationsPage() {
       {/* Filters */}
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
           <input
             type="text"
             value={search}
@@ -219,12 +219,12 @@ export default function ApplicationsPage() {
               <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
             </div>
           ) : filteredApplications.length === 0 ? (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-12 text-center">
-              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center">
+              <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                 No applications found
               </h3>
-              <p className="text-gray-500">
+              <p className="text-slate-500">
                 {applications.length === 0
                   ? 'When candidates apply to your jobs, they will appear here'
                   : 'Try adjusting your filters'}
@@ -240,13 +240,13 @@ export default function ApplicationsPage() {
                   <div
                     key={app.id}
                     onClick={() => setSelectedApp(app)}
-                    className={`bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 cursor-pointer hover:shadow-md transition ${
+                    className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md transition ${
                       selectedApp?.id === app.id ? 'ring-2 ring-blue-500' : ''
                     }`}
                   >
                     <div className="flex items-start gap-4">
                       {/* Avatar */}
-                      <div className="h-12 w-12 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+                      <div className="h-12 w-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
                         {app.user.profile?.avatar ? (
                           <img
                             src={app.user.profile.avatar}
@@ -254,14 +254,14 @@ export default function ApplicationsPage() {
                             className="h-12 w-12 rounded-full object-cover"
                           />
                         ) : (
-                          <User className="h-6 w-6 text-gray-400" />
+                          <User className="h-6 w-6 text-slate-400" />
                         )}
                       </div>
 
                       {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-semibold text-gray-900 dark:text-white truncate">
+                          <h3 className="font-semibold text-slate-900 dark:text-white truncate">
                             {app.user.firstName} {app.user.lastName}
                           </h3>
                           {app.rating && (
@@ -271,10 +271,10 @@ export default function ApplicationsPage() {
                             </div>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500 truncate">
+                        <p className="text-sm text-slate-500 truncate">
                           {app.user.profile?.headline || app.user.email}
                         </p>
-                        <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                        <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                           <span className="flex items-center gap-1">
                             <Briefcase className="h-3 w-3" />
                             {app.job.title}
@@ -301,7 +301,7 @@ export default function ApplicationsPage() {
                         </button>
 
                         {statusDropdownOpen === app.id && (
-                          <div className="absolute right-0 top-8 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-20">
+                          <div className="absolute right-0 top-8 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-20">
                             {statusOrder.map((status) => {
                               const statusCfg = statusConfig[status];
                               const StatusIcon = statusCfg.icon;
@@ -313,7 +313,7 @@ export default function ApplicationsPage() {
                                     updateStatusMutation.mutate({ applicationId: app.id, status });
                                   }}
                                   disabled={app.status === status}
-                                  className={`flex items-center gap-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                                  className={`flex items-center gap-2 px-4 py-2 text-sm w-full text-left hover:bg-slate-100 dark:hover:bg-slate-700 ${
                                     app.status === status ? 'opacity-50' : ''
                                   }`}
                                 >
@@ -335,17 +335,17 @@ export default function ApplicationsPage() {
 
         {/* Detail Panel */}
         {selectedApp && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 h-fit sticky top-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 h-fit sticky top-6">
             <button
               onClick={() => setSelectedApp(null)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 lg:hidden"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 lg:hidden"
             >
               <X className="h-5 w-5" />
             </button>
 
             {/* Candidate Info */}
             <div className="text-center mb-6">
-              <div className="h-20 w-20 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center mx-auto mb-3">
+              <div className="h-20 w-20 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center mx-auto mb-3">
                 {selectedApp.user.profile?.avatar ? (
                   <img
                     src={selectedApp.user.profile.avatar}
@@ -353,13 +353,13 @@ export default function ApplicationsPage() {
                     className="h-20 w-20 rounded-full object-cover"
                   />
                 ) : (
-                  <User className="h-10 w-10 text-gray-400" />
+                  <User className="h-10 w-10 text-slate-400" />
                 )}
               </div>
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">
                 {selectedApp.user.firstName} {selectedApp.user.lastName}
               </h2>
-              <p className="text-gray-500">{selectedApp.user.profile?.headline}</p>
+              <p className="text-slate-500">{selectedApp.user.profile?.headline}</p>
             </div>
 
             {/* Quick Actions */}
@@ -382,17 +382,17 @@ export default function ApplicationsPage() {
             {/* Application Details */}
             <div className="space-y-4">
               <div>
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Applied For
                 </h4>
-                <p className="text-gray-900 dark:text-white">{selectedApp.job.title}</p>
+                <p className="text-slate-900 dark:text-white">{selectedApp.job.title}</p>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Applied
                 </h4>
-                <p className="text-gray-900 dark:text-white">
+                <p className="text-slate-900 dark:text-white">
                   {new Date(selectedApp.createdAt).toLocaleDateString('en-AU', {
                     day: 'numeric',
                     month: 'long',
@@ -403,10 +403,10 @@ export default function ApplicationsPage() {
 
               {selectedApp.coverLetter && (
                 <div>
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Cover Letter
                   </h4>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm whitespace-pre-wrap">
+                  <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
                     {selectedApp.coverLetter}
                   </p>
                 </div>
@@ -414,10 +414,10 @@ export default function ApplicationsPage() {
 
               {selectedApp.notes && (
                 <div>
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Notes
                   </h4>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm whitespace-pre-wrap">
+                  <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
                     {selectedApp.notes}
                   </p>
                 </div>

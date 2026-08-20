@@ -305,7 +305,7 @@ export default function PrivacyCenterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white">
         <div className="max-w-4xl mx-auto px-4 py-12">
@@ -322,14 +322,14 @@ export default function PrivacyCenterPage() {
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
         {/* Quick Actions */}
         {isAuthenticated && (
-          <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Your Data Rights</h2>
+          <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">Your Data Rights</h2>
             <div className="grid md:grid-cols-2 gap-4">
               {/* Export Data */}
               <button
                 onClick={requestDataExport}
                 disabled={exportLoading}
-                className="flex items-center gap-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-750 transition text-left"
+                className="flex items-center gap-4 p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition text-left"
               >
                 <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
                   {exportLoading ? (
@@ -339,8 +339,8 @@ export default function PrivacyCenterPage() {
                   )}
                 </div>
                 <div>
-                  <h3 className="font-medium text-gray-900 dark:text-white">Download My Data</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Get a copy of all your personal data</p>
+                  <h3 className="font-medium text-slate-900 dark:text-white">Download My Data</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Get a copy of all your personal data</p>
                 </div>
               </button>
 
@@ -353,8 +353,8 @@ export default function PrivacyCenterPage() {
                   <Trash2 className="w-6 h-6 text-red-600" />
                 </div>
                 <div>
-                  <h3 className="font-medium text-gray-900 dark:text-white">Delete My Account</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Permanently delete all your data</p>
+                  <h3 className="font-medium text-slate-900 dark:text-white">Delete My Account</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Permanently delete all your data</p>
                 </div>
               </button>
             </div>
@@ -362,11 +362,11 @@ export default function PrivacyCenterPage() {
         )}
 
         {/* Consent Management */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
           <div className="flex items-center justify-between gap-3 mb-6">
             <div className="flex items-center gap-2">
             <Bell className="w-5 h-5 text-purple-600" />
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Communication Preferences</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Communication Preferences</h2>
             </div>
             {saving && (
               <span className="inline-flex items-center gap-1 text-xs text-purple-600">
@@ -376,10 +376,10 @@ export default function PrivacyCenterPage() {
           </div>
           <div className="space-y-4">
             {(['MARKETING_EMAIL', 'MARKETING_SMS', 'MARKETING_PUSH'] as const).map((key) => (
-              <div key={key} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700 last:border-0">
+              <div key={key} className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-700 last:border-0">
                 <div>
-                  <h3 className="font-medium text-gray-900 dark:text-white">{CONSENT_DESCRIPTIONS[key].title}</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{CONSENT_DESCRIPTIONS[key].description}</p>
+                  <h3 className="font-medium text-slate-900 dark:text-white">{CONSENT_DESCRIPTIONS[key].title}</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{CONSENT_DESCRIPTIONS[key].description}</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -389,7 +389,7 @@ export default function PrivacyCenterPage() {
                     className="sr-only peer"
                     disabled={!isAuthenticated}
                   />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-purple-600"></div>
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-purple-600"></div>
                 </label>
               </div>
             ))}
@@ -397,22 +397,22 @@ export default function PrivacyCenterPage() {
         </section>
 
         {/* Data Processing Consents */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
           <div className="flex items-center gap-2 mb-6">
             <Lock className="w-5 h-5 text-purple-600" />
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Data Processing</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Data Processing</h2>
           </div>
           <div className="space-y-4">
             {(['DATA_PROCESSING', 'ANALYTICS', 'PERSONALIZATION', 'THIRD_PARTY_SHARING'] as const).map((key) => (
-              <div key={key} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700 last:border-0">
+              <div key={key} className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-700 last:border-0">
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-gray-900 dark:text-white">{CONSENT_DESCRIPTIONS[key].title}</h3>
+                    <h3 className="font-medium text-slate-900 dark:text-white">{CONSENT_DESCRIPTIONS[key].title}</h3>
                     {CONSENT_DESCRIPTIONS[key].required && (
-                      <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded">Required</span>
+                      <span className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded">Required</span>
                     )}
                   </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{CONSENT_DESCRIPTIONS[key].description}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{CONSENT_DESCRIPTIONS[key].description}</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer ml-4">
                   <input
@@ -422,7 +422,7 @@ export default function PrivacyCenterPage() {
                     className="sr-only peer"
                     disabled={!isAuthenticated || CONSENT_DESCRIPTIONS[key].required}
                   />
-                  <div className={`w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-purple-600 ${CONSENT_DESCRIPTIONS[key].required ? 'opacity-60 cursor-not-allowed' : ''}`}></div>
+                  <div className={`w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-purple-600 ${CONSENT_DESCRIPTIONS[key].required ? 'opacity-60 cursor-not-allowed' : ''}`}></div>
                 </label>
               </div>
             ))}
@@ -430,12 +430,12 @@ export default function PrivacyCenterPage() {
         </section>
 
         {/* Cookie Settings Link */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
           <div className="flex items-center gap-2 mb-4">
             <Cookie className="w-5 h-5 text-purple-600" />
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Cookie Preferences</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Cookie Preferences</h2>
           </div>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
             Manage how we use cookies and similar technologies to improve your experience.
           </p>
           <Link
@@ -448,16 +448,16 @@ export default function PrivacyCenterPage() {
 
         {/* Request History */}
         {isAuthenticated && dsarHistory.length > 0 && (
-          <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Request History</h2>
+          <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">Request History</h2>
             <div className="space-y-3">
               {dsarHistory.map((request) => (
-                <div key={request.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 rounded-lg">
+                <div key={request.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white capitalize">
+                    <p className="font-medium text-slate-900 dark:text-white capitalize">
                       {request.type.toLowerCase().replace('_', ' ')} Request
                     </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
                       Submitted {new Date(request.createdAt).toLocaleDateString()}
                     </p>
                   </div>
@@ -483,12 +483,12 @@ export default function PrivacyCenterPage() {
         )}
 
         {/* Legal Documents */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
           <div className="flex items-center justify-between gap-3 mb-2">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Legal Documents</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Legal Documents</h2>
             {legalLoading && <Loader2 className="w-4 h-4 animate-spin text-purple-600" />}
           </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
             Review current legal policies and record your acknowledgement.
           </p>
 
@@ -497,7 +497,7 @@ export default function PrivacyCenterPage() {
           )}
 
           {!legalLoading && legalDocuments.length === 0 && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">No legal documents are currently available.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">No legal documents are currently available.</p>
           )}
 
           <div className="space-y-3">
@@ -508,14 +508,14 @@ export default function PrivacyCenterPage() {
               return (
                 <article
                   key={document.id}
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/70 dark:bg-gray-900/40"
+                  className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 bg-slate-50/70 dark:bg-slate-900/40"
                 >
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div className="flex items-start gap-3">
-                      <FileText className="w-5 h-5 text-gray-400 mt-0.5" />
+                      <FileText className="w-5 h-5 text-slate-400 mt-0.5" />
                       <div>
-                        <h3 className="font-medium text-gray-900 dark:text-white">{document.title}</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <h3 className="font-medium text-slate-900 dark:text-white">{document.title}</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
                           Version {document.version} • Effective {formatDateLabel(document.effectiveDate)}
                         </p>
                         <div className="flex items-center gap-2 mt-2">
@@ -535,7 +535,7 @@ export default function PrivacyCenterPage() {
                           </span>
                         </div>
                         {acknowledgedAt && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                             {acknowledgedAt === 'Previously acknowledged'
                               ? acknowledgedAt
                               : `Acknowledged on ${acknowledgedAt}`}
@@ -547,7 +547,7 @@ export default function PrivacyCenterPage() {
                     <div className="flex flex-col sm:flex-row gap-2 md:items-center md:justify-end">
                       <Link
                         href={document.url || '/privacy'}
-                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800"
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
                       >
                         <Eye className="w-4 h-4" /> Review
                       </Link>
@@ -575,7 +575,7 @@ export default function PrivacyCenterPage() {
           </div>
 
           {!isAuthenticated && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-4">
               Sign in to record legal acknowledgements on your account.
             </p>
           )}
@@ -587,8 +587,8 @@ export default function PrivacyCenterPage() {
 
         {/* Privacy contact */}
         <section className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Questions about your privacy?</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Questions about your privacy?</h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">
             Contact our privacy team for any privacy-related inquiries or to exercise your rights.
           </p>
           <a href="mailto:privacy@athena.com" className="inline-flex items-center gap-2 text-purple-600 hover:text-purple-700 font-medium">
@@ -600,27 +600,27 @@ export default function PrivacyCenterPage() {
       {/* Delete Confirmation Modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl max-w-md w-full p-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-red-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Delete Account</h3>
-                <p className="text-sm text-gray-500">This action cannot be undone</p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Delete Account</h3>
+                <p className="text-sm text-slate-500">This action cannot be undone</p>
               </div>
             </div>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
+            <p className="text-slate-600 dark:text-slate-400 mb-4">
               Your account and all associated data will be permanently deleted within 30 days. This includes your profile, posts, messages, and all other content.
             </p>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
               Type <strong>DELETE_MY_ACCOUNT</strong> to confirm:
             </p>
             <input
               type="text"
               value={deleteInput}
               onChange={(e) => setDeleteInput(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg mb-4 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg mb-4 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               placeholder="DELETE_MY_ACCOUNT"
             />
             <div className="flex gap-3">
@@ -629,7 +629,7 @@ export default function PrivacyCenterPage() {
                   setDeleteConfirm(false);
                   setDeleteInput('');
                 }}
-                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
               >
                 Cancel
               </button>

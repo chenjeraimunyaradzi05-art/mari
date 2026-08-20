@@ -100,10 +100,10 @@ export default function SuperPage() {
             <Landmark className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Superannuation</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Track your retirement savings
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Combined balance: {formatCurrency(totalBalance)}
           </p>
         </div>
@@ -113,32 +113,32 @@ export default function SuperPage() {
       </div>
 
       {showForm && (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add super account</h2>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Add super account</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <input
               value={fundName}
               onChange={(e) => setFundName(e.target.value)}
               placeholder="Fund name (e.g. AustralianSuper)"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
             <input
               value={memberNumber}
               onChange={(e) => setMemberNumber(e.target.value)}
               placeholder="Member number (optional)"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
             <input
               value={balance}
               onChange={(e) => setBalance(e.target.value)}
               type="number"
               placeholder="Current balance ($)"
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
             <select
               value={investmentOption}
               onChange={(e) => setInvestmentOption(e.target.value)}
-              className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+              className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             >
               <option value="High Growth">High Growth</option>
               <option value="Balanced">Balanced</option>
@@ -181,12 +181,12 @@ export default function SuperPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading super accounts...
         </div>
       ) : accounts.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500 text-center">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500 text-center">
           No super accounts linked yet. Add your super fund to start tracking.
         </div>
       ) : (
@@ -194,50 +194,50 @@ export default function SuperPage() {
           {accounts.map((account) => (
             <div
               key={account.id}
-              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{account.fundName}</h3>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{account.fundName}</h3>
                   {account.memberNumber && (
-                    <p className="text-xs text-gray-500">Member #{account.memberNumber}</p>
+                    <p className="text-xs text-slate-500">Member #{account.memberNumber}</p>
                   )}
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-bold text-emerald-600">{formatCurrency(toNumber(account.balance))}</p>
-                  <p className="text-xs text-gray-500">Current balance</p>
+                  <p className="text-xs text-slate-500">Current balance</p>
                 </div>
               </div>
 
               <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-500 text-xs">Investment</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{account.investmentOption || '-'}</p>
+                  <p className="text-slate-500 text-xs">Investment</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{account.investmentOption || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Insurance</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{account.insuranceIncluded ? 'Yes' : 'No'}</p>
+                  <p className="text-slate-500 text-xs">Insurance</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{account.insuranceIncluded ? 'Yes' : 'No'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Employer</p>
-                  <p className="font-medium text-gray-900 dark:text-white">{account.employerContributing ? 'Contributing' : 'Not contributing'}</p>
+                  <p className="text-slate-500 text-xs">Employer</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{account.employerContributing ? 'Contributing' : 'Not contributing'}</p>
                 </div>
                 {account.lastStatementDate && (
                   <div>
-                    <p className="text-gray-500 text-xs flex items-center gap-1">
+                    <p className="text-slate-500 text-xs flex items-center gap-1">
                       <CalendarDays className="w-3 h-3" /> Last statement
                     </p>
-                    <p className="font-medium text-gray-900 dark:text-white">{formatDate(account.lastStatementDate)}</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{formatDate(account.lastStatementDate)}</p>
                   </div>
                 )}
               </div>
 
               {account.projectedRetirementBalance && toNumber(account.projectedRetirementBalance) > 0 && (
-                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-2">
+                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-sm text-slate-600 dark:text-slate-400">
                     Projected at retirement:{' '}
-                    <span className="font-semibold text-gray-900 dark:text-white">
+                    <span className="font-semibold text-slate-900 dark:text-white">
                       {formatCurrency(toNumber(account.projectedRetirementBalance))}
                     </span>
                   </span>

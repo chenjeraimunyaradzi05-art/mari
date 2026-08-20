@@ -240,22 +240,22 @@ export default function PersonaDashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <section className="rounded-2xl border border-primary-100/70 bg-white p-6 shadow-sm dark:border-primary-900/30 dark:bg-gray-800">
+      <section className="rounded-2xl border border-primary-100/70 bg-white p-6 shadow-sm dark:border-primary-900/30 dark:bg-slate-800">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-primary-600 dark:text-primary-300">
               Persona dashboard
             </div>
-            <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{label}</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">
+            <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">{label}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
               Live account signals and active workspace links for this ATHENA persona.
             </p>
           </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900/40">
-            <div className="font-semibold text-gray-900 dark:text-white">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+            <div className="font-semibold text-slate-900 dark:text-white">
               {isCurrentPersona ? 'Active account persona' : 'Viewing alternate persona'}
             </div>
-            <div className="mt-1 text-gray-500 dark:text-gray-400">
+            <div className="mt-1 text-slate-500 dark:text-slate-400">
               {userPersonaLabel ? `Your account: ${userPersonaLabel}` : 'Account persona not set'}
             </div>
           </div>
@@ -266,28 +266,28 @@ export default function PersonaDashboard() {
         {liveMetrics.map((metric) => {
           const Icon = metric.icon;
           return (
-            <div key={metric.label} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <div key={metric.label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
               <div className="flex items-center justify-between gap-3">
                 <div className="rounded-lg bg-primary-50 p-2 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300">
                   <Icon className="h-5 w-5" />
                 </div>
-                <span className="text-2xl font-bold text-gray-900 dark:text-white">
+                <span className="text-2xl font-bold text-slate-900 dark:text-white">
                   {metric.isLoading ? '...' : metric.value}
                 </span>
               </div>
-              <h2 className="mt-4 text-sm font-semibold text-gray-900 dark:text-white">{metric.label}</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{metric.helper}</p>
+              <h2 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{metric.label}</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{metric.helper}</p>
             </div>
           );
         })}
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Workspace Links</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Open the live areas most relevant to {label}.</p>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Workspace Links</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Open the live areas most relevant to {label}.</p>
             </div>
             <Link href="/dashboard/persona" className="hidden items-center gap-2 text-sm font-semibold text-primary-700 hover:text-primary-800 dark:text-primary-300 sm:inline-flex">
               All personas
@@ -302,39 +302,39 @@ export default function PersonaDashboard() {
                 <Link
                   key={action.href}
                   href={action.href}
-                  className="group rounded-xl border border-gray-200 p-4 transition hover:border-primary-300 hover:bg-primary-50/60 dark:border-gray-700 dark:hover:border-primary-700 dark:hover:bg-primary-950/20"
+                  className="group rounded-xl border border-slate-200 p-4 transition hover:border-primary-300 hover:bg-primary-50/60 dark:border-slate-700 dark:hover:border-primary-700 dark:hover:bg-primary-950/20"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="rounded-lg bg-gray-100 p-2 text-gray-700 transition group-hover:bg-white group-hover:text-primary-700 dark:bg-gray-900 dark:text-gray-300 dark:group-hover:bg-gray-800 dark:group-hover:text-primary-300">
+                    <div className="rounded-lg bg-slate-100 p-2 text-slate-700 transition group-hover:bg-white group-hover:text-primary-700 dark:bg-slate-900 dark:text-slate-300 dark:group-hover:bg-slate-800 dark:group-hover:text-primary-300">
                       <Icon className="h-5 w-5" />
                     </div>
-                    <ArrowRight className="h-4 w-4 text-gray-400 transition group-hover:text-primary-600" />
+                    <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:text-primary-600" />
                   </div>
-                  <h3 className="mt-4 font-semibold text-gray-900 dark:text-white">{action.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">{action.detail}</p>
+                  <h3 className="mt-4 font-semibold text-slate-900 dark:text-white">{action.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">{action.detail}</p>
                 </Link>
               );
             })}
           </div>
         </div>
 
-        <aside className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Live Ecosystem</h2>
+        <aside className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Live Ecosystem</h2>
           <div className="mt-5 space-y-4">
             {ecosystemMetrics.map((metric) => {
               const Icon = metric.icon;
               return (
                 <div key={metric.label} className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="rounded-lg bg-gray-100 p-2 text-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                    <div className="rounded-lg bg-slate-100 p-2 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
                       <Icon className="h-4 w-4" />
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 dark:text-white">{metric.label}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{metric.helper}</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-white">{metric.label}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{metric.helper}</div>
                     </div>
                   </div>
-                  <div className="text-sm font-bold text-gray-900 dark:text-white">
+                  <div className="text-sm font-bold text-slate-900 dark:text-white">
                     {metric.isLoading ? '...' : metric.value}
                   </div>
                 </div>

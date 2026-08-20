@@ -155,7 +155,7 @@ export default function SkillsMarketplacePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero Section */}
       <div className="bg-gradient-to-br from-secondary-600 to-secondary-800 text-white">
         <div className="container mx-auto px-4 py-12">
@@ -187,7 +187,7 @@ export default function SkillsMarketplacePage() {
 
       {/* Popular Categories */}
       <div className="container mx-auto px-4 py-8">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
           Popular Categories
         </h2>
         <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
@@ -198,7 +198,7 @@ export default function SkillsMarketplacePage() {
               className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
                 filters.category === cat.name
                   ? 'bg-primary-500 text-white'
-                  : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-primary-500'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-primary-500'
               }`}
             >
               {cat.name}
@@ -227,12 +227,12 @@ export default function SkillsMarketplacePage() {
             <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
           </div>
         ) : services.length === 0 ? (
-          <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-xl">
-            <Sparkles className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+          <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-xl">
+            <Sparkles className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
               No services found
             </h3>
-            <p className="text-gray-500 mb-4">
+            <p className="text-slate-500 mb-4">
               Try adjusting your filters or search terms
             </p>
             <Button

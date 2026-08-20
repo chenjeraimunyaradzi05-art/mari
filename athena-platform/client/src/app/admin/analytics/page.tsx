@@ -69,16 +69,16 @@ export default function AdminAnalyticsPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Platform Analytics</h1>
-              <p className="text-gray-600 dark:text-gray-400">Metrics and insights</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Platform Analytics</h1>
+              <p className="text-slate-600 dark:text-slate-400">Metrics and insights</p>
             </div>
           </div>
         </div>
@@ -92,7 +92,7 @@ export default function AdminAnalyticsPage() {
         ) : (
           <>
             <section className="mb-8">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                 <DollarSign className="h-5 w-5" />
                 Revenue
               </h2>
@@ -105,17 +105,17 @@ export default function AdminAnalyticsPage() {
                   <p className="text-blue-100 text-sm">Annual Recurring Revenue</p>
                   <p className="text-3xl font-bold">AU${(revenue?.arr || 0).toLocaleString()}</p>
                 </div>
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                  <p className="text-gray-500 text-sm mb-3">Breakdown by Tier</p>
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+                  <p className="text-slate-500 text-sm mb-3">Breakdown by Tier</p>
                   <div className="space-y-2">
                     {revenue?.breakdown && Object.entries(revenue.breakdown).map(([tier, data]) => (
                       <div key={tier} className="flex items-center justify-between">
-                        <span className="text-gray-700 dark:text-gray-300">{tier}</span>
+                        <span className="text-slate-700 dark:text-slate-300">{tier}</span>
                         <div className="text-right">
-                          <span className="font-semibold text-gray-900 dark:text-white">
+                          <span className="font-semibold text-slate-900 dark:text-white">
                             {data.count} users
                           </span>
-                          <span className="text-gray-500 ml-2">
+                          <span className="text-slate-500 ml-2">
                             (AU${data.revenue.toLocaleString()}/mo)
                           </span>
                         </div>
@@ -127,12 +127,12 @@ export default function AdminAnalyticsPage() {
             </section>
 
             <section>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                 <TrendingUp className="h-5 w-5" />
                 Engagement ({engagement?.period?.label || 'Last 30 Days'})
               </h2>
               <div className="mb-4 max-w-xs">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Time window
                 </label>
                 <select
@@ -148,12 +148,12 @@ export default function AdminAnalyticsPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 {engagementCards.map((card) => (
-                  <div key={card.label} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                  <div key={card.label} className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
                     <div className="flex items-center gap-3 mb-2">
                       <card.icon className={`h-5 w-5 ${card.color}`} />
-                      <span className="text-sm text-gray-500">{card.label}</span>
+                      <span className="text-sm text-slate-500">{card.label}</span>
                     </div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
                       {card.value.toLocaleString()}
                     </p>
                   </div>
@@ -162,25 +162,25 @@ export default function AdminAnalyticsPage() {
             </section>
 
             <section className="mt-8">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Key Ratios
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                  <p className="text-sm text-gray-500 mb-1">Posts per Active User</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+                  <p className="text-sm text-slate-500 mb-1">Posts per Active User</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {activeUsers ? (newPosts / activeUsers).toFixed(2) : '0'}
                   </p>
                 </div>
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                  <p className="text-sm text-gray-500 mb-1">Comments per Post</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+                  <p className="text-sm text-slate-500 mb-1">Comments per Post</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {newPosts ? (newComments / newPosts).toFixed(2) : '0'}
                   </p>
                 </div>
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                  <p className="text-sm text-gray-500 mb-1">Likes per Post</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+                  <p className="text-sm text-slate-500 mb-1">Likes per Post</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {newPosts ? (newLikes / newPosts).toFixed(2) : '0'}
                   </p>
                 </div>

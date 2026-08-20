@@ -32,19 +32,19 @@ export default function WaitlistPage() {
   if (submitted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl p-8 text-center shadow-2xl">
+        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl p-8 text-center shadow-2xl">
           <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-10 h-10 text-green-500" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">You&apos;re on the list!</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
-            Thanks for joining! We&apos;ll notify you at <span className="font-medium text-gray-900 dark:text-white">{email}</span> when it&apos;s your turn.
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">You&apos;re on the list!</h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-6">
+            Thanks for joining! We&apos;ll notify you at <span className="font-medium text-slate-900 dark:text-white">{email}</span> when it&apos;s your turn.
           </p>
-          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 mb-6">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Your position:</p>
+          <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 mb-6">
+            <p className="text-sm text-slate-600 dark:text-slate-400">Your position:</p>
             <p className="text-3xl font-bold text-primary-600">#25,847</p>
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
             Share with friends to move up the list!
           </p>
           <div className="flex gap-3 justify-center">
@@ -64,7 +64,7 @@ export default function WaitlistPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -97,13 +97,13 @@ export default function WaitlistPage() {
       {/* Form Section */}
       <section className="container mx-auto px-4 -mt-16 relative z-20 pb-16">
         <div className="max-w-xl mx-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-200 dark:border-gray-700">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-200 dark:border-slate-700">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 text-center">
               Reserve Your Spot
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Full Name
                 </label>
                 <input
@@ -111,12 +111,12 @@ export default function WaitlistPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   placeholder="Jane Doe"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Email Address
                 </label>
                 <input
@@ -124,18 +124,18 @@ export default function WaitlistPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   placeholder="jane@example.com"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   What interests you most?
                 </label>
                 <select
                   value={interest}
                   onChange={(e) => setInterest(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
                   <option value="">Select an option</option>
                   <option value="jobs">AI Job Matching</option>
@@ -154,7 +154,7 @@ export default function WaitlistPage() {
                 <ArrowRight className="w-5 h-5" />
               </button>
             </form>
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-4">
               By joining, you agree to our Terms of Service and Privacy Policy. No spam, ever.
             </p>
           </div>
@@ -163,26 +163,26 @@ export default function WaitlistPage() {
 
       {/* Benefits */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Early Access Benefits
         </h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
           {benefits.map((benefit) => (
-            <div key={benefit.title} className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700 text-center">
+            <div key={benefit.title} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 text-center">
               <div className="w-14 h-14 bg-primary-100 dark:bg-primary-900/30 rounded-xl flex items-center justify-center mx-auto mb-4">
                 <benefit.icon className="w-7 h-7 text-primary-600" />
               </div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{benefit.title}</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">{benefit.description}</p>
+              <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{benefit.title}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{benefit.description}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Testimonials */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
             What Early Users Say
           </h2>
           <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
@@ -191,9 +191,9 @@ export default function WaitlistPage() {
               { quote: "My mentor helped me negotiate a 40% salary increase.", author: "Mike T., Software Engineer" },
               { quote: "The resume optimizer got me 3x more callbacks.", author: "Emily R., Marketing Director" },
             ].map((testimonial, i) => (
-              <div key={i} className="bg-gray-50 dark:bg-gray-900 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-                <p className="text-gray-700 dark:text-gray-300 mb-4">&ldquo;{testimonial.quote}&rdquo;</p>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{testimonial.author}</p>
+              <div key={i} className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+                <p className="text-slate-700 dark:text-slate-300 mb-4">&ldquo;{testimonial.quote}&rdquo;</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-white">{testimonial.author}</p>
               </div>
             ))}
           </div>

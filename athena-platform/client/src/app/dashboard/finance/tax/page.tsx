@@ -319,8 +319,8 @@ export default function TaxPage() {
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Tax & Returns</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Tax & Returns</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Maintain tax rates and prepare returns.
           </p>
         </div>
@@ -331,20 +331,20 @@ export default function TaxPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Active Rates</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Active Rates</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? '—' : rates.length}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Returns</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Returns</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? '—' : returns.length}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? 'Loading' : 'Ready'}
           </p>
         </div>
@@ -358,31 +358,31 @@ export default function TaxPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Tax Rate</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Tax Rate</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
               <input
                 value={rateForm.organizationId}
                 onChange={(e) => setRateForm({ ...rateForm, organizationId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Name</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Name</label>
               <input
                 value={rateForm.name}
                 onChange={(e) => setRateForm({ ...rateForm, name: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="GST Standard"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Type</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Type</label>
               <select
                 value={rateForm.type}
                 onChange={(e) => setRateForm({ ...rateForm, type: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               >
                 {['GST', 'VAT', 'SALES_TAX', 'WITHHOLDING'].map((type) => (
                   <option key={type} value={type}>
@@ -392,30 +392,30 @@ export default function TaxPage() {
               </select>
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Rate (%)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Rate (%)</label>
               <input
                 value={rateForm.rate}
                 onChange={(e) => setRateForm({ ...rateForm, rate: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="10"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Region</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Region</label>
               <input
                 value={rateForm.region}
                 onChange={(e) => setRateForm({ ...rateForm, region: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="ANZ"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Effective From</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Effective From</label>
               <input
                 type="date"
                 value={rateForm.effectiveFrom}
                 onChange={(e) => setRateForm({ ...rateForm, effectiveFrom: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -425,67 +425,67 @@ export default function TaxPage() {
         </div>
 
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Tax Return</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Tax Return</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
               <input
                 value={returnForm.organizationId}
                 onChange={(e) => setReturnForm({ ...returnForm, organizationId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Currency</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Currency</label>
               <input
                 value={returnForm.currency}
                 onChange={(e) => setReturnForm({ ...returnForm, currency: e.target.value.toUpperCase() })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="AUD"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Period Start</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Period Start</label>
               <input
                 type="date"
                 value={returnForm.periodStart}
                 onChange={(e) => setReturnForm({ ...returnForm, periodStart: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Period End</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Period End</label>
               <input
                 type="date"
                 value={returnForm.periodEnd}
                 onChange={(e) => setReturnForm({ ...returnForm, periodEnd: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Total Sales</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Total Sales</label>
               <input
                 value={returnForm.totalSales}
                 onChange={(e) => setReturnForm({ ...returnForm, totalSales: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="0"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Total Tax</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Total Tax</label>
               <input
                 value={returnForm.totalTax}
                 onChange={(e) => setReturnForm({ ...returnForm, totalTax: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="0"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Reference</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Reference</label>
               <input
                 value={returnForm.reference}
                 onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -497,58 +497,58 @@ export default function TaxPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tax Returns</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Tax Returns</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading returns...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading returns...</p>
         ) : returns.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No returns filed yet.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No returns filed yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Period</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Total Tax</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Status</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Period</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Total Tax</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Status</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {returns.slice(0, 6).map((entry) => (
-                  <tr key={entry.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">
+                  <tr key={entry.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">
                       {editingReturnId === entry.id ? (
                         <div className="flex flex-col gap-2">
                           <input
                             type="date"
                             value={editingReturn.periodStart}
                             onChange={(e) => setEditingReturn({ ...editingReturn, periodStart: e.target.value })}
-                            className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                            className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                           />
                           <input
                             type="date"
                             value={editingReturn.periodEnd}
                             onChange={(e) => setEditingReturn({ ...editingReturn, periodEnd: e.target.value })}
-                            className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                            className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                           />
                         </div>
                       ) : (
                         `${formatDate(entry.periodStart)} - ${formatDate(entry.periodEnd)}`
                       )}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingReturnId === entry.id ? (
                         <input
                           value={editingReturn.totalTax}
                           onChange={(e) => setEditingReturn({ ...editingReturn, totalTax: e.target.value })}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         />
                       ) : (
                         formatCurrency(entry.totalTax || 0, entry.currency || 'AUD')
                       )}
                     </td>
-                    <td className="py-2 text-xs text-gray-500 dark:text-gray-400">
+                    <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
                       {entry.status}
                     </td>
                     <td className="py-2 text-right">
@@ -563,7 +563,7 @@ export default function TaxPage() {
                             </button>
                             <button
                               onClick={() => setEditingReturnId(null)}
-                              className="text-xs text-gray-500 hover:underline"
+                              className="text-xs text-slate-500 hover:underline"
                             >
                               Cancel
                             </button>
@@ -572,7 +572,7 @@ export default function TaxPage() {
                           entry.status === 'DRAFT' && (
                             <button
                               onClick={() => startEditReturn(entry)}
-                              className="text-xs text-gray-600 hover:underline"
+                              className="text-xs text-slate-600 hover:underline"
                             >
                               Edit
                             </button>
@@ -606,43 +606,43 @@ export default function TaxPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tax Rates</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Tax Rates</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading rates...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading rates...</p>
         ) : rates.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No tax rates configured.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No tax rates configured.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Name</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Rate</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Name</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Type</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Rate</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rates.slice(0, 6).map((rate) => (
-                  <tr key={rate.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">
+                  <tr key={rate.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">
                       {editingRateId === rate.id ? (
                         <input
                           value={editingRate.name}
                           onChange={(e) => setEditingRate({ ...editingRate, name: e.target.value })}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         />
                       ) : (
                         rate.name
                       )}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingRateId === rate.id ? (
                         <select
                           value={editingRate.type}
                           onChange={(e) => setEditingRate({ ...editingRate, type: e.target.value })}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         >
                           {['GST', 'VAT', 'SALES_TAX', 'WITHHOLDING'].map((type) => (
                             <option key={type} value={type}>
@@ -654,12 +654,12 @@ export default function TaxPage() {
                         rate.type
                       )}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingRateId === rate.id ? (
                         <input
                           value={editingRate.rate}
                           onChange={(e) => setEditingRate({ ...editingRate, rate: e.target.value })}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         />
                       ) : (
                         `${Number(rate.rate) * 100}%`
@@ -677,7 +677,7 @@ export default function TaxPage() {
                             </button>
                             <button
                               onClick={() => setEditingRateId(null)}
-                              className="text-xs text-gray-500 hover:underline"
+                              className="text-xs text-slate-500 hover:underline"
                             >
                               Cancel
                             </button>
@@ -685,7 +685,7 @@ export default function TaxPage() {
                         ) : (
                           <button
                             onClick={() => startEditRate(rate)}
-                            className="text-xs text-gray-600 hover:underline"
+                            className="text-xs text-slate-600 hover:underline"
                           >
                             Edit
                           </button>

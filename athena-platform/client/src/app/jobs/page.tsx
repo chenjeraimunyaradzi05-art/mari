@@ -185,7 +185,7 @@ function JobsContent() {
                     id="remote"
                     checked={isRemote}
                     onChange={(event) => setIsRemote(event.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300"
+                    className="h-4 w-4 rounded border-slate-300"
                   />
                   <label htmlFor="remote" className="text-sm">
                     Remote Only
@@ -274,7 +274,7 @@ function JobsContent() {
                   jobs.map((job) => <JobCard key={job.id} job={job} />)
                 ) : (
                   <div className="rounded-lg border border-dashed border-slate-300 bg-white py-12 text-center dark:border-slate-700 dark:bg-slate-900">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-medium text-slate-900 dark:text-white">
                       No jobs found
                     </h3>
                     <p className="mt-1 text-muted-foreground">

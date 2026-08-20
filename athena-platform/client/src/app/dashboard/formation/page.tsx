@@ -78,7 +78,7 @@ export default function FormationLandingPage() {
             <Rocket className="h-6 w-6" />
           </div>
           <h3 className="font-semibold text-xl">Register Business</h3>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-slate-500">
             Create and submit business-registration drafts with the connected formation workflow.
           </p>
           <ul className="text-sm gap-2 grid">
@@ -105,7 +105,7 @@ export default function FormationLandingPage() {
             <Receipt className="h-6 w-6" />
           </div>
           <h3 className="font-semibold text-xl">Tax Optimization</h3>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-slate-500">
             Configure tax rates, deductions, and return planning from the finance workspace.
           </p>
           <Link href="/dashboard/finance/tax" className="inline-flex text-sm font-medium text-primary hover:underline">
@@ -118,7 +118,7 @@ export default function FormationLandingPage() {
             <Landmark className="h-6 w-6" />
           </div>
           <h3 className="font-semibold text-xl">Grants & Capital</h3>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-slate-500">
             Track grant opportunities and investor outreach through connected business workflows.
           </p>
           <div className="flex flex-wrap gap-3">

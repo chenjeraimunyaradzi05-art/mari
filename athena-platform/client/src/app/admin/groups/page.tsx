@@ -59,16 +59,16 @@ export default function AdminGroupsPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Groups Moderation</h1>
-              <p className="text-gray-600 dark:text-gray-400">Feature, pin, or hide community groups</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Groups Moderation</h1>
+              <p className="text-slate-600 dark:text-slate-400">Feature, pin, or hide community groups</p>
             </div>
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function AdminGroupsPage() {
             {data?.groups.map((group) => (
               <div
                 key={group.id}
-                className={`bg-white dark:bg-gray-800 rounded-lg shadow p-6 ${
+                className={`bg-white dark:bg-slate-800 rounded-lg shadow p-6 ${
                   group.isHidden ? 'opacity-60 border-2 border-red-300' : ''
                 }`}
               >
@@ -120,8 +120,8 @@ export default function AdminGroupsPage() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-gray-900 dark:text-white">{group.name}</span>
-                        <span className="text-xs text-gray-500">{group.privacy.toLowerCase()}</span>
+                        <span className="font-medium text-slate-900 dark:text-white">{group.name}</span>
+                        <span className="text-xs text-slate-500">{group.privacy.toLowerCase()}</span>
                         {group.isHidden && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
                             Hidden
@@ -138,10 +138,10 @@ export default function AdminGroupsPage() {
                           </span>
                         )}
                       </div>
-                      <p className="text-gray-600 dark:text-gray-300 text-sm line-clamp-2">
+                      <p className="text-slate-600 dark:text-slate-300 text-sm line-clamp-2">
                         {group.description}
                       </p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                      <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
                         <span>Members: {group._count.members}</span>
                         <span>Posts: {group._count.posts}</span>
                       </div>
@@ -178,14 +178,14 @@ export default function AdminGroupsPage() {
             ))}
 
             {data?.groups.length === 0 && (
-              <div className="text-center py-12 text-gray-500">No groups found.</div>
+              <div className="text-center py-12 text-slate-500">No groups found.</div>
             )}
           </div>
         )}
 
         {data && data.pagination.totalPages > 1 && (
           <div className="mt-6 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-slate-500">
               Page {data.pagination.page} of {data.pagination.totalPages}
             </div>
             <div className="flex gap-2">

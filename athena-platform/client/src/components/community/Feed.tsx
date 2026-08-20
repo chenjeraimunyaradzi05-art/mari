@@ -31,7 +31,7 @@ export default function Feed({ tab, contentType = 'all' }: FeedProps) {
 
   if (!posts || posts.length === 0) {
      return (
-        <div className="bg-white p-8 rounded-lg border border-gray-200 text-center text-gray-500">
+        <div className="bg-white p-8 rounded-lg border border-slate-200 text-center text-slate-500">
             <p>No posts yet. Be the first to share something!</p>
         </div>
      );

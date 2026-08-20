@@ -18,8 +18,8 @@ export default function CreatorStudioPage() {
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Creator Upload Studio</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Creator Upload Studio</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             Upload, polish, and publish your next career story.
           </p>
         </div>
@@ -33,17 +33,17 @@ export default function CreatorStudioPage() {
           <div
             className={cn(
               'border-2 border-dashed rounded-2xl p-8 text-center transition',
-              file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700'
+              file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700'
             )}
           >
-            <UploadCloud className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-            <p className="text-sm text-gray-600 dark:text-gray-300">
+            <UploadCloud className="w-10 h-10 mx-auto text-slate-400 mb-3" />
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               Drag and drop a video here, or click to browse
             </p>
             <input
               type="file"
               accept="video/*"
-              className="mt-4 block w-full text-sm text-gray-500"
+              className="mt-4 block w-full text-sm text-slate-500"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
             {file && (
@@ -67,25 +67,25 @@ export default function CreatorStudioPage() {
         </div>
 
         <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 p-4 space-y-4 bg-white dark:bg-gray-900">
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Details</h2>
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4 bg-white dark:bg-slate-900">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Details</h2>
             <Input
               label="Tags"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="Interview, salary, leadership"
-              icon={<Tag className="w-4 h-4 text-gray-400" />}
+              icon={<Tag className="w-4 h-4 text-slate-400" />}
             />
             <Input
               label="Category"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               placeholder="Career Growth"
-              icon={<Folder className="w-4 h-4 text-gray-400" />}
+              icon={<Folder className="w-4 h-4 text-slate-400" />}
             />
             <div className="space-y-2">
-              <p className="text-xs text-gray-500">Publishing checklist</p>
-              <ul className="text-sm text-gray-600 dark:text-gray-300 space-y-1">
+              <p className="text-xs text-slate-500">Publishing checklist</p>
+              <ul className="text-sm text-slate-600 dark:text-slate-300 space-y-1">
                 <li>• Add a clear, concise title</li>
                 <li>• Include 2-3 tags</li>
                 <li>• Add a short summary</li>
@@ -93,9 +93,9 @@ export default function CreatorStudioPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 p-4 space-y-3 bg-white dark:bg-gray-900">
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Preview</h2>
-            <div className="aspect-video rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-400">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 bg-white dark:bg-slate-900">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Preview</h2>
+            <div className="aspect-video rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
               {file ? 'Video ready for preview' : 'Upload to preview'}
             </div>
             <Button variant="outline" className="w-full">

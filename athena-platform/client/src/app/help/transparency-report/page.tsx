@@ -121,17 +121,17 @@ export default function TransparencyReportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+    <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className="max-w-5xl mx-auto px-4 py-12">
         {/* Header */}
         <div className="text-center mb-12">
           <div className="mx-auto w-16 h-16 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center mb-6">
             <FileText className="w-8 h-8 text-purple-600 dark:text-purple-400" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
             Transparency Report
           </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+          <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
             We believe in being open about how we moderate content and protect our community. 
             {reportData
               ? ` This report details our content moderation activities for ${reportData.period}.`
@@ -157,8 +157,8 @@ export default function TransparencyReportPage() {
         </div>
 
         {isLoadingReport ? (
-          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
-            <p className="text-sm font-medium text-gray-900 dark:text-white">Loading transparency report...</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <p className="text-sm font-medium text-slate-900 dark:text-white">Loading transparency report...</p>
           </div>
         ) : reportError ? (
           <div className="rounded-xl border border-orange-200 bg-orange-50 p-6 text-orange-900 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-100">
@@ -166,10 +166,10 @@ export default function TransparencyReportPage() {
             <p className="mt-2 text-sm">{reportError}</p>
           </div>
         ) : !reportData ? (
-          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
-            <FileText className="mx-auto h-10 w-10 text-gray-400" />
-            <h2 className="mt-4 text-lg font-semibold text-gray-900 dark:text-white">No published transparency report yet</h2>
-            <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-400">
+          <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <FileText className="mx-auto h-10 w-10 text-slate-400" />
+            <h2 className="mt-4 text-lg font-semibold text-slate-900 dark:text-white">No published transparency report yet</h2>
+            <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
               ATHENA will publish moderation metrics here after a reviewed reporting period is approved for release.
             </p>
           </div>
@@ -177,33 +177,33 @@ export default function TransparencyReportPage() {
           <>
         {/* Key Metrics */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
             <div className="flex items-center gap-3 mb-3">
               <AlertTriangle className="w-5 h-5 text-orange-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">Total Reports</span>
+              <span className="text-sm text-slate-600 dark:text-slate-400">Total Reports</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.totalReports.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{reportData.totalReports.toLocaleString()}</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
             <div className="flex items-center gap-3 mb-3">
               <Shield className="w-5 h-5 text-green-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">Content Removed</span>
+              <span className="text-sm text-slate-600 dark:text-slate-400">Content Removed</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.actions.contentRemoved.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{reportData.actions.contentRemoved.toLocaleString()}</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
             <div className="flex items-center gap-3 mb-3">
               <Clock className="w-5 h-5 text-blue-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">Avg Response</span>
+              <span className="text-sm text-slate-600 dark:text-slate-400">Avg Response</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.timing.avgResponseHours}h</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{reportData.timing.avgResponseHours}h</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
             <div className="flex items-center gap-3 mb-3">
               <TrendingUp className="w-5 h-5 text-purple-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">Appeal Rate</span>
+              <span className="text-sm text-slate-600 dark:text-slate-400">Appeal Rate</span>
             </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">
               {getPercentage(reportData.appeals.total, reportData.actions.contentRemoved)}%
             </p>
           </div>
@@ -212,19 +212,19 @@ export default function TransparencyReportPage() {
         {/* Detailed Sections */}
         <div className="space-y-4">
           {/* Reports by Category */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
             <button
               onClick={() => toggleSection('categories')}
-              className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
             >
               <div className="flex items-center gap-3">
                 <BarChart3 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                <span className="font-semibold text-gray-900 dark:text-white">Reports by Category</span>
+                <span className="font-semibold text-slate-900 dark:text-white">Reports by Category</span>
               </div>
               {expandedSection === 'categories' ? (
-                <ChevronUp className="w-5 h-5 text-gray-500" />
+                <ChevronUp className="w-5 h-5 text-slate-500" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-gray-500" />
+                <ChevronDown className="w-5 h-5 text-slate-500" />
               )}
             </button>
             {expandedSection === 'categories' && (
@@ -234,16 +234,16 @@ export default function TransparencyReportPage() {
                     .sort(([, a], [, b]) => b - a)
                     .map(([category, count]) => (
                       <div key={category} className="flex items-center gap-4">
-                        <span className="w-32 text-sm text-gray-600 dark:text-gray-400">
+                        <span className="w-32 text-sm text-slate-600 dark:text-slate-400">
                           {CATEGORY_LABELS[category]}
                         </span>
-                        <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
+                        <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
                           <div
                             className="bg-purple-600 h-full rounded-full transition-all"
                             style={{ width: getBarWidth(count, reportData.totalReports) }}
                           />
                         </div>
-                        <span className="w-20 text-right text-sm font-medium text-gray-900 dark:text-white">
+                        <span className="w-20 text-right text-sm font-medium text-slate-900 dark:text-white">
                           {count} ({getPercentage(count, reportData.totalReports)}%)
                         </span>
                       </div>
@@ -254,53 +254,53 @@ export default function TransparencyReportPage() {
           </div>
 
           {/* Actions Taken */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
             <button
               onClick={() => toggleSection('actions')}
-              className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
             >
               <div className="flex items-center gap-3">
                 <Shield className="w-5 h-5 text-green-600 dark:text-green-400" />
-                <span className="font-semibold text-gray-900 dark:text-white">Actions Taken</span>
+                <span className="font-semibold text-slate-900 dark:text-white">Actions Taken</span>
               </div>
               {expandedSection === 'actions' ? (
-                <ChevronUp className="w-5 h-5 text-gray-500" />
+                <ChevronUp className="w-5 h-5 text-slate-500" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-gray-500" />
+                <ChevronDown className="w-5 h-5 text-slate-500" />
               )}
             </button>
             {expandedSection === 'actions' && (
               <div className="px-6 pb-6">
                 <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
                       {reportData.actions.contentRemoved}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Content Removed</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Content Removed</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
                       {reportData.actions.accountsSuspended}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Accounts Suspended</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Accounts Suspended</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
                       {reportData.actions.accountsBanned}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Accounts Banned</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Accounts Banned</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
                       {reportData.actions.warnings}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Warnings Issued</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Warnings Issued</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
-                    <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
+                    <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">
                       {reportData.actions.noAction}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">No Action</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">No Action</p>
                   </div>
                 </div>
               </div>
@@ -308,19 +308,19 @@ export default function TransparencyReportPage() {
           </div>
 
           {/* Response Times */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
             <button
               onClick={() => toggleSection('timing')}
-              className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
             >
               <div className="flex items-center gap-3">
                 <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span className="font-semibold text-gray-900 dark:text-white">Response Times</span>
+                <span className="font-semibold text-slate-900 dark:text-white">Response Times</span>
               </div>
               {expandedSection === 'timing' ? (
-                <ChevronUp className="w-5 h-5 text-gray-500" />
+                <ChevronUp className="w-5 h-5 text-slate-500" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-gray-500" />
+                <ChevronDown className="w-5 h-5 text-slate-500" />
               )}
             </button>
             {expandedSection === 'timing' && (
@@ -330,7 +330,7 @@ export default function TransparencyReportPage() {
                     <p className="text-2xl font-bold text-green-600 dark:text-green-400">
                       {reportData.timing.under24Hours}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Resolved &lt;24 hours</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Resolved &lt;24 hours</p>
                     <p className="text-xs text-green-600 dark:text-green-400">
                       {getPercentage(reportData.timing.under24Hours, reportData.totalReports)}%
                     </p>
@@ -339,7 +339,7 @@ export default function TransparencyReportPage() {
                     <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
                       {reportData.timing.under72Hours}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Resolved 24-72 hours</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Resolved 24-72 hours</p>
                     <p className="text-xs text-yellow-600 dark:text-yellow-400">
                       {getPercentage(reportData.timing.under72Hours, reportData.totalReports)}%
                     </p>
@@ -348,7 +348,7 @@ export default function TransparencyReportPage() {
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
                       {reportData.timing.over72Hours}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Resolved &gt;72 hours</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Resolved &gt;72 hours</p>
                     <p className="text-xs text-red-600 dark:text-red-400">
                       {getPercentage(reportData.timing.over72Hours, reportData.totalReports)}%
                     </p>
@@ -359,50 +359,50 @@ export default function TransparencyReportPage() {
           </div>
 
           {/* Appeals */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
             <button
               onClick={() => toggleSection('appeals')}
-              className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
             >
               <div className="flex items-center gap-3">
                 <Users className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                <span className="font-semibold text-gray-900 dark:text-white">Appeals</span>
+                <span className="font-semibold text-slate-900 dark:text-white">Appeals</span>
               </div>
               {expandedSection === 'appeals' ? (
-                <ChevronUp className="w-5 h-5 text-gray-500" />
+                <ChevronUp className="w-5 h-5 text-slate-500" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-gray-500" />
+                <ChevronDown className="w-5 h-5 text-slate-500" />
               )}
             </button>
             {expandedSection === 'appeals' && (
               <div className="px-6 pb-6">
                 <div className="grid sm:grid-cols-4 gap-4">
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">
                       {reportData.appeals.total}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Total Appeals</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Total Appeals</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-green-600 dark:text-green-400">
                       {reportData.appeals.upheld}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Decision Upheld</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Decision Upheld</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
                       {reportData.appeals.overturned}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Overturned</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Overturned</p>
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 text-center">
                     <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                       {reportData.appeals.pending}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Pending Review</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Pending Review</p>
                   </div>
                 </div>
-                <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
+                <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
                   Our appeal overturn rate of {getPercentage(reportData.appeals.overturned, reportData.appeals.total)}% 
                   reflects our commitment to fair content moderation and willingness to correct errors.
                 </p>
@@ -412,9 +412,9 @@ export default function TransparencyReportPage() {
         </div>
 
         {/* Methodology */}
-        <div className="mt-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl p-8">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Methodology</h2>
-          <div className="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-400">
+        <div className="mt-12 bg-slate-50 dark:bg-slate-800/50 rounded-xl p-8">
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Methodology</h2>
+          <div className="prose dark:prose-invert max-w-none text-slate-600 dark:text-slate-400">
             <p>
               This report covers content moderation activities for {reportData.period}. All data is
               collected from our internal moderation systems and represents actions taken in response
@@ -446,14 +446,14 @@ export default function TransparencyReportPage() {
           </Link>
           <Link
             href="/help/community-guidelines"
-            className="inline-flex items-center px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            className="inline-flex items-center px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <FileText className="w-4 h-4 mr-2" />
             Community Guidelines
           </Link>
           <Link
             href="/help/appeal"
-            className="inline-flex items-center px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            className="inline-flex items-center px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <Users className="w-4 h-4 mr-2" />
             Appeal a Decision

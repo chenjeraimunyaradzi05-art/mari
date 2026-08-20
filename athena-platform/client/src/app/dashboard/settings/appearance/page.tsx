@@ -74,7 +74,7 @@ function Toggle({
         className="sr-only peer"
         aria-label={label}
       />
-      <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:bg-gray-700 dark:peer-focus:ring-primary-800 rtl:peer-checked:after:-translate-x-full" />
+      <div className="h-6 w-11 rounded-full bg-slate-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:bg-slate-700 dark:peer-focus:ring-primary-800 rtl:peer-checked:after:-translate-x-full" />
     </label>
   );
 }
@@ -104,17 +104,17 @@ export default function AppearanceSettingsPage() {
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Appearance
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Customize how ATHENA looks on your device
         </p>
       </div>
 
       {/* Theme Selection */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Theme
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -126,7 +126,7 @@ export default function AppearanceSettingsPage() {
                 'relative flex flex-col items-center rounded-lg border-2 p-6 transition',
                 theme === themeOption.id
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
               )}
             >
               {theme === themeOption.id && (
@@ -138,23 +138,23 @@ export default function AppearanceSettingsPage() {
                 className={cn(
                   'w-12 h-12 rounded-full flex items-center justify-center mb-3',
                   themeOption.id === 'light' && 'bg-yellow-100',
-                  themeOption.id === 'dark' && 'bg-gray-800',
-                  themeOption.id === 'system' && 'bg-gradient-to-br from-yellow-100 to-gray-800'
+                  themeOption.id === 'dark' && 'bg-slate-800',
+                  themeOption.id === 'system' && 'bg-gradient-to-br from-yellow-100 to-slate-800'
                 )}
               >
                 <themeOption.icon
                   className={cn(
                     'w-6 h-6',
                     themeOption.id === 'light' && 'text-yellow-600',
-                    themeOption.id === 'dark' && 'text-gray-300',
-                    themeOption.id === 'system' && 'text-gray-600'
+                    themeOption.id === 'dark' && 'text-slate-300',
+                    themeOption.id === 'system' && 'text-slate-600'
                   )}
                 />
               </div>
-              <span className="font-medium text-gray-900 dark:text-white">
+              <span className="font-medium text-slate-900 dark:text-white">
                 {themeOption.name}
               </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 text-center mt-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400 text-center mt-1">
                 {themeOption.description}
               </span>
             </button>
@@ -165,12 +165,12 @@ export default function AppearanceSettingsPage() {
       {/* Accent Color */}
       <div className="card">
         <div className="flex items-center space-x-2 mb-4">
-          <Palette className="w-5 h-5 text-gray-500" />
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <Palette className="w-5 h-5 text-slate-500" />
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Accent Color
           </h2>
         </div>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
           Choose your preferred accent color for buttons and highlights
         </p>
         <div className="flex flex-wrap gap-3">
@@ -181,7 +181,7 @@ export default function AppearanceSettingsPage() {
               className={cn(
                 'relative w-12 h-12 rounded-full transition-transform hover:scale-110',
                 color.class,
-                accentColor === color.id && 'ring-2 ring-offset-2 ring-gray-400 dark:ring-offset-gray-900'
+                accentColor === color.id && 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-900'
               )}
               aria-label={`Use ${color.name} accent color`}
               title={color.name}
@@ -196,7 +196,7 @@ export default function AppearanceSettingsPage() {
 
       {/* Font Size */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Font Size
         </h2>
         <div className="flex items-center space-x-4">
@@ -208,16 +208,16 @@ export default function AppearanceSettingsPage() {
                 'flex-1 py-3 px-4 rounded-lg border-2 transition text-center',
                 fontSize === size.id
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
               )}
             >
               <span
-                className="font-medium text-gray-900 dark:text-white"
+                className="font-medium text-slate-900 dark:text-white"
                 style={{ fontSize: size.size }}
               >
                 Aa
               </span>
-              <span className="block text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <span className="block text-xs text-slate-500 dark:text-slate-400 mt-1">
                 {size.name}
               </span>
             </button>
@@ -227,24 +227,24 @@ export default function AppearanceSettingsPage() {
 
       {/* Preview */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Preview
         </h2>
-        <div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-4">
+        <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-lg space-y-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-full bg-primary-500 flex items-center justify-center text-white font-semibold">
               {initials}
             </div>
             <div>
-              <p className="font-medium text-gray-900 dark:text-white">
+              <p className="font-medium text-slate-900 dark:text-white">
                 {displayName}
               </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 This is how text will appear
               </p>
             </div>
           </div>
-          <p className="text-gray-600 dark:text-gray-300">
+          <p className="text-slate-600 dark:text-slate-300">
             The quick brown fox jumps over the lazy dog. This is a preview of
             your selected appearance settings.
           </p>
@@ -263,10 +263,10 @@ export default function AppearanceSettingsPage() {
       <div className="card">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-white">
+            <h2 className="font-semibold text-slate-900 dark:text-white">
               Compact Mode
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Reduce spacing and padding for a more compact view
             </p>
           </div>
@@ -282,10 +282,10 @@ export default function AppearanceSettingsPage() {
       <div className="card">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-white">
+            <h2 className="font-semibold text-slate-900 dark:text-white">
               Reduce Motion
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Minimize animations and transitions
             </p>
           </div>

@@ -128,7 +128,7 @@ export default function AccessibilityPage() {
         {[1, 2, 3, 4, 5].map((star) => (
           <span
             key={star}
-            className={star <= rating ? 'text-yellow-400' : 'text-gray-300'}
+            className={star <= rating ? 'text-yellow-400' : 'text-slate-300'}
           >
             ★
           </span>
@@ -144,10 +144,10 @@ export default function AccessibilityPage() {
           <Accessibility className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Accessibility</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Disability Support & Accommodations
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Set your accessibility preferences and find inclusive employers
         </p>
       </div>
@@ -157,7 +157,7 @@ export default function AccessibilityPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading...
         </div>
@@ -166,7 +166,7 @@ export default function AccessibilityPage() {
           {/* Accessibility Profile */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 My Accessibility Profile
               </h2>
               <button onClick={() => setShowForm(!showForm)} className="btn-primary text-sm">
@@ -175,9 +175,9 @@ export default function AccessibilityPage() {
             </div>
 
             {showForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 mb-4 space-y-6">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-6">
                 <div>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
                     Impairment types (select all that apply)
                   </p>
                   <div className="grid grid-cols-2 gap-3">
@@ -201,7 +201,7 @@ export default function AccessibilityPage() {
                 </div>
 
                 <div>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
                     Assistive technology & preferences
                   </p>
                   <div className="grid grid-cols-2 gap-3">
@@ -225,7 +225,7 @@ export default function AccessibilityPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Other accessibility needs
                   </label>
                   <textarea
@@ -233,12 +233,12 @@ export default function AccessibilityPage() {
                     onChange={(e) => setOtherNeeds(e.target.value)}
                     placeholder="Describe any other accessibility needs..."
                     rows={2}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Workplace accommodations needed (one per line)
                   </label>
                   <textarea
@@ -246,7 +246,7 @@ export default function AccessibilityPage() {
                     onChange={(e) => setWorkAccommodations(e.target.value)}
                     placeholder="e.g., Flexible hours, Standing desk, Quiet workspace..."
                     rows={3}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                 </div>
 
@@ -260,7 +260,7 @@ export default function AccessibilityPage() {
             )}
 
             {profile && !showForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {profile.hasVisionImpairment && (
                     <div className="flex items-center gap-2 text-sm">
@@ -301,8 +301,8 @@ export default function AccessibilityPage() {
                 </div>
 
                 {profile.workAccommodations.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-                    <p className="text-xs text-gray-500 mb-2">Workplace accommodations:</p>
+                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                    <p className="text-xs text-slate-500 mb-2">Workplace accommodations:</p>
                     <div className="flex flex-wrap gap-2">
                       {profile.workAccommodations.map((acc, idx) => (
                         <span key={idx} className="text-xs px-2 py-1 bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded-full">
@@ -318,33 +318,33 @@ export default function AccessibilityPage() {
 
           {/* Disability-Friendly Employers */}
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
               <Briefcase className="w-5 h-5" /> Disability-Confident Employers
             </h2>
 
             {employers.length === 0 ? (
-              <p className="text-sm text-gray-500">No disability-friendly employers found.</p>
+              <p className="text-sm text-slate-500">No disability-friendly employers found.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {employers.map((employer) => (
                   <div
                     key={employer.id}
-                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
                   >
                     <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center flex-shrink-0">
                         {employer.organization.logoUrl ? (
                           <img src={employer.organization.logoUrl} alt="" className="w-8 h-8 object-contain" />
                         ) : (
-                          <Building2 className="w-6 h-6 text-gray-400" />
+                          <Building2 className="w-6 h-6 text-slate-400" />
                         )}
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                        <h3 className="font-semibold text-slate-900 dark:text-white">
                           {employer.organization.name}
                         </h3>
                         {employer.organization.industry && (
-                          <p className="text-xs text-gray-500">{employer.organization.industry}</p>
+                          <p className="text-xs text-slate-500">{employer.organization.industry}</p>
                         )}
                         {employer.accessibilityRating && (
                           <div className="mt-1">{renderStars(employer.accessibilityRating)}</div>
@@ -359,29 +359,29 @@ export default function AccessibilityPage() {
 
                     <div className="flex flex-wrap gap-2 mt-4">
                       {employer.hasWheelchairAccess && (
-                        <span className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+                        <span className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-full">
                           ♿ Wheelchair access
                         </span>
                       )}
                       {employer.hasFlexibleWork && (
-                        <span className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+                        <span className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-full">
                           Flexible work
                         </span>
                       )}
                       {employer.hasRemoteOptions && (
-                        <span className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+                        <span className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-full">
                           Remote options
                         </span>
                       )}
                       {employer.hasMentalHealthSupport && (
-                        <span className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+                        <span className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-full">
                           Mental health support
                         </span>
                       )}
                     </div>
 
                     {employer.accommodationsOffered.length > 0 && (
-                      <div className="mt-3 text-xs text-gray-500">
+                      <div className="mt-3 text-xs text-slate-500">
                         Accommodations: {employer.accommodationsOffered.slice(0, 3).join(', ')}
                         {employer.accommodationsOffered.length > 3 && ` +${employer.accommodationsOffered.length - 3} more`}
                       </div>

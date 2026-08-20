@@ -197,14 +197,14 @@ export default function BecomeMentorPage() {
           <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-10 h-10 text-green-500" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
             Application Submitted!
           </h1>
-          <p className="text-gray-600 dark:text-gray-300 mb-6">
+          <p className="text-slate-600 dark:text-slate-300 mb-6">
             Thank you for applying to become a mentor on ATHENA. Our team will review
             your application and get back to you within 3-5 business days.
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             In the meantime, make sure your profile is complete and up-to-date.
           </p>
         </div>
@@ -216,10 +216,10 @@ export default function BecomeMentorPage() {
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       {/* Header */}
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
           Become a Mentor
         </h1>
-        <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+        <p className="text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto">
           Share your expertise and help other women advance their careers while
           earning income and building your personal brand.
         </p>
@@ -234,10 +234,10 @@ export default function BecomeMentorPage() {
               className="card text-center p-4"
             >
               <benefit.icon className="w-8 h-8 text-primary-500 mx-auto mb-2" />
-              <h3 className="font-medium text-gray-900 dark:text-white text-sm">
+              <h3 className="font-medium text-slate-900 dark:text-white text-sm">
                 {benefit.title}
               </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 {benefit.description}
               </p>
             </div>
@@ -256,7 +256,7 @@ export default function BecomeMentorPage() {
                   ? 'bg-primary-500 text-white'
                   : currentStep === step.id
                   ? 'bg-primary-500 text-white'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
               )}
             >
               {currentStep > step.id ? (
@@ -271,7 +271,7 @@ export default function BecomeMentorPage() {
                   'w-12 h-1 mx-1',
                   currentStep > step.id
                     ? 'bg-primary-500'
-                    : 'bg-gray-200 dark:bg-gray-700'
+                    : 'bg-slate-200 dark:bg-slate-700'
                 )}
               />
             )}
@@ -281,7 +281,7 @@ export default function BecomeMentorPage() {
 
       {/* Form Card */}
       <div className="card">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-6">
           {steps[currentStep - 1].title}
         </h2>
 
@@ -290,7 +290,7 @@ export default function BecomeMentorPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   First Name *
                 </label>
                 <input
@@ -302,7 +302,7 @@ export default function BecomeMentorPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Last Name *
                 </label>
                 <input
@@ -316,7 +316,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Email Address *
               </label>
               <input
@@ -329,7 +329,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Professional Headline *
               </label>
               <input
@@ -342,7 +342,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Bio *
               </label>
               <textarea
@@ -352,11 +352,11 @@ export default function BecomeMentorPage() {
                 className="input-field"
                 placeholder="Tell mentees about your background, experience, and what you're passionate about helping with..."
               />
-              <p className="text-xs text-gray-500 mt-1">Min 100 characters</p>
+              <p className="text-xs text-slate-500 mt-1">Min 100 characters</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 LinkedIn Profile URL
               </label>
               <input
@@ -375,7 +375,7 @@ export default function BecomeMentorPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Current Role *
                 </label>
                 <input
@@ -387,7 +387,7 @@ export default function BecomeMentorPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Company *
                 </label>
                 <input
@@ -402,7 +402,7 @@ export default function BecomeMentorPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Years of Experience *
                 </label>
                 <select
@@ -418,7 +418,7 @@ export default function BecomeMentorPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Industry *
                 </label>
                 <select
@@ -438,7 +438,7 @@ export default function BecomeMentorPage() {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                   Previous Roles (Optional)
                 </label>
                 <button
@@ -490,7 +490,7 @@ export default function BecomeMentorPage() {
                   <button
                     type="button"
                     onClick={() => removePreviousRole(index)}
-                    className="p-2 text-gray-400 hover:text-red-500"
+                    className="p-2 text-slate-400 hover:text-red-500"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -504,7 +504,7 @@ export default function BecomeMentorPage() {
         {currentStep === 3 && (
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
                 Areas of Expertise * (Select at least 3)
               </label>
               <div className="flex flex-wrap gap-2">
@@ -517,7 +517,7 @@ export default function BecomeMentorPage() {
                       'px-4 py-2 rounded-full text-sm font-medium transition',
                       formData.expertiseAreas.includes(area)
                         ? 'bg-primary-500 text-white'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                     )}
                   >
                     {area}
@@ -527,7 +527,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Specializations (comma-separated)
               </label>
               <input
@@ -543,7 +543,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Languages Spoken
               </label>
               <input
@@ -560,7 +560,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Certifications (comma-separated)
               </label>
               <input
@@ -582,11 +582,11 @@ export default function BecomeMentorPage() {
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Hourly Rate (USD) *
                 </label>
                 <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
                     type="number"
                     value={formData.hourlyRate}
@@ -595,12 +595,12 @@ export default function BecomeMentorPage() {
                     placeholder="100"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-slate-500 mt-1">
                   Average on ATHENA: $75-$200/hour
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Max Mentees/Month *
                 </label>
                 <select
@@ -618,7 +618,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
                 Session Lengths Offered *
               </label>
               <div className="flex flex-wrap gap-3">
@@ -629,7 +629,7 @@ export default function BecomeMentorPage() {
                       'flex items-center px-4 py-2 rounded-lg border cursor-pointer transition',
                       formData.sessionLength.includes(length)
                         ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-gray-300 dark:border-gray-600'
+                        : 'border-slate-300 dark:border-slate-600'
                     )}
                   >
                     <input
@@ -653,7 +653,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
                 Available Days *
               </label>
               <div className="flex flex-wrap gap-2">
@@ -670,7 +670,7 @@ export default function BecomeMentorPage() {
                       'px-4 py-2 rounded-lg text-sm font-medium capitalize transition',
                       available
                         ? 'bg-primary-500 text-white'
-                        : 'bg-gray-100 dark:bg-gray-700 text-gray-500'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
                     )}
                   >
                     {day.slice(0, 3)}
@@ -680,7 +680,7 @@ export default function BecomeMentorPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Timezone *
               </label>
               <select
@@ -704,50 +704,50 @@ export default function BecomeMentorPage() {
         {/* Step 5: Review */}
         {currentStep === 5 && (
           <div className="space-y-6">
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-4">
-              <h3 className="font-medium text-gray-900 dark:text-white">Personal Information</h3>
+            <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 space-y-4">
+              <h3 className="font-medium text-slate-900 dark:text-white">Personal Information</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-gray-500">Name:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">
+                  <span className="text-slate-500">Name:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">
                     {formData.firstName} {formData.lastName}
                   </span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Email:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.email}</span>
+                  <span className="text-slate-500">Email:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.email}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="text-gray-500">Headline:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.headline}</span>
+                  <span className="text-slate-500">Headline:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.headline}</span>
                 </div>
               </div>
             </div>
 
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-4">
-              <h3 className="font-medium text-gray-900 dark:text-white">Experience</h3>
+            <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 space-y-4">
+              <h3 className="font-medium text-slate-900 dark:text-white">Experience</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-gray-500">Current Role:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.currentRole}</span>
+                  <span className="text-slate-500">Current Role:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.currentRole}</span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Company:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.company}</span>
+                  <span className="text-slate-500">Company:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.company}</span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Experience:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.yearsExperience} years</span>
+                  <span className="text-slate-500">Experience:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.yearsExperience} years</span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Industry:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.industry}</span>
+                  <span className="text-slate-500">Industry:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.industry}</span>
                 </div>
               </div>
             </div>
 
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-4">
-              <h3 className="font-medium text-gray-900 dark:text-white">Expertise</h3>
+            <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 space-y-4">
+              <h3 className="font-medium text-slate-900 dark:text-white">Expertise</h3>
               <div className="flex flex-wrap gap-2">
                 {formData.expertiseAreas.map((area) => (
                   <span
@@ -760,28 +760,28 @@ export default function BecomeMentorPage() {
               </div>
             </div>
 
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-4">
-              <h3 className="font-medium text-gray-900 dark:text-white">Availability & Pricing</h3>
+            <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 space-y-4">
+              <h3 className="font-medium text-slate-900 dark:text-white">Availability & Pricing</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-gray-500">Hourly Rate:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">${formData.hourlyRate}/hour</span>
+                  <span className="text-slate-500">Hourly Rate:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">${formData.hourlyRate}/hour</span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Session Lengths:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">
+                  <span className="text-slate-500">Session Lengths:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">
                     {formData.sessionLength.join(', ')} min
                   </span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Max Mentees:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">
+                  <span className="text-slate-500">Max Mentees:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">
                     {formData.maxMenteesPerMonth}/month
                   </span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Timezone:</span>{' '}
-                  <span className="text-gray-900 dark:text-white">{formData.timezone}</span>
+                  <span className="text-slate-500">Timezone:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">{formData.timezone}</span>
                 </div>
               </div>
             </div>
@@ -792,7 +792,7 @@ export default function BecomeMentorPage() {
                 id="terms"
                 className="mt-1"
               />
-              <label htmlFor="terms" className="text-sm text-gray-600 dark:text-gray-300">
+              <label htmlFor="terms" className="text-sm text-slate-600 dark:text-slate-300">
                 I agree to the{' '}
                 <a href="/terms" className="text-primary-500 hover:underline">
                   Terms of Service
@@ -809,7 +809,7 @@ export default function BecomeMentorPage() {
         )}
 
         {/* Navigation Buttons */}
-        <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
           <button
             type="button"
             onClick={() => setCurrentStep((prev) => prev - 1)}
@@ -817,8 +817,8 @@ export default function BecomeMentorPage() {
             className={cn(
               'flex items-center space-x-2 px-4 py-2 rounded-lg transition',
               currentStep === 1
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                ? 'text-slate-400 cursor-not-allowed'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
             )}
           >
             <ArrowLeft className="w-4 h-4" />

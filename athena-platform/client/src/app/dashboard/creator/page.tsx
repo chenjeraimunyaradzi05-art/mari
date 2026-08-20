@@ -248,19 +248,19 @@ export default function CreatorDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:h-20">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Creator Dashboard</h1>
-              <p className="text-sm text-gray-500">Manage your content and earnings</p>
+              <h1 className="text-2xl font-bold text-slate-900">Creator Dashboard</h1>
+              <p className="text-sm text-slate-500">Manage your content and earnings</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <select
                 value={selectedPeriod}
                 onChange={(event) => setSelectedPeriod(event.target.value as any)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="7d">Last 7 days</option>
                 <option value="30d">Last 30 days</option>
@@ -310,8 +310,8 @@ export default function CreatorDashboardPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-500 text-sm font-medium">Total Views</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{formatNumber(stats?.totalViews || 0)}</p>
+                  <p className="text-slate-500 text-sm font-medium">Total Views</p>
+                  <p className="text-3xl font-bold text-slate-900 mt-1">{formatNumber(stats?.totalViews || 0)}</p>
                   <div className="flex items-center mt-2 text-green-600">
                     <ArrowUpRight className="w-4 h-4 mr-1" />
                     <span className="text-sm">{formatNumber(stats?.periodViews || 0)} in period</span>
@@ -328,8 +328,8 @@ export default function CreatorDashboardPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-500 text-sm font-medium">Followers</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{formatNumber(stats?.totalFollowers || 0)}</p>
+                  <p className="text-slate-500 text-sm font-medium">Followers</p>
+                  <p className="text-3xl font-bold text-slate-900 mt-1">{formatNumber(stats?.totalFollowers || 0)}</p>
                   <div className="flex items-center mt-2 text-green-600">
                     <ArrowUpRight className="w-4 h-4 mr-1" />
                     <span className="text-sm">+{formatNumber(stats?.newFollowers || 0)} in period</span>
@@ -346,9 +346,9 @@ export default function CreatorDashboardPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-500 text-sm font-medium">Gifts Received</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{formatNumber(stats?.giftsReceived || 0)}</p>
-                  <div className="flex items-center mt-2 text-gray-500">
+                  <p className="text-slate-500 text-sm font-medium">Gifts Received</p>
+                  <p className="text-3xl font-bold text-slate-900 mt-1">{formatNumber(stats?.giftsReceived || 0)}</p>
+                  <div className="flex items-center mt-2 text-slate-500">
                     <Clock className="w-4 h-4 mr-1" />
                     <span className="text-sm">Streaming data pending</span>
                   </div>
@@ -372,7 +372,7 @@ export default function CreatorDashboardPage() {
               </CardHeader>
               <CardContent>
                 {earningsBreakdown.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
+                  <div className="text-center py-8 text-slate-500">
                     No creator earnings recorded for this period.
                   </div>
                 ) : (
@@ -381,16 +381,16 @@ export default function CreatorDashboardPage() {
                       <div key={item.source} className="flex items-center">
                         <div className="flex-1">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-700">{item.source}</span>
+                            <span className="text-sm font-medium text-slate-700">{item.source}</span>
                             <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-gray-900">
+                              <span className="text-sm font-semibold text-slate-900">
                                 {formatCurrency(item.amount)}
                               </span>
                               {item.trend === 'up' && <ArrowUpRight className="w-4 h-4 text-green-500" />}
                               {item.trend === 'down' && <ArrowDownRight className="w-4 h-4 text-red-500" />}
                             </div>
                           </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div className="w-full bg-slate-200 rounded-full h-2">
                             <div
                               className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
                               style={{ width: `${item.percentage}%` }}
@@ -416,23 +416,23 @@ export default function CreatorDashboardPage() {
               </CardHeader>
               <CardContent>
                 {recentVideos.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
+                  <div className="text-center py-8 text-slate-500">
                     No posts or videos have analytics in this period.
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {recentVideos.map((video) => (
-                      <div key={video.id} className="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                        <div className="w-24 h-14 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      <div key={video.id} className="flex items-center gap-4 p-3 rounded-lg hover:bg-slate-50 transition-colors">
+                        <div className="w-24 h-14 bg-slate-200 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
                           {video.thumbnailUrl ? (
                             <img src={video.thumbnailUrl} alt="" className="h-full w-full object-cover" />
                           ) : (
-                            <Video className="w-8 h-8 text-gray-400" />
+                            <Video className="w-8 h-8 text-slate-400" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-medium text-gray-900 truncate">{video.title}</h4>
-                          <div className="flex flex-wrap items-center gap-4 mt-1 text-sm text-gray-500">
+                          <h4 className="font-medium text-slate-900 truncate">{video.title}</h4>
+                          <div className="flex flex-wrap items-center gap-4 mt-1 text-sm text-slate-500">
                             <span className="flex items-center">
                               <Eye className="w-4 h-4 mr-1" />
                               {formatNumber(video.views)}
@@ -449,7 +449,7 @@ export default function CreatorDashboardPage() {
                         </div>
                         <div className="text-right">
                           <p className="font-semibold text-green-600">{formatCurrency(video.earnings)}</p>
-                          <p className="text-xs text-gray-500">Tracked gifts</p>
+                          <p className="text-xs text-slate-500">Tracked gifts</p>
                         </div>
                       </div>
                     ))}
@@ -468,9 +468,9 @@ export default function CreatorDashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-500">Available for Payout</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(stats?.availableForPayout || 0)}</p>
+                <div className="p-4 bg-slate-50 rounded-lg">
+                  <p className="text-sm text-slate-500">Available for Payout</p>
+                  <p className="text-2xl font-bold text-slate-900">{formatCurrency(stats?.availableForPayout || 0)}</p>
                 </div>
                 <div className="p-4 bg-yellow-50 rounded-lg">
                   <p className="text-sm text-yellow-700">Pending</p>
@@ -484,7 +484,7 @@ export default function CreatorDashboardPage() {
                   <Download className="w-4 h-4 mr-2" />
                   Request Payout
                 </Button>
-                <p className="text-xs text-gray-500 text-center">
+                <p className="text-xs text-slate-500 text-center">
                   Minimum payout: $50 AUD. Processing time: 3-5 business days.
                 </p>
               </CardContent>
@@ -499,7 +499,7 @@ export default function CreatorDashboardPage() {
               </CardHeader>
               <CardContent>
                 {topGifters.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
+                  <div className="text-center py-8 text-slate-500">
                     No supporters recorded yet.
                   </div>
                 ) : (
@@ -508,9 +508,9 @@ export default function CreatorDashboardPage() {
                       <div key={gifter.id} className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
                           index === 0 ? 'bg-yellow-100 text-yellow-700' :
-                          index === 1 ? 'bg-gray-100 text-gray-700' :
+                          index === 1 ? 'bg-slate-100 text-slate-700' :
                           index === 2 ? 'bg-orange-100 text-orange-700' :
-                          'bg-gray-50 text-gray-500'
+                          'bg-slate-50 text-slate-500'
                         }`}>
                           {index + 1}
                         </div>
@@ -524,8 +524,8 @@ export default function CreatorDashboardPage() {
                           )}
                         </div>
                         <div className="flex-1">
-                          <p className="font-medium text-gray-900">{gifter.displayName}</p>
-                          <p className="text-sm text-gray-500">{gifter.totalGifts} gifts</p>
+                          <p className="font-medium text-slate-900">{gifter.displayName}</p>
+                          <p className="text-sm text-slate-500">{gifter.totalGifts} gifts</p>
                         </div>
                         <p className="font-semibold text-indigo-600">{formatCurrency(gifter.totalValue)}</p>
                       </div>

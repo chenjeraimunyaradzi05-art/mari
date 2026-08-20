@@ -72,7 +72,7 @@ export default function JobDetailsPage() {
     : `/dashboard/organizations/${job.organization?.slug}`;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white pb-12">
       {/* Header / Banner Area */}
       <div className="sticky top-16 z-10 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/90">
         <div className="container mx-auto px-4 py-6 max-w-6xl">

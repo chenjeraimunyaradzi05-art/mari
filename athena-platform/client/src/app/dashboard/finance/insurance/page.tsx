@@ -42,7 +42,7 @@ const statusColors: Record<string, string> = {
   APPROVED: 'bg-emerald-50 text-emerald-700',
   REJECTED: 'bg-red-50 text-red-700',
   ACTIVE: 'bg-emerald-50 text-emerald-700',
-  CANCELLED: 'bg-gray-100 text-gray-600',
+  CANCELLED: 'bg-slate-100 text-slate-600',
 };
 
 export default function InsurancePage() {
@@ -103,10 +103,10 @@ export default function InsurancePage() {
           <Shield className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Insurance</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Protect your future
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Compare insurance options and apply online
         </p>
       </div>
@@ -118,10 +118,10 @@ export default function InsurancePage() {
       {/* My applications */}
       {applications.length > 0 && (
         <section>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">My applications</h2>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">My applications</h2>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-800 text-left text-gray-500 dark:text-gray-400">
+              <thead className="bg-slate-50 dark:bg-slate-800 text-left text-slate-500 dark:text-slate-400">
                 <tr>
                   <th className="px-4 py-3">Product</th>
                   <th className="px-4 py-3">Type</th>
@@ -130,18 +130,18 @@ export default function InsurancePage() {
                   <th className="px-4 py-3">Policy #</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {applications.map((app) => (
                   <tr key={app.id}>
-                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{app.product.name}</td>
+                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{app.product.name}</td>
                     <td className="px-4 py-3 capitalize">{app.product.type.replace('_', ' ').toLowerCase()}</td>
                     <td className="px-4 py-3">{formatDate(app.appliedAt)}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusColors[app.status] || 'bg-gray-100 text-gray-600'}`}>
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusColors[app.status] || 'bg-slate-100 text-slate-600'}`}>
                         {app.status.replace('_', ' ')}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{app.policyNumber || '-'}</td>
+                    <td className="px-4 py-3 text-slate-500">{app.policyNumber || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -152,11 +152,11 @@ export default function InsurancePage() {
 
       {/* Filter */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Compare products</h2>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Compare products</h2>
         <select
           value={filterType}
           onChange={(event) => setFilterType(event.target.value)}
-          className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+          className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
         >
           {insuranceTypes.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -165,12 +165,12 @@ export default function InsurancePage() {
       </section>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading products...
         </div>
       ) : products.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500 text-center">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500 text-center">
           No insurance products available in this category.
         </div>
       ) : (
@@ -178,28 +178,28 @@ export default function InsurancePage() {
           {products.map((product) => (
             <div
               key={product.id}
-              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 flex flex-col gap-4"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 flex flex-col gap-4"
             >
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide">{product.type.replace('_', ' ')}</p>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mt-1">{product.name}</h3>
-                <p className="text-sm text-gray-500">{product.provider}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">{product.type.replace('_', ' ')}</p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mt-1">{product.name}</h3>
+                <p className="text-sm text-slate-500">{product.provider}</p>
               </div>
 
               {product.description && (
-                <p className="text-sm text-gray-600 dark:text-gray-300">{product.description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{product.description}</p>
               )}
 
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-500 text-xs">Monthly premium</p>
-                  <p className="font-semibold text-gray-900 dark:text-white">
+                  <p className="text-slate-500 text-xs">Monthly premium</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">
                     {formatCurrency(toNumber(product.monthlyPremium))}
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Coverage</p>
-                  <p className="font-semibold text-gray-900 dark:text-white">
+                  <p className="text-slate-500 text-xs">Coverage</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">
                     {formatCurrency(toNumber(product.coverageAmount))}
                   </p>
                 </div>
@@ -208,7 +208,7 @@ export default function InsurancePage() {
               {product.features && product.features.length > 0 && (
                 <ul className="text-sm space-y-1">
                   {product.features.slice(0, 4).map((feature, idx) => (
-                    <li key={idx} className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <li key={idx} className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                       <Check className="w-4 h-4 text-emerald-500" />
                       {feature}
                     </li>

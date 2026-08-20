@@ -142,7 +142,7 @@ function SponsorSlider() {
           <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200">
             Sponsored
           </span>
-          <span className="text-xs uppercase tracking-[0.22em] text-gray-500 dark:text-gray-400">
+          <span className="text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
             Featured partners
           </span>
         </div>
@@ -151,7 +151,7 @@ function SponsorSlider() {
             type="button"
             aria-label="Previous sponsor"
             onClick={() => go(active - 1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -159,14 +159,14 @@ function SponsorSlider() {
             type="button"
             aria-label="Next sponsor"
             onClick={() => go(active + 1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <div
           className="flex transition-transform duration-700 ease-out"
           style={{ transform: `translateX(-${active * 100}%)` }}
@@ -200,7 +200,7 @@ function SponsorSlider() {
                   <div className="mt-6">
                     <Link
                       href={slide.ctaHref}
-                      className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-gray-900 transition hover:-translate-y-0.5 hover:bg-gray-100"
+                      className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-slate-100"
                     >
                       {slide.ctaLabel}
                       <ArrowRight className="h-4 w-4" />
@@ -236,7 +236,7 @@ function SponsorSlider() {
         </div>
       </div>
 
-      <p className="mt-3 text-[11px] text-gray-500 dark:text-gray-400">
+      <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
         Sponsored placements run alongside ATHENA editorial — always disclosed, never disruptive.
       </p>
     </section>
@@ -346,7 +346,7 @@ export default function BusinessPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-900 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -367,7 +367,7 @@ export default function BusinessPage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="/contact-sales?intent=partnership&audience=government&country=AU"
-                className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-gray-100 transition flex items-center gap-2"
+                className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition flex items-center gap-2"
               >
                 <Zap className="w-5 h-5" />
                 Brief our gov team
@@ -399,9 +399,9 @@ export default function BusinessPage() {
             { value: 'WGEA', label: 'Aligned reporting' },
             { value: 'IPP', label: 'Indigenous procurement ready' },
           ].map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <div className="text-2xl md:text-3xl font-bold text-blue-600">{stat.value}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -413,31 +413,31 @@ export default function BusinessPage() {
       {/* Services */}
       <section className="container mx-auto px-4 py-16">
         <div className="max-w-3xl mx-auto text-center mb-10">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">
             Government partnership services
           </h2>
-          <p className="mt-3 text-gray-600 dark:text-gray-400">
+          <p className="mt-3 text-slate-600 dark:text-slate-400">
             Build co-funded, outcomes-based programs with ATHENA across the Commonwealth, states, and territories.
           </p>
         </div>
         <div className="grid md:grid-cols-3 gap-6">
           {services.map((service) => (
-            <div key={service.title} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+            <div key={service.title} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
               <div className="w-14 h-14 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mb-4">
                 <service.icon className="w-7 h-7 text-blue-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">{service.title}</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{service.description}</p>
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">{service.title}</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">{service.description}</p>
               <ul className="space-y-2 mb-6">
                 {service.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <li key={feature} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                     <CheckCircle className="w-4 h-4 text-blue-500" />
                     {feature}
                   </li>
                 ))}
               </ul>
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <span className="text-lg font-bold text-gray-900 dark:text-white">{service.price}</span>
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                <span className="text-lg font-bold text-slate-900 dark:text-white">{service.price}</span>
               </div>
             </div>
           ))}
@@ -445,13 +445,13 @@ export default function BusinessPage() {
       </section>
 
       {/* Programs */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center mb-10">
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+            <h2 className="text-3xl font-bold text-slate-900 dark:text-white">
               Priority program areas
             </h2>
-            <p className="mt-3 text-gray-600 dark:text-gray-400">
+            <p className="mt-3 text-slate-600 dark:text-slate-400">
               Aligned to national priorities under Working for Women, Closing the Gap, and the Australian Skills Guarantee.
             </p>
           </div>
@@ -459,13 +459,13 @@ export default function BusinessPage() {
             {programs.map((program) => (
               <div
                 key={program.title}
-                className="relative overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-5"
+                className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-5"
               >
                 <div className={`inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${program.gradient} text-white shadow-md`}>
                   <program.icon className="h-5 w-5" />
                 </div>
-                <h3 className="mt-4 text-base font-semibold text-gray-900 dark:text-white">{program.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-400">{program.description}</p>
+                <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">{program.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{program.description}</p>
               </div>
             ))}
           </div>
@@ -475,10 +475,10 @@ export default function BusinessPage() {
       {/* Jurisdictions */}
       <section className="container mx-auto px-4 py-16">
         <div className="max-w-3xl mx-auto text-center mb-10">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">
             Federal, state & territory coverage
           </h2>
-          <p className="mt-3 text-gray-600 dark:text-gray-400">
+          <p className="mt-3 text-slate-600 dark:text-slate-400">
             One partner across every Australian jurisdiction. Tagged for procurement panels and aligned to portfolio outcomes.
           </p>
         </div>
@@ -490,7 +490,7 @@ export default function BusinessPage() {
               className={`group block p-5 rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-md ${
                 state.popular
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
               }`}
             >
               <div className="flex items-center justify-between">
@@ -498,7 +498,7 @@ export default function BusinessPage() {
                   <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white text-xs font-bold">
                     {state.code}
                   </span>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">{state.name}</h3>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{state.name}</h3>
                 </span>
                 {state.popular && (
                   <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wide">
@@ -506,8 +506,8 @@ export default function BusinessPage() {
                   </span>
                 )}
               </div>
-              <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">{state.focus}</p>
-              <div className="mt-3 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">{state.focus}</p>
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span className="inline-flex items-center gap-1">
                   <Clock className="w-3 h-3" /> {state.time}
                 </span>
@@ -521,9 +521,9 @@ export default function BusinessPage() {
       </section>
 
       {/* Process */}
-      <section className="bg-gray-100 dark:bg-gray-900/50 py-16">
+      <section className="bg-slate-100 dark:bg-slate-900/50 py-16">
         <div className="container mx-auto px-4">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-12 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-12 text-center">
           From discovery to outcomes
         </h2>
         <div className="max-w-4xl mx-auto">
@@ -536,8 +536,8 @@ export default function BusinessPage() {
                     {i + 1}
                   </div>
                   <div className="pt-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{step.title}</h3>
-                    <p className="text-gray-600 dark:text-gray-400">{step.description}</p>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{step.title}</h3>
+                    <p className="text-slate-600 dark:text-slate-400">{step.description}</p>
                   </div>
                 </div>
               ))}
@@ -563,7 +563,7 @@ export default function BusinessPage() {
             <div className="flex flex-wrap gap-3 lg:justify-end">
               <Link
                 href="/contact-sales?intent=partnership&audience=government&country=AU"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition"
               >
                 Brief our gov team <ArrowRight className="w-4 h-4" />
               </Link>

@@ -102,10 +102,10 @@ export default function AcceleratorPage() {
             <Rocket className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Accelerators</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Scale your business with expert-led cohorts
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             {headerLabel}. Learn, build, and graduate alongside founders.
           </p>
         </div>
@@ -119,13 +119,13 @@ export default function AcceleratorPage() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <label className="text-sm font-medium text-gray-600 dark:text-gray-300">Status</label>
+          <label className="text-sm font-medium text-slate-600 dark:text-slate-300">Status</label>
           <select
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {statusOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -134,12 +134,12 @@ export default function AcceleratorPage() {
             ))}
           </select>
         </div>
-        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <input
             type="checkbox"
             checked={upcomingOnly}
             onChange={(event) => setUpcomingOnly(event.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-slate-300"
           />
           Show only upcoming cohorts
         </label>
@@ -150,12 +150,12 @@ export default function AcceleratorPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading accelerator cohorts...
         </div>
       ) : cohorts.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
           No cohorts found. Adjust your filters or check back soon.
         </div>
       ) : (
@@ -163,12 +163,12 @@ export default function AcceleratorPage() {
           {cohorts.map((cohort) => (
             <div
               key={cohort.id}
-              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-4"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-4"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{cohort.name}</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{cohort.name}</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                     {cohort.description || 'Founder-friendly cohort with structured mentorship.'}
                   </p>
                 </div>
@@ -176,7 +176,7 @@ export default function AcceleratorPage() {
                   {cohort.status.replace('_', ' ')}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm text-gray-600 dark:text-gray-300">
+              <div className="grid grid-cols-2 gap-3 text-sm text-slate-600 dark:text-slate-300">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
                   {formatDate(cohort.startDate)} → {formatDate(cohort.endDate)}
@@ -189,7 +189,7 @@ export default function AcceleratorPage() {
                   <BadgeCheck className="w-4 h-4" />
                   {pluralize(cohort.sessionCount ?? 0, 'session')}
                 </div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">
                   {formatCurrency(toNumber(cohort.priceAud))}
                 </div>
               </div>
@@ -205,20 +205,20 @@ export default function AcceleratorPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Your enrollments</h2>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your enrollments</h2>
         {enrollments.length === 0 ? (
-          <p className="text-sm text-gray-500">No enrollments yet.</p>
+          <p className="text-sm text-slate-500">No enrollments yet.</p>
         ) : (
           <div className="space-y-3">
             {enrollments.map((enrollment) => (
-              <div key={enrollment.id} className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+              <div key={enrollment.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="font-semibold text-gray-900 dark:text-white">
+                    <div className="font-semibold text-slate-900 dark:text-white">
                       {enrollment.cohort.name}
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-slate-500">
                       Enrolled {formatDate(enrollment.enrolledAt)} · Status {enrollment.status}
                     </div>
                   </div>

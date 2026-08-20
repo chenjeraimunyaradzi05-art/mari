@@ -104,11 +104,11 @@ export default function ReferralsPage() {
     <div className="max-w-4xl mx-auto p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <Gift className="h-7 w-7 text-purple-600" />
           Referral Program
         </h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">
+        <p className="text-slate-600 dark:text-slate-400 mt-1">
           Invite friends and earn rewards together!
         </p>
       </div>
@@ -138,47 +138,47 @@ export default function ReferralsPage() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+        <div className="bg-white dark:bg-slate-800 rounded-lg p-4 shadow">
           <div className="flex items-center gap-2 mb-1">
             <Users className="h-4 w-4 text-blue-500" />
-            <span className="text-sm text-gray-500">Total Referrals</span>
+            <span className="text-sm text-slate-500">Total Referrals</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {referralData?.stats.totalReferrals || 0}
           </p>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+        <div className="bg-white dark:bg-slate-800 rounded-lg p-4 shadow">
           <div className="flex items-center gap-2 mb-1">
             <Gift className="h-4 w-4 text-green-500" />
-            <span className="text-sm text-gray-500">Completed</span>
+            <span className="text-sm text-slate-500">Completed</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {referralData?.stats.completedReferrals || 0}
           </p>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+        <div className="bg-white dark:bg-slate-800 rounded-lg p-4 shadow">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm">⏳</span>
-            <span className="text-sm text-gray-500">Pending</span>
+            <span className="text-sm text-slate-500">Pending</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {referralData?.stats.pendingReferrals || 0}
           </p>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+        <div className="bg-white dark:bg-slate-800 rounded-lg p-4 shadow">
           <div className="flex items-center gap-2 mb-1">
             <Coins className="h-4 w-4 text-yellow-500" />
-            <span className="text-sm text-gray-500">Credits Earned</span>
+            <span className="text-sm text-slate-500">Credits Earned</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {referralData?.stats.creditsEarned || 0}
           </p>
         </div>
       </div>
 
       {/* Share Buttons */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow mb-6">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+      <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow mb-6">
+        <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
           <Share2 className="h-5 w-5" />
           Share Your Link
         </h3>
@@ -217,7 +217,7 @@ export default function ReferralsPage() {
           </a>
           <a
             href={shareLinks?.email}
-            className="flex items-center justify-center gap-2 p-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            className="flex items-center justify-center gap-2 p-3 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors"
           >
             <span>Email</span>
           </a>
@@ -231,7 +231,7 @@ export default function ReferralsPage() {
           className={`px-4 py-2 rounded-lg font-medium transition-colors ${
             activeTab === 'overview'
               ? 'bg-purple-600 text-white'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
           }`}
         >
           How It Works
@@ -241,7 +241,7 @@ export default function ReferralsPage() {
           className={`px-4 py-2 rounded-lg font-medium transition-colors ${
             activeTab === 'history'
               ? 'bg-purple-600 text-white'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
           }`}
         >
           Referral History
@@ -251,7 +251,7 @@ export default function ReferralsPage() {
           className={`px-4 py-2 rounded-lg font-medium transition-colors ${
             activeTab === 'leaderboard'
               ? 'bg-purple-600 text-white'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
           }`}
         >
           <Trophy className="h-4 w-4 inline mr-1" />
@@ -260,31 +260,31 @@ export default function ReferralsPage() {
       </div>
 
       {/* Tab Content */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow">
+      <div className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow">
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            <h3 className="font-semibold text-gray-900 dark:text-white text-lg">How Referrals Work</h3>
+            <h3 className="font-semibold text-slate-900 dark:text-white text-lg">How Referrals Work</h3>
             <div className="grid md:grid-cols-3 gap-6">
               <div className="text-center">
                 <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Share2 className="h-6 w-6 text-purple-600" />
                 </div>
-                <h4 className="font-medium text-gray-900 dark:text-white mb-1">1. Share Your Link</h4>
-                <p className="text-sm text-gray-500">Share your unique referral link with friends via social media, email, or messaging.</p>
+                <h4 className="font-medium text-slate-900 dark:text-white mb-1">1. Share Your Link</h4>
+                <p className="text-sm text-slate-500">Share your unique referral link with friends via social media, email, or messaging.</p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-pink-100 dark:bg-pink-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Users className="h-6 w-6 text-pink-600" />
                 </div>
-                <h4 className="font-medium text-gray-900 dark:text-white mb-1">2. Friend Joins</h4>
-                <p className="text-sm text-gray-500">When your friend signs up using your link and completes their profile.</p>
+                <h4 className="font-medium text-slate-900 dark:text-white mb-1">2. Friend Joins</h4>
+                <p className="text-sm text-slate-500">When your friend signs up using your link and completes their profile.</p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Gift className="h-6 w-6 text-green-600" />
                 </div>
-                <h4 className="font-medium text-gray-900 dark:text-white mb-1">3. Both Get Rewarded</h4>
-                <p className="text-sm text-gray-500">You both earn 100 credits that can be used for premium features!</p>
+                <h4 className="font-medium text-slate-900 dark:text-white mb-1">3. Both Get Rewarded</h4>
+                <p className="text-sm text-slate-500">You both earn 100 credits that can be used for premium features!</p>
               </div>
             </div>
             
@@ -302,13 +302,13 @@ export default function ReferralsPage() {
 
         {activeTab === 'history' && (
           <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Your Referrals</h3>
+            <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Your Referrals</h3>
             {referralData?.referrals && referralData.referrals.length > 0 ? (
               <div className="space-y-3">
                 {referralData.referrals.map((referral) => (
                   <div
                     key={referral.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg"
+                    className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg"
                   >
                     <div className="flex items-center gap-3">
                       {referral.referred.avatar ? (
@@ -325,10 +325,10 @@ export default function ReferralsPage() {
                         </div>
                       )}
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
+                        <p className="font-medium text-slate-900 dark:text-white">
                           {referral.referred.firstName} {referral.referred.lastName}
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-slate-500">
                           Joined {new Date(referral.createdAt).toLocaleDateString()}
                         </p>
                       </div>
@@ -347,8 +347,8 @@ export default function ReferralsPage() {
               </div>
             ) : (
               <div className="text-center py-8">
-                <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">No referrals yet. Share your link to get started!</p>
+                <Users className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500">No referrals yet. Share your link to get started!</p>
               </div>
             )}
           </div>
@@ -356,7 +356,7 @@ export default function ReferralsPage() {
 
         {activeTab === 'leaderboard' && (
           <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
               <Trophy className="h-5 w-5 text-yellow-500" />
               Top Referrers
             </h3>
@@ -368,15 +368,15 @@ export default function ReferralsPage() {
                     className={`flex items-center justify-between p-4 rounded-lg ${
                       entry.rank <= 3
                         ? 'bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20'
-                        : 'bg-gray-50 dark:bg-gray-700'
+                        : 'bg-slate-50 dark:bg-slate-700'
                     }`}
                   >
                     <div className="flex items-center gap-4">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
                         entry.rank === 1 ? 'bg-yellow-400 text-yellow-900' :
-                        entry.rank === 2 ? 'bg-gray-300 text-gray-700' :
+                        entry.rank === 2 ? 'bg-slate-300 text-slate-700' :
                         entry.rank === 3 ? 'bg-amber-600 text-white' :
-                        'bg-gray-200 text-gray-600'
+                        'bg-slate-200 text-slate-600'
                       }`}>
                         {entry.rank}
                       </div>
@@ -389,19 +389,19 @@ export default function ReferralsPage() {
                           </span>
                         </div>
                       )}
-                      <p className="font-medium text-gray-900 dark:text-white">{entry.name}</p>
+                      <p className="font-medium text-slate-900 dark:text-white">{entry.name}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-gray-900 dark:text-white">{entry.referrals}</p>
-                      <p className="text-xs text-gray-500">referrals</p>
+                      <p className="font-bold text-slate-900 dark:text-white">{entry.referrals}</p>
+                      <p className="text-xs text-slate-500">referrals</p>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="text-center py-8">
-                <Trophy className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">Be the first to top the leaderboard!</p>
+                <Trophy className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500">Be the first to top the leaderboard!</p>
               </div>
             )}
           </div>

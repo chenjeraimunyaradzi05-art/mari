@@ -66,7 +66,7 @@ export default function OrganizationDashboardPage() {
       {/* Back Button */}
       <Link
         href="/employer"
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mb-6"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-6"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         All Organizations
@@ -83,10 +83,10 @@ export default function OrganizationDashboardPage() {
             )}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
               {organization.name}
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 capitalize">
+            <p className="text-slate-600 dark:text-slate-400 capitalize">
               {organization.type} • {organization.city}, {organization.state}
             </p>
           </div>
@@ -101,55 +101,55 @@ export default function OrganizationDashboardPage() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
               <Briefcase className="h-5 w-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.activeJobs}</p>
-              <p className="text-sm text-gray-500">Active Jobs</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{stats.activeJobs}</p>
+              <p className="text-sm text-slate-500">Active Jobs</p>
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
               <FileText className="h-5 w-5 text-green-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalApplications}</p>
-              <p className="text-sm text-gray-500">Applications</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{stats.totalApplications}</p>
+              <p className="text-sm text-slate-500">Applications</p>
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
               <Eye className="h-5 w-5 text-purple-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalViews}</p>
-              <p className="text-sm text-gray-500">Job Views</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{stats.totalViews}</p>
+              <p className="text-sm text-slate-500">Job Views</p>
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
               <Users className="h-5 w-5 text-orange-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.teamMembers}</p>
-              <p className="text-sm text-gray-500">Team Members</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{stats.teamMembers}</p>
+              <p className="text-sm text-slate-500">Team Members</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Application Pipeline */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 mb-8">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Application Pipeline
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -166,9 +166,9 @@ export default function OrganizationDashboardPage() {
             >
               <div className="flex items-center gap-2 mb-2">
                 <Icon className={`h-4 w-4 text-${color}-600`} />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</span>
               </div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">
                 {stats.applicationsByStatus[status] || 0}
               </p>
             </div>
@@ -180,50 +180,50 @@ export default function OrganizationDashboardPage() {
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
           href={`/employer/organizations/${orgId}/jobs`}
-          className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:border-blue-300 transition-colors"
+          className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Briefcase className="h-5 w-5 text-blue-600" />
-              <span className="font-medium text-gray-900 dark:text-white">Manage Jobs</span>
+              <span className="font-medium text-slate-900 dark:text-white">Manage Jobs</span>
             </div>
-            <ChevronRight className="h-5 w-5 text-gray-400" />
+            <ChevronRight className="h-5 w-5 text-slate-400" />
           </div>
         </Link>
         <Link
           href={`/employer/organizations/${orgId}/applications`}
-          className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:border-blue-300 transition-colors"
+          className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <FileText className="h-5 w-5 text-green-600" />
-              <span className="font-medium text-gray-900 dark:text-white">Applications</span>
+              <span className="font-medium text-slate-900 dark:text-white">Applications</span>
             </div>
-            <ChevronRight className="h-5 w-5 text-gray-400" />
+            <ChevronRight className="h-5 w-5 text-slate-400" />
           </div>
         </Link>
         <Link
           href={`/employer/organizations/${orgId}/team`}
-          className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:border-blue-300 transition-colors"
+          className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Users className="h-5 w-5 text-purple-600" />
-              <span className="font-medium text-gray-900 dark:text-white">Team</span>
+              <span className="font-medium text-slate-900 dark:text-white">Team</span>
             </div>
-            <ChevronRight className="h-5 w-5 text-gray-400" />
+            <ChevronRight className="h-5 w-5 text-slate-400" />
           </div>
         </Link>
         <Link
           href={`/employer/organizations/${orgId}/analytics`}
-          className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:border-blue-300 transition-colors"
+          className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <TrendingUp className="h-5 w-5 text-orange-600" />
-              <span className="font-medium text-gray-900 dark:text-white">Analytics</span>
+              <span className="font-medium text-slate-900 dark:text-white">Analytics</span>
             </div>
-            <ChevronRight className="h-5 w-5 text-gray-400" />
+            <ChevronRight className="h-5 w-5 text-slate-400" />
           </div>
         </Link>
 
@@ -231,26 +231,26 @@ export default function OrganizationDashboardPage() {
           <>
             <Link
               href={`/employer/organizations/${orgId}/education/applications`}
-              className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:border-blue-300 transition-colors"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <FileText className="h-5 w-5 text-blue-600" />
-                  <span className="font-medium text-gray-900 dark:text-white">Education Apps</span>
+                  <span className="font-medium text-slate-900 dark:text-white">Education Apps</span>
                 </div>
-                <ChevronRight className="h-5 w-5 text-gray-400" />
+                <ChevronRight className="h-5 w-5 text-slate-400" />
               </div>
             </Link>
             <Link
               href={`/employer/organizations/${orgId}/education/outcomes`}
-              className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:border-blue-300 transition-colors"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <TrendingUp className="h-5 w-5 text-green-600" />
-                  <span className="font-medium text-gray-900 dark:text-white">Education Outcomes</span>
+                  <span className="font-medium text-slate-900 dark:text-white">Education Outcomes</span>
                 </div>
-                <ChevronRight className="h-5 w-5 text-gray-400" />
+                <ChevronRight className="h-5 w-5 text-slate-400" />
               </div>
             </Link>
           </>

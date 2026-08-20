@@ -55,11 +55,11 @@ export default function SavedJobsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center space-x-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center space-x-2">
             <Bookmark className="w-6 h-6 text-primary-500" />
             <span>Saved Jobs</span>
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Jobs you've bookmarked for later
           </p>
         </div>
@@ -71,10 +71,10 @@ export default function SavedJobsPage() {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
         <div className="card text-center">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
             {savedJobs?.length || 0}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             Saved Jobs
           </div>
         </div>
@@ -82,7 +82,7 @@ export default function SavedJobsPage() {
           <div className="text-2xl font-bold text-green-600">
             {savedJobs?.filter((j: any) => j.status === 'OPEN').length || 0}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             Still Open
           </div>
         </div>
@@ -95,7 +95,7 @@ export default function SavedJobsPage() {
               return savedDate > weekAgo;
             }).length || 0}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-slate-500 dark:text-slate-400">
             Saved This Week
           </div>
         </div>
@@ -106,23 +106,23 @@ export default function SavedJobsPage() {
         <div className="flex flex-col sm:flex-row gap-4">
           {/* Search */}
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
               placeholder="Search saved jobs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+              className="w-full pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           {/* Sort */}
           <div className="flex items-center space-x-2">
-            <SortAsc className="w-5 h-5 text-gray-400" />
+            <SortAsc className="w-5 h-5 text-slate-400" />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as 'recent' | 'salary' | 'company')}
-              className="border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-primary-500"
+              className="border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-primary-500"
             >
               <option value="recent">Recently Saved</option>
               <option value="salary">Highest Salary</option>
@@ -138,10 +138,10 @@ export default function SavedJobsPage() {
           {[1, 2, 3].map((i) => (
             <div key={i} className="card animate-pulse">
               <div className="flex items-start space-x-4">
-                <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+                <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-lg" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
-                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4" />
+                  <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
                 </div>
               </div>
             </div>
@@ -149,11 +149,11 @@ export default function SavedJobsPage() {
         </div>
       ) : filteredJobs?.length === 0 ? (
         <div className="card text-center py-12">
-          <Bookmark className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <Bookmark className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             {searchQuery ? 'No matching jobs found' : 'No saved jobs yet'}
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-4">
+          <p className="text-slate-500 dark:text-slate-400 mb-4">
             {searchQuery
               ? 'Try adjusting your search'
               : 'Start exploring jobs and save ones that interest you'}
@@ -172,7 +172,7 @@ export default function SavedJobsPage() {
               <div className="flex flex-col lg:flex-row lg:items-center gap-4">
                 {/* Company Logo & Job Info */}
                 <div className="flex items-start space-x-4 flex-1">
-                  <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
+                  <div className="w-12 h-12 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center overflow-hidden flex-shrink-0">
                     {job.organization?.logo ? (
                       <img
                         src={job.organization.logo}
@@ -180,17 +180,17 @@ export default function SavedJobsPage() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <Building2 className="w-6 h-6 text-gray-400" />
+                      <Building2 className="w-6 h-6 text-slate-400" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <Link
                       href={`/dashboard/jobs/${job.id}`}
-                      className="font-semibold text-gray-900 dark:text-white hover:text-primary-600 dark:hover:text-primary-400 text-lg"
+                      className="font-semibold text-slate-900 dark:text-white hover:text-primary-600 dark:hover:text-primary-400 text-lg"
                     >
                       {job.title}
                     </Link>
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
                       <Link
                         href={`/dashboard/organizations/${job.organization?.slug}`}
                         className="hover:text-primary-600 dark:hover:text-primary-400"
@@ -220,14 +220,14 @@ export default function SavedJobsPage() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-3">
-                  <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center">
+                  <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center">
                     <Clock className="w-4 h-4 mr-1" />
                     Saved {formatRelativeTime(job.savedAt || job.createdAt)}
                   </div>
                   <button
                     onClick={() => handleUnsave(job.id)}
                     disabled={isUnsaving}
-                    className="p-2 text-gray-400 hover:text-red-500 transition"
+                    className="p-2 text-slate-400 hover:text-red-500 transition"
                     title="Remove from saved"
                   >
                     <Trash2 className="w-5 h-5" />
@@ -244,18 +244,18 @@ export default function SavedJobsPage() {
 
               {/* Skills Tags */}
               {job.skills && job.skills.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                   <div className="flex flex-wrap gap-2">
                     {job.skills.slice(0, 5).map((skill: string, i: number) => (
                       <span
                         key={i}
-                        className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                        className="px-2 py-1 text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full"
                       >
                         {skill}
                       </span>
                     ))}
                     {job.skills.length > 5 && (
-                      <span className="px-2 py-1 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="px-2 py-1 text-xs text-slate-500 dark:text-slate-400">
                         +{job.skills.length - 5} more
                       </span>
                     )}
@@ -270,10 +270,10 @@ export default function SavedJobsPage() {
       {/* Tips */}
       {savedJobs?.length > 0 && (
         <div className="card bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+          <h3 className="font-semibold text-slate-900 dark:text-white mb-2">
             💡 Pro Tip
           </h3>
-          <p className="text-sm text-gray-600 dark:text-gray-300">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
             Don't wait too long to apply! Jobs with high match scores tend to fill quickly.
             Use the Resume Optimizer to tailor your application for each role.
           </p>

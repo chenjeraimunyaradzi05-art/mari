@@ -71,7 +71,7 @@ const notificationColors: Record<NotificationType, string> = {
   APPLICATION_UPDATE: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-500',
   MESSAGE: 'bg-green-100 dark:bg-green-900/30 text-green-500',
   MENTION: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500',
-  SYSTEM: 'bg-gray-100 dark:bg-gray-700 text-gray-500',
+  SYSTEM: 'bg-slate-100 dark:bg-slate-700 text-slate-500',
   MENTOR_SESSION: 'bg-orange-100 dark:bg-orange-900/30 text-orange-500',
   LIKE: 'bg-red-100 dark:bg-red-900/30 text-red-500',
   COMMENT: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
@@ -191,10 +191,10 @@ export default function NotificationsPage() {
     return (
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 w-48 rounded bg-gray-200 dark:bg-gray-700" />
-          <div className="h-20 rounded-xl bg-gray-200 dark:bg-gray-700" />
-          <div className="h-28 rounded-xl bg-gray-200 dark:bg-gray-700" />
-          <div className="h-28 rounded-xl bg-gray-200 dark:bg-gray-700" />
+          <div className="h-8 w-48 rounded bg-slate-200 dark:bg-slate-700" />
+          <div className="h-20 rounded-xl bg-slate-200 dark:bg-slate-700" />
+          <div className="h-28 rounded-xl bg-slate-200 dark:bg-slate-700" />
+          <div className="h-28 rounded-xl bg-slate-200 dark:bg-slate-700" />
         </div>
       </div>
     );
@@ -204,11 +204,11 @@ export default function NotificationsPage() {
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center">
             <Bell className="w-6 h-6 mr-2 text-primary-500" />
             Notifications
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             {unreadCount > 0
               ? `You have ${unreadCount} unread notifications`
               : "You're all caught up!"}
@@ -223,7 +223,7 @@ export default function NotificationsPage() {
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-white p-4 shadow dark:bg-gray-800">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-white p-4 shadow dark:bg-slate-800">
         <div className="flex items-center space-x-4">
           <label className="flex items-center space-x-2 cursor-pointer">
             <input
@@ -233,9 +233,9 @@ export default function NotificationsPage() {
                 selectedIds.length === filteredNotifications.length
               }
               onChange={selectAll}
-              className="rounded border-gray-300 dark:border-gray-600"
+              className="rounded border-slate-300 dark:border-slate-600"
             />
-            <span className="text-sm text-gray-600 dark:text-gray-300">
+            <span className="text-sm text-slate-600 dark:text-slate-300">
               {hasBulkSelection ? `${selectedIds.length} selected` : 'Select all'}
             </span>
           </label>
@@ -266,14 +266,14 @@ export default function NotificationsPage() {
           <div className="relative">
             <button
               onClick={() => setShowFilters((prev) => !prev)}
-              className="flex items-center space-x-2 rounded-lg px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+              className="flex items-center space-x-2 rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
             >
               <Filter className="w-4 h-4" />
               <span>{filterOptions.find((option) => option.value === filter)?.label}</span>
             </button>
 
             {showFilters && (
-              <div className="absolute right-0 top-full z-10 mt-2 w-48 rounded-lg border border-gray-200 bg-white py-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+              <div className="absolute right-0 top-full z-10 mt-2 w-48 rounded-lg border border-slate-200 bg-white py-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
                 {filterOptions.map((option) => (
                   <button
                     key={option.value}
@@ -283,10 +283,10 @@ export default function NotificationsPage() {
                       setSelectedIds([]);
                     }}
                     className={cn(
-                      'w-full px-4 py-2 text-left text-sm transition hover:bg-gray-100 dark:hover:bg-gray-700',
+                      'w-full px-4 py-2 text-left text-sm transition hover:bg-slate-100 dark:hover:bg-slate-700',
                       filter === option.value
                         ? 'bg-primary-50 text-primary-500 dark:bg-primary-900/20'
-                        : 'text-gray-700 dark:text-gray-300'
+                        : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
                     {option.label}
@@ -311,11 +311,11 @@ export default function NotificationsPage() {
 
       {filteredNotifications.length === 0 ? (
         <div className="card py-16 text-center">
-          <Bell className="mx-auto mb-4 h-16 w-16 text-gray-300 dark:text-gray-600" />
-          <h3 className="mb-2 text-lg font-medium text-gray-900 dark:text-white">
+          <Bell className="mx-auto mb-4 h-16 w-16 text-slate-300 dark:text-slate-600" />
+          <h3 className="mb-2 text-lg font-medium text-slate-900 dark:text-white">
             No notifications
           </h3>
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-slate-500 dark:text-slate-400">
             {filter === 'all'
               ? "You don't have any notifications yet"
               : `No ${filterOptions
@@ -327,7 +327,7 @@ export default function NotificationsPage() {
         <div className="space-y-6">
           {Object.entries(groupedNotifications).map(([date, group]) => (
             <div key={date}>
-              <h3 className="mb-3 text-sm font-medium text-gray-500 dark:text-gray-400">
+              <h3 className="mb-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                 {date}
               </h3>
               <div className="space-y-2">
@@ -339,7 +339,7 @@ export default function NotificationsPage() {
                     <div
                       key={notification.id}
                       className={cn(
-                        'group relative rounded-lg bg-white p-4 shadow transition hover:shadow-md dark:bg-gray-800',
+                        'group relative rounded-lg bg-white p-4 shadow transition hover:shadow-md dark:bg-slate-800',
                         !notification.isRead && 'ring-2 ring-primary-500/20'
                       )}
                     >
@@ -348,7 +348,7 @@ export default function NotificationsPage() {
                           type="checkbox"
                           checked={selectedIds.includes(notification.id)}
                           onChange={() => toggleSelect(notification.id)}
-                          className="mt-1 rounded border-gray-300 dark:border-gray-600"
+                          className="mt-1 rounded border-slate-300 dark:border-slate-600"
                         />
 
                         <div
@@ -371,17 +371,17 @@ export default function NotificationsPage() {
                         >
                           <div className="flex items-start justify-between">
                             <div>
-                              <p className="font-medium text-gray-900 dark:text-white">
+                              <p className="font-medium text-slate-900 dark:text-white">
                                 {notification.title}
                                 {!notification.isRead && (
                                   <span className="ml-2 inline-block h-2 w-2 rounded-full bg-primary-500" />
                                 )}
                               </p>
-                              <p className="mt-1 text-gray-600 dark:text-gray-300">
+                              <p className="mt-1 text-slate-600 dark:text-slate-300">
                                 {notification.message}
                               </p>
                               <p
-                                className="mt-2 text-sm text-gray-400 dark:text-gray-500"
+                                className="mt-2 text-sm text-slate-400 dark:text-slate-500"
                                 suppressHydrationWarning
                               >
                                 {isHydrated
@@ -399,7 +399,7 @@ export default function NotificationsPage() {
                             <button
                               onClick={() => handleMarkAsRead(notification.id)}
                               disabled={hasPendingMutation}
-                              className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-primary-500 disabled:opacity-50 dark:hover:bg-gray-700"
+                              className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-primary-500 disabled:opacity-50 dark:hover:bg-slate-700"
                               title="Mark as read"
                             >
                               <Check className="h-4 w-4" />
@@ -408,7 +408,7 @@ export default function NotificationsPage() {
                           <button
                             onClick={() => handleDelete(notification.id)}
                             disabled={hasPendingMutation}
-                            className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-red-500 disabled:opacity-50 dark:hover:bg-gray-700"
+                            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-red-500 disabled:opacity-50 dark:hover:bg-slate-700"
                             title="Delete"
                           >
                             <Trash2 className="h-4 w-4" />

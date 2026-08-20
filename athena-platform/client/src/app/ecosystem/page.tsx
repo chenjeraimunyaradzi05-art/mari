@@ -45,7 +45,7 @@ export default function EcosystemPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -64,7 +64,7 @@ export default function EcosystemPage() {
             <div className="flex flex-wrap justify-center gap-4">
               <Link
                 href="/contact-sales"
-                className="px-6 py-3 bg-white text-purple-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+                className="px-6 py-3 bg-white text-purple-700 font-semibold rounded-lg hover:bg-slate-100 transition"
               >
                 Become a Partner
               </Link>
@@ -83,10 +83,10 @@ export default function EcosystemPage() {
       <section className="container mx-auto px-4 -mt-8 relative z-20">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {partners.map((partner) => (
-            <div key={partner.name} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={partner.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <partner.icon className="w-8 h-8 text-purple-600 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-gray-900 dark:text-white">{partner.count}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{partner.name}</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-white">{partner.count}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{partner.name}</div>
             </div>
           ))}
         </div>
@@ -94,17 +94,17 @@ export default function EcosystemPage() {
 
       {/* Partner Types */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
           Partner With Us
         </h2>
         <div className="grid md:grid-cols-3 gap-6">
           {partnerTypes.map((type) => (
-            <div key={type.title} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col">
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">{type.title}</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{type.description}</p>
+            <div key={type.title} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col">
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">{type.title}</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">{type.description}</p>
               <ul className="space-y-2 mb-6 flex-1">
                 {type.benefits.map((benefit) => (
-                  <li key={benefit} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <li key={benefit} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                     <CheckCircle className="w-4 h-4 text-purple-500" />
                     {benefit}
                   </li>
@@ -122,17 +122,17 @@ export default function EcosystemPage() {
       </section>
 
       {/* Benefits */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-4xl mx-auto">
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">
+            <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
               Ecosystem Benefits
             </h2>
             <div className="grid md:grid-cols-2 gap-4">
               {benefits.map((benefit) => (
-                <div key={benefit} className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                <div key={benefit} className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-900 rounded-lg">
                   <Sparkles className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                  <span className="text-gray-900 dark:text-white">{benefit}</span>
+                  <span className="text-slate-900 dark:text-white">{benefit}</span>
                 </div>
               ))}
             </div>
@@ -143,16 +143,16 @@ export default function EcosystemPage() {
       {/* Integration */}
       <section className="container mx-auto px-4 py-16">
         <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
             Seamless Integration
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-8">
+          <p className="text-slate-600 dark:text-slate-400 mb-8">
             Connect your systems with our robust APIs and pre-built integrations.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {['Workday', 'Greenhouse', 'Lever', 'SAP', 'Oracle', 'Salesforce', 'Slack', 'Teams'].map((tool) => (
-              <div key={tool} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                <span className="font-medium text-gray-900 dark:text-white">{tool}</span>
+              <div key={tool} className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <span className="font-medium text-slate-900 dark:text-white">{tool}</span>
               </div>
             ))}
           </div>
@@ -175,7 +175,7 @@ export default function EcosystemPage() {
           </p>
           <Link
             href="/contact-sales"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-purple-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-purple-700 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             Get in Touch <ArrowRight className="w-4 h-4" />
           </Link>

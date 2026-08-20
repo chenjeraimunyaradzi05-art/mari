@@ -14,16 +14,16 @@ const sections = [
 
 export default function AdminMarketingPage() {
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Marketing Hub</h1>
-              <p className="text-gray-600 dark:text-gray-400">Manage campaigns, growth ops, and outreach</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Marketing Hub</h1>
+              <p className="text-slate-600 dark:text-slate-400">Manage campaigns, growth ops, and outreach</p>
             </div>
           </div>
         </div>
@@ -35,15 +35,15 @@ export default function AdminMarketingPage() {
             <Link
               key={section.title}
               href={section.href}
-              className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+              className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
             >
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-lg bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
                   <Megaphone className="h-5 w-5 text-primary-600" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">{section.title}</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{section.description}</p>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{section.title}</h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{section.description}</p>
                   <span className="inline-flex items-center gap-2 text-primary-600 text-sm mt-2">
                     Open <ArrowRight className="h-4 w-4" />
                   </span>

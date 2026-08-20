@@ -16,7 +16,7 @@ export default function ConversationDetails() {
 
   if (!conversation || !participant) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 p-6">
+      <div className="h-full flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 p-6">
         <Info className="w-8 h-8 mb-2" />
         <p className="text-sm">Select a conversation to see details.</p>
       </div>
@@ -24,8 +24,8 @@ export default function ConversationDetails() {
   }
 
   return (
-    <div className="h-full flex flex-col border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-      <div className="p-5 border-b border-gray-200 dark:border-gray-800">
+    <div className="h-full flex flex-col border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+      <div className="p-5 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3">
           <Avatar
             src={participant.avatar}
@@ -33,17 +33,17 @@ export default function ConversationDetails() {
             className="w-12 h-12"
           />
           <div className="min-w-0">
-            <p className="text-base font-semibold text-gray-900 dark:text-white truncate">
+            <p className="text-base font-semibold text-slate-900 dark:text-white truncate">
               {participant.name}
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Active now</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Active now</p>
           </div>
         </div>
         <div className="mt-3 flex items-center gap-2">
           <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
             <ShieldCheck className="w-3 h-3 mr-1" /> Safety Verified
           </Badge>
-          <Badge className="bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
             <User className="w-3 h-3 mr-1" /> Community Member
           </Badge>
         </div>
@@ -51,7 +51,7 @@ export default function ConversationDetails() {
 
       <div className="p-5 space-y-6 overflow-y-auto">
         <div>
-          <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500">Actions</p>
+          <p className="text-xs uppercase tracking-widest text-slate-400 dark:text-slate-500">Actions</p>
           <div className="mt-3 space-y-2">
             <Link
               href={`/dashboard/profile/${participant.id}`}
@@ -66,12 +66,12 @@ export default function ConversationDetails() {
         </div>
 
         <div>
-          <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500">Shared Media</p>
+          <p className="text-xs uppercase tracking-widest text-slate-400 dark:text-slate-500">Shared Media</p>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {[1, 2, 3, 4, 5, 6].map((item) => (
               <div
                 key={item}
-                className="aspect-square rounded-lg border border-dashed border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400"
+                className="aspect-square rounded-lg border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400"
               >
                 <ImageIcon className="w-4 h-4" />
               </div>

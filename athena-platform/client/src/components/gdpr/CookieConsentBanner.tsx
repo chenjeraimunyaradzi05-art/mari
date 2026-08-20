@@ -132,7 +132,7 @@ export function CookieConsentBanner() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="w-full max-w-2xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -155,7 +155,7 @@ export function CookieConsentBanner() {
 
         {/* Content */}
         <div className="p-6">
-          <p className="text-gray-600 dark:text-gray-300 mb-4">
+          <p className="text-slate-600 dark:text-slate-300 mb-4">
             We use cookies to enhance your experience, analyse site traffic, and for marketing purposes. 
             You can choose which cookies you&apos;d like to accept.
           </p>
@@ -172,13 +172,13 @@ export function CookieConsentBanner() {
               </button>
               <button
                 onClick={rejectOptional}
-                className="flex-1 py-3 px-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="flex-1 py-3 px-4 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 Essential Only
               </button>
               <button
                 onClick={() => setShowDetails(true)}
-                className="flex-1 py-3 px-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 py-3 px-4 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
               >
                 <Settings className="w-5 h-5" />
                 Customise
@@ -190,21 +190,21 @@ export function CookieConsentBanner() {
           {showDetails && (
             <div className="space-y-4 mb-4">
               {/* Essential */}
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <Shield className="w-5 h-5 text-green-600" />
-                    <span className="font-semibold text-gray-900 dark:text-white">Essential</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Essential</span>
                   </div>
                   <span className="text-sm text-green-600 font-medium">Always Active</span>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   Required for the website to function. Cannot be disabled.
                 </p>
               </div>
 
               {/* Analytics */}
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -214,18 +214,18 @@ export function CookieConsentBanner() {
                         onChange={(e) => setPreferences(p => ({ ...p, analytics: e.target.checked }))}
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
-                    <span className="font-semibold text-gray-900 dark:text-white">Analytics</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Analytics</span>
                   </div>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   Help us understand how visitors interact with our website to improve our services.
                 </p>
               </div>
 
               {/* Functional */}
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -235,18 +235,18 @@ export function CookieConsentBanner() {
                         onChange={(e) => setPreferences(p => ({ ...p, functional: e.target.checked }))}
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
-                    <span className="font-semibold text-gray-900 dark:text-white">Functional</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Functional</span>
                   </div>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   Enable enhanced functionality like remembering your preferences.
                 </p>
               </div>
 
               {/* Marketing */}
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -256,12 +256,12 @@ export function CookieConsentBanner() {
                         onChange={(e) => setPreferences(p => ({ ...p, marketing: e.target.checked }))}
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                     </label>
-                    <span className="font-semibold text-gray-900 dark:text-white">Marketing</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Marketing</span>
                   </div>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   Used to deliver relevant advertisements and measure campaign effectiveness.
                 </p>
               </div>
@@ -270,7 +270,7 @@ export function CookieConsentBanner() {
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowDetails(false)}
-                  className="flex-1 py-3 px-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  className="flex-1 py-3 px-4 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                 >
                   Back
                 </button>
@@ -285,7 +285,7 @@ export function CookieConsentBanner() {
           )}
 
           {/* Links */}
-          <div className="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex flex-wrap gap-4 text-sm text-slate-500 dark:text-slate-400 pt-4 border-t border-slate-200 dark:border-slate-700">
             <Link href="/cookies" className="hover:text-purple-600 transition-colors">
               Cookie Policy
             </Link>

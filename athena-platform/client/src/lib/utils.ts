@@ -205,7 +205,7 @@ export const PERSONA_COLORS: Record<string, string> = {
   CREATOR: 'bg-pink-100 text-pink-800',
   MENTOR: 'bg-indigo-100 text-indigo-800',
   EDUCATION_PROVIDER: 'bg-green-100 text-green-800',
-  EMPLOYER: 'bg-gray-100 text-gray-800',
+  EMPLOYER: 'bg-slate-100 text-slate-800',
   REAL_ESTATE: 'bg-yellow-100 text-yellow-800',
   GOVERNMENT_NGO: 'bg-red-100 text-red-800',
 };
@@ -237,5 +237,5 @@ export const APPLICATION_STATUS_COLORS: Record<string, string> = {
   OFFERED: 'bg-green-100 text-green-800',
   HIRED: 'bg-emerald-100 text-emerald-800',
   REJECTED: 'bg-red-100 text-red-800',
-  WITHDRAWN: 'bg-gray-100 text-gray-800',
+  WITHDRAWN: 'bg-slate-100 text-slate-800',
 };

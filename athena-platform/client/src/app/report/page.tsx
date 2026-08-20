@@ -125,23 +125,23 @@ function ReportContent() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+      <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
         <div className="max-w-2xl mx-auto px-4 py-16">
           <div className="text-center">
             <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-6">
               <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
               Report Submitted
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
               Thank you for helping keep ATHENA safe. Your report has been received and will be reviewed by our Trust & Safety team.
             </p>
             
             {ticketId && (
-              <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-6">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Your reference number:</p>
-                <p className="text-lg font-mono font-bold text-gray-900 dark:text-white">{ticketId}</p>
+              <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 mb-6">
+                <p className="text-sm text-slate-600 dark:text-slate-400">Your reference number:</p>
+                <p className="text-lg font-mono font-bold text-slate-900 dark:text-white">{ticketId}</p>
               </div>
             )}
 
@@ -158,7 +158,7 @@ function ReportContent() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 href="/"
-                className="inline-flex items-center justify-center px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="inline-flex items-center justify-center px-6 py-3 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Home
@@ -188,13 +188,13 @@ function ReportContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+    <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className="max-w-3xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <Link
             href="/"
-            className="inline-flex items-center text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4"
+            className="inline-flex items-center text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white mb-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
@@ -204,8 +204,8 @@ function ReportContent() {
               <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Report Content</h1>
-              <p className="text-gray-600 dark:text-gray-400">Help us maintain a safe platform</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Report Content</h1>
+              <p className="text-slate-600 dark:text-slate-400">Help us maintain a safe platform</p>
             </div>
           </div>
         </div>
@@ -227,13 +227,13 @@ function ReportContent() {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Content Type */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               What type of content are you reporting?
             </label>
             <select
               value={formData.contentType}
               onChange={(e) => setFormData(prev => ({ ...prev, contentType: e.target.value as ReportFormData['contentType'] }))}
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
               {CONTENT_TYPES.map(type => (
                 <option key={type.value} value={type.value}>{type.label}</option>
@@ -243,7 +243,7 @@ function ReportContent() {
 
           {/* Content ID */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Content ID or URL
             </label>
             <input
@@ -251,17 +251,17 @@ function ReportContent() {
               value={formData.contentId}
               onChange={(e) => setFormData(prev => ({ ...prev, contentId: e.target.value }))}
               placeholder="Paste the URL or ID of the content"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               required
             />
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               You can find this in the browser address bar or by clicking &quot;Share&quot; on the content
             </p>
           </div>
 
           {/* Reason */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Reason for report
             </label>
             <div className="grid gap-3">
@@ -271,7 +271,7 @@ function ReportContent() {
                   className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
                     formData.reason === reason.value
                       ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
                 >
                   <input
@@ -284,14 +284,14 @@ function ReportContent() {
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-900 dark:text-white">{reason.label}</span>
+                      <span className="font-medium text-slate-900 dark:text-white">{reason.label}</span>
                       {reason.priority === 'critical' && (
                         <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded">
                           Priority
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{reason.description}</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">{reason.description}</p>
                   </div>
                 </label>
               ))}
@@ -300,7 +300,7 @@ function ReportContent() {
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Please describe the issue
             </label>
             <textarea
@@ -308,14 +308,14 @@ function ReportContent() {
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
               rows={4}
               placeholder="Provide as much detail as possible about why this content is problematic..."
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
               required
             />
           </div>
 
           {/* Evidence URLs */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Additional evidence (optional)
             </label>
             <div className="flex gap-2 mb-2">
@@ -324,12 +324,12 @@ function ReportContent() {
                 value={newEvidenceUrl}
                 onChange={(e) => setNewEvidenceUrl(e.target.value)}
                 placeholder="Add screenshot or archive link"
-                className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="flex-1 px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <button
                 type="button"
                 onClick={addEvidenceUrl}
-                className="px-4 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                className="px-4 py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
               >
                 Add
               </button>
@@ -337,7 +337,7 @@ function ReportContent() {
             {formData.evidenceUrls.length > 0 && (
               <ul className="space-y-2">
                 {formData.evidenceUrls.map((url, i) => (
-                  <li key={i} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <li key={i} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                     <span className="truncate flex-1">{url}</span>
                     <button
                       type="button"
@@ -354,7 +354,7 @@ function ReportContent() {
 
           {/* Contact Email */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Your email (for updates)
             </label>
             <input
@@ -362,9 +362,9 @@ function ReportContent() {
               value={formData.contactEmail}
               onChange={(e) => setFormData(prev => ({ ...prev, contactEmail: e.target.value }))}
               placeholder="you@example.com"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               We&apos;ll only contact you if we need additional information
             </p>
           </div>
@@ -379,8 +379,8 @@ function ReportContent() {
               className="mt-1"
             />
             <label htmlFor="urgent" className="text-sm">
-              <span className="font-medium text-gray-900 dark:text-white">Mark as urgent</span>
-              <p className="text-gray-600 dark:text-gray-400">
+              <span className="font-medium text-slate-900 dark:text-white">Mark as urgent</span>
+              <p className="text-slate-600 dark:text-slate-400">
                 Check this if the content poses an immediate risk to safety
               </p>
             </label>
@@ -419,36 +419,36 @@ function ReportContent() {
         </form>
 
         {/* Additional Info */}
-        <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Additional Resources</h2>
+        <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Additional Resources</h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <Link
               href="/help/community-guidelines"
-              className="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-purple-500 transition-colors"
+              className="block p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-purple-500 transition-colors"
             >
-              <h3 className="font-medium text-gray-900 dark:text-white">Community Guidelines</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">Learn about our content policies</p>
+              <h3 className="font-medium text-slate-900 dark:text-white">Community Guidelines</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Learn about our content policies</p>
             </Link>
             <Link
               href="/help/safety-center"
-              className="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-purple-500 transition-colors"
+              className="block p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-purple-500 transition-colors"
             >
-              <h3 className="font-medium text-gray-900 dark:text-white">Safety Center</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">Resources for staying safe online</p>
+              <h3 className="font-medium text-slate-900 dark:text-white">Safety Center</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Resources for staying safe online</p>
             </Link>
             <Link
               href="/help/transparency-report"
-              className="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-purple-500 transition-colors"
+              className="block p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-purple-500 transition-colors"
             >
-              <h3 className="font-medium text-gray-900 dark:text-white">Transparency Report</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">See how we handle reports</p>
+              <h3 className="font-medium text-slate-900 dark:text-white">Transparency Report</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">See how we handle reports</p>
             </Link>
             <Link
               href="/help/appeal"
-              className="block p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-purple-500 transition-colors"
+              className="block p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-purple-500 transition-colors"
             >
-              <h3 className="font-medium text-gray-900 dark:text-white">Appeal a Decision</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">Contest content removal</p>
+              <h3 className="font-medium text-slate-900 dark:text-white">Appeal a Decision</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Contest content removal</p>
             </Link>
           </div>
         </div>

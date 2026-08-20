@@ -240,7 +240,7 @@ export function FacebookSignInButton({
       className="btn-outline flex w-full items-center justify-center py-2.5 text-[#1877F2] hover:bg-[#1877F2]/5 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-[#1877F2]/10"
     >
       <FacebookIcon />
-      <span className="ml-2 text-gray-700 dark:text-gray-200">Continue with Facebook</span>
+      <span className="ml-2 text-slate-700 dark:text-slate-200">Continue with Facebook</span>
     </button>
   );
 }

@@ -59,13 +59,13 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Create a Channel" size="md">
       <form onSubmit={handleSubmit} className="p-6 space-y-4" data-testid="create-channel-modal">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Channels are where your community communicates. They're best when organized around a topic.
         </p>
 
         {/* Channel type */}
         <div className="space-y-2">
-          <label htmlFor="channel-type" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label htmlFor="channel-type" className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Channel Type
           </label>
           <select
@@ -87,13 +87,13 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
                 'flex items-center gap-3 p-3 rounded-lg border-2 transition-colors',
                 type === 'public'
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
               )}
             >
-              <Hash className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <Hash className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               <div className="text-left">
-                <p className="font-medium text-gray-900 dark:text-white">Public</p>
-                <p className="text-xs text-gray-500">Anyone can join</p>
+                <p className="font-medium text-slate-900 dark:text-white">Public</p>
+                <p className="text-xs text-slate-500">Anyone can join</p>
               </div>
             </button>
             <button
@@ -103,13 +103,13 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
                 'flex items-center gap-3 p-3 rounded-lg border-2 transition-colors',
                 type === 'private'
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
               )}
             >
-              <Lock className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <Lock className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               <div className="text-left">
-                <p className="font-medium text-gray-900 dark:text-white">Private</p>
-                <p className="text-xs text-gray-500">Invite only</p>
+                <p className="font-medium text-slate-900 dark:text-white">Private</p>
+                <p className="text-xs text-slate-500">Invite only</p>
               </div>
             </button>
           </div>
@@ -117,11 +117,11 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
 
         {/* Channel name */}
         <div className="space-y-2">
-          <label htmlFor="channel-name" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label htmlFor="channel-name" className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Channel Name
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
               {type === 'public' ? '#' : '🔒'}
             </span>
             <Input
@@ -141,8 +141,8 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
 
         {/* Description */}
         <div className="space-y-2">
-          <label htmlFor="channel-description" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Description <span className="text-gray-400">(optional)</span>
+          <label htmlFor="channel-description" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            Description <span className="text-slate-400">(optional)</span>
           </label>
           <textarea
             id="channel-description"
@@ -151,7 +151,7 @@ export function CreateChannelModal({ isOpen, onClose, onCreate }: CreateChannelM
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What's this channel about?"
             rows={3}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
 

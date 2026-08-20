@@ -69,7 +69,7 @@ export function ApprenticeshipFiltersBar({
       {/* Search bar */}
       <div className="flex gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <Input
             value={filters.search}
             onChange={(e) => updateFilter('search', e.target.value)}
@@ -101,7 +101,7 @@ export function ApprenticeshipFiltersBar({
             'px-3 py-1.5 rounded-full text-sm font-medium transition-colors',
             filters.remote === true
               ? 'bg-primary-500 text-white'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           )}
         >
           Remote Only
@@ -116,7 +116,7 @@ export function ApprenticeshipFiltersBar({
               'px-3 py-1.5 rounded-full text-sm font-medium transition-colors capitalize',
               filters.level.includes(level)
                 ? 'bg-primary-500 text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             )}
           >
             {level}
@@ -127,7 +127,7 @@ export function ApprenticeshipFiltersBar({
         {activeFiltersCount > 0 && (
           <button
             onClick={clearFilters}
-            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           >
             Clear all
           </button>
@@ -136,11 +136,11 @@ export function ApprenticeshipFiltersBar({
 
       {/* Advanced filters panel */}
       {showAdvanced && (
-        <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-xl space-y-4">
+        <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Industry */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Industry
               </label>
               <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -152,7 +152,7 @@ export function ApprenticeshipFiltersBar({
                       onChange={() => toggleArrayFilter('industry', industry)}
                       className="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{industry}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{industry}</span>
                   </label>
                 ))}
               </div>
@@ -160,13 +160,13 @@ export function ApprenticeshipFiltersBar({
 
             {/* Location */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Location
               </label>
               <select
                 value={filters.location}
                 onChange={(e) => updateFilter('location', e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               >
                 <option value="">All Locations</option>
                 {locations.map((loc) => (
@@ -179,7 +179,7 @@ export function ApprenticeshipFiltersBar({
 
             {/* Salary Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Salary Range (yearly)
               </label>
               <div className="flex gap-2">

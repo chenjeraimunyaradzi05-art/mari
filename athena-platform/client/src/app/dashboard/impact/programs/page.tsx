@@ -43,7 +43,7 @@ const statusColors: Record<string, string> = {
   ACTIVE: 'bg-emerald-50 text-emerald-700',
   COMPLETED: 'bg-blue-50 text-blue-700',
   PAUSED: 'bg-yellow-50 text-yellow-700',
-  CANCELLED: 'bg-gray-100 text-gray-600',
+  CANCELLED: 'bg-slate-100 text-slate-600',
 };
 
 export default function ProgramsPage() {
@@ -100,10 +100,10 @@ export default function ProgramsPage() {
           <Users className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Support Programs</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Community Support Programs
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Tailored programs to help you achieve your goals
         </p>
       </div>
@@ -115,7 +115,7 @@ export default function ProgramsPage() {
       {/* My Enrollments */}
       {enrollments.length > 0 && (
         <section>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">My Enrollments</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">My Enrollments</h2>
           <div className="space-y-4">
             {enrollments.map((enrollment) => {
               const completedMilestones = enrollment.milestoneProgress.filter((p) => p.isCompleted).length;
@@ -125,12 +125,12 @@ export default function ProgramsPage() {
               return (
                 <div
                   key={enrollment.id}
-                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
                 >
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-white">{enrollment.program.name}</h3>
-                      <p className="text-xs text-gray-500">
+                      <h3 className="font-semibold text-slate-900 dark:text-white">{enrollment.program.name}</h3>
+                      <p className="text-xs text-slate-500">
                         {communityTypeLabels[enrollment.program.communityType] || enrollment.program.communityType}
                       </p>
                     </div>
@@ -142,9 +142,9 @@ export default function ProgramsPage() {
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-sm mb-2">
                       <span>{completedMilestones} of {totalMilestones} milestones</span>
-                      <span className="text-gray-500">{progress}%</span>
+                      <span className="text-slate-500">{progress}%</span>
                     </div>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
                       <div
                         className="bg-purple-500 h-2 rounded-full transition-all"
                         style={{ width: `${progress}%` }}
@@ -163,9 +163,9 @@ export default function ProgramsPage() {
                             {isComplete ? (
                               <CheckCircle className="w-4 h-4 text-emerald-500" />
                             ) : (
-                              <Clock className="w-4 h-4 text-gray-400" />
+                              <Clock className="w-4 h-4 text-slate-400" />
                             )}
-                            <span className={isComplete ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}>
+                            <span className={isComplete ? 'text-slate-500 line-through' : 'text-slate-700 dark:text-slate-300'}>
                               {milestone.title}
                             </span>
                           </div>
@@ -182,11 +182,11 @@ export default function ProgramsPage() {
 
       {/* Filter */}
       <div className="flex items-center gap-4">
-        <label className="text-sm text-gray-600 dark:text-gray-400">Filter by community:</label>
+        <label className="text-sm text-slate-600 dark:text-slate-400">Filter by community:</label>
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
-          className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+          className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
         >
           <option value="">All communities</option>
           {Object.entries(communityTypeLabels).map(([value, label]) => (
@@ -197,12 +197,12 @@ export default function ProgramsPage() {
 
       {/* Available Programs */}
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading programs...
         </div>
       ) : programs.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-center text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center text-sm text-slate-500">
           No programs available in this category.
         </div>
       ) : (
@@ -214,32 +214,32 @@ export default function ProgramsPage() {
             return (
               <div
                 key={program.id}
-                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 flex flex-col"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 flex flex-col"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <span className="text-xs text-purple-600 font-medium">
                       {communityTypeLabels[program.communityType] || program.communityType}
                     </span>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mt-1">{program.name}</h3>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white mt-1">{program.name}</h3>
                   </div>
                   {program.maxParticipants && (
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-slate-500">
                       {program.currentParticipants}/{program.maxParticipants}
                     </span>
                   )}
                 </div>
 
-                <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">{program.description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{program.description}</p>
 
                 {program.objectives.length > 0 && (
                   <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                    <p className="text-xs text-slate-500 mb-2 flex items-center gap-1">
                       <Target className="w-3 h-3" /> Objectives
                     </p>
                     <ul className="text-sm space-y-1">
                       {program.objectives.slice(0, 3).map((obj, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-gray-600 dark:text-gray-400">
+                        <li key={idx} className="flex items-start gap-2 text-slate-600 dark:text-slate-400">
                           <span className="text-purple-500">•</span> {obj}
                         </li>
                       ))}
@@ -250,7 +250,7 @@ export default function ProgramsPage() {
                 {program.partnerOrgs.length > 0 && (
                   <div className="mb-4 flex flex-wrap gap-1">
                     {program.partnerOrgs.slice(0, 3).map((org, idx) => (
-                      <span key={idx} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400">
+                      <span key={idx} className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-400">
                         {org}
                       </span>
                     ))}

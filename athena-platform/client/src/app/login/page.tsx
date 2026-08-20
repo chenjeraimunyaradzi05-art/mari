@@ -156,10 +156,10 @@ function LoginContent() {
             <div className="progress-athena absolute left-0 top-0 right-0 h-[3px] rounded-none">
               <div className="progress-athena-fill w-full" />
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
               {isRegistrationRecovery ? 'Welcome to ATHENA' : 'Welcome back'}
             </h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
+            <p className="mt-2 text-slate-600 dark:text-slate-400">
               {isRegistrationRecovery
                 ? 'Finish signing in to start your onboarding, workspace, mentors, and community.'
                 : 'Sign in to access your jobs, mentors, saved opportunities, and community.'}
@@ -211,9 +211,9 @@ function LoginContent() {
                     className="absolute inset-y-0 right-0 flex items-center pr-3"
                   >
                     {showPassword ? (
-                      <EyeOff className="w-5 h-5 text-gray-400" />
+                      <EyeOff className="w-5 h-5 text-slate-400" />
                     ) : (
-                      <Eye className="w-5 h-5 text-gray-400" />
+                      <Eye className="w-5 h-5 text-slate-400" />
                     )}
                   </button>
                 </div>
@@ -244,9 +244,9 @@ function LoginContent() {
                 <label className="flex items-center">
                   <input
                     type="checkbox"
-                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                   />
-                  <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="ml-2 text-sm text-slate-600 dark:text-slate-400">
                     Remember me
                   </span>
                 </label>
@@ -280,10 +280,10 @@ function LoginContent() {
             <div className="mt-8">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300 dark:border-gray-700" />
+                <div className="w-full border-t border-slate-300 dark:border-slate-700" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white dark:bg-gray-950 text-gray-500">
+                <span className="px-2 bg-white dark:bg-slate-950 text-slate-500">
                   Or continue with
                 </span>
               </div>
@@ -305,12 +305,12 @@ function LoginContent() {
                 }}
               />
             </div>
-            <p className="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
               We only ever request the minimum: your name, email, and avatar.
             </p>
           </div>
 
-          <p className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
+          <p className="mt-8 text-center text-sm text-slate-600 dark:text-slate-400">
             Don&apos;t have an account?{' '}
             <Link href="/register" className="text-primary-600 hover:text-primary-500 font-medium">
               Create one free

@@ -14,7 +14,7 @@ export default function VideosPage() {
       </p>
 
       <div className="mt-8 grid gap-4 md:grid-cols-2">
-        <Link href="/explore" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/explore" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Sparkles className="h-4 w-4" /> Explore feed
           </div>
@@ -24,7 +24,7 @@ export default function VideosPage() {
           </span>
         </Link>
 
-        <Link href="/dashboard/create-post" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/dashboard/create-post" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Video className="h-4 w-4" /> Share a video
           </div>

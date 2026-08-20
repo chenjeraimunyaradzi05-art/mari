@@ -57,7 +57,7 @@ export default function TeamPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
@@ -69,7 +69,7 @@ export default function TeamPage() {
             </p>
             <Link
               href="/careers"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-slate-100 transition"
             >
               <Briefcase className="w-5 h-5" />
               Join Our Team
@@ -82,9 +82,9 @@ export default function TeamPage() {
       <section className="container mx-auto px-4 -mt-8 relative z-20">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {stats.map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg text-center">
+            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
               <div className="text-3xl font-bold text-primary-600">{stat.value}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -92,33 +92,33 @@ export default function TeamPage() {
 
       {/* Leadership */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">Leadership Team</h2>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">Leadership Team</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           {leadership.map((person) => (
-            <div key={person.name} className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 text-center">
+            <div key={person.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 text-center">
               <div className="w-24 h-24 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full mx-auto mb-4 flex items-center justify-center">
                 <Users className="w-12 h-12 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 dark:text-white">{person.name}</h3>
+              <h3 className="font-semibold text-slate-900 dark:text-white">{person.name}</h3>
               <p className="text-sm text-primary-600 mb-2">{person.role}</p>
-              <p className="text-sm text-gray-600 dark:text-gray-400">{person.bio}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{person.bio}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Values */}
-      <section className="bg-white dark:bg-gray-800 py-16">
+      <section className="bg-white dark:bg-slate-800 py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">Our Values</h2>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">Our Values</h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
             {values.map((value) => (
               <div key={value.title} className="text-center">
                 <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <value.icon className="w-8 h-8 text-primary-600" />
                 </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{value.title}</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{value.description}</p>
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-2">{value.title}</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400">{value.description}</p>
               </div>
             ))}
           </div>
@@ -128,12 +128,12 @@ export default function TeamPage() {
       {/* Benefits */}
       <section className="container mx-auto px-4 py-16">
         <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8 text-center">Why Work at ATHENA?</h2>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">Why Work at ATHENA?</h2>
           <div className="grid md:grid-cols-2 gap-4">
             {benefits.map((benefit) => (
-              <div key={benefit} className="flex items-center gap-3 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+              <div key={benefit} className="flex items-center gap-3 p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                 <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
-                <span className="text-gray-900 dark:text-white">{benefit}</span>
+                <span className="text-slate-900 dark:text-white">{benefit}</span>
               </div>
             ))}
           </div>
@@ -149,7 +149,7 @@ export default function TeamPage() {
           </p>
           <Link
             href="/careers"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             View Open Positions <ArrowRight className="w-4 h-4" />
           </Link>

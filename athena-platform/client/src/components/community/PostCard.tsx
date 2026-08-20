@@ -56,7 +56,7 @@ export default function PostCard({ post }: PostCardProps) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
       {/* Header */}
       <div className="p-4 flex items-start justify-between">
         <div className="flex gap-3">
@@ -69,11 +69,11 @@ export default function PostCard({ post }: PostCardProps) {
             />
           </div>
           <div>
-            <h3 className="font-semibold text-gray-900 group cursor-pointer hover:underline hover:text-blue-600">
+            <h3 className="font-semibold text-slate-900 group cursor-pointer hover:underline hover:text-blue-600">
                 {authorName}
             </h3>
-            <p className="text-xs text-gray-500 line-clamp-1">{post.author.headline || 'Member'}</p>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <p className="text-xs text-slate-500 line-clamp-1">{post.author.headline || 'Member'}</p>
+            <p className="text-xs text-slate-400 mt-0.5">
               {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })} • 
               <span className="ml-1">Public</span>
             </p>
@@ -83,12 +83,12 @@ export default function PostCard({ post }: PostCardProps) {
           <div className="relative" ref={menuRef}>
             <button 
               onClick={() => setShowMenu(!showMenu)}
-              className="text-gray-400 hover:text-gray-600 p-1"
+              className="text-slate-400 hover:text-slate-600 p-1"
             >
               <MoreHorizontal size={20} />
             </button>
             {showMenu && (
-              <div className="absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10 min-w-[120px]">
+              <div className="absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-10 min-w-[120px]">
                 <button
                   onClick={handleDelete}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
@@ -104,7 +104,7 @@ export default function PostCard({ post }: PostCardProps) {
 
       {/* Content */}
       <div className="px-4 pb-2">
-        <p className="text-gray-800 whitespace-pre-wrap text-sm leading-relaxed">{post.content}</p>
+        <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">{post.content}</p>
       </div>
 
       {/* Media */}
@@ -158,7 +158,7 @@ export default function PostCard({ post }: PostCardProps) {
       )}
 
       {/* Stats/Counts */}
-      <div className="px-4 py-2 border-b border-gray-100 flex items-center justify-between text-xs text-gray-500">
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500">
         <div className="flex items-center gap-1 group cursor-pointer hover:text-blue-600 hover:underline">
          {Number(post.likeCount) > 0 && (
                 <>
@@ -179,7 +179,7 @@ export default function PostCard({ post }: PostCardProps) {
             className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium ${
                 post.isLiked 
                 ? 'text-blue-600 hover:bg-blue-50' 
-                : 'text-gray-500 hover:bg-gray-100'
+                : 'text-slate-500 hover:bg-slate-100'
             }`}
         >
           <Heart size={20} className={post.isLiked ? 'fill-blue-600' : ''} />
@@ -187,12 +187,12 @@ export default function PostCard({ post }: PostCardProps) {
         </button>
         <button 
           onClick={() => setShowComments(!showComments)}
-          className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-gray-500 hover:bg-gray-100"
+          className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
         >
           <MessageCircle size={20} />
           <span>Comment</span>
         </button>
-        <button className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-gray-500 hover:bg-gray-100">
+        <button className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100">
           <Share2 size={20} />
           <span>Share</span>
         </button>

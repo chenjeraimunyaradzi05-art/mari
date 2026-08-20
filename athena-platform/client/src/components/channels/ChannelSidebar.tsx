@@ -85,26 +85,26 @@ export function ChannelSidebar({
       );
     }
     if (channel.type === 'private') {
-      return <Lock className="w-4 h-4 text-gray-500" />;
+      return <Lock className="w-4 h-4 text-slate-500" />;
     }
-    return <Hash className="w-4 h-4 text-gray-500" />;
+    return <Hash className="w-4 h-4 text-slate-500" />;
   };
 
   return (
     <div
-      className="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full"
+      className="w-64 bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col h-full"
       data-testid="channel-sidebar"
     >
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-gray-900 dark:text-white">Community</h2>
+          <h2 className="font-semibold text-slate-900 dark:text-white">Community</h2>
           <Button variant="ghost" size="icon" onClick={onCreateChannel} data-testid="create-channel-button">
             <Plus className="w-4 h-4" />
           </Button>
         </div>
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <Input
             placeholder="Search channels..."
             value={searchQuery}
@@ -121,7 +121,7 @@ export function ChannelSidebar({
         <div className="mb-2">
           <button
             onClick={() => toggleSection('channels')}
-            className="w-full flex items-center px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:text-gray-700 dark:hover:text-gray-200"
+            className="w-full flex items-center px-4 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hover:text-slate-700 dark:hover:text-slate-200"
           >
             {expandedSections.channels ? (
               <ChevronDown className="w-3 h-3 mr-1" />
@@ -150,7 +150,7 @@ export function ChannelSidebar({
         <div>
           <button
             onClick={() => toggleSection('directMessages')}
-            className="w-full flex items-center px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:text-gray-700 dark:hover:text-gray-200"
+            className="w-full flex items-center px-4 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hover:text-slate-700 dark:hover:text-slate-200"
           >
             {expandedSections.directMessages ? (
               <ChevronDown className="w-3 h-3 mr-1" />
@@ -177,7 +177,7 @@ export function ChannelSidebar({
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-gray-200 dark:border-gray-800">
+      <div className="p-3 border-t border-slate-200 dark:border-slate-800">
         <Button
           variant="outline"
           size="sm"
@@ -207,7 +207,7 @@ function ChannelItem({ channel, isActive, onClick, icon }: ChannelItemProps) {
         'w-full flex items-center gap-2 px-4 py-1.5 text-sm transition-colors',
         isActive
           ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
-          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
       )}
       data-testid="channel-item"
     >
@@ -219,7 +219,7 @@ function ChannelItem({ channel, isActive, onClick, icon }: ChannelItemProps) {
         </span>
       )}
       {channel.isMuted && (
-        <BellOff className="w-3 h-3 text-gray-400 flex-shrink-0" />
+        <BellOff className="w-3 h-3 text-slate-400 flex-shrink-0" />
       )}
     </button>
   );

@@ -17,7 +17,7 @@ export default function Error({
   }, [error]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 px-4">
       <div className="text-center max-w-lg">
         {/* Icon */}
         <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -25,21 +25,21 @@ export default function Error({
         </div>
 
         {/* Content */}
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
           Something Went Wrong
         </h1>
-        <p className="text-lg text-gray-600 dark:text-gray-300 mb-8">
+        <p className="text-lg text-slate-600 dark:text-slate-300 mb-8">
           We're sorry, but something unexpected happened. Our team has been notified and is working on a fix.
         </p>
 
         {/* Error Details (Development only) */}
         {process.env.NODE_ENV === 'development' && (
-          <div className="mb-8 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg text-left">
+          <div className="mb-8 p-4 bg-slate-100 dark:bg-slate-800 rounded-lg text-left">
             <p className="text-sm font-mono text-red-500 break-all">
               {error.message}
             </p>
             {error.digest && (
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-slate-500 mt-2">
                 Error ID: {error.digest}
               </p>
             )}
@@ -57,7 +57,7 @@ export default function Error({
           </button>
           <Link
             href="/dashboard"
-            className="flex items-center space-x-2 px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            className="flex items-center space-x-2 px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           >
             <Home className="w-5 h-5" />
             <span>Go to Dashboard</span>
@@ -65,8 +65,8 @@ export default function Error({
         </div>
 
         {/* Report Bug */}
-        <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
             If this problem persists, please let us know:
           </p>
           <a

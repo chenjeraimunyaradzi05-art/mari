@@ -216,12 +216,12 @@ export default function CommunityPage() {
           isLoading={messagesLoading}
         />
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="flex-1 flex items-center justify-center bg-slate-50 dark:bg-slate-950">
           <div className="text-center">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
               Welcome to Athena Community
             </h2>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               Select a channel to start chatting or create a new one
             </p>
             <button

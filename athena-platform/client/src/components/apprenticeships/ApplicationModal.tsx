@@ -109,14 +109,14 @@ export function ApplicationModal({
           <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
             Application Submitted!
           </h2>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">
+          <p className="text-slate-500 dark:text-slate-400 mb-6">
             Your application for <strong>{apprenticeship.title}</strong> at{' '}
             <strong>{apprenticeship.organization.name}</strong> has been submitted successfully.
           </p>
-          <p className="text-sm text-gray-500 mb-6">
+          <p className="text-sm text-slate-500 mb-6">
             You'll receive an email confirmation shortly. The team will review your application and get back to you within 5-7 business days.
           </p>
           <Button onClick={handleClose}>Close</Button>
@@ -130,11 +130,11 @@ export function ApplicationModal({
       <div className="p-6">
         {/* Progress bar */}
         <div className="mb-6">
-          <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
+          <div className="flex items-center justify-between text-sm text-slate-500 mb-2">
             <span>Step {step} of {totalSteps}</span>
             <span>{Math.round((step / totalSteps) * 100)}% complete</span>
           </div>
-          <div className="h-2 bg-gray-200 dark:bg-gray-800 rounded-full">
+          <div className="h-2 bg-slate-200 dark:bg-slate-800 rounded-full">
             <div
               className="h-full bg-primary-500 rounded-full transition-all"
               style={{ width: `${(step / totalSteps) * 100}%` }}
@@ -151,10 +151,10 @@ export function ApplicationModal({
         {/* Step 1: Cover Letter */}
         {step === 1 && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
               Tell us about yourself
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-slate-500">
               Write a cover letter explaining why you're interested in this apprenticeship and what makes you a great fit.
             </p>
             <div>
@@ -166,16 +166,16 @@ export function ApplicationModal({
 I am excited to apply for this apprenticeship opportunity because..."
                 rows={10}
                 className={cn(
-                  'w-full px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500',
+                  'w-full px-3 py-2 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500',
                   errors.coverLetter
                     ? 'border-red-500'
-                    : 'border-gray-300 dark:border-gray-600'
+                    : 'border-slate-300 dark:border-slate-600'
                 )}
               />
               {errors.coverLetter && (
                 <p className="mt-1 text-sm text-red-600">{errors.coverLetter}</p>
               )}
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-slate-500">
                 {formData.coverLetter.length} / 100 minimum characters
               </p>
             </div>
@@ -185,12 +185,12 @@ I am excited to apply for this apprenticeship opportunity because..."
         {/* Step 2: Documents & Dates */}
         {step === 2 && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
               Documents & Availability
             </h3>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Resume URL (optional)
               </label>
               <Input
@@ -199,13 +199,13 @@ I am excited to apply for this apprenticeship opportunity because..."
                 onChange={(e) => setFormData({ ...formData, resumeUrl: e.target.value })}
                 placeholder="https://drive.google.com/your-resume.pdf"
               />
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-slate-500">
                 Link to your resume on Google Drive, Dropbox, or similar
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Portfolio URL (optional)
               </label>
               <Input
@@ -217,7 +217,7 @@ I am excited to apply for this apprenticeship opportunity because..."
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Earliest Available Start Date *
               </label>
               <Input
@@ -234,44 +234,44 @@ I am excited to apply for this apprenticeship opportunity because..."
         {/* Step 3: Review */}
         {step === 3 && (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
               Review Your Application
             </h3>
 
-            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg space-y-4">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg space-y-4">
               <div>
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Applying for
                 </h4>
-                <p className="text-gray-900 dark:text-white font-medium">
+                <p className="text-slate-900 dark:text-white font-medium">
                   {apprenticeship.title}
                 </p>
-                <p className="text-sm text-gray-500">{apprenticeship.organization.name}</p>
+                <p className="text-sm text-slate-500">{apprenticeship.organization.name}</p>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Cover Letter
                 </h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-3">
+                <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-3">
                   {formData.coverLetter}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Resume
                   </h4>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
                     {formData.resumeUrl ? 'Attached' : 'Not provided'}
                   </p>
                 </div>
                 <div>
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Available From
                   </h4>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
                     {formData.availableStartDate
                       ? new Date(formData.availableStartDate).toLocaleDateString()
                       : 'Not specified'}
@@ -288,7 +288,7 @@ I am excited to apply for this apprenticeship opportunity because..."
         )}
 
         {/* Actions */}
-        <div className="flex justify-between pt-6 mt-6 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex justify-between pt-6 mt-6 border-t border-slate-100 dark:border-slate-800">
           {step > 1 ? (
             <Button variant="ghost" onClick={handleBack} disabled={isSubmitting}>
               Back

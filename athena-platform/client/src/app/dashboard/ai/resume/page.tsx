@@ -74,16 +74,16 @@ export default function ResumePage() {
       <div className="flex items-center space-x-4">
         <Link
           href="/dashboard/ai"
-          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
         >
-          <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center space-x-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center space-x-2">
             <FileText className="w-7 h-7 text-purple-600" />
             <span>AI Resume Optimizer</span>
           </h1>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-slate-600 dark:text-slate-400">
             Optimize your resume for any job with AI-powered suggestions
           </p>
         </div>
@@ -94,22 +94,22 @@ export default function ResumePage() {
           {/* Input Section */}
           <div className="space-y-6">
             {/* Resume Upload */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center space-x-2">
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center space-x-2">
                 <Upload className="w-5 h-5 text-purple-600" />
                 <span>Your Resume</span>
               </h2>
               
               <div className="space-y-4">
                 <div
-                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition"
+                  className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <Upload className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                  <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
                     Click to upload or drag and drop
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-slate-500 mt-1">
                     TXT, PDF, or DOCX (max 5MB)
                   </p>
                   <input
@@ -123,10 +123,10 @@ export default function ResumePage() {
 
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-300 dark:border-gray-600" />
+                    <div className="w-full border-t border-slate-300 dark:border-slate-600" />
                   </div>
                   <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-white dark:bg-gray-800 text-gray-500">or paste</span>
+                    <span className="px-2 bg-white dark:bg-slate-800 text-slate-500">or paste</span>
                   </div>
                 </div>
 
@@ -135,14 +135,14 @@ export default function ResumePage() {
                   onChange={(e) => setResume(e.target.value)}
                   placeholder="Paste your resume content here..."
                   rows={8}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                 />
               </div>
             </div>
 
             {/* Job Description */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center space-x-2">
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center space-x-2">
                 <Target className="w-5 h-5 text-blue-600" />
                 <span>Target Job Description</span>
               </h2>
@@ -152,7 +152,7 @@ export default function ResumePage() {
                 onChange={(e) => setJobDescription(e.target.value)}
                 placeholder="Paste the job description you're applying for..."
                 rows={8}
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                className="w-full px-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
               />
             </div>
 
@@ -179,21 +179,21 @@ export default function ResumePage() {
           {/* Results Section */}
           <div className="space-y-6">
             {!result ? (
-              <div className="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-200 dark:border-gray-700 text-center">
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-8 border border-slate-200 dark:border-slate-700 text-center">
                 <Sparkles className="w-16 h-16 text-purple-600/20 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
                   Ready to Optimize
                 </h3>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-slate-600 dark:text-slate-400">
                   Upload your resume and paste a job description to get AI-powered optimization suggestions.
                 </p>
               </div>
             ) : (
               <>
                 {/* Match Score */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
                       Match Score
                     </h3>
                     <div className={`text-3xl font-bold ${
@@ -203,7 +203,7 @@ export default function ResumePage() {
                       {result.matchScore || 75}%
                     </div>
                   </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                  <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
                     <div
                       className={`h-3 rounded-full transition-all duration-500 ${
                         (result.matchScore || 75) >= 80 ? 'bg-green-600' :
@@ -215,24 +215,24 @@ export default function ResumePage() {
                 </div>
 
                 {/* Summary */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                   <button
                     onClick={() => toggleSection('summary')}
-                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition"
+                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
                   >
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center space-x-2">
                       <Zap className="w-5 h-5 text-yellow-600" />
                       <span>Summary</span>
                     </h3>
                     {expandedSections.includes('summary') ? (
-                      <ChevronUp className="w-5 h-5 text-gray-500" />
+                      <ChevronUp className="w-5 h-5 text-slate-500" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-500" />
+                      <ChevronDown className="w-5 h-5 text-slate-500" />
                     )}
                   </button>
                   {expandedSections.includes('summary') && (
                     <div className="px-6 pb-4">
-                      <p className="text-gray-700 dark:text-gray-300">
+                      <p className="text-slate-700 dark:text-slate-300">
                         {result.summary || 'Your resume shows strong alignment with the job requirements. Focus on highlighting your technical skills and quantifying your achievements for better impact.'}
                       </p>
                     </div>
@@ -240,19 +240,19 @@ export default function ResumePage() {
                 </div>
 
                 {/* Keywords */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                   <button
                     onClick={() => toggleSection('keywords')}
-                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition"
+                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
                   >
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center space-x-2">
                       <Target className="w-5 h-5 text-blue-600" />
                       <span>Missing Keywords</span>
                     </h3>
                     {expandedSections.includes('keywords') ? (
-                      <ChevronUp className="w-5 h-5 text-gray-500" />
+                      <ChevronUp className="w-5 h-5 text-slate-500" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-500" />
+                      <ChevronDown className="w-5 h-5 text-slate-500" />
                     )}
                   </button>
                   {expandedSections.includes('keywords') && (
@@ -272,19 +272,19 @@ export default function ResumePage() {
                 </div>
 
                 {/* Improvements */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                   <button
                     onClick={() => toggleSection('improvements')}
-                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition"
+                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
                   >
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center space-x-2">
                       <Check className="w-5 h-5 text-green-600" />
                       <span>Suggested Improvements</span>
                     </h3>
                     {expandedSections.includes('improvements') ? (
-                      <ChevronUp className="w-5 h-5 text-gray-500" />
+                      <ChevronUp className="w-5 h-5 text-slate-500" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-500" />
+                      <ChevronDown className="w-5 h-5 text-slate-500" />
                     )}
                   </button>
                   {expandedSections.includes('improvements') && (
@@ -297,7 +297,7 @@ export default function ResumePage() {
                       ]).map((improvement: string, index: number) => (
                         <div key={index} className="flex items-start space-x-3">
                           <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                          <span className="text-gray-700 dark:text-gray-300">{improvement}</span>
+                          <span className="text-slate-700 dark:text-slate-300">{improvement}</span>
                         </div>
                       ))}
                     </div>
@@ -308,7 +308,7 @@ export default function ResumePage() {
                 <div className="flex space-x-4">
                   <button
                     onClick={() => copyToClipboard(JSON.stringify(result, null, 2))}
-                    className="flex-1 py-3 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center justify-center space-x-2 transition"
+                    className="flex-1 py-3 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center justify-center space-x-2 transition"
                   >
                     <Copy className="w-5 h-5" />
                     <span>Copy Results</span>

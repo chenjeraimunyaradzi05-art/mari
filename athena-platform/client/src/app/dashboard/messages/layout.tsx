@@ -11,7 +11,7 @@ export default function MessagesLayout({
   return (
     <div className="flex h-[calc(100vh-64px)] overflow-hidden"> 
       {/* Assuming 64px is header height, adjust if needed */}
-      <div className="w-80 flex-shrink-0 h-full border-r border-gray-200 dark:border-gray-800">
+      <div className="w-80 flex-shrink-0 h-full border-r border-slate-200 dark:border-slate-800">
         <ConversationList />
       </div>
       <div className="flex-1 h-full relative">

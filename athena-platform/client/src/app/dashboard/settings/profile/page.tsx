@@ -103,10 +103,10 @@ export default function ProfileSettingsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
             Profile Settings
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Update your personal information and public profile
           </p>
         </div>
@@ -140,16 +140,16 @@ export default function ProfileSettingsPage() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Women-only Verification */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
             Women-only Verification
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
             Paid subscribers can request verification to receive a trusted badge.
           </p>
           <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Status:{' '}
-              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
                 {user?.womanVerificationStatus || 'UNVERIFIED'}
               </span>
             </span>
@@ -175,7 +175,7 @@ export default function ProfileSettingsPage() {
         </div>
         {/* Avatar Section */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
             Profile Photo
           </h2>
           <div className="flex items-center space-x-6">
@@ -204,14 +204,14 @@ export default function ProfileSettingsPage() {
               )}
             </div>
             <div>
-              <h3 className="font-medium text-gray-900 dark:text-white">
+              <h3 className="font-medium text-slate-900 dark:text-white">
                 {user?.firstName} {user?.lastName}
               </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 {user?.persona ? PERSONA_LABELS[user.persona] : 'ATHENA Member'}
               </p>
               {isEditing && (
-                <p className="text-xs text-gray-400 mt-2">
+                <p className="text-xs text-slate-400 mt-2">
                   JPG, PNG or GIF. Max 5MB.
                 </p>
               )}
@@ -221,20 +221,20 @@ export default function ProfileSettingsPage() {
 
         {/* Basic Information */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
             Basic Information
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 First Name
               </label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('firstName', { required: 'First name is required' })}
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
               {errors.firstName && (
@@ -242,15 +242,15 @@ export default function ProfileSettingsPage() {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Last Name
               </label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('lastName', { required: 'Last name is required' })}
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
               {errors.lastName && (
@@ -258,21 +258,21 @@ export default function ProfileSettingsPage() {
               )}
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Headline
               </label>
               <div className="relative">
-                <Briefcase className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Briefcase className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('headline')}
                   placeholder="e.g. Senior Product Manager at Tech Corp"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Bio
               </label>
               <textarea
@@ -280,34 +280,34 @@ export default function ProfileSettingsPage() {
                 rows={4}
                 placeholder="Tell us about yourself..."
                 disabled={!isEditing}
-                className="input w-full disabled:bg-gray-50 dark:disabled:bg-gray-800 resize-none"
+                className="input w-full disabled:bg-slate-50 dark:disabled:bg-slate-800 resize-none"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Location
               </label>
               <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('location')}
                   placeholder="City, Country"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Phone
               </label>
               <div className="relative">
-                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('phone')}
                   placeholder="+1 (555) 000-0000"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
@@ -316,7 +316,7 @@ export default function ProfileSettingsPage() {
 
         {/* Skills */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
             Skills
           </h2>
           <div className="space-y-4">
@@ -341,7 +341,7 @@ export default function ProfileSettingsPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 No skills added yet.
               </p>
             )}
@@ -376,63 +376,63 @@ export default function ProfileSettingsPage() {
 
         {/* Social Links */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
             Social Links
           </h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Website
               </label>
               <div className="relative">
-                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('website')}
                   placeholder="https://yourwebsite.com"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 LinkedIn
               </label>
               <div className="relative">
-                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('linkedinUrl')}
                   placeholder="https://linkedin.com/in/yourprofile"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Twitter
               </label>
               <div className="relative">
-                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('twitterUrl')}
                   placeholder="https://twitter.com/yourhandle"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 GitHub
               </label>
               <div className="relative">
-                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <LinkIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   {...register('githubUrl')}
                   placeholder="https://github.com/yourusername"
                   disabled={!isEditing}
-                  className="input pl-10 w-full disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  className="input pl-10 w-full disabled:bg-slate-50 dark:disabled:bg-slate-800"
                 />
               </div>
             </div>
@@ -441,22 +441,22 @@ export default function ProfileSettingsPage() {
 
         {/* Email (read-only) */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
             Account Email
           </h2>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               Email Address
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
                 value={user?.email || ''}
                 disabled
-                className="input pl-10 w-full bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
+                className="input pl-10 w-full bg-slate-50 dark:bg-slate-800 cursor-not-allowed"
               />
             </div>
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-slate-500 mt-2">
               To change your email, please contact support.
             </p>
           </div>

@@ -207,10 +207,10 @@ export default function SecuritySettingsPage() {
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Security Settings
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Manage your password and account security
         </p>
       </div>
@@ -222,10 +222,10 @@ export default function SecuritySettingsPage() {
             <Key className="w-5 h-5 text-primary-600" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               Change Password
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Update your password to keep your account secure
             </p>
           </div>
@@ -233,7 +233,7 @@ export default function SecuritySettingsPage() {
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               Current Password
             </label>
             <div className="relative">
@@ -245,7 +245,7 @@ export default function SecuritySettingsPage() {
               <button
                 type="button"
                 onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
                 {showCurrentPassword ? (
                   <EyeOff className="w-4 h-4" />
@@ -260,7 +260,7 @@ export default function SecuritySettingsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               New Password
             </label>
             <div className="relative">
@@ -282,7 +282,7 @@ export default function SecuritySettingsPage() {
               <button
                 type="button"
                 onClick={() => setShowNewPassword(!showNewPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
                 {showNewPassword ? (
                   <EyeOff className="w-4 h-4" />
@@ -297,7 +297,7 @@ export default function SecuritySettingsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               Confirm New Password
             </label>
             <div className="relative">
@@ -313,7 +313,7 @@ export default function SecuritySettingsPage() {
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
                 {showConfirmPassword ? (
                   <EyeOff className="w-4 h-4" />
@@ -345,10 +345,10 @@ export default function SecuritySettingsPage() {
               <Smartphone className="w-5 h-5 text-primary-600" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Two-Factor Authentication
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Add an extra layer of security to your account
               </p>
             </div>
@@ -371,14 +371,14 @@ export default function SecuritySettingsPage() {
         </div>
 
         {isLoadingTwoFactorStatus ? (
-          <div className="mt-4 h-16 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+          <div className="mt-4 h-16 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
         ) : isTwoFactorStatusError ? (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
             Two-factor status could not be loaded.
           </div>
         ) : isTwoFactorEnabled ? (
-          <div className="mt-4 space-y-3 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+          <div className="mt-4 space-y-3 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
               Enabled{twoFactorStatus?.enabledAt ? ` on ${formatDate(twoFactorStatus.enabledAt)}` : ''}.
             </p>
             <div className="grid gap-3 md:grid-cols-2">
@@ -418,12 +418,12 @@ export default function SecuritySettingsPage() {
             </button>
           </div>
         ) : twoFactorSetup ? (
-          <div className="mt-4 space-y-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+          <div className="mt-4 space-y-4 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white">
+              <p className="text-sm font-medium text-slate-900 dark:text-white">
                 {twoFactorSetup.issuer} / {twoFactorSetup.accountName}
               </p>
-              <p className="mt-2 break-all rounded-lg bg-gray-50 p-3 font-mono text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <p className="mt-2 break-all rounded-lg bg-slate-50 p-3 font-mono text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 {twoFactorSetup.secret}
               </p>
               <a
@@ -472,10 +472,10 @@ export default function SecuritySettingsPage() {
               <Monitor className="w-5 h-5 text-primary-600" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Active Sessions
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Manage your active sessions across devices
               </p>
             </div>
@@ -495,7 +495,7 @@ export default function SecuritySettingsPage() {
 
         <div className="space-y-4">
           {isLoadingSessions ? (
-            <div className="h-20 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+            <div className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
           ) : isSessionsError ? (
             <div className="p-4 border border-red-200 bg-red-50 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300 rounded-lg">
               Active sessions could not be loaded.
@@ -504,12 +504,12 @@ export default function SecuritySettingsPage() {
             sessions.map((session: SessionItem) => (
               <div
                 key={session.id}
-                className="flex items-start justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg"
+                className="flex items-start justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg"
               >
                 <div className="flex items-start space-x-3">
-                  <Monitor className="w-5 h-5 text-gray-400 mt-0.5" />
+                  <Monitor className="w-5 h-5 text-slate-400 mt-0.5" />
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="font-medium text-slate-900 dark:text-white">
                       {session.device || 'Unknown Device'}
                       {session.isCurrent && (
                         <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full">
@@ -517,7 +517,7 @@ export default function SecuritySettingsPage() {
                         </span>
                       )}
                     </p>
-                    <div className="flex items-center space-x-3 mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center space-x-3 mt-1 text-sm text-slate-500 dark:text-slate-400">
                       <span className="flex items-center">
                         <MapPin className="w-3 h-3 mr-1" />
                         {session.location || 'Unknown location'}
@@ -541,7 +541,7 @@ export default function SecuritySettingsPage() {
               </div>
             ))
           ) : (
-            <div className="p-4 border border-dashed border-gray-200 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400 rounded-lg">
+            <div className="p-4 border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400 rounded-lg">
               No active session records were returned.
             </div>
           )}
@@ -556,7 +556,7 @@ export default function SecuritySettingsPage() {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-red-600">Danger Zone</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Irreversible and destructive actions
             </p>
           </div>
@@ -564,10 +564,10 @@ export default function SecuritySettingsPage() {
 
         <div className="flex items-center justify-between p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
           <div>
-            <p className="font-medium text-gray-900 dark:text-white">
+            <p className="font-medium text-slate-900 dark:text-white">
               Delete Account
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Permanently delete your account and all data
             </p>
           </div>

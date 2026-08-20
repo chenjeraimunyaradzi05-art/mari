@@ -161,7 +161,7 @@ export default function ApprenticeshipsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Hero Section */}
       <div className="bg-gradient-to-br from-primary-600 to-primary-800 text-white">
         <div className="container mx-auto px-4 py-12">
@@ -196,7 +196,7 @@ export default function ApprenticeshipsPage() {
         {/* Featured Section */}
         {featuredApprenticeships.length > 0 && (
           <section className="mb-12">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">
               Featured Opportunities
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -227,10 +227,10 @@ export default function ApprenticeshipsPage() {
         {/* Results */}
         <section>
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
               All Apprenticeships
             </h2>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-slate-500">
               {apprenticeships.length} opportunities found
             </span>
           </div>
@@ -240,12 +240,12 @@ export default function ApprenticeshipsPage() {
               <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
             </div>
           ) : apprenticeships.length === 0 ? (
-            <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-xl">
-              <GraduationCap className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-xl">
+              <GraduationCap className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
                 No apprenticeships found
               </h3>
-              <p className="text-gray-500 mb-4">
+              <p className="text-slate-500 mb-4">
                 Try adjusting your filters to see more opportunities
               </p>
               <Button variant="outline" onClick={() => setFilters({

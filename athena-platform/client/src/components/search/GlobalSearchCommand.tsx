@@ -211,14 +211,14 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
               </div>
               <button
                 onClick={() => onOpenChange(false)}
-                className="rounded-lg p-1.5 text-gray-400 transition hover:bg-white hover:text-gray-600 dark:hover:bg-slate-900 dark:hover:text-gray-200"
+                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-slate-600 dark:hover:bg-slate-900 dark:hover:text-slate-200"
                 aria-label="Close search"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:border-primary-300 focus-within:ring-2 focus-within:ring-primary-100 dark:border-slate-800 dark:bg-slate-900 dark:focus-within:border-primary-400/50 dark:focus-within:ring-primary-400/10">
-              <Search className="h-4 w-4 text-gray-400" />
+              <Search className="h-4 w-4 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -228,7 +228,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
                     submitSearch();
                   }
                 }}
-                className="w-full bg-transparent px-3 text-sm text-gray-900 outline-none dark:text-white"
+                className="w-full bg-transparent px-3 text-sm text-slate-900 outline-none dark:text-white"
                 placeholder="Search people, jobs, courses, mentors, videos..."
                 autoFocus
               />
@@ -275,7 +275,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
                   ))}
                 </div>
                 <div className="mt-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-400">Popular searches</p>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Popular searches</p>
                   <div className="flex flex-wrap gap-2">
                     {popularSearches.map((suggestion) => (
                       <button
@@ -311,7 +311,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
 
             {Object.entries(grouped).map(([group, items]) => (
               <div key={group} className="mb-4">
-                <p className="text-xs uppercase tracking-widest text-gray-400 mb-2">
+                <p className="text-xs uppercase tracking-widest text-slate-400 mb-2">
                   {group}
                 </p>
                 <div className="space-y-2">
@@ -322,7 +322,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
                         key={item.id}
                         onClick={() => handleSelect(item)}
                         className={cn(
-                          'w-full flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm transition hover:bg-gray-50 dark:hover:bg-gray-800',
+                          'w-full flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm transition hover:bg-slate-50 dark:hover:bg-slate-800',
                           'focus:outline-none focus:ring-2 focus:ring-primary-500'
                         )}
                       >
@@ -330,9 +330,9 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
                           <Icon className="w-4 h-4" />
                         </span>
                         <span className="flex-1 min-w-0">
-                          <span className="block text-gray-900 dark:text-white truncate">{item.title}</span>
+                          <span className="block text-slate-900 dark:text-white truncate">{item.title}</span>
                           {item.subtitle && (
-                            <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">
+                            <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
                               {item.subtitle}
                             </span>
                           )}
@@ -346,13 +346,13 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
 
             {suggestions.length > 0 && (
               <div className="mt-4">
-                <p className="text-xs uppercase tracking-widest text-gray-400 mb-2">Suggestions</p>
+                <p className="text-xs uppercase tracking-widest text-slate-400 mb-2">Suggestions</p>
                 <div className="flex flex-wrap gap-2">
                   {suggestions.map((suggestion) => (
                     <button
                       key={suggestion}
                       onClick={() => setQuery(suggestion)}
-                      className="px-3 py-1 rounded-full border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      className="px-3 py-1 rounded-full border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
                     >
                       {suggestion}
                     </button>

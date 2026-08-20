@@ -14,7 +14,7 @@ export default function FormationPage() {
       </p>
 
       <div className="mt-8 grid gap-4 md:grid-cols-2">
-        <Link href="/dashboard/formation" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/dashboard/formation" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Sparkles className="h-4 w-4" /> Formation Studio
           </div>
@@ -24,7 +24,7 @@ export default function FormationPage() {
           </span>
         </Link>
 
-        <Link href="/finances" className="group rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 hover:shadow-md transition">
+        <Link href="/finances" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Wallet className="h-4 w-4" /> Business finances
           </div>

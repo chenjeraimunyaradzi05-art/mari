@@ -167,10 +167,10 @@ function BillingContent() {
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Billing & Subscription
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Manage your subscription and billing information
         </p>
       </div>
@@ -183,19 +183,19 @@ function BillingContent() {
               'p-3 rounded-xl',
               isPremium 
                 ? 'bg-gradient-to-br from-primary-500 to-secondary-500' 
-                : 'bg-gray-100 dark:bg-gray-800'
+                : 'bg-slate-100 dark:bg-slate-800'
             )}>
               {isPremium ? (
                 <Crown className="w-6 h-6 text-white" />
               ) : (
-                <Sparkles className="w-6 h-6 text-gray-500" />
+                <Sparkles className="w-6 h-6 text-slate-500" />
               )}
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 {isPremium ? 'ATHENA Pro' : 'Free Plan'}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 {isPremium 
                   ? 'You have access to all premium features' 
                   : 'Upgrade to unlock all features'}
@@ -214,29 +214,29 @@ function BillingContent() {
         </div>
 
         {isPremium && subscription && (
-          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Plan</p>
-                <p className="font-medium text-gray-900 dark:text-white">
+                <p className="text-sm text-slate-500 dark:text-slate-400">Plan</p>
+                <p className="font-medium text-slate-900 dark:text-white">
                   {subscription.plan || 'Pro Monthly'}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Price</p>
-                <p className="font-medium text-gray-900 dark:text-white">
+                <p className="text-sm text-slate-500 dark:text-slate-400">Price</p>
+                <p className="font-medium text-slate-900 dark:text-white">
                   {formatCurrency(subscription.amount || 29)}/month
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
                 <p className="font-medium text-green-600 dark:text-green-400">
                   {subscription.status || 'Active'}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Next billing</p>
-                <p className="font-medium text-gray-900 dark:text-white">
+                <p className="text-sm text-slate-500 dark:text-slate-400">Next billing</p>
+                <p className="font-medium text-slate-900 dark:text-white">
                   {formatDate(subscription.currentPeriodEnd) || 'N/A'}
                 </p>
               </div>
@@ -248,10 +248,10 @@ function BillingContent() {
       {/* Available Payment Methods */}
       <div className="card">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Available payment methods
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             Methods currently returned by the payment routing service for {paymentRegion}.
           </p>
         </div>
@@ -260,7 +260,7 @@ function BillingContent() {
             [1, 2].map((item) => (
               <div
                 key={item}
-                className="h-20 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse"
+                className="h-20 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse"
               />
             ))
           ) : paymentMethodsError ? (
@@ -271,15 +271,15 @@ function BillingContent() {
             paymentMethods.map((method: PaymentMethod) => (
               <div
                 key={`${method.provider}-${method.type}`}
-                className="flex items-start justify-between rounded-lg border border-gray-200 dark:border-gray-800 p-4"
+                className="flex items-start justify-between rounded-lg border border-slate-200 dark:border-slate-800 p-4"
               >
                 <div className="flex items-start gap-3">
-                  <div className="rounded-lg bg-gray-100 p-2 dark:bg-gray-800">
-                    <CreditCard className="h-5 w-5 text-gray-500" />
+                  <div className="rounded-lg bg-slate-100 p-2 dark:bg-slate-800">
+                    <CreditCard className="h-5 w-5 text-slate-500" />
                   </div>
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{method.name}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="font-medium text-slate-900 dark:text-white">{method.name}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
                       {paymentTypeLabels[method.type] || method.type}
                     </p>
                   </div>
@@ -290,7 +290,7 @@ function BillingContent() {
               </div>
             ))
           ) : (
-            <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+            <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               No payment methods are configured for this region.
             </div>
           )}
@@ -299,7 +299,7 @@ function BillingContent() {
 
       {/* Available Plans */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Available Plans
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -315,7 +315,7 @@ function BillingContent() {
                 className={cn(
                   'card relative overflow-hidden',
                   plan.popular && 'border-2 border-primary-500',
-                  isCurrentPlan && 'ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-gray-900'
+                  isCurrentPlan && 'ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-slate-900'
                 )}
               >
                 {plan.popular && (
@@ -324,19 +324,19 @@ function BillingContent() {
                   </div>
                 )}
                 <div className="mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
                     {plan.name}
                   </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
                     {plan.description}
                   </p>
                 </div>
                 <div className="mb-6">
-                  <span className="text-3xl font-bold text-gray-900 dark:text-white">
+                  <span className="text-3xl font-bold text-slate-900 dark:text-white">
                     {plan.price === 0 ? 'Free' : formatCurrency(plan.price)}
                   </span>
                   {plan.price > 0 && (
-                    <span className="text-gray-500 dark:text-gray-400">
+                    <span className="text-slate-500 dark:text-slate-400">
                       /{plan.interval}
                     </span>
                   )}
@@ -345,7 +345,7 @@ function BillingContent() {
                   {plan.features.map((feature, index) => (
                     <li key={index} className="flex items-start space-x-2">
                       <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                      <span className="text-sm text-gray-600 dark:text-gray-300">
+                      <span className="text-sm text-slate-600 dark:text-slate-300">
                         {feature}
                       </span>
                     </li>
@@ -387,19 +387,19 @@ function BillingContent() {
       {/* Payment Method */}
       {isPremium && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
             Payment Method
           </h2>
-          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+          <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
             <div className="flex items-center space-x-4">
-              <div className="p-2 bg-white dark:bg-gray-700 rounded-lg shadow-sm">
-                <CreditCard className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+              <div className="p-2 bg-white dark:bg-slate-700 rounded-lg shadow-sm">
+                <CreditCard className="w-6 h-6 text-slate-600 dark:text-slate-400" />
               </div>
               <div>
-                <p className="font-medium text-gray-900 dark:text-white">
+                <p className="font-medium text-slate-900 dark:text-white">
                   {subscription?.cardLast4 ? `•••• •••• •••• ${subscription.cardLast4}` : 'No saved payment method'}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   {subscription?.cardExpiry ? `Expires ${subscription.cardExpiry}` : 'Use the billing portal to add or update a card'}
                 </p>
               </div>
@@ -417,7 +417,7 @@ function BillingContent() {
       {/* Billing History */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Billing History
           </h2>
           {isPremium && (
@@ -434,34 +434,34 @@ function BillingContent() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                     Date
                   </th>
-                  <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
+                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                     Description
                   </th>
-                  <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
+                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                     Amount
                   </th>
-                  <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
+                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                     Status
                   </th>
-                  <th className="text-right py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
+                  <th className="text-right py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
                     Invoice
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {subscription.invoices.map((invoice: any) => (
-                  <tr key={invoice.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-3 text-sm text-gray-900 dark:text-white">
+                  <tr key={invoice.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-3 text-sm text-slate-900 dark:text-white">
                       {formatDate(invoice.date)}
                     </td>
-                    <td className="py-3 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-3 text-sm text-slate-600 dark:text-slate-300">
                       {invoice.description || 'ATHENA Pro - Monthly'}
                     </td>
-                    <td className="py-3 text-sm text-gray-900 dark:text-white">
+                    <td className="py-3 text-sm text-slate-900 dark:text-white">
                       {formatCurrency(invoice.amount)}
                     </td>
                     <td className="py-3">
@@ -485,7 +485,7 @@ function BillingContent() {
             </table>
           </div>
         ) : (
-          <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+          <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
             No billing history available
           </p>
         )}
@@ -494,11 +494,11 @@ function BillingContent() {
       {/* Cancel Subscription Modal */}
       {showCancelModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
               Cancel Subscription
             </h3>
-            <p className="text-gray-500 dark:text-gray-400 mb-6">
+            <p className="text-slate-500 dark:text-slate-400 mb-6">
               Are you sure you want to cancel your subscription? You'll lose access to
               premium features at the end of your current billing period.
             </p>

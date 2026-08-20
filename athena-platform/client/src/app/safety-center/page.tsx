@@ -205,7 +205,7 @@ export default function SafetyCenterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       <div className="max-w-6xl mx-auto px-6 py-10">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
           <div>
@@ -214,8 +214,8 @@ export default function SafetyCenterPage() {
                 <ShieldCheck className="w-6 h-6 text-indigo-600" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">Safety Center</h1>
-                <p className="text-gray-600">Your central hub for safety tools, reports, and support.</p>
+                <h1 className="text-3xl font-bold text-slate-900">Safety Center</h1>
+                <p className="text-slate-600">Your central hub for safety tools, reports, and support.</p>
               </div>
             </div>
           </div>
@@ -270,19 +270,19 @@ export default function SafetyCenterPage() {
                   <CardDescription>Track the status of your submitted reports.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {isLoading && <p className="text-sm text-gray-500">Loading reports...</p>}
+                  {isLoading && <p className="text-sm text-slate-500">Loading reports...</p>}
                   {!isLoading && reports.length === 0 && (
-                    <p className="text-sm text-gray-500">No reports submitted yet.</p>
+                    <p className="text-sm text-slate-500">No reports submitted yet.</p>
                   )}
                   {reports.map((report) => (
                     <div
                       key={report.id}
-                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border border-gray-100 rounded-xl"
+                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border border-slate-100 rounded-xl"
                     >
                       <div>
-                        <p className="text-sm text-gray-500">{report.targetType.toUpperCase()}</p>
-                        <h3 className="text-lg font-semibold text-gray-900">{report.reason}</h3>
-                        <p className="text-sm text-gray-500">Reported on {new Date(report.createdAt).toLocaleDateString()}</p>
+                        <p className="text-sm text-slate-500">{report.targetType.toUpperCase()}</p>
+                        <h3 className="text-lg font-semibold text-slate-900">{report.reason}</h3>
+                        <p className="text-sm text-slate-500">Reported on {new Date(report.createdAt).toLocaleDateString()}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <Badge
@@ -291,7 +291,7 @@ export default function SafetyCenterPage() {
                             report.status === 'ACTION_TAKEN'
                               ? 'bg-green-100 text-green-700'
                               : report.status === 'CLOSED'
-                              ? 'bg-gray-100 text-gray-700'
+                              ? 'bg-slate-100 text-slate-700'
                               : 'bg-yellow-100 text-yellow-700'
                           }
                         >
@@ -315,8 +315,8 @@ export default function SafetyCenterPage() {
                   <div className="flex items-center gap-3">
                     <Clock className="w-5 h-5 text-yellow-500" />
                     <div>
-                      <p className="text-sm text-gray-500">Open reports</p>
-                      <p className="text-xl font-semibold text-gray-900">
+                      <p className="text-sm text-slate-500">Open reports</p>
+                      <p className="text-xl font-semibold text-slate-900">
                         {reports.filter((item) => item.status !== 'CLOSED' && item.status !== 'ACTION_TAKEN').length}
                       </p>
                     </div>
@@ -324,8 +324,8 @@ export default function SafetyCenterPage() {
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="w-5 h-5 text-green-500" />
                     <div>
-                      <p className="text-sm text-gray-500">Resolved reports</p>
-                      <p className="text-xl font-semibold text-gray-900">
+                      <p className="text-sm text-slate-500">Resolved reports</p>
+                      <p className="text-xl font-semibold text-slate-900">
                         {reports.filter((item) => item.status === 'CLOSED' || item.status === 'ACTION_TAKEN').length}
                       </p>
                     </div>
@@ -346,21 +346,21 @@ export default function SafetyCenterPage() {
                   <CardDescription>Manage who can contact you on ATHENA.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {isLoading && <p className="text-sm text-gray-500">Loading blocks...</p>}
+                  {isLoading && <p className="text-sm text-slate-500">Loading blocks...</p>}
                   {!isLoading && blockedUsers.length === 0 && (
-                    <p className="text-sm text-gray-500">No blocked users yet.</p>
+                    <p className="text-sm text-slate-500">No blocked users yet.</p>
                   )}
                   {blockedUsers.map((user) => (
                     <div
                       key={user.id}
-                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border border-gray-100 rounded-xl"
+                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border border-slate-100 rounded-xl"
                     >
                       <div>
-                        <h3 className="text-lg font-semibold text-gray-900">
+                        <h3 className="text-lg font-semibold text-slate-900">
                           {user.user?.displayName || user.blockedUserId}
                         </h3>
-                        {user.reason && <p className="text-sm text-gray-500">Reason: {user.reason}</p>}
-                        <p className="text-sm text-gray-500">Blocked on {new Date(user.createdAt).toLocaleDateString()}</p>
+                        {user.reason && <p className="text-sm text-slate-500">Reason: {user.reason}</p>}
+                        <p className="text-sm text-slate-500">Blocked on {new Date(user.createdAt).toLocaleDateString()}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Button variant="outline" size="sm" onClick={() => handleUnblock(user.blockedUserId)}>
@@ -379,10 +379,10 @@ export default function SafetyCenterPage() {
                   <CardDescription>Prevent unwanted messages with safeguards.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Allow Messages</p>
-                      <p className="text-xs text-gray-500">Control who can message you.</p>
+                      <p className="text-sm font-semibold text-slate-900">Allow Messages</p>
+                      <p className="text-xs text-slate-500">Control who can message you.</p>
                     </div>
                     <input
                       type="checkbox"
@@ -391,10 +391,10 @@ export default function SafetyCenterPage() {
                       className="h-5 w-5"
                     />
                   </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Safe Mode</p>
-                      <p className="text-xs text-gray-500">Enable high safety protections.</p>
+                      <p className="text-sm font-semibold text-slate-900">Safe Mode</p>
+                      <p className="text-xs text-slate-500">Enable high safety protections.</p>
                     </div>
                     <input
                       type="checkbox"
@@ -403,10 +403,10 @@ export default function SafetyCenterPage() {
                       className="h-5 w-5"
                     />
                   </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Hide from Search</p>
-                      <p className="text-xs text-gray-500">Hide your profile from discovery.</p>
+                      <p className="text-sm font-semibold text-slate-900">Hide from Search</p>
+                      <p className="text-xs text-slate-500">Hide your profile from discovery.</p>
                     </div>
                     <input
                       type="checkbox"
@@ -493,7 +493,7 @@ export default function SafetyCenterPage() {
       >
         <ModalContent className="space-y-4">
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-gray-700">Target type</label>
+            <label className="text-sm font-medium text-slate-700">Target type</label>
             <select
               value={reportForm.targetType}
               onChange={(event) =>
@@ -502,7 +502,7 @@ export default function SafetyCenterPage() {
                   targetType: event.target.value as ReportTargetType,
                 }))
               }
-              className="w-full rounded-lg border border-gray-200 p-2"
+              className="w-full rounded-lg border border-slate-200 p-2"
             >
               <option value="post">Post</option>
               <option value="video">Video</option>
@@ -513,29 +513,29 @@ export default function SafetyCenterPage() {
             </select>
           </div>
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-gray-700">Target ID (optional)</label>
+            <label className="text-sm font-medium text-slate-700">Target ID (optional)</label>
             <input
               value={reportForm.targetId}
               onChange={(event) => setReportForm((prev) => ({ ...prev, targetId: event.target.value }))}
-              className="w-full rounded-lg border border-gray-200 p-2"
+              className="w-full rounded-lg border border-slate-200 p-2"
             />
           </div>
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-gray-700">Reason</label>
+            <label className="text-sm font-medium text-slate-700">Reason</label>
             <input
               value={reportForm.reason}
               onChange={(event) => setReportForm((prev) => ({ ...prev, reason: event.target.value }))}
               placeholder="e.g. Harassment, spam, impersonation"
-              className="w-full rounded-lg border border-gray-200 p-2"
+              className="w-full rounded-lg border border-slate-200 p-2"
             />
           </div>
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-gray-700">Additional details</label>
+            <label className="text-sm font-medium text-slate-700">Additional details</label>
             <textarea
               value={reportForm.details}
               onChange={(event) => setReportForm((prev) => ({ ...prev, details: event.target.value }))}
               rows={4}
-              className="w-full rounded-lg border border-gray-200 p-2"
+              className="w-full rounded-lg border border-slate-200 p-2"
             />
           </div>
         </ModalContent>
@@ -555,19 +555,19 @@ export default function SafetyCenterPage() {
       >
         <ModalContent className="space-y-4">
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-gray-700">User ID</label>
+            <label className="text-sm font-medium text-slate-700">User ID</label>
             <input
               value={blockForm.blockedUserId}
               onChange={(event) => setBlockForm((prev) => ({ ...prev, blockedUserId: event.target.value }))}
-              className="w-full rounded-lg border border-gray-200 p-2"
+              className="w-full rounded-lg border border-slate-200 p-2"
             />
           </div>
           <div className="grid gap-2">
-            <label className="text-sm font-medium text-gray-700">Reason (optional)</label>
+            <label className="text-sm font-medium text-slate-700">Reason (optional)</label>
             <input
               value={blockForm.reason}
               onChange={(event) => setBlockForm((prev) => ({ ...prev, reason: event.target.value }))}
-              className="w-full rounded-lg border border-gray-200 p-2"
+              className="w-full rounded-lg border border-slate-200 p-2"
             />
           </div>
         </ModalContent>

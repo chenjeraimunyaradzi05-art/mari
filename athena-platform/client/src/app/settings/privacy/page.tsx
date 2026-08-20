@@ -22,29 +22,29 @@ export default function PrivacySettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       <div className="max-w-3xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <Link
             href="/dashboard/settings"
-            className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4"
+            className="inline-flex items-center gap-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Settings
           </Link>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Shield className="w-7 h-7" />
             Privacy Settings
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">
+          <p className="text-slate-600 dark:text-slate-400 mt-2">
             Control your privacy and who can see your information.
           </p>
         </div>
 
         {/* Profile Visibility */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <Eye className="w-5 h-5" />
             Profile Visibility
           </h2>
@@ -59,7 +59,7 @@ export default function PrivacySettingsPage() {
                 className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition ${
                   settings.profileVisibility === option.value
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750'
+                    : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
                 }`}
               >
                 <input
@@ -70,10 +70,10 @@ export default function PrivacySettingsPage() {
                   onChange={(e) => setSettings({ ...settings, profileVisibility: e.target.value })}
                   className="mt-1"
                 />
-                <option.icon className="w-5 h-5 text-gray-500 mt-0.5" />
+                <option.icon className="w-5 h-5 text-slate-500 mt-0.5" />
                 <div>
-                  <div className="font-medium text-gray-900 dark:text-white">{option.label}</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">{option.desc}</div>
+                  <div className="font-medium text-slate-900 dark:text-white">{option.label}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">{option.desc}</div>
                 </div>
               </label>
             ))}
@@ -81,8 +81,8 @@ export default function PrivacySettingsPage() {
         </section>
 
         {/* Contact Information */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <EyeOff className="w-5 h-5" />
             Contact Information Visibility
           </h2>
@@ -92,10 +92,10 @@ export default function PrivacySettingsPage() {
               { key: 'showPhone', label: 'Show phone number', desc: 'Display your phone number on your profile' },
               { key: 'showLocation', label: 'Show location', desc: 'Display your city/country on your profile' },
             ].map((item) => (
-              <div key={item.key} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 rounded-lg">
+              <div key={item.key} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
                 <div>
-                  <div className="font-medium text-gray-900 dark:text-white">{item.label}</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">{item.desc}</div>
+                  <div className="font-medium text-slate-900 dark:text-white">{item.label}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">{item.desc}</div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -104,7 +104,7 @@ export default function PrivacySettingsPage() {
                     onChange={(e) => setSettings({ ...settings, [item.key]: e.target.checked })}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-primary-600"></div>
                 </label>
               </div>
             ))}
@@ -112,8 +112,8 @@ export default function PrivacySettingsPage() {
         </section>
 
         {/* Activity & Presence */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <Users className="w-5 h-5" />
             Activity & Presence
           </h2>
@@ -125,10 +125,10 @@ export default function PrivacySettingsPage() {
               { key: 'showInMentorSearch', label: 'Appear in mentor search', desc: 'Let mentees find you in search results' },
               { key: 'allowIndexing', label: 'Allow search engine indexing', desc: 'Let your profile appear in Google search results' },
             ].map((item) => (
-              <div key={item.key} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 rounded-lg">
+              <div key={item.key} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
                 <div>
-                  <div className="font-medium text-gray-900 dark:text-white">{item.label}</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">{item.desc}</div>
+                  <div className="font-medium text-slate-900 dark:text-white">{item.label}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">{item.desc}</div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -137,7 +137,7 @@ export default function PrivacySettingsPage() {
                     onChange={(e) => setSettings({ ...settings, [item.key]: e.target.checked })}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-primary-600"></div>
                 </label>
               </div>
             ))}
@@ -145,34 +145,34 @@ export default function PrivacySettingsPage() {
         </section>
 
         {/* Data & Account */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <UserX className="w-5 h-5" />
             Data & Account
           </h2>
           <div className="space-y-4">
             <Link
               href="/privacy-center"
-              className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+              className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition"
             >
               <div className="flex items-center gap-3">
                 <Download className="w-5 h-5 text-primary-600" />
                 <div>
-                  <div className="font-medium text-gray-900 dark:text-white">Download your data</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Get a copy of all your data</div>
+                  <div className="font-medium text-slate-900 dark:text-white">Download your data</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Get a copy of all your data</div>
                 </div>
               </div>
               <span className="text-primary-600">→</span>
             </Link>
             <Link
               href="/settings/privacy/gdpr"
-              className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+              className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition"
             >
               <div className="flex items-center gap-3">
                 <Shield className="w-5 h-5 text-primary-600" />
                 <div>
-                  <div className="font-medium text-gray-900 dark:text-white">GDPR rights</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Manage your data protection rights</div>
+                  <div className="font-medium text-slate-900 dark:text-white">GDPR rights</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Manage your data protection rights</div>
                 </div>
               </div>
               <span className="text-primary-600">→</span>
@@ -194,7 +194,7 @@ export default function PrivacySettingsPage() {
         <div className="flex justify-end gap-4">
           <Link
             href="/dashboard/settings"
-            className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+            className="px-6 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
           >
             Cancel
           </Link>

@@ -28,32 +28,32 @@ export default function PaywallGate({
 
   if (!isPro) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 text-center bg-gray-50 dark:bg-gray-800/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+      <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
         <div className="bg-primary-100 dark:bg-primary-900/30 p-4 rounded-full mb-6 relative">
           <Zap className="w-8 h-8 text-primary-600 dark:text-primary-400" />
-          <div className="absolute -top-1 -right-1 bg-white dark:bg-gray-800 rounded-full p-1 shadow-sm">
-            <Lock className="w-4 h-4 text-gray-500" />
+          <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-800 rounded-full p-1 shadow-sm">
+            <Lock className="w-4 h-4 text-slate-500" />
           </div>
         </div>
         
-        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+        <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
           Unlock {featureName}
         </h3>
         
-        <p className="text-gray-600 dark:text-gray-300 max-w-md mb-8">
+        <p className="text-slate-600 dark:text-slate-300 max-w-md mb-8">
           Upgrade to ATHENA Pro to access AI-powered tools like the {featureName}, unlimited job applications, and more.
         </p>
 
         <ul className="text-left space-y-3 mb-8 mx-auto max-w-xs">
-           <li className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+           <li className="flex items-center text-sm text-slate-600 dark:text-slate-400">
               <Check className="w-4 h-4 mr-2 text-green-500" />
               AI Resume Optimization
            </li>
-           <li className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+           <li className="flex items-center text-sm text-slate-600 dark:text-slate-400">
               <Check className="w-4 h-4 mr-2 text-green-500" />
               Interview Coach
            </li>
-           <li className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+           <li className="flex items-center text-sm text-slate-600 dark:text-slate-400">
               <Check className="w-4 h-4 mr-2 text-green-500" />
               Unlimited Applications
            </li>

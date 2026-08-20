@@ -42,7 +42,7 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
     editorProps: {
       attributes: {
         class:
-          'min-h-[160px] px-4 py-3 text-sm text-gray-800 dark:text-gray-200 focus:outline-none prose prose-sm dark:prose-invert max-w-none',
+          'min-h-[160px] px-4 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none prose prose-sm dark:prose-invert max-w-none',
       },
     },
   });
@@ -56,14 +56,14 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
   }, [value, editor]);
 
   return (
-    <div className={cn('rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900', className)}>
-      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-3 py-2">
+    <div className={cn('rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900', className)}>
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
         <button
           type="button"
           onClick={() => editor?.chain().focus().toggleBold().run()}
           className={cn(
-            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
-            editor?.isActive('bold') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+            'p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800',
+            editor?.isActive('bold') && 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white'
           )}
           aria-label="Bold"
           disabled={!editor}
@@ -74,8 +74,8 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
           type="button"
           onClick={() => editor?.chain().focus().toggleItalic().run()}
           className={cn(
-            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
-            editor?.isActive('italic') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+            'p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800',
+            editor?.isActive('italic') && 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white'
           )}
           aria-label="Italic"
           disabled={!editor}
@@ -86,8 +86,8 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
           type="button"
           onClick={() => editor?.chain().focus().toggleUnderline().run()}
           className={cn(
-            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
-            editor?.isActive('underline') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+            'p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800',
+            editor?.isActive('underline') && 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white'
           )}
           aria-label="Underline"
           disabled={!editor}
@@ -98,8 +98,8 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
           type="button"
           onClick={() => editor?.chain().focus().toggleBulletList().run()}
           className={cn(
-            'p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800',
-            editor?.isActive('bulletList') && 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+            'p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800',
+            editor?.isActive('bulletList') && 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white'
           )}
           aria-label="Bullet list"
           disabled={!editor}

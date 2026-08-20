@@ -49,16 +49,16 @@ export default function AdminSettingsPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Platform Settings</h1>
-              <p className="text-gray-600 dark:text-gray-400">Configure platform behavior</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Platform Settings</h1>
+              <p className="text-slate-600 dark:text-slate-400">Configure platform behavior</p>
             </div>
           </div>
         </div>
@@ -67,23 +67,23 @@ export default function AdminSettingsPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {settingSections.map((section) => (
-            <div key={section.title} className="bg-white dark:bg-gray-800 rounded-lg shadow">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <div key={section.title} className="bg-white dark:bg-slate-800 rounded-lg shadow">
+              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                    <section.icon className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                  <div className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                    <section.icon className="h-5 w-5 text-slate-600 dark:text-slate-300" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{section.title}</h3>
-                    <p className="text-sm text-gray-500">{section.description}</p>
+                    <h3 className="font-semibold text-slate-900 dark:text-white">{section.title}</h3>
+                    <p className="text-sm text-slate-500">{section.description}</p>
                   </div>
                 </div>
               </div>
               <div className="p-6 space-y-4">
                 {section.items.map((item) => (
                   <div key={item.label} className="flex items-center justify-between">
-                    <span className="text-gray-600 dark:text-gray-400">{item.label}</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{item.value}</span>
+                    <span className="text-slate-600 dark:text-slate-400">{item.label}</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{item.value}</span>
                   </div>
                 ))}
               </div>
@@ -103,26 +103,26 @@ export default function AdminSettingsPage() {
         </div>
 
         {/* Environment Info */}
-        <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Environment Information</h3>
+        <div className="mt-6 bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+          <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Environment Information</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-gray-500">Environment</span>
-              <p className="font-medium text-gray-900 dark:text-white">
+              <span className="text-slate-500">Environment</span>
+              <p className="font-medium text-slate-900 dark:text-white">
                 {process.env.NODE_ENV || 'development'}
               </p>
             </div>
             <div>
-              <span className="text-gray-500">Version</span>
-              <p className="font-medium text-gray-900 dark:text-white">1.0.0</p>
+              <span className="text-slate-500">Version</span>
+              <p className="font-medium text-slate-900 dark:text-white">1.0.0</p>
             </div>
             <div>
-              <span className="text-gray-500">Region</span>
-              <p className="font-medium text-gray-900 dark:text-white">ap-southeast-2</p>
+              <span className="text-slate-500">Region</span>
+              <p className="font-medium text-slate-900 dark:text-white">ap-southeast-2</p>
             </div>
             <div>
-              <span className="text-gray-500">Last Deploy</span>
-              <p className="font-medium text-gray-900 dark:text-white">
+              <span className="text-slate-500">Last Deploy</span>
+              <p className="font-medium text-slate-900 dark:text-white">
                 {new Date().toLocaleDateString()}
               </p>
             </div>

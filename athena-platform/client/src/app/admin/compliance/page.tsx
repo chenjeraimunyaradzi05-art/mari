@@ -90,25 +90,25 @@ export default function AdminCompliancePage() {
   ), [summary, days]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">GDPR & UK Compliance</h1>
-              <p className="text-gray-600 dark:text-gray-400">Consent audits, DSAR activity, and region readiness</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">GDPR & UK Compliance</h1>
+              <p className="text-slate-600 dark:text-slate-400">Consent audits, DSAR activity, and region readiness</p>
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm text-gray-600 dark:text-gray-300">Window (days)</span>
+            <span className="text-sm text-slate-600 dark:text-slate-300">Window (days)</span>
             <Input
               type="number"
               value={days}
@@ -124,14 +124,14 @@ export default function AdminCompliancePage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {cards.map((card) => (
-            <div key={card.label} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <div key={card.label} className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
               <div className="flex items-center gap-4">
                 <div className="bg-primary-100 dark:bg-primary-900/30 p-3 rounded-lg">
                   <card.icon className="h-6 w-6 text-primary-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{card.label}</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{card.label}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {card.value.toLocaleString()}
                   </p>
                 </div>
@@ -140,11 +140,11 @@ export default function AdminCompliancePage() {
           ))}
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Consent Ledger</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Recent consent records by user</p>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Consent Ledger</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Recent consent records by user</p>
             </div>
             <div className="flex items-center gap-3">
               <select
@@ -153,7 +153,7 @@ export default function AdminCompliancePage() {
                   setRegion(e.target.value);
                   setPage(1);
                 }}
-                className="px-3 py-2 border rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="px-3 py-2 border rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               >
                 <option value="">All Regions</option>
                 <option value="UK">United Kingdom</option>
@@ -167,32 +167,32 @@ export default function AdminCompliancePage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
+            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+              <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Region</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Consents</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Updated</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">User</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Region</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Consents</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Updated</th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
                 {consentUsers.map((user) => (
                   <tr key={user.id}>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                    <td className="px-4 py-3 text-sm text-slate-900 dark:text-white">
                       <div className="font-medium">{user.firstName} {user.lastName}</div>
-                      <div className="text-xs text-gray-500">{user.email}</div>
+                      <div className="text-xs text-slate-500">{user.email}</div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{user.region}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{user.region}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                       <div className="flex flex-wrap gap-2">
-                        <span className={user.consentDataProcessing ? 'text-emerald-600' : 'text-gray-400'}>Data</span>
-                        <span className={user.consentCookies ? 'text-emerald-600' : 'text-gray-400'}>Cookies</span>
-                        <span className={user.consentMarketing ? 'text-emerald-600' : 'text-gray-400'}>Marketing</span>
-                        <span className={user.consentDoNotSell ? 'text-amber-600' : 'text-gray-400'}>DNT</span>
+                        <span className={user.consentDataProcessing ? 'text-emerald-600' : 'text-slate-400'}>Data</span>
+                        <span className={user.consentCookies ? 'text-emerald-600' : 'text-slate-400'}>Cookies</span>
+                        <span className={user.consentMarketing ? 'text-emerald-600' : 'text-slate-400'}>Marketing</span>
+                        <span className={user.consentDoNotSell ? 'text-amber-600' : 'text-slate-400'}>DNT</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                       {user.consentUpdatedAt ? new Date(user.consentUpdatedAt).toLocaleDateString() : '—'}
                     </td>
                   </tr>
@@ -210,7 +210,7 @@ export default function AdminCompliancePage() {
             >
               Previous
             </Button>
-            <span className="text-sm text-gray-500">Page {page} of {consentsQuery.data?.pagination.totalPages || 1}</span>
+            <span className="text-sm text-slate-500">Page {page} of {consentsQuery.data?.pagination.totalPages || 1}</span>
             <Button
               variant="outline"
               size="sm"

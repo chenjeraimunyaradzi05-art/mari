@@ -335,7 +335,7 @@ export default function FormationDetailPage() {
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit || submitMutation.isPending || updateMutation.isPending}
-            className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50"
+            className="px-4 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50"
           >
             {submitMutation.isPending ? 'Submitting…' : 'Submit'}
           </button>

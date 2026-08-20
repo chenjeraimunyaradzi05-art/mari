@@ -103,7 +103,7 @@ export function MarketplaceFiltersBar({
       <div className="flex flex-wrap gap-3 items-center">
         {/* Search */}
         <div className="relative flex-1 min-w-[300px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <Input
             value={filters.search}
             onChange={(e) => updateFilter('search', e.target.value)}
@@ -119,7 +119,7 @@ export function MarketplaceFiltersBar({
             updateFilter('category', e.target.value);
             updateFilter('subcategory', '');
           }}
-          className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+          className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
         >
           <option value="">All Categories</option>
           {categories.map((cat) => (
@@ -134,7 +134,7 @@ export function MarketplaceFiltersBar({
           <select
             value={filters.subcategory}
             onChange={(e) => updateFilter('subcategory', e.target.value)}
-            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+            className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           >
             <option value="">All Subcategories</option>
             {selectedCategory.subcategories.map((sub) => (
@@ -164,7 +164,7 @@ export function MarketplaceFiltersBar({
         <select
           value={filters.sortBy}
           onChange={(e) => updateFilter('sortBy', e.target.value as MarketplaceFilters['sortBy'])}
-          className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+          className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
         >
           {sortOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -174,14 +174,14 @@ export function MarketplaceFiltersBar({
         </select>
 
         {/* View mode toggle */}
-        <div className="flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+        <div className="flex border border-slate-300 dark:border-slate-600 rounded-lg overflow-hidden">
           <button
             onClick={() => onViewModeChange('grid')}
             className={cn(
               'p-2',
               viewMode === 'grid'
                 ? 'bg-primary-500 text-white'
-                : 'bg-white dark:bg-gray-800 text-gray-600'
+                : 'bg-white dark:bg-slate-800 text-slate-600'
             )}
           >
             <Grid className="w-4 h-4" />
@@ -192,7 +192,7 @@ export function MarketplaceFiltersBar({
               'p-2',
               viewMode === 'list'
                 ? 'bg-primary-500 text-white'
-                : 'bg-white dark:bg-gray-800 text-gray-600'
+                : 'bg-white dark:bg-slate-800 text-slate-600'
             )}
           >
             <List className="w-4 h-4" />
@@ -202,24 +202,24 @@ export function MarketplaceFiltersBar({
 
       {/* Results count */}
       {resultCount !== undefined && (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-slate-500">
           {resultCount.toLocaleString()} services available
         </p>
       )}
 
       {/* Advanced filters panel */}
       {showAdvanced && (
-        <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-xl">
+        <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* Delivery Time */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Delivery Time
               </label>
               <select
                 value={filters.deliveryTime}
                 onChange={(e) => updateFilter('deliveryTime', e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               >
                 {deliveryOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -231,7 +231,7 @@ export function MarketplaceFiltersBar({
 
             {/* Price Range */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Price Range
               </label>
               <div className="flex gap-2">
@@ -256,7 +256,7 @@ export function MarketplaceFiltersBar({
 
             {/* Seller Level */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Seller Level
               </label>
               <div className="flex flex-wrap gap-2">
@@ -268,7 +268,7 @@ export function MarketplaceFiltersBar({
                       'px-3 py-1 rounded-full text-sm transition-colors',
                       filters.sellerLevel.includes(level.value)
                         ? 'bg-primary-500 text-white'
-                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                     )}
                   >
                     {level.label}
@@ -279,7 +279,7 @@ export function MarketplaceFiltersBar({
 
             {/* Min Rating */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Minimum Rating
               </label>
               <select
@@ -287,7 +287,7 @@ export function MarketplaceFiltersBar({
                 onChange={(e) =>
                   updateFilter('minRating', e.target.value ? Number(e.target.value) : undefined)
                 }
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               >
                 <option value="">Any</option>
                 <option value="4.5">4.5 & up</option>
@@ -297,7 +297,7 @@ export function MarketplaceFiltersBar({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
             <Button variant="ghost" onClick={() => setShowAdvanced(false)}>
               Close
             </Button>
@@ -340,7 +340,7 @@ export function MarketplaceFiltersBar({
           ))}
           <button
             onClick={clearFilters}
-            className="text-sm text-gray-500 hover:text-gray-700 underline"
+            className="text-sm text-slate-500 hover:text-slate-700 underline"
           >
             Clear all
           </button>

@@ -28,8 +28,8 @@ export default function EducationProviderDetailPage() {
     return (
       <div className="p-6">
         <div className="card p-10 text-center">
-          <p className="text-gray-900 dark:text-white font-medium">Provider not found</p>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Try another provider.</p>
+          <p className="text-slate-900 dark:text-white font-medium">Provider not found</p>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Try another provider.</p>
           <div className="mt-4">
             <Link href="/dashboard/learn/providers" className="btn-outline px-6 py-2.5">
               Back to Providers
@@ -46,16 +46,16 @@ export default function EducationProviderDetailPage() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div className="w-14 h-14 rounded-lg bg-gray-100 dark:bg-gray-800 overflow-hidden flex items-center justify-center">
+          <div className="w-14 h-14 rounded-lg bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center">
             {provider.logo ? (
               <img src={provider.logo} alt={provider.name} className="w-full h-full object-cover" />
             ) : (
-              <GraduationCap className="w-7 h-7 text-gray-600 dark:text-gray-300" />
+              <GraduationCap className="w-7 h-7 text-slate-600 dark:text-slate-300" />
             )}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{provider.name}</h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">{location || 'Australia'}</p>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{provider.name}</h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">{location || 'Australia'}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -72,9 +72,9 @@ export default function EducationProviderDetailPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             {provider.description ? (
-              <p className="text-gray-700 dark:text-gray-300">{provider.description}</p>
+              <p className="text-slate-700 dark:text-slate-300">{provider.description}</p>
             ) : (
-              <p className="text-gray-500 dark:text-gray-400">No description available.</p>
+              <p className="text-slate-500 dark:text-slate-400">No description available.</p>
             )}
           </div>
           {provider.website ? (
@@ -93,8 +93,8 @@ export default function EducationProviderDetailPage() {
       <div className="card">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Courses</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Courses</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               {courses.length} available
             </p>
           </div>
@@ -116,15 +116,15 @@ export default function EducationProviderDetailPage() {
         </div>
 
         {courses.length === 0 ? (
-          <div className="mt-6 text-sm text-gray-500 dark:text-gray-400">No courses listed.</div>
+          <div className="mt-6 text-sm text-slate-500 dark:text-slate-400">No courses listed.</div>
         ) : (
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             {courses.map((c: any) => (
-              <div key={c.id} className="card border border-gray-200 dark:border-gray-800">
+              <div key={c.id} className="card border border-slate-200 dark:border-slate-800">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <p className="font-semibold text-gray-900 dark:text-white truncate">{c.title}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="font-semibold text-slate-900 dark:text-white truncate">{c.title}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                       {c.type || 'Course'}
                     </p>
                   </div>

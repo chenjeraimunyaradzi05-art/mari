@@ -119,7 +119,7 @@ export default function CreateOrganizationPage() {
       {/* Back Button */}
       <Link
         href="/employer"
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mb-6"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-6"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Employer Dashboard
@@ -130,32 +130,32 @@ export default function CreateOrganizationPage() {
         <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
           <Building2 className="h-8 w-8 text-white" />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Create Your Organization
         </h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-2">
+        <p className="text-slate-600 dark:text-slate-400 mt-2">
           Set up your company profile to start posting jobs on ATHENA
         </p>
       </div>
 
       {/* Progress */}
       <div className="flex items-center gap-2 mb-8">
-        <div className={`h-1 flex-1 rounded ${step >= 1 ? 'bg-blue-500' : 'bg-gray-200'}`} />
-        <div className={`h-1 flex-1 rounded ${step >= 2 ? 'bg-blue-500' : 'bg-gray-200'}`} />
-        <div className={`h-1 flex-1 rounded ${step >= 3 ? 'bg-blue-500' : 'bg-gray-200'}`} />
+        <div className={`h-1 flex-1 rounded ${step >= 1 ? 'bg-blue-500' : 'bg-slate-200'}`} />
+        <div className={`h-1 flex-1 rounded ${step >= 2 ? 'bg-blue-500' : 'bg-slate-200'}`} />
+        <div className={`h-1 flex-1 rounded ${step >= 3 ? 'bg-blue-500' : 'bg-slate-200'}`} />
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
           {step === 1 && (
             <div className="space-y-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Basic Information
               </h2>
 
               {/* Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Organization Name *
                 </label>
                 <input
@@ -171,7 +171,7 @@ export default function CreateOrganizationPage() {
 
               {/* Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Organization Type *
                 </label>
                 <div className="grid grid-cols-2 gap-3">
@@ -183,13 +183,13 @@ export default function CreateOrganizationPage() {
                       className={`p-4 rounded-lg border-2 text-left transition ${
                         selectedType === type.value
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
                       }`}
                     >
-                      <div className="font-medium text-gray-900 dark:text-white">
+                      <div className="font-medium text-slate-900 dark:text-white">
                         {type.label}
                       </div>
-                      <div className="text-xs text-gray-500">{type.description}</div>
+                      <div className="text-xs text-slate-500">{type.description}</div>
                     </button>
                   ))}
                 </div>
@@ -198,7 +198,7 @@ export default function CreateOrganizationPage() {
 
               {/* Description */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Description
                 </label>
                 <textarea
@@ -220,13 +220,13 @@ export default function CreateOrganizationPage() {
 
           {step === 2 && (
             <div className="space-y-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Company Details
               </h2>
 
               {/* Website */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   <Globe className="inline h-4 w-4 mr-1" />
                   Website
                 </label>
@@ -241,7 +241,7 @@ export default function CreateOrganizationPage() {
               {/* Industry & Size */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Industry
                   </label>
                   <select {...register('industry')} className="input w-full">
@@ -252,7 +252,7 @@ export default function CreateOrganizationPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     <Users className="inline h-4 w-4 mr-1" />
                     Company Size
                   </label>
@@ -267,7 +267,7 @@ export default function CreateOrganizationPage() {
 
               {/* Location */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   <MapPin className="inline h-4 w-4 mr-1" />
                   Location
                 </label>
@@ -302,13 +302,13 @@ export default function CreateOrganizationPage() {
 
           {step === 3 && (
             <div className="space-y-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Branding
               </h2>
 
               {/* Brand Color */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   <Palette className="inline h-4 w-4 mr-1" />
                   Brand Color
                 </label>
@@ -316,7 +316,7 @@ export default function CreateOrganizationPage() {
                   <input
                     {...register('brandColor')}
                     type="color"
-                    className="w-16 h-12 rounded-lg border-2 border-gray-200 cursor-pointer"
+                    className="w-16 h-12 rounded-lg border-2 border-slate-200 cursor-pointer"
                   />
                   <div
                     className="flex-1 h-12 rounded-lg flex items-center justify-center text-white font-medium"
@@ -325,30 +325,30 @@ export default function CreateOrganizationPage() {
                     Preview: Your Career Page
                   </div>
                 </div>
-                <p className="text-sm text-gray-500 mt-2">
+                <p className="text-sm text-slate-500 mt-2">
                   This color will be used on your public career page
                 </p>
               </div>
 
               {/* Summary */}
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <h3 className="font-medium text-gray-900 dark:text-white mb-2">Summary</h3>
+              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4">
+                <h3 className="font-medium text-slate-900 dark:text-white mb-2">Summary</h3>
                 <dl className="space-y-1 text-sm">
                   <div className="flex justify-between">
-                    <dt className="text-gray-500">Organization:</dt>
-                    <dd className="font-medium text-gray-900 dark:text-white">{watch('name') || '-'}</dd>
+                    <dt className="text-slate-500">Organization:</dt>
+                    <dd className="font-medium text-slate-900 dark:text-white">{watch('name') || '-'}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-gray-500">Type:</dt>
-                    <dd className="font-medium text-gray-900 dark:text-white capitalize">{watch('type') || '-'}</dd>
+                    <dt className="text-slate-500">Type:</dt>
+                    <dd className="font-medium text-slate-900 dark:text-white capitalize">{watch('type') || '-'}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-gray-500">Industry:</dt>
-                    <dd className="font-medium text-gray-900 dark:text-white">{watch('industry') || '-'}</dd>
+                    <dt className="text-slate-500">Industry:</dt>
+                    <dd className="font-medium text-slate-900 dark:text-white">{watch('industry') || '-'}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-gray-500">Location:</dt>
-                    <dd className="font-medium text-gray-900 dark:text-white">
+                    <dt className="text-slate-500">Location:</dt>
+                    <dd className="font-medium text-slate-900 dark:text-white">
                       {[watch('city'), watch('state')].filter(Boolean).join(', ') || '-'}
                     </dd>
                   </div>

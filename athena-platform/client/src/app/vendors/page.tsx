@@ -117,7 +117,7 @@ export default function VendorsPage() {
   }, [searchQuery, vendors]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       <section className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl">
@@ -136,13 +136,13 @@ export default function VendorsPage() {
       <section className="container mx-auto px-4 py-8">
         <div className="flex flex-col md:flex-row gap-4 mb-8">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
               placeholder="Search vendors..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+              className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
             />
           </div>
           <div className="flex gap-2 overflow-x-auto pb-2">
@@ -153,7 +153,7 @@ export default function VendorsPage() {
                 className={`px-4 py-2 rounded-lg whitespace-nowrap transition ${
                   selectedCategory === category.id
                     ? 'bg-blue-600 text-white'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 hover:bg-slate-50'
                 }`}
               >
                 {category.name}
@@ -169,15 +169,15 @@ export default function VendorsPage() {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-slate-500">
             <Loader2 className="w-4 h-4 animate-spin" />
             Loading vendors...
           </div>
         ) : filteredVendors.length === 0 ? (
-          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <Store className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No vendors available</h3>
-            <p className="text-gray-600 dark:text-gray-400">
+          <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+            <Store className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">No vendors available</h3>
+            <p className="text-slate-600 dark:text-slate-400">
               {searchQuery || selectedCategory
                 ? 'Try adjusting your search or category.'
                 : 'The marketplace has no published vendors yet.'}
@@ -188,7 +188,7 @@ export default function VendorsPage() {
             {filteredVendors.map((vendor) => (
               <div
                 key={vendor.id}
-                className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition"
+                className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 hover:shadow-lg transition"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="w-14 h-14 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl flex items-center justify-center">
@@ -208,8 +208,8 @@ export default function VendorsPage() {
                     )}
                   </div>
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{vendor.name}</h3>
-                <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">{vendor.name}</h3>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-slate-400 mb-2">
                   <span className="flex items-center gap-1">
                     <Star className="w-4 h-4 text-yellow-500" />
                     {formatRating(vendor)}
@@ -219,7 +219,7 @@ export default function VendorsPage() {
                     {vendor.location || 'Remote'}
                   </span>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-3">
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-3">
                   {vendor.description || 'No public description has been provided yet.'}
                 </p>
                 <div className="flex flex-wrap gap-2 mb-4">
@@ -229,13 +229,13 @@ export default function VendorsPage() {
                   {(vendor.services?.length ? vendor.services : ['Services available by request']).slice(0, 3).map((service) => (
                     <span
                       key={service}
-                      className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded"
+                      className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded"
                     >
                       {service}
                     </span>
                   ))}
                 </div>
-                <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                <div className="mb-4 text-sm text-slate-600 dark:text-slate-400">
                   Pricing: {vendor.priceRange || 'Request quote'}
                 </div>
                 <Link
@@ -258,7 +258,7 @@ export default function VendorsPage() {
           </p>
           <Link
             href="/contact-sales"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-gray-100 transition"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition"
           >
             Apply to Join <ArrowRight className="w-4 h-4" />
           </Link>

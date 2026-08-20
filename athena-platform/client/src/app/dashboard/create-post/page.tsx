@@ -73,8 +73,8 @@ export default function CreatePostPage() {
   if (!user) {
     return (
       <div className="p-6 max-w-3xl">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create Post</h1>
-        <p className="mt-2 text-gray-500 dark:text-gray-400">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Create Post</h1>
+        <p className="mt-2 text-slate-500 dark:text-slate-400">
           Please sign in to publish a post.
         </p>
         <Link href="/login" className="btn-primary mt-4 inline-flex">
@@ -86,15 +86,15 @@ export default function CreatePostPage() {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create Post</h1>
-      <p className="mt-1 text-gray-500 dark:text-gray-400">Share an update with the community.</p>
+      <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Create Post</h1>
+      <p className="mt-1 text-slate-500 dark:text-slate-400">Share an update with the community.</p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="What’s on your mind?"
-          className="w-full min-h-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="w-full min-h-[160px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
 
         <div className="flex flex-wrap items-center gap-3">
@@ -117,19 +117,19 @@ export default function CreatePostPage() {
             Add video
           </button>
           {uploading && (
-            <span className="inline-flex items-center gap-2 text-sm text-gray-500">
+            <span className="inline-flex items-center gap-2 text-sm text-slate-500">
               <Loader2 className="w-4 h-4 animate-spin" /> Uploading...
             </span>
           )}
         </div>
 
         {mediaUrls.length > 0 && (
-          <div className="text-xs text-gray-500 dark:text-gray-400">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
             Attached: {postType === 'VIDEO' ? 'Video' : 'Image'}
           </div>
         )}
 
-        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
             checked={isPublic}

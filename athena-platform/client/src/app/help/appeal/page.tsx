@@ -70,23 +70,23 @@ export default function AppealPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+      <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
         <div className="max-w-2xl mx-auto px-4 py-16">
           <div className="text-center">
             <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-6">
               <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
               Appeal Submitted
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
               Thank you for submitting your appeal. We take all appeals seriously and will review your case carefully.
             </p>
 
             {ticketId && (
-              <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-6">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Your appeal reference:</p>
-                <p className="text-lg font-mono font-bold text-gray-900 dark:text-white">{ticketId}</p>
+              <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 mb-6">
+                <p className="text-sm text-slate-600 dark:text-slate-400">Your appeal reference:</p>
+                <p className="text-lg font-mono font-bold text-slate-900 dark:text-white">{ticketId}</p>
               </div>
             )}
 
@@ -103,7 +103,7 @@ export default function AppealPage() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 href="/"
-                className="inline-flex items-center justify-center px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="inline-flex items-center justify-center px-6 py-3 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Home
@@ -123,13 +123,13 @@ export default function AppealPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+    <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className="max-w-3xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <Link
             href="/help/community-guidelines"
-            className="inline-flex items-center text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4"
+            className="inline-flex items-center text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white mb-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Community Guidelines
@@ -139,8 +139,8 @@ export default function AppealPage() {
               <Scale className="w-6 h-6 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Appeal a Decision</h1>
-              <p className="text-gray-600 dark:text-gray-400">Request a review of a moderation action</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Appeal a Decision</h1>
+              <p className="text-slate-600 dark:text-slate-400">Request a review of a moderation action</p>
             </div>
           </div>
         </div>
@@ -163,7 +163,7 @@ export default function AppealPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Appeal Type */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               What are you appealing?
             </label>
             <div className="grid gap-3">
@@ -173,7 +173,7 @@ export default function AppealPage() {
                   className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
                     formData.appealType === type.value
                       ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
                 >
                   <input
@@ -185,8 +185,8 @@ export default function AppealPage() {
                     className="mt-1"
                   />
                   <div>
-                    <span className="font-medium text-gray-900 dark:text-white">{type.label}</span>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{type.description}</p>
+                    <span className="font-medium text-slate-900 dark:text-white">{type.label}</span>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">{type.description}</p>
                   </div>
                 </label>
               ))}
@@ -195,7 +195,7 @@ export default function AppealPage() {
 
           {/* Reference ID */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Reference ID (if available)
             </label>
             <input
@@ -203,16 +203,16 @@ export default function AppealPage() {
               value={formData.referenceId}
               onChange={(e) => setFormData(prev => ({ ...prev, referenceId: e.target.value }))}
               placeholder="e.g., MOD-123ABC or the URL of removed content"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               This helps us find the specific action you&apos;re appealing. Check your email for this ID.
             </p>
           </div>
 
           {/* Reason */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Why do you believe this decision was incorrect? *
             </label>
             <textarea
@@ -220,14 +220,14 @@ export default function AppealPage() {
               onChange={(e) => setFormData(prev => ({ ...prev, reason: e.target.value }))}
               rows={4}
               placeholder="Explain why you believe the content did not violate our guidelines, or why the action taken was disproportionate..."
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
               required
             />
           </div>
 
           {/* Additional Info */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Additional context (optional)
             </label>
             <textarea
@@ -235,13 +235,13 @@ export default function AppealPage() {
               onChange={(e) => setFormData(prev => ({ ...prev, additionalInfo: e.target.value }))}
               rows={3}
               placeholder="Any additional information that might help us understand the context..."
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
             />
           </div>
 
           {/* Contact Email */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Your email address *
             </label>
             <input
@@ -249,10 +249,10 @@ export default function AppealPage() {
               value={formData.contactEmail}
               onChange={(e) => setFormData(prev => ({ ...prev, contactEmail: e.target.value }))}
               placeholder="you@example.com"
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               required
             />
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               We&apos;ll send the outcome of your appeal to this address
             </p>
           </div>
@@ -267,7 +267,7 @@ export default function AppealPage() {
               className="mt-1"
               required
             />
-            <label htmlFor="agreeToTerms" className="text-sm text-gray-600 dark:text-gray-400">
+            <label htmlFor="agreeToTerms" className="text-sm text-slate-600 dark:text-slate-400">
               I confirm that the information provided is accurate and understand that submitting false or misleading appeals 
               may result in further action on my account. I also understand that the appeal decision is final.
             </label>
@@ -306,31 +306,31 @@ export default function AppealPage() {
         </form>
 
         {/* FAQ */}
-        <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Frequently Asked Questions</h2>
+        <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Frequently Asked Questions</h2>
           <div className="space-y-4">
             <div>
-              <h3 className="font-medium text-gray-900 dark:text-white">How long does the appeal process take?</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <h3 className="font-medium text-slate-900 dark:text-white">How long does the appeal process take?</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 We aim to review all appeals within 5 business days. Complex cases may take longer.
               </p>
             </div>
             <div>
-              <h3 className="font-medium text-gray-900 dark:text-white">Can I submit multiple appeals?</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <h3 className="font-medium text-slate-900 dark:text-white">Can I submit multiple appeals?</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 Each enforcement action can only be appealed once. Please include all relevant information in your initial appeal.
               </p>
             </div>
             <div>
-              <h3 className="font-medium text-gray-900 dark:text-white">What if my appeal is rejected?</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <h3 className="font-medium text-slate-900 dark:text-white">What if my appeal is rejected?</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 If your appeal is rejected, the original decision stands. For users in the UK and EU, you may have additional rights 
                 to challenge decisions through external dispute resolution mechanisms.
               </p>
             </div>
             <div>
-              <h3 className="font-medium text-gray-900 dark:text-white">Will submitting an appeal affect my account?</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <h3 className="font-medium text-slate-900 dark:text-white">Will submitting an appeal affect my account?</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 No, submitting a good-faith appeal will never result in additional action on your account.
               </p>
             </div>

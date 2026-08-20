@@ -86,10 +86,10 @@ export default function ReportsPage() {
           <FileText className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Impact Reports</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Community Impact & Outcomes
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Tracking real outcomes for women across all communities
         </p>
       </div>
@@ -100,39 +100,39 @@ export default function ReportsPage() {
 
       {/* Aggregate Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-2 text-indigo-600 mb-2">
             <Users className="w-4 h-4" />
             <span className="text-xs font-medium">Users Supported</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {aggregateStats.totalUsers.toLocaleString()}
           </p>
         </div>
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-2 text-emerald-600 mb-2">
             <Briefcase className="w-4 h-4" />
             <span className="text-xs font-medium">Jobs Gained</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {aggregateStats.employment.toLocaleString()}
           </p>
         </div>
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-2 text-blue-600 mb-2">
             <Home className="w-4 h-4" />
             <span className="text-xs font-medium">Housing Secured</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {aggregateStats.housing.toLocaleString()}
           </p>
         </div>
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-2 text-amber-600 mb-2">
             <DollarSign className="w-4 h-4" />
             <span className="text-xs font-medium">Economic Impact</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {formatCurrency(aggregateStats.economicImpact)}
           </p>
         </div>
@@ -159,11 +159,11 @@ export default function ReportsPage() {
 
       {/* Filter */}
       <div className="flex items-center gap-4">
-        <label className="text-sm text-gray-600 dark:text-gray-400">Filter by community:</label>
+        <label className="text-sm text-slate-600 dark:text-slate-400">Filter by community:</label>
         <select
           value={filterCommunity}
           onChange={(e) => setFilterCommunity(e.target.value)}
-          className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+          className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
         >
           <option value="">All communities</option>
           {Object.entries(communityTypeLabels).map(([value, label]) => (
@@ -174,12 +174,12 @@ export default function ReportsPage() {
 
       {/* Reports List */}
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading reports...
         </div>
       ) : reports.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-center text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center text-sm text-slate-500">
           No impact reports available for this filter.
         </div>
       ) : (
@@ -187,44 +187,44 @@ export default function ReportsPage() {
           {reports.map((report) => (
             <div
               key={report.id}
-              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
             >
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-4">
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">{report.reportPeriod}</h3>
-                  <p className="text-xs text-gray-500">
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{report.reportPeriod}</h3>
+                  <p className="text-xs text-slate-500">
                     {report.communityType ? communityTypeLabels[report.communityType] : 'All Communities'} • {report.region}
                   </p>
                 </div>
                 {report.totalEconomicImpact && (
                   <div className="text-right">
                     <p className="text-lg font-bold text-emerald-600">{formatCurrency(report.totalEconomicImpact)}</p>
-                    <p className="text-xs text-gray-500">Total economic impact</p>
+                    <p className="text-xs text-slate-500">Total economic impact</p>
                   </div>
                 )}
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-500 text-xs">Users supported</p>
-                  <p className="font-semibold text-gray-900 dark:text-white">{report.totalUsersSupported.toLocaleString()}</p>
+                  <p className="text-slate-500 text-xs">Users supported</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{report.totalUsersSupported.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Employment gained</p>
-                  <p className="font-semibold text-gray-900 dark:text-white">{report.employmentGained.toLocaleString()}</p>
+                  <p className="text-slate-500 text-xs">Employment gained</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{report.employmentGained.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Housing secured</p>
-                  <p className="font-semibold text-gray-900 dark:text-white">{report.housingSecured.toLocaleString()}</p>
+                  <p className="text-slate-500 text-xs">Housing secured</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{report.housingSecured.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs">Qualifications</p>
-                  <p className="font-semibold text-gray-900 dark:text-white">{report.qualificationsObtained.toLocaleString()}</p>
+                  <p className="text-slate-500 text-xs">Qualifications</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{report.qualificationsObtained.toLocaleString()}</p>
                 </div>
               </div>
 
               {report.narrativeSummary && (
-                <p className="mt-4 text-sm text-gray-600 dark:text-gray-300 border-t border-gray-100 dark:border-gray-800 pt-4">
+                <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-800 pt-4">
                   {report.narrativeSummary}
                 </p>
               )}

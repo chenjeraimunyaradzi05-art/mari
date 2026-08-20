@@ -39,7 +39,7 @@ interface Job {
 }
 
 const statusColors: Record<string, string> = {
-  DRAFT: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+  DRAFT: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
   ACTIVE: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   PAUSED: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
   CLOSED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
@@ -97,7 +97,7 @@ export default function EmployerJobsPage() {
       {/* Back Button */}
       <Link
         href={`/employer/organizations/${orgId}`}
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mb-6"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-6"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Dashboard
@@ -106,11 +106,11 @@ export default function EmployerJobsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Briefcase className="h-7 w-7 text-blue-600" />
             Job Listings
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
             Manage your job postings and track applications
           </p>
         </div>
@@ -125,7 +125,7 @@ export default function EmployerJobsPage() {
       {/* Filters */}
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
           <input
             type="text"
             value={search}
@@ -140,7 +140,7 @@ export default function EmployerJobsPage() {
             className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
               filter === 'all'
                 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200'
+                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200'
             }`}
           >
             All ({jobs.length})
@@ -152,7 +152,7 @@ export default function EmployerJobsPage() {
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                 filter === status
                   ? statusColors[status]
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200'
+                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200'
               }`}
             >
               {status.charAt(0) + status.slice(1).toLowerCase()} ({statusCounts[status] || 0})
@@ -165,15 +165,15 @@ export default function EmployerJobsPage() {
       {isLoading ? (
         <div className="text-center py-12">
           <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-          <p className="text-gray-500 mt-2">Loading jobs...</p>
+          <p className="text-slate-500 mt-2">Loading jobs...</p>
         </div>
       ) : filteredJobs.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-12 text-center">
-          <Briefcase className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center">
+          <Briefcase className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
             {jobs.length === 0 ? 'No jobs posted yet' : 'No jobs match your search'}
           </h3>
-          <p className="text-gray-500 mb-6">
+          <p className="text-slate-500 mb-6">
             {jobs.length === 0
               ? 'Create your first job posting to start attracting candidates'
               : 'Try adjusting your filters or search terms'}
@@ -192,14 +192,14 @@ export default function EmployerJobsPage() {
           {filteredJobs.map((job) => (
             <div
               key={job.id}
-              className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition"
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <Link
                       href={`/jobs/${job.id}`}
-                      className="text-lg font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400"
+                      className="text-lg font-semibold text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400"
                     >
                       {job.title}
                     </Link>
@@ -208,7 +208,7 @@ export default function EmployerJobsPage() {
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-gray-400 mb-3">
+                  <div className="flex flex-wrap gap-4 text-sm text-slate-500 dark:text-slate-400 mb-3">
                     <span className="flex items-center gap-1">
                       <MapPin className="h-4 w-4" />
                       {job.isRemote ? 'Remote' : [job.city, job.state].filter(Boolean).join(', ') || 'No location'}
@@ -221,14 +221,14 @@ export default function EmployerJobsPage() {
 
                   <div className="flex gap-6">
                     <div className="flex items-center gap-2 text-sm">
-                      <Eye className="h-4 w-4 text-gray-400" />
-                      <span className="font-medium text-gray-900 dark:text-white">{job.viewCount}</span>
-                      <span className="text-gray-500">views</span>
+                      <Eye className="h-4 w-4 text-slate-400" />
+                      <span className="font-medium text-slate-900 dark:text-white">{job.viewCount}</span>
+                      <span className="text-slate-500">views</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
-                      <Users className="h-4 w-4 text-gray-400" />
-                      <span className="font-medium text-gray-900 dark:text-white">{job.applicationCount}</span>
-                      <span className="text-gray-500">applications</span>
+                      <Users className="h-4 w-4 text-slate-400" />
+                      <span className="font-medium text-slate-900 dark:text-white">{job.applicationCount}</span>
+                      <span className="text-slate-500">applications</span>
                     </div>
                   </div>
                 </div>
@@ -237,23 +237,23 @@ export default function EmployerJobsPage() {
                 <div className="relative">
                   <button
                     onClick={() => setMenuOpen(menuOpen === job.id ? null : job.id)}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
                   >
-                    <MoreVertical className="h-5 w-5 text-gray-500" />
+                    <MoreVertical className="h-5 w-5 text-slate-500" />
                   </button>
 
                   {menuOpen === job.id && (
-                    <div className="absolute right-0 top-10 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
+                    <div className="absolute right-0 top-10 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-10">
                       <Link
                         href={`/jobs/${job.id}`}
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
                       >
                         <Globe className="h-4 w-4" />
                         View Public Listing
                       </Link>
                       <Link
                         href={`/employer/organizations/${orgId}/jobs/${job.id}/edit`}
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
                       >
                         <Edit2 className="h-4 w-4" />
                         Edit Job
@@ -261,7 +261,7 @@ export default function EmployerJobsPage() {
                       {job.status === 'ACTIVE' && (
                         <button
                           onClick={() => updateJobMutation.mutate({ jobId: job.id, status: 'PAUSED' })}
-                          className="flex items-center gap-2 px-4 py-2 text-sm text-yellow-600 hover:bg-gray-100 dark:hover:bg-gray-700 w-full text-left"
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-yellow-600 hover:bg-slate-100 dark:hover:bg-slate-700 w-full text-left"
                         >
                           <Pause className="h-4 w-4" />
                           Pause Listing
@@ -270,7 +270,7 @@ export default function EmployerJobsPage() {
                       {(job.status === 'DRAFT' || job.status === 'PAUSED') && (
                         <button
                           onClick={() => updateJobMutation.mutate({ jobId: job.id, status: 'ACTIVE' })}
-                          className="flex items-center gap-2 px-4 py-2 text-sm text-green-600 hover:bg-gray-100 dark:hover:bg-gray-700 w-full text-left"
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-green-600 hover:bg-slate-100 dark:hover:bg-slate-700 w-full text-left"
                         >
                           <Play className="h-4 w-4" />
                           Activate
@@ -278,7 +278,7 @@ export default function EmployerJobsPage() {
                       )}
                       <button
                         onClick={() => updateJobMutation.mutate({ jobId: job.id, status: 'CLOSED' })}
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 w-full text-left"
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-slate-100 dark:hover:bg-slate-700 w-full text-left"
                       >
                         <Trash2 className="h-4 w-4" />
                         Close Job

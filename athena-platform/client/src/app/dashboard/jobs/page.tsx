@@ -126,8 +126,8 @@ function JobsContent() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Find Your Dream Job</h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Find Your Dream Job</h1>
+        <p className="text-slate-600 dark:text-slate-400 mt-1">
           Discover opportunities matched to your skills and goals
         </p>
       </div>
@@ -136,7 +136,7 @@ function JobsContent() {
       <form onSubmit={handleSearch} className="mb-6">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
@@ -146,7 +146,7 @@ function JobsContent() {
             />
           </div>
           <div className="flex-1 relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
               value={location}
@@ -190,7 +190,7 @@ function JobsContent() {
                   'px-3 py-1.5 rounded-full text-sm font-medium transition',
                   selectedTypes.includes(type.value)
                     ? 'bg-primary-500 text-white'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                 )}
               >
                 {type.label}
@@ -201,7 +201,7 @@ function JobsContent() {
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="text-sm text-gray-500 hover:text-gray-700 flex items-center space-x-1"
+              className="text-sm text-slate-500 hover:text-slate-700 flex items-center space-x-1"
             >
               <X className="w-4 h-4" />
               <span>Clear all</span>
@@ -211,11 +211,11 @@ function JobsContent() {
 
         {/* Sort dropdown */}
         <div className="flex items-center space-x-2">
-          <span className="text-sm text-gray-500">Sort by:</span>
+          <span className="text-sm text-slate-500">Sort by:</span>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900"
+            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-900"
           >
             {sortOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -232,7 +232,7 @@ function JobsContent() {
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-6">
             {/* Job Type */}
             <div>
-              <label className="text-sm font-medium text-gray-900 dark:text-white mb-2 block">
+              <label className="text-sm font-medium text-slate-900 dark:text-white mb-2 block">
                 Job Type
               </label>
               <div className="space-y-2">
@@ -242,9 +242,9 @@ function JobsContent() {
                       type="checkbox"
                       checked={selectedTypes.includes(type.value)}
                       onChange={() => toggleType(type.value)}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{type.label}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{type.label}</span>
                   </label>
                 ))}
               </div>
@@ -252,7 +252,7 @@ function JobsContent() {
 
             {/* Experience Level */}
             <div>
-              <label className="text-sm font-medium text-gray-900 dark:text-white mb-2 block">
+              <label className="text-sm font-medium text-slate-900 dark:text-white mb-2 block">
                 Experience Level
               </label>
               <div className="space-y-2">
@@ -262,9 +262,9 @@ function JobsContent() {
                       type="checkbox"
                       checked={selectedLevels.includes(level.value)}
                       onChange={() => toggleLevel(level.value)}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{level.label}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{level.label}</span>
                   </label>
                 ))}
               </div>
@@ -272,7 +272,7 @@ function JobsContent() {
 
             {/* Salary Range */}
             <div>
-              <label className="text-sm font-medium text-gray-900 dark:text-white mb-2 block">
+              <label className="text-sm font-medium text-slate-900 dark:text-white mb-2 block">
                 Salary Range
               </label>
               <div className="space-y-2">
@@ -294,7 +294,7 @@ function JobsContent() {
       <div className="space-y-4">
         {/* Results count */}
         {data && (
-          <div className="text-sm text-gray-600 dark:text-gray-400">
+          <div className="text-sm text-slate-600 dark:text-slate-400">
             Showing {data.jobs?.length || 0} of {data.total || 0} jobs
           </div>
         )}
@@ -305,11 +305,11 @@ function JobsContent() {
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="card animate-pulse">
                 <div className="flex items-start space-x-4">
-                  <div className="w-14 h-14 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+                  <div className="w-14 h-14 bg-slate-200 dark:bg-slate-700 rounded-lg" />
                   <div className="flex-1 space-y-3">
-                    <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4" />
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
+                    <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                    <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
+                    <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
                   </div>
                 </div>
               </div>
@@ -325,7 +325,7 @@ function JobsContent() {
               >
                 <div className="flex items-start space-x-4">
                   {/* Company logo */}
-                  <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center flex-shrink-0">
                     {job.organization?.logo ? (
                       <Image
                         src={job.organization.logo}
@@ -336,7 +336,7 @@ function JobsContent() {
                         className="w-10 h-10 object-contain"
                       />
                     ) : (
-                      <Building2 className="w-6 h-6 text-gray-400" />
+                      <Building2 className="w-6 h-6 text-slate-400" />
                     )}
                   </div>
 
@@ -344,10 +344,10 @@ function JobsContent() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 transition">
+                        <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition">
                           {job.title}
                         </h3>
-                        <p className="text-gray-600 dark:text-gray-400">
+                        <p className="text-slate-600 dark:text-slate-400">
                           {job.organization?.name}
                         </p>
                       </div>
@@ -360,7 +360,7 @@ function JobsContent() {
                       )}
                     </div>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
                       <span className="flex items-center">
                         <MapPin className="w-4 h-4 mr-1" />
                         {job.location}
@@ -387,13 +387,13 @@ function JobsContent() {
                         {(job.requiredSkills ?? []).slice(0, 5).map((skill: string) => (
                           <span
                             key={skill}
-                            className="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded text-xs"
+                            className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs"
                           >
                             {skill}
                           </span>
                         ))}
                         {(job.requiredSkills?.length ?? 0) > 5 && (
-                          <span className="px-2 py-1 text-gray-500 text-xs">
+                          <span className="px-2 py-1 text-slate-500 text-xs">
                             +{(job.requiredSkills?.length ?? 0) - 5} more
                           </span>
                         )}
@@ -419,7 +419,7 @@ function JobsContent() {
                         'p-2 transition disabled:opacity-50',
                         savedJobIds.has(job.id)
                           ? 'text-primary-600 hover:text-primary-700'
-                          : 'text-gray-400 hover:text-primary-600'
+                          : 'text-slate-400 hover:text-primary-600'
                       )}
                     >
                       <Bookmark className={cn('w-5 h-5', savedJobIds.has(job.id) && 'fill-current')} />
@@ -431,11 +431,11 @@ function JobsContent() {
           </div>
         ) : (
           <div className="card text-center py-12">
-            <Briefcase className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+            <Briefcase className="w-12 h-12 mx-auto text-slate-400 mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
               No jobs found
             </h3>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               Try adjusting your search or filters
             </p>
             <button onClick={clearFilters} className="btn-primary">
@@ -450,16 +450,16 @@ function JobsContent() {
         <div className="mt-8 flex items-center justify-center space-x-2">
           <button
             disabled={data.pagination.page === 1}
-            className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-50"
+            className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-50"
           >
             Previous
           </button>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-slate-600">
             Page {data.pagination.page} of {data.pagination.pages}
           </span>
           <button
             disabled={data.pagination.page === data.pagination.pages}
-            className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-50"
+            className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-50"
           >
             Next
           </button>

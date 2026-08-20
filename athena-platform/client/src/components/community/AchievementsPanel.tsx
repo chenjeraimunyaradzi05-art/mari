@@ -55,17 +55,17 @@ export default function AchievementsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Award className="w-5 h-5 text-blue-600" />
-            <h3 className="font-semibold text-gray-900">Your Wins</h3>
+            <h3 className="font-semibold text-slate-900">Your Wins</h3>
           </div>
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-slate-500">
             {earned}/{total} unlocked • {Math.round(data.stats.totalXpEarned)} XP
           </div>
         </div>
-        <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
             className="h-2 bg-blue-600"
             style={{ width: `${Math.min(100, Math.max(0, data.stats.progress))}%` }}
@@ -73,30 +73,30 @@ export default function AchievementsPanel() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
         {data.achievements.length === 0 ? (
-          <div className="p-6 text-center text-gray-500">No achievements yet.</div>
+          <div className="p-6 text-center text-slate-500">No achievements yet.</div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-slate-100">
             {data.achievements.map((a) => (
               <div key={a.id} className="p-4 flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-lg">{a.icon || '🏆'}</span>
-                    <div className="font-medium text-gray-900">{a.name}</div>
+                    <div className="font-medium text-slate-900">{a.name}</div>
                     {a.earned ? (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
                         Unlocked
                       </span>
                     ) : (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-600 border border-gray-100">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-slate-100">
                         Locked
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 text-sm text-gray-600">{a.description}</div>
+                  <div className="mt-1 text-sm text-slate-600">{a.description}</div>
                 </div>
-                <div className="text-sm text-gray-500 whitespace-nowrap">{a.xp ? `+${a.xp} XP` : ''}</div>
+                <div className="text-sm text-slate-500 whitespace-nowrap">{a.xp ? `+${a.xp} XP` : ''}</div>
               </div>
             ))}
           </div>

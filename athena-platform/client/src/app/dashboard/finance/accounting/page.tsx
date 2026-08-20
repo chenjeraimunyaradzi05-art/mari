@@ -326,8 +326,8 @@ export default function AccountingPage() {
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Accounting</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Accounting</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Manage your chart of accounts and journal entries.
           </p>
         </div>
@@ -338,20 +338,20 @@ export default function AccountingPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Accounts</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Accounts</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? '—' : accounts.length}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Journal Entries</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Journal Entries</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? '—' : journals.length}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? 'Loading' : 'Ready'}
           </p>
         </div>
@@ -365,41 +365,41 @@ export default function AccountingPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Account</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Account</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
               <input
                 value={accountForm.organizationId}
                 onChange={(e) => setAccountForm({ ...accountForm, organizationId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="org_123"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Account Name</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Account Name</label>
               <input
                 value={accountForm.name}
                 onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="Cash on Hand"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Account Code</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Account Code</label>
               <input
                 value={accountForm.code}
                 onChange={(e) => setAccountForm({ ...accountForm, code: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="1000"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Type</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Type</label>
               <select
                 value={accountForm.type}
                 onChange={(e) => setAccountForm({ ...accountForm, type: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               >
                 {['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].map((type) => (
                   <option key={type} value={type}>
@@ -409,11 +409,11 @@ export default function AccountingPage() {
               </select>
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Currency</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Currency</label>
               <input
                 value={accountForm.currency}
                 onChange={(e) => setAccountForm({ ...accountForm, currency: e.target.value.toUpperCase() })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="AUD"
               />
             </div>
@@ -424,50 +424,50 @@ export default function AccountingPage() {
         </div>
 
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Journal Entry</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Journal Entry</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
               <input
                 value={journalForm.organizationId}
                 onChange={(e) => setJournalForm({ ...journalForm, organizationId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="org_123"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Description</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Description</label>
               <input
                 value={journalForm.description}
                 onChange={(e) => setJournalForm({ ...journalForm, description: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="Monthly subscription revenue"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Reference</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Reference</label>
               <input
                 value={journalForm.reference}
                 onChange={(e) => setJournalForm({ ...journalForm, reference: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="INV-1001"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Entry Date</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Entry Date</label>
               <input
                 type="date"
                 value={journalForm.entryDate}
                 onChange={(e) => setJournalForm({ ...journalForm, entryDate: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Debit Account</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Debit Account</label>
               <select
                 value={journalForm.debitAccountId}
                 onChange={(e) => setJournalForm({ ...journalForm, debitAccountId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               >
                 <option value="">Select account</option>
                 {accounts.map((account) => (
@@ -478,11 +478,11 @@ export default function AccountingPage() {
               </select>
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Credit Account</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Credit Account</label>
               <select
                 value={journalForm.creditAccountId}
                 onChange={(e) => setJournalForm({ ...journalForm, creditAccountId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               >
                 <option value="">Select account</option>
                 {accounts.map((account) => (
@@ -493,20 +493,20 @@ export default function AccountingPage() {
               </select>
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Amount</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Amount</label>
               <input
                 value={journalForm.amount}
                 onChange={(e) => setJournalForm({ ...journalForm, amount: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="0.00"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Status</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Status</label>
               <select
                 value={journalForm.status}
                 onChange={(e) => setJournalForm({ ...journalForm, status: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               >
                 <option value="DRAFT">DRAFT</option>
                 <option value="POSTED">POSTED</option>
@@ -521,45 +521,45 @@ export default function AccountingPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Recent Journal Entries
           </h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading entries...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading entries...</p>
         ) : journals.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             No journal entries yet.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Date</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Description</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Status</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Date</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Description</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Status</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {journals.slice(0, 6).map((entry) => (
-                  <tr key={entry.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">
+                  <tr key={entry.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">
                       {formatDate(entry.entryDate || entry.createdAt)}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingJournalId === entry.id ? (
                         <input
                           value={editingJournal.description}
                           onChange={(e) => setEditingJournal({ ...editingJournal, description: e.target.value })}
-                          className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="w-full rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         />
                       ) : (
                         entry.description
                       )}
                     </td>
-                    <td className="py-2 text-xs text-gray-500 dark:text-gray-400">
+                    <td className="py-2 text-xs text-slate-500 dark:text-slate-400">
                       {entry.status}
                     </td>
                     <td className="py-2 text-right">
@@ -574,7 +574,7 @@ export default function AccountingPage() {
                             </button>
                             <button
                               onClick={() => setEditingJournalId(null)}
-                              className="text-xs text-gray-500 hover:underline"
+                              className="text-xs text-slate-500 hover:underline"
                             >
                               Cancel
                             </button>
@@ -583,7 +583,7 @@ export default function AccountingPage() {
                           entry.status === 'DRAFT' && (
                             <button
                               onClick={() => startEditJournal(entry)}
-                              className="text-xs text-gray-600 hover:underline"
+                              className="text-xs text-slate-600 hover:underline"
                             >
                               Edit
                             </button>
@@ -617,45 +617,45 @@ export default function AccountingPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Accounts
           </h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading accounts...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading accounts...</p>
         ) : accounts.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No accounts yet.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No accounts yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Name</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Currency</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Name</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Type</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Currency</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {accounts.slice(0, 8).map((account) => (
-                  <tr key={account.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">
+                  <tr key={account.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">
                       {editingAccountId === account.id ? (
                         <input
                           value={editingAccount.name}
                           onChange={(e) => setEditingAccount({ ...editingAccount, name: e.target.value })}
-                          className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="w-full rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         />
                       ) : (
                         account.name
                       )}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingAccountId === account.id ? (
                         <select
                           value={editingAccount.type}
                           onChange={(e) => setEditingAccount({ ...editingAccount, type: e.target.value })}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         >
                           {['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].map((type) => (
                             <option key={type} value={type}>
@@ -667,12 +667,12 @@ export default function AccountingPage() {
                         account.type
                       )}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingAccountId === account.id ? (
                         <input
                           value={editingAccount.currency}
                           onChange={(e) => setEditingAccount({ ...editingAccount, currency: e.target.value.toUpperCase() })}
-                          className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          className="w-full rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
                         />
                       ) : (
                         account.currency
@@ -690,7 +690,7 @@ export default function AccountingPage() {
                             </button>
                             <button
                               onClick={() => setEditingAccountId(null)}
-                              className="text-xs text-gray-500 hover:underline"
+                              className="text-xs text-slate-500 hover:underline"
                             >
                               Cancel
                             </button>
@@ -698,7 +698,7 @@ export default function AccountingPage() {
                         ) : (
                           <button
                             onClick={() => startEditAccount(account)}
-                            className="text-xs text-gray-600 hover:underline"
+                            className="text-xs text-slate-600 hover:underline"
                           >
                             Edit
                           </button>
@@ -721,7 +721,7 @@ export default function AccountingPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Trial Balance Snapshot
           </h2>
           <button
@@ -732,7 +732,7 @@ export default function AccountingPage() {
             {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Trial balance will appear once journal entries are posted.
         </p>
       </div>

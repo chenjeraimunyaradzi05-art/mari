@@ -105,10 +105,10 @@ export default function CreatorAnalyticsPage() {
           <DollarSign className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">IncomeStream</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Creator Analytics & Income
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Track your growth and projected earnings on ATHENA
         </p>
       </div>
@@ -185,39 +185,39 @@ export default function CreatorAnalyticsPage() {
           {analytics && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-slate-500 mb-2">
                     <Eye className="w-4 h-4" />
                     <span className="text-sm">Total Views</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {formatNumber(analytics.totalViews)}
                   </p>
                 </div>
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-slate-500 mb-2">
                     <ThumbsUp className="w-4 h-4" />
                     <span className="text-sm">Total Likes</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {formatNumber(analytics.totalLikes)}
                   </p>
                 </div>
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-slate-500 mb-2">
                     <MessageCircle className="w-4 h-4" />
                     <span className="text-sm">Comments</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {formatNumber(analytics.totalComments)}
                   </p>
                 </div>
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-slate-500 mb-2">
                     <Share2 className="w-4 h-4" />
                     <span className="text-sm">Shares</span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">
                     {formatNumber(analytics.totalShares)}
                   </p>
                 </div>
@@ -226,25 +226,25 @@ export default function CreatorAnalyticsPage() {
               {/* More Stats */}
               <div className="grid md:grid-cols-3 gap-6">
                 {/* Engagement Overview */}
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Engagement Overview</h3>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Engagement Overview</h3>
                   <div className="space-y-4">
                     <div>
                       <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-gray-500">Followers</span>
-                        <span className="font-medium text-gray-900 dark:text-white">
+                        <span className="text-slate-500">Followers</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
                           {formatNumber(analytics.followerCount)}
                         </span>
                       </div>
                     </div>
                     <div>
                       <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-gray-500">Engagement Rate</span>
-                        <span className="font-medium text-gray-900 dark:text-white">
+                        <span className="text-slate-500">Engagement Rate</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
                           {analytics.engagementRate.toFixed(1)}%
                         </span>
                       </div>
-                      <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                      <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                         <div 
                           className="h-full bg-pink-500 rounded-full"
                           style={{ width: `${Math.min(analytics.engagementRate * 10, 100)}%` }}
@@ -253,8 +253,8 @@ export default function CreatorAnalyticsPage() {
                     </div>
                     <div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500">Avg. Watch Time</span>
-                        <span className="font-medium text-gray-900 dark:text-white">
+                        <span className="text-slate-500">Avg. Watch Time</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
                           {Math.floor(analytics.avgWatchTime / 60)}:{String(analytics.avgWatchTime % 60).padStart(2, '0')}
                         </span>
                       </div>
@@ -263,29 +263,29 @@ export default function CreatorAnalyticsPage() {
                 </div>
 
                 {/* Top Categories */}
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Top Categories</h3>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Top Categories</h3>
                   <div className="space-y-2">
                     {analytics.topCategories.map((category, index) => (
                       <div 
                         key={category}
-                        className="flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                        className="flex items-center gap-3 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg"
                       >
                         <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-sm font-medium">
                           {index + 1}
                         </span>
-                        <span className="text-gray-900 dark:text-white">{category}</span>
+                        <span className="text-slate-900 dark:text-white">{category}</span>
                       </div>
                     ))}
                     {analytics.topCategories.length === 0 && (
-                      <p className="text-gray-500 text-sm">No content categories yet</p>
+                      <p className="text-slate-500 text-sm">No content categories yet</p>
                     )}
                   </div>
                 </div>
 
                 {/* Peak Hours */}
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                     <Calendar className="w-4 h-4" />
                     Peak Viewing Hours
                   </h3>
@@ -296,7 +296,7 @@ export default function CreatorAnalyticsPage() {
                         <div 
                           key={hour}
                           className={`flex-1 rounded-t transition-all ${
-                            isPeak ? 'bg-pink-500' : 'bg-gray-200 dark:bg-gray-700'
+                            isPeak ? 'bg-pink-500' : 'bg-slate-200 dark:bg-slate-700'
                           }`}
                           style={{ 
                             height: isPeak ? '100%' : '30%',
@@ -306,7 +306,7 @@ export default function CreatorAnalyticsPage() {
                       );
                     })}
                   </div>
-                  <div className="flex justify-between text-xs text-gray-500 mt-2">
+                  <div className="flex justify-between text-xs text-slate-500 mt-2">
                     <span>12am</span>
                     <span>6am</span>
                     <span>12pm</span>
@@ -318,8 +318,8 @@ export default function CreatorAnalyticsPage() {
 
               {/* Content Performance */}
               {analytics.contentPerformance.length > 0 && (
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                     <Video className="w-4 h-4" />
                     Top Performing Content
                   </h3>
@@ -327,17 +327,17 @@ export default function CreatorAnalyticsPage() {
                     {analytics.contentPerformance.map((content, index) => (
                       <div 
                         key={content.contentId}
-                        className="flex items-center gap-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                        className="flex items-center gap-4 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg"
                       >
-                        <span className="text-2xl font-bold text-gray-300">#{index + 1}</span>
-                        <div className="w-16 h-12 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
-                          <PlayCircle className="w-6 h-6 text-gray-400" />
+                        <span className="text-2xl font-bold text-slate-300">#{index + 1}</span>
+                        <div className="w-16 h-12 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center flex-shrink-0">
+                          <PlayCircle className="w-6 h-6 text-slate-400" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 dark:text-white truncate">
+                          <p className="font-medium text-slate-900 dark:text-white truncate">
                             {content.title}
                           </p>
-                          <div className="flex items-center gap-4 text-sm text-gray-500">
+                          <div className="flex items-center gap-4 text-sm text-slate-500">
                             <span className="flex items-center gap-1">
                               <Eye className="w-3 h-3" />
                               {formatNumber(content.views)}
@@ -358,8 +358,8 @@ export default function CreatorAnalyticsPage() {
 
           {/* Growth Recommendations */}
           {projections?.growthRecommendations && projections.growthRecommendations.length > 0 && (
-            <div className="bg-gradient-to-r from-gray-50 to-pink-50 dark:from-gray-800 dark:to-pink-900/20 rounded-xl p-6">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <div className="bg-gradient-to-r from-slate-50 to-pink-50 dark:from-slate-800 dark:to-pink-900/20 rounded-xl p-6">
+              <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-pink-600" />
                 Growth Recommendations
               </h3>
@@ -367,12 +367,12 @@ export default function CreatorAnalyticsPage() {
                 {projections.growthRecommendations.map((recommendation, index) => (
                   <div 
                     key={index}
-                    className="flex items-start gap-3 p-3 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700"
+                    className="flex items-start gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700"
                   >
                     <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-sm font-bold flex-shrink-0">
                       {index + 1}
                     </span>
-                    <p className="text-gray-700 dark:text-gray-300 text-sm">{recommendation}</p>
+                    <p className="text-slate-700 dark:text-slate-300 text-sm">{recommendation}</p>
                   </div>
                 ))}
               </div>
@@ -382,9 +382,9 @@ export default function CreatorAnalyticsPage() {
           {/* No Data State */}
           {!analytics && !projections && (
             <div className="text-center py-20">
-              <Video className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">No creator data yet</h3>
-              <p className="text-gray-500 mt-1">Start creating content to see your analytics and income projections</p>
+              <Video className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white">No creator data yet</h3>
+              <p className="text-slate-500 mt-1">Start creating content to see your analytics and income projections</p>
             </div>
           )}
         </>

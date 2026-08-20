@@ -36,7 +36,7 @@ export default function GroupDetailPage() {
 
   if (!group) {
     return (
-      <div className="max-w-3xl mx-auto p-6 text-gray-500">Loading…</div>
+      <div className="max-w-3xl mx-auto p-6 text-slate-500">Loading…</div>
     );
   }
 
@@ -47,12 +47,12 @@ export default function GroupDetailPage() {
       <div className="card p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{group.name}</h1>
-            <p className="text-gray-600 dark:text-gray-300 mt-2">{group.description}</p>
-            <div className="mt-3 flex items-center gap-2 text-sm text-gray-500">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{group.name}</h1>
+            <p className="text-slate-600 dark:text-slate-300 mt-2">{group.description}</p>
+            <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
               <Users className="w-4 h-4" />
               <span>{group.memberCount} members</span>
-              <span className="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-600 dark:text-gray-300">
+              <span className="text-xs px-2 py-1 rounded-full border border-slate-200 text-slate-600 dark:text-slate-300">
                 {group.privacy}
               </span>
             </div>
@@ -81,7 +81,7 @@ export default function GroupDetailPage() {
 
         {canPost && (
           <div className="mt-6">
-            <div className="font-medium text-gray-900 dark:text-white mb-2">Post to group</div>
+            <div className="font-medium text-slate-900 dark:text-white mb-2">Post to group</div>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -108,20 +108,20 @@ export default function GroupDetailPage() {
         )}
 
         {!user && (
-          <div className="mt-6 text-sm text-gray-500">Log in to join and post.</div>
+          <div className="mt-6 text-sm text-slate-500">Log in to join and post.</div>
         )}
       </div>
 
       <div className="space-y-3">
         {posts.length === 0 ? (
-          <div className="text-gray-500">No posts yet.</div>
+          <div className="text-slate-500">No posts yet.</div>
         ) : (
           posts.map((p) => (
             <div key={p.id} className="card p-4">
-              <div className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">
+              <div className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
                 {p.content}
               </div>
-              <div className="mt-2 text-xs text-gray-500" suppressHydrationWarning>
+              <div className="mt-2 text-xs text-slate-500" suppressHydrationWarning>
                 {isHydrated
                   ? formatDistanceToNow(new Date(p.createdAt), { addSuffix: true })
                   : p.createdAt.slice(0, 10)}

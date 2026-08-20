@@ -181,10 +181,10 @@ export default function CommunityPage() {
             <Sparkles className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Community</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Discover insights, celebrate wins, and grow your network
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Curated updates from your circles, trending discussions, and new opportunities.
           </p>
         </div>
@@ -211,16 +211,16 @@ export default function CommunityPage() {
         {stats.map((stat) => (
           <div
             key={stat.label}
-            className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 flex items-center gap-4"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center gap-4"
           >
             <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', stat.accent)}>
               <stat.icon className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xl font-semibold text-gray-900 dark:text-white">
-                {stat.isLoading ? <Loader2 className="h-5 w-5 animate-spin text-gray-400" /> : stat.value}
+              <div className="text-xl font-semibold text-slate-900 dark:text-white">
+                {stat.isLoading ? <Loader2 className="h-5 w-5 animate-spin text-slate-400" /> : stat.value}
               </div>
-              <div className="text-sm text-gray-500 dark:text-gray-400">{stat.label}</div>
+              <div className="text-sm text-slate-500 dark:text-slate-400">{stat.label}</div>
             </div>
           </div>
         ))}
@@ -235,7 +235,7 @@ export default function CommunityPage() {
           <CreatePostWidget />
 
           {/* Tabs */}
-          <div className="flex items-center space-x-1 border-b border-gray-200 dark:border-gray-800">
+          <div className="flex items-center space-x-1 border-b border-slate-200 dark:border-slate-800">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -244,7 +244,7 @@ export default function CommunityPage() {
                   'flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition',
                   activeTab === tab.id
                     ? 'text-primary-600 border-primary-600'
-                    : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+                    : 'text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300'
                 )}
               >
                 <tab.icon className="w-4 h-4" />
@@ -263,17 +263,17 @@ export default function CommunityPage() {
 
         {/* Right rail */}
         <aside className="space-y-6">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Trending topics</h2>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Trending topics</h2>
               <Flame className="w-4 h-4 text-orange-500" />
             </div>
             {isLoadingFeedOverview ? (
               <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
               </div>
             ) : trendingTopics.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 No trending topics yet.
               </div>
             ) : (
@@ -281,30 +281,30 @@ export default function CommunityPage() {
                 {trendingTopics.map((topic) => (
                   <div
                     key={topic.tag}
-                    className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800"
+                    className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800"
                   >
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 dark:text-white">{topic.tag}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{topic.posts}</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-white">{topic.tag}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{topic.posts}</div>
                     </div>
-                    <ArrowUpRight className="w-4 h-4 text-gray-400" />
+                    <ArrowUpRight className="w-4 h-4 text-slate-400" />
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Upcoming events</h2>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Upcoming events</h2>
               <CalendarDays className="w-4 h-4 text-primary-600" />
             </div>
             {isLoadingEvents ? (
               <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
               </div>
             ) : events.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 No upcoming events are connected.
               </div>
             ) : (
@@ -315,8 +315,8 @@ export default function CommunityPage() {
                       <CalendarDays className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 dark:text-white">{event.title}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{formatEventDate(event)}</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-white">{event.title}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{formatEventDate(event)}</div>
                     </div>
                   </div>
                 ))}
@@ -324,17 +324,17 @@ export default function CommunityPage() {
             )}
           </div>
 
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Community leaderboard</h2>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Community leaderboard</h2>
               <Trophy className="w-4 h-4 text-yellow-500" />
             </div>
             {isLoadingLeaderboard ? (
               <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
               </div>
             ) : leaderboard.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 No leaderboard entries yet.
               </div>
             ) : (
@@ -342,12 +342,12 @@ export default function CommunityPage() {
                 {leaderboard.map((member, index) => (
                   <div key={member.id ?? member.user?.id ?? index} className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 flex items-center justify-center text-xs font-semibold">
+                      <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs font-semibold">
                         {index + 1}
                       </div>
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">{getLeaderboardName(member)}</div>
+                      <div className="text-sm font-medium text-slate-900 dark:text-white">{getLeaderboardName(member)}</div>
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{getLeaderboardPoints(member)}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">{getLeaderboardPoints(member)}</div>
                   </div>
                 ))}
               </div>

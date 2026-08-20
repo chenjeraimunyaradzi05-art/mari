@@ -165,10 +165,10 @@ export default function MigrantPage() {
           <Globe className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Migrant Services</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Refugee & Immigrant Integration
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Credential recognition, language support, and settlement services
         </p>
       </div>
@@ -178,7 +178,7 @@ export default function MigrantPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading...
         </div>
@@ -187,7 +187,7 @@ export default function MigrantPage() {
           {/* Language Profile */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                 <Languages className="w-5 h-5" /> Language Profile
               </h2>
               <button onClick={() => setShowLangForm(!showLangForm)} className="btn-secondary text-sm">
@@ -196,18 +196,18 @@ export default function MigrantPage() {
             </div>
 
             {showLangForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 mb-4 space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <input
                     value={primaryLanguage}
                     onChange={(e) => setPrimaryLanguage(e.target.value)}
                     placeholder="Primary language (e.g. Arabic, Vietnamese)"
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                   <select
                     value={englishProficiency}
                     onChange={(e) => setEnglishProficiency(e.target.value)}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   >
                     {Object.entries(proficiencyLabels).map(([value, label]) => (
                       <option key={value} value={value}>{label} English</option>
@@ -232,21 +232,21 @@ export default function MigrantPage() {
             )}
 
             {languageProfile && !showLangForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-500 text-xs">Primary language</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{languageProfile.primaryLanguage}</p>
+                    <p className="text-slate-500 text-xs">Primary language</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{languageProfile.primaryLanguage}</p>
                   </div>
                   <div>
-                    <p className="text-gray-500 text-xs">English level</p>
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="text-slate-500 text-xs">English level</p>
+                    <p className="font-medium text-slate-900 dark:text-white">
                       {proficiencyLabels[languageProfile.englishProficiency]}
                     </p>
                   </div>
                   <div>
-                    <p className="text-gray-500 text-xs">Interpreter needed</p>
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="text-slate-500 text-xs">Interpreter needed</p>
+                    <p className="font-medium text-slate-900 dark:text-white">
                       {languageProfile.needsInterpreter ? 'Yes' : 'No'}
                     </p>
                   </div>
@@ -258,7 +258,7 @@ export default function MigrantPage() {
           {/* International Credentials */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                 <GraduationCap className="w-5 h-5" /> International Credentials
               </h2>
               <button onClick={() => setShowCredForm(!showCredForm)} className="btn-primary text-sm inline-flex items-center gap-1">
@@ -267,18 +267,18 @@ export default function MigrantPage() {
             </div>
 
             {showCredForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 mb-4 space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <input
                     value={credCountry}
                     onChange={(e) => setCredCountry(e.target.value)}
                     placeholder="Country of origin"
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                   <select
                     value={credType}
                     onChange={(e) => setCredType(e.target.value)}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   >
                     <option value="DEGREE">Degree</option>
                     <option value="DIPLOMA">Diploma</option>
@@ -289,26 +289,26 @@ export default function MigrantPage() {
                     value={credName}
                     onChange={(e) => setCredName(e.target.value)}
                     placeholder="Credential name"
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                   <input
                     value={credInstitution}
                     onChange={(e) => setCredInstitution(e.target.value)}
                     placeholder="Institution"
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                   <input
                     value={credYear}
                     onChange={(e) => setCredYear(e.target.value)}
                     type="number"
                     placeholder="Year obtained"
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                   <input
                     value={credField}
                     onChange={(e) => setCredField(e.target.value)}
                     placeholder="Field of study"
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -321,18 +321,18 @@ export default function MigrantPage() {
             )}
 
             {credentials.length === 0 ? (
-              <p className="text-sm text-gray-500">No credentials added yet.</p>
+              <p className="text-sm text-slate-500">No credentials added yet.</p>
             ) : (
               <div className="space-y-4">
                 {credentials.map((cred) => (
                   <div
                     key={cred.id}
-                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white">{cred.credentialName}</h3>
-                        <p className="text-sm text-gray-500">{cred.institution}, {cred.originalCountry}</p>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">{cred.credentialName}</h3>
+                        <p className="text-sm text-slate-500">{cred.institution}, {cred.originalCountry}</p>
                       </div>
                       <span className={`text-xs font-semibold px-2 py-1 rounded-full ${credentialStatusColors[cred.status]}`}>
                         {cred.status.replace('_', ' ')}
@@ -340,24 +340,24 @@ export default function MigrantPage() {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
-                        <p className="text-gray-500 text-xs">Type</p>
-                        <p className="text-gray-900 dark:text-white">{cred.credentialType}</p>
+                        <p className="text-slate-500 text-xs">Type</p>
+                        <p className="text-slate-900 dark:text-white">{cred.credentialType}</p>
                       </div>
                       {cred.yearObtained && (
                         <div>
-                          <p className="text-gray-500 text-xs">Year</p>
-                          <p className="text-gray-900 dark:text-white">{cred.yearObtained}</p>
+                          <p className="text-slate-500 text-xs">Year</p>
+                          <p className="text-slate-900 dark:text-white">{cred.yearObtained}</p>
                         </div>
                       )}
                       {cred.australianEquiv && (
                         <div>
-                          <p className="text-gray-500 text-xs">AU Equivalent</p>
-                          <p className="text-gray-900 dark:text-white">{cred.australianEquiv}</p>
+                          <p className="text-slate-500 text-xs">AU Equivalent</p>
+                          <p className="text-slate-900 dark:text-white">{cred.australianEquiv}</p>
                         </div>
                       )}
                       {cred.bridgingRequired && (
                         <div>
-                          <p className="text-gray-500 text-xs">Bridging needed</p>
+                          <p className="text-slate-500 text-xs">Bridging needed</p>
                           <p className="text-orange-600">{cred.bridgingRequired}</p>
                         </div>
                       )}
@@ -370,28 +370,28 @@ export default function MigrantPage() {
 
           {/* Bridging Programs */}
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
               <FileCheck className="w-5 h-5" /> Bridging Programs
             </h2>
 
             {bridgingPrograms.length === 0 ? (
-              <p className="text-sm text-gray-500">No bridging programs available.</p>
+              <p className="text-sm text-slate-500">No bridging programs available.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {bridgingPrograms.map((program) => (
                   <div
                     key={program.id}
-                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
                   >
                     <span className="text-xs text-blue-600 font-medium">{program.profession}</span>
-                    <h3 className="font-semibold text-gray-900 dark:text-white mt-1">{program.name}</h3>
-                    <p className="text-sm text-gray-500">{program.provider}</p>
+                    <h3 className="font-semibold text-slate-900 dark:text-white mt-1">{program.name}</h3>
+                    <p className="text-sm text-slate-500">{program.provider}</p>
 
                     {program.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">{program.description}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">{program.description}</p>
                     )}
 
-                    <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
+                    <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
                       {program.duration && <span>{program.duration}</span>}
                       {program.fundingAvailable && (
                         <span className="text-emerald-600">Funding available</span>

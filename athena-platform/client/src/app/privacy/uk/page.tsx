@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 export default function UKPrivacyAddendumPage() {
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white">
         <div className="max-w-4xl mx-auto px-4 py-12">
@@ -23,7 +23,7 @@ export default function UKPrivacyAddendumPage() {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-8 prose prose-purple dark:prose-invert max-w-none">
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Introduction</h2>
           <p>
             This UK Privacy Addendum supplements our main <Link href="/privacy" className="text-purple-600 hover:underline">Privacy Policy</Link> and 
@@ -35,42 +35,42 @@ export default function UKPrivacyAddendumPage() {
           </p>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Data Controller</h2>
           <p>
             For UK users, ATHENA currently manages privacy operations from Australia. If ATHENA begins a public UK
             launch that requires a local representative or UK registration details, those details will be published
             here before that launch.
           </p>
-          <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 mt-4">
+          <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 mt-4">
             <p className="font-semibold">ATHENA Platform Pty Ltd</p>
             <p className="flex items-center gap-2 mt-2">
-              <MapPin className="w-4 h-4 text-gray-400" />
+              <MapPin className="w-4 h-4 text-slate-400" />
               Australia-based privacy operations; UK service contact details will be published before launch
             </p>
             <p className="flex items-center gap-2 mt-1">
-              <Mail className="w-4 h-4 text-gray-400" />
+              <Mail className="w-4 h-4 text-slate-400" />
               <a href="mailto:privacy@athena.com" className="text-purple-600">privacy@athena.com</a>
             </p>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-slate-500 mt-2">
               ICO registration and any UK representative details will be added before a regulated public UK launch.
             </p>
           </div>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Lawful Bases for Processing</h2>
           <p>Under UK GDPR, we must have a lawful basis to process your personal data. We rely on the following bases:</p>
           
           <div className="overflow-x-auto mt-4">
-            <table className="min-w-full border border-gray-200 dark:border-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-750">
+            <table className="min-w-full border border-slate-200 dark:border-slate-700">
+              <thead className="bg-slate-50 dark:bg-slate-700">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Processing Activity</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Lawful Basis</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                 <tr>
                   <td className="px-4 py-3 text-sm">Account creation and management</td>
                   <td className="px-4 py-3 text-sm">Contract performance</td>
@@ -108,7 +108,7 @@ export default function UKPrivacyAddendumPage() {
           </div>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Your Rights Under UK GDPR</h2>
           <p>As a UK resident, you have the following rights regarding your personal data:</p>
           
@@ -142,7 +142,7 @@ export default function UKPrivacyAddendumPage() {
           </p>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">International Data Transfers</h2>
           <p>
             Your data may be transferred to and processed in countries outside the UK. When we transfer data internationally, 
@@ -160,50 +160,50 @@ export default function UKPrivacyAddendumPage() {
           </p>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Privacy Contact</h2>
           <p>
             For privacy-related queries, including UK GDPR rights requests, contact the ATHENA privacy team using the
             dedicated inbox below.
           </p>
-          <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 mt-4">
+          <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 mt-4">
             <p className="font-semibold">ATHENA privacy team</p>
             <p className="flex items-center gap-2 mt-2">
-              <Mail className="w-4 h-4 text-gray-400" />
+              <Mail className="w-4 h-4 text-slate-400" />
               <a href="mailto:privacy@athena.com" className="text-purple-600">privacy@athena.com</a>
             </p>
           </div>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Complaints</h2>
           <p>
             If you are not satisfied with how we handle your personal data, you have the right to lodge a complaint 
             with the Information Commissioner's Office (ICO):
           </p>
-          <div className="bg-gray-50 dark:bg-gray-750 rounded-lg p-4 mt-4">
+          <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 mt-4">
             <p className="font-semibold">Information Commissioner's Office</p>
             <p className="flex items-center gap-2 mt-2">
-              <MapPin className="w-4 h-4 text-gray-400" />
+              <MapPin className="w-4 h-4 text-slate-400" />
               Wycliffe House, Water Lane, Wilmslow, Cheshire, SK9 5AF
             </p>
             <p className="flex items-center gap-2 mt-1">
-              <Phone className="w-4 h-4 text-gray-400" />
+              <Phone className="w-4 h-4 text-slate-400" />
               0303 123 1113
             </p>
             <p className="flex items-center gap-2 mt-1">
-              <ExternalLink className="w-4 h-4 text-gray-400" />
+              <ExternalLink className="w-4 h-4 text-slate-400" />
               <a href="https://ico.org.uk/make-a-complaint/" target="_blank" rel="noopener noreferrer" className="text-purple-600">
                 ico.org.uk/make-a-complaint
               </a>
             </p>
           </div>
-          <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
+          <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
             We would encourage you to contact us first so we can try to resolve any concerns directly.
           </p>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 mb-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 mb-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">UK Online Safety</h2>
           <p>
             In compliance with the UK Online Safety Act, we have implemented comprehensive safety measures to protect 
@@ -221,7 +221,7 @@ export default function UKPrivacyAddendumPage() {
           </p>
         </section>
 
-        <section className="bg-white dark:bg-gray-800 rounded-xl p-8 shadow-sm">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-8 shadow-sm">
           <h2 className="text-2xl font-semibold mb-4">Contact Us</h2>
           <p>For any questions about this UK Privacy Addendum or your privacy rights, please contact us:</p>
           <div className="flex flex-col sm:flex-row gap-4 mt-4">

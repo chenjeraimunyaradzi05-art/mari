@@ -50,12 +50,12 @@ export default function AIChatPage() {
 
   return (
     <div className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">AI Chat</h1>
-      <p className="mt-1 text-gray-500 dark:text-gray-400">
+      <h1 className="text-2xl font-bold text-slate-900 dark:text-white">AI Chat</h1>
+      <p className="mt-1 text-slate-500 dark:text-slate-400">
         Ask ATHENA for career guidance.
       </p>
 
-      <div className="mt-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
+      <div className="mt-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 overflow-hidden">
         <div className="p-4 max-h-[60vh] overflow-auto space-y-3">
           {messages.map((m, idx) => (
             <div
@@ -70,7 +70,7 @@ export default function AIChatPage() {
                 className={
                   m.role === 'user'
                     ? 'max-w-[80%] rounded-lg bg-primary-500 text-white px-4 py-2'
-                    : 'max-w-[80%] rounded-lg bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 px-4 py-2'
+                    : 'max-w-[80%] rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-4 py-2'
                 }
               >
                 <div className="whitespace-pre-wrap text-sm leading-relaxed">{m.content}</div>
@@ -79,16 +79,16 @@ export default function AIChatPage() {
           ))}
 
           {chat.isPending && (
-            <div className="text-sm text-gray-500 dark:text-gray-400">ATHENA is thinking…</div>
+            <div className="text-sm text-slate-500 dark:text-slate-400">ATHENA is thinking…</div>
           )}
         </div>
 
-        <form onSubmit={onSend} className="border-t border-gray-200 dark:border-gray-800 p-3 flex gap-2">
+        <form onSubmit={onSend} className="border-t border-slate-200 dark:border-slate-800 p-3 flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type your message…"
-            className="flex-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
           <button type="submit" className="btn-primary" disabled={chat.isPending}>
             Send

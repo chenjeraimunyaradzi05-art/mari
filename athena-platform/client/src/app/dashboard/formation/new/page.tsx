@@ -45,28 +45,28 @@ export default function NewFormationPage() {
               className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
             >
               <h3 className="font-bold">Sole Trader</h3>
-              <p className="text-sm text-gray-500 mt-2">Simplest structure. You trade as an individual.</p>
+              <p className="text-sm text-slate-500 mt-2">Simplest structure. You trade as an individual.</p>
             </button>
             <button
               onClick={() => handleTypeSelect('COMPANY')}
               className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
             >
               <h3 className="font-bold">Company (Pty Ltd)</h3>
-              <p className="text-sm text-gray-500 mt-2">Separate legal entity. Limited liability protection.</p>
+              <p className="text-sm text-slate-500 mt-2">Separate legal entity. Limited liability protection.</p>
             </button>
             <button
               onClick={() => handleTypeSelect('PARTNERSHIP')}
               className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
             >
               <h3 className="font-bold">Partnership</h3>
-              <p className="text-sm text-gray-500 mt-2">Two or more people running a business together.</p>
+              <p className="text-sm text-slate-500 mt-2">Two or more people running a business together.</p>
             </button>
             <button
               onClick={() => handleTypeSelect('TRUST')}
               className="p-6 border rounded-lg text-left hover:border-primary hover:bg-slate-50 transition-colors"
             >
               <h3 className="font-bold">Trust</h3>
-              <p className="text-sm text-gray-500 mt-2">Entity holds property/income for others.</p>
+              <p className="text-sm text-slate-500 mt-2">Entity holds property/income for others.</p>
             </button>
           </div>
         </div>
@@ -90,7 +90,7 @@ export default function NewFormationPage() {
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="px-4 py-2 border rounded-md hover:bg-gray-50"
+              className="px-4 py-2 border rounded-md hover:bg-slate-50"
             >
               Back
             </button>

@@ -186,10 +186,10 @@ export default function GranularCookieBanner() {
     return (
       <button
         onClick={() => setVisible(true)}
-        className="fixed bottom-4 left-4 z-40 p-3 bg-white dark:bg-gray-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition group"
+        className="fixed bottom-4 left-4 z-40 p-3 bg-white dark:bg-slate-800 rounded-full shadow-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition group"
         aria-label="Cookie Settings"
       >
-        <Cookie className="w-5 h-5 text-gray-600 dark:text-gray-400 group-hover:text-purple-600" />
+        <Cookie className="w-5 h-5 text-slate-600 dark:text-slate-400 group-hover:text-purple-600" />
       </button>
     );
   }
@@ -200,19 +200,19 @@ export default function GranularCookieBanner() {
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setVisible(false)} />
 
       {/* Banner */}
-      <div className="relative w-full max-w-2xl mx-4 mb-4 sm:mb-0 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="relative w-full max-w-2xl mx-4 mb-4 sm:mb-0 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
         {/* Header */}
-        <div className="p-6 border-b border-gray-100 dark:border-gray-700">
+        <div className="p-6 border-b border-slate-100 dark:border-slate-700">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
               <Shield className="w-5 h-5 text-purple-600" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Cookie Preferences</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Manage your privacy settings</p>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Cookie Preferences</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Manage your privacy settings</p>
             </div>
           </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
             We use cookies and similar technologies to provide our services, understand how you use them, and improve your experience.
             {isGDPRRegion && ' Under GDPR, you have the right to accept or reject non-essential cookies.'}
           </p>
@@ -225,13 +225,13 @@ export default function GranularCookieBanner() {
               <button
                 onClick={rejectOptional}
                 disabled={saving}
-                className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750 transition"
+                className="flex-1 px-4 py-2.5 text-sm font-medium border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
               >
                 Reject Optional
               </button>
               <button
                 onClick={() => setShowDetails(true)}
-                className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750 transition flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2.5 text-sm font-medium border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition flex items-center justify-center gap-2"
               >
                 <Settings className="w-4 h-4" />
                 Customize
@@ -252,10 +252,10 @@ export default function GranularCookieBanner() {
           <div className="max-h-[60vh] overflow-y-auto">
             <div className="p-6 space-y-4">
               {COOKIE_CATEGORIES.map((category) => (
-                <div key={category.key} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div key={category.key} className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
                   {/* Category Header */}
                   <div
-                    className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 cursor-pointer"
+                    className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 cursor-pointer"
                     onClick={() => setExpandedCategory(expandedCategory === category.key ? null : category.key)}
                   >
                     <div className="flex items-center gap-3">
@@ -268,7 +268,7 @@ export default function GranularCookieBanner() {
                         className={`w-10 h-6 rounded-full relative transition ${
                           preferences[category.key]
                             ? 'bg-purple-600'
-                            : 'bg-gray-300 dark:bg-gray-600'
+                            : 'bg-slate-300 dark:bg-slate-600'
                         } ${category.required ? 'opacity-60 cursor-not-allowed' : ''}`}
                       >
                         <span
@@ -278,41 +278,41 @@ export default function GranularCookieBanner() {
                         />
                       </button>
                       <div>
-                        <h3 className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                        <h3 className="font-medium text-slate-900 dark:text-white flex items-center gap-2">
                           {category.title}
                           {category.required && (
-                            <span className="text-xs bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">
+                            <span className="text-xs bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded">
                               Required
                             </span>
                           )}
                         </h3>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{category.description}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{category.description}</p>
                       </div>
                     </div>
                     {expandedCategory === category.key ? (
-                      <ChevronUp className="w-5 h-5 text-gray-400" />
+                      <ChevronUp className="w-5 h-5 text-slate-400" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-400" />
+                      <ChevronDown className="w-5 h-5 text-slate-400" />
                     )}
                   </div>
 
                   {/* Cookie Details */}
                   {expandedCategory === category.key && (
-                    <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+                    <div className="p-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="text-left text-gray-500 dark:text-gray-400">
+                          <tr className="text-left text-slate-500 dark:text-slate-400">
                             <th className="pb-2 font-medium">Cookie</th>
                             <th className="pb-2 font-medium">Purpose</th>
                             <th className="pb-2 font-medium">Duration</th>
                           </tr>
                         </thead>
-                        <tbody className="text-gray-600 dark:text-gray-300">
+                        <tbody className="text-slate-600 dark:text-slate-300">
                           {category.cookies.map((cookie) => (
-                            <tr key={cookie.name} className="border-t border-gray-100 dark:border-gray-700">
+                            <tr key={cookie.name} className="border-t border-slate-100 dark:border-slate-700">
                               <td className="py-2 font-mono text-xs">{cookie.name}</td>
                               <td className="py-2">{cookie.purpose}</td>
-                              <td className="py-2 text-gray-400">{cookie.duration}</td>
+                              <td className="py-2 text-slate-400">{cookie.duration}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -324,11 +324,11 @@ export default function GranularCookieBanner() {
             </div>
 
             {/* Save Button */}
-            <div className="p-6 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-750">
+            <div className="p-6 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-700">
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowDetails(false)}
-                  className="flex-1 px-4 py-2.5 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 transition"
+                  className="flex-1 px-4 py-2.5 text-sm font-medium border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition"
                 >
                   Back
                 </button>
@@ -352,7 +352,7 @@ export default function GranularCookieBanner() {
         )}
 
         {/* Footer Links */}
-        <div className="px-6 py-3 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 flex justify-between text-xs text-gray-500 dark:text-gray-400">
+        <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-700 flex justify-between text-xs text-slate-500 dark:text-slate-400">
           <a href="/privacy" className="hover:text-purple-600 transition">Privacy Policy</a>
           <a href="/cookies" className="hover:text-purple-600 transition">Cookie Policy</a>
           <a href="/privacy-center" className="hover:text-purple-600 transition">Privacy Center</a>

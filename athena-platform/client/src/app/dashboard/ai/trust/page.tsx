@@ -105,7 +105,7 @@ export default function TrustScorePage() {
     if (score >= 80) return { label: 'Excellent', color: 'text-emerald-600' };
     if (score >= 60) return { label: 'Good', color: 'text-blue-600' };
     if (score >= 40) return { label: 'Fair', color: 'text-amber-600' };
-    return { label: 'Building', color: 'text-gray-600' };
+    return { label: 'Building', color: 'text-slate-600' };
   };
 
   return (
@@ -116,10 +116,10 @@ export default function TrustScorePage() {
           <Shield className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">SafetyScore</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           Trust & Safety Profile
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Build credibility, verify your identity, and stay protected
         </p>
       </div>
@@ -135,7 +135,7 @@ export default function TrustScorePage() {
       ) : trustScore ? (
         <>
           {/* Main Trust Score */}
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-8">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8">
             <div className="flex flex-col md:flex-row items-center gap-8">
               {/* Score Circle */}
               <div className="relative w-40 h-40">
@@ -147,7 +147,7 @@ export default function TrustScorePage() {
                     stroke="currentColor"
                     strokeWidth="12"
                     fill="none"
-                    className="text-gray-100 dark:text-gray-800"
+                    className="text-slate-100 dark:text-slate-800"
                   />
                   <circle
                     cx="80"
@@ -163,7 +163,7 @@ export default function TrustScorePage() {
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-4xl font-bold text-gray-900 dark:text-white">{trustScore.trustScore}</span>
+                  <span className="text-4xl font-bold text-slate-900 dark:text-white">{trustScore.trustScore}</span>
                   <span className={`text-sm font-medium ${getTrustLevel(trustScore.trustScore).color}`}>
                     {getTrustLevel(trustScore.trustScore).label}
                   </span>
@@ -172,27 +172,27 @@ export default function TrustScorePage() {
 
               {/* Score Breakdown */}
               <div className="flex-1 space-y-3">
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Score Components</h3>
+                <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Score Components</h3>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Identity Verification</span>
-                    <span className="font-medium text-gray-900 dark:text-white">+{trustScore.identityScore}</span>
+                    <span className="text-slate-600 dark:text-slate-400">Identity Verification</span>
+                    <span className="font-medium text-slate-900 dark:text-white">+{trustScore.identityScore}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Account Age ({trustScore.accountAge} days)</span>
-                    <span className="font-medium text-gray-900 dark:text-white">+{trustScore.accountAgeScore}</span>
+                    <span className="text-slate-600 dark:text-slate-400">Account Age ({trustScore.accountAge} days)</span>
+                    <span className="font-medium text-slate-900 dark:text-white">+{trustScore.accountAgeScore}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Community Feedback</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{trustScore.communityFeedback}</span>
+                    <span className="text-slate-600 dark:text-slate-400">Community Feedback</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{trustScore.communityFeedback}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Engagement Authenticity</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{trustScore.engagementScore}</span>
+                    <span className="text-slate-600 dark:text-slate-400">Engagement Authenticity</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{trustScore.engagementScore}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Professional Verification</span>
-                    <span className="font-medium text-gray-900 dark:text-white">+{trustScore.professionalScore}</span>
+                    <span className="text-slate-600 dark:text-slate-400">Professional Verification</span>
+                    <span className="font-medium text-slate-900 dark:text-white">+{trustScore.professionalScore}</span>
                   </div>
                 </div>
               </div>
@@ -201,12 +201,12 @@ export default function TrustScorePage() {
 
           {/* Badges */}
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Your Badges</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Your Badges</h2>
             {trustScore.badges.length === 0 ? (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-center">
-                <Award className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">No badges earned yet</p>
-                <p className="text-sm text-gray-400 mt-1">Complete verifications to earn trust badges</p>
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center">
+                <Award className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500">No badges earned yet</p>
+                <p className="text-sm text-slate-400 mt-1">Complete verifications to earn trust badges</p>
               </div>
             ) : (
               <div className="flex flex-wrap gap-3">
@@ -229,8 +229,8 @@ export default function TrustScorePage() {
           </div>
 
           {/* Available Badges */}
-          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-6">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Earn More Badges</h3>
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-6">
+            <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Earn More Badges</h3>
             <div className="grid md:grid-cols-2 gap-4">
               {Object.entries(badgeInfo).map(([key, info]) => {
                 const hasBadge = trustScore.badges.includes(key);
@@ -240,18 +240,18 @@ export default function TrustScorePage() {
                     key={key}
                     className={`flex items-center gap-3 p-3 rounded-lg border ${
                       hasBadge
-                        ? 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700'
-                        : 'bg-white/50 dark:bg-gray-900/50 border-dashed border-gray-300 dark:border-gray-700'
+                        ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                        : 'bg-white/50 dark:bg-slate-900/50 border-dashed border-slate-300 dark:border-slate-700'
                     }`}
                   >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${hasBadge ? info.color : 'bg-gray-100 text-gray-400'}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${hasBadge ? info.color : 'bg-slate-100 text-slate-400'}`}>
                       <Icon className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className={`font-medium text-sm ${hasBadge ? 'text-gray-900 dark:text-white' : 'text-gray-500'}`}>
+                      <p className={`font-medium text-sm ${hasBadge ? 'text-slate-900 dark:text-white' : 'text-slate-500'}`}>
                         {info.label}
                       </p>
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-slate-400">
                         {hasBadge ? '✓ Earned' : 'Not yet earned'}
                       </p>
                     </div>
@@ -284,11 +284,11 @@ export default function TrustScorePage() {
           )}
 
           {/* Report Section */}
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="font-semibold text-gray-900 dark:text-white">Report Content</h3>
-                <p className="text-sm text-gray-500">Help keep ATHENA safe for everyone</p>
+                <h3 className="font-semibold text-slate-900 dark:text-white">Report Content</h3>
+                <p className="text-sm text-slate-500">Help keep ATHENA safe for everyone</p>
               </div>
               <button
                 onClick={() => setShowReport(!showReport)}
@@ -300,12 +300,12 @@ export default function TrustScorePage() {
             </div>
 
             {showReport && (
-              <div className="space-y-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+              <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <div className="grid md:grid-cols-2 gap-4">
                   <select
                     value={reportForm.contentType}
                     onChange={(e) => setReportForm(prev => ({ ...prev, contentType: e.target.value }))}
-                    className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
                   >
                     <option value="PROFILE">Profile</option>
                     <option value="MESSAGE">Message</option>
@@ -318,19 +318,19 @@ export default function TrustScorePage() {
                     value={reportForm.contentId}
                     onChange={(e) => setReportForm(prev => ({ ...prev, contentId: e.target.value }))}
                     placeholder="Content ID *"
-                    className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
                   />
                   <input
                     type="text"
                     value={reportForm.reportedUserId}
                     onChange={(e) => setReportForm(prev => ({ ...prev, reportedUserId: e.target.value }))}
                     placeholder="User ID *"
-                    className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
                   />
                   <select
                     value={reportForm.reason}
                     onChange={(e) => setReportForm(prev => ({ ...prev, reason: e.target.value }))}
-                    className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
                   >
                     <option value="">Select reason *</option>
                     <option value="HARASSMENT">Harassment</option>
@@ -346,7 +346,7 @@ export default function TrustScorePage() {
                   onChange={(e) => setReportForm(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="Additional details (optional)"
                   rows={3}
-                  className="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                  className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
                 />
                 <button
                   onClick={handleReport}
@@ -359,7 +359,7 @@ export default function TrustScorePage() {
             )}
 
             {trustScore.reportsSubmitted > 0 && (
-              <p className="text-sm text-gray-500 mt-4">
+              <p className="text-sm text-slate-500 mt-4">
                 You&apos;ve submitted {trustScore.reportsSubmitted} report(s)
                 {trustScore.reportAccuracy && ` • ${Math.round(trustScore.reportAccuracy * 100)}% accuracy`}
               </p>

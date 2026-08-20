@@ -65,7 +65,7 @@ const roleConfig: Record<string, { label: string; color: string; icon: any; desc
   },
   VIEWER: {
     label: 'Viewer',
-    color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+    color: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
     icon: Eye,
     description: 'Read-only access to view analytics',
   },
@@ -135,7 +135,7 @@ export default function TeamPage() {
       {/* Back Button */}
       <Link
         href={`/employer/organizations/${orgId}`}
-        className="inline-flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mb-6"
+        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-6"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Dashboard
@@ -144,11 +144,11 @@ export default function TeamPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Users className="h-7 w-7 text-blue-600" />
             Team Members
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
             Manage who has access to your organization
           </p>
         </div>
@@ -168,35 +168,35 @@ export default function TeamPage() {
           return (
             <div
               key={role}
-              className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4"
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4"
             >
               <div className="flex items-center gap-2 mb-2">
-                <Icon className="h-5 w-5 text-gray-500" />
-                <span className="font-medium text-gray-900 dark:text-white">{config.label}</span>
+                <Icon className="h-5 w-5 text-slate-500" />
+                <span className="font-medium text-slate-900 dark:text-white">{config.label}</span>
               </div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{count}</p>
-              <p className="text-xs text-gray-500 mt-1">{config.description}</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{count}</p>
+              <p className="text-xs text-slate-500 mt-1">{config.description}</p>
             </div>
           );
         })}
       </div>
 
       {/* Team List */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
         {isLoading ? (
           <div className="p-12 text-center">
             <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
           </div>
         ) : sortedMembers.length === 0 ? (
           <div className="p-12 text-center">
-            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+            <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
               No team members yet
             </h3>
-            <p className="text-gray-500">Invite colleagues to collaborate on hiring</p>
+            <p className="text-slate-500">Invite colleagues to collaborate on hiring</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+          <div className="divide-y divide-slate-200 dark:divide-slate-700">
             {sortedMembers.map((member) => {
               const config = roleConfig[member.role];
               const Icon = config.icon;
@@ -204,7 +204,7 @@ export default function TeamPage() {
               return (
                 <div key={member.id} className="p-4 flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="h-12 w-12 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                    <div className="h-12 w-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
                       {member.user.profile?.avatar ? (
                         <img
                           src={member.user.profile.avatar}
@@ -212,7 +212,7 @@ export default function TeamPage() {
                           className="h-12 w-12 rounded-full object-cover"
                         />
                       ) : (
-                        <span className="text-lg font-medium text-gray-500">
+                        <span className="text-lg font-medium text-slate-500">
                           {member.user.firstName[0]}
                           {member.user.lastName[0]}
                         </span>
@@ -220,7 +220,7 @@ export default function TeamPage() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                        <h3 className="font-semibold text-slate-900 dark:text-white">
                           {member.user.firstName} {member.user.lastName}
                         </h3>
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${config.color}`}>
@@ -228,11 +228,11 @@ export default function TeamPage() {
                           {config.label}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <p className="text-sm text-slate-500 flex items-center gap-1">
                         <Mail className="h-3 w-3" />
                         {member.user.email}
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs text-slate-400 mt-1">
                         Joined {formatDistanceToNow(new Date(member.createdAt), { addSuffix: true })}
                       </p>
                     </div>
@@ -242,17 +242,17 @@ export default function TeamPage() {
                   <div className="flex items-center gap-4">
                     <div className="hidden md:flex gap-2">
                       {member.permissions.canPostJobs && (
-                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-400">
+                        <span className="px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs text-slate-600 dark:text-slate-400">
                           Post Jobs
                         </span>
                       )}
                       {member.permissions.canManageTeam && (
-                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-400">
+                        <span className="px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs text-slate-600 dark:text-slate-400">
                           Manage Team
                         </span>
                       )}
                       {member.permissions.canViewAnalytics && (
-                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-400">
+                        <span className="px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs text-slate-600 dark:text-slate-400">
                           View Analytics
                         </span>
                       )}
@@ -262,16 +262,16 @@ export default function TeamPage() {
                       <div className="relative">
                         <button
                           onClick={() => setMenuOpen(menuOpen === member.id ? null : member.id)}
-                          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
                         >
-                          <MoreVertical className="h-5 w-5 text-gray-500" />
+                          <MoreVertical className="h-5 w-5 text-slate-500" />
                         </button>
 
                         {menuOpen === member.id && (
-                          <div className="absolute right-0 top-10 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
+                          <div className="absolute right-0 top-10 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-10">
                             <button
                               onClick={() => removeMemberMutation.mutate(member.id)}
-                              className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 w-full text-left"
+                              className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-slate-100 dark:hover:bg-slate-700 w-full text-left"
                             >
                               <Trash2 className="h-4 w-4" />
                               Remove from team
@@ -291,12 +291,12 @@ export default function TeamPage() {
       {/* Invite Modal */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Invite Team Member</h2>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Invite Team Member</h2>
               <button
                 onClick={() => setShowInviteModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-slate-400 hover:text-slate-600"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -310,7 +310,7 @@ export default function TeamPage() {
               className="space-y-4"
             >
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Email Address
                 </label>
                 <input
@@ -321,13 +321,13 @@ export default function TeamPage() {
                   placeholder="colleague@company.com"
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-slate-500 mt-1">
                   They must have an existing ATHENA account
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Role
                 </label>
                 <div className="space-y-2">
@@ -342,14 +342,14 @@ export default function TeamPage() {
                         className={`w-full p-3 rounded-lg border-2 text-left transition ${
                           inviteRole === role
                             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <Icon className="h-5 w-5 text-gray-500" />
-                          <span className="font-medium text-gray-900 dark:text-white">{config.label}</span>
+                          <Icon className="h-5 w-5 text-slate-500" />
+                          <span className="font-medium text-slate-900 dark:text-white">{config.label}</span>
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">{config.description}</p>
+                        <p className="text-sm text-slate-500 mt-1">{config.description}</p>
                       </button>
                     );
                   })}

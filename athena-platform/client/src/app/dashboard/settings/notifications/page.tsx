@@ -182,7 +182,7 @@ function Toggle({
         className="sr-only peer"
         aria-label={label}
       />
-      <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600" />
+      <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600" />
     </label>
   );
 }
@@ -296,10 +296,10 @@ export default function NotificationsSettingsPage() {
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
             Notification Settings
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Control how and when you receive notifications
           </p>
         </div>
@@ -316,7 +316,7 @@ export default function NotificationsSettingsPage() {
       </div>
 
       {isLoading ? (
-        <div className="card flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+        <div className="card flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading notification preferences...
         </div>
@@ -327,7 +327,7 @@ export default function NotificationsSettingsPage() {
       ) : (
         <>
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+            <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
               Quick Actions
             </h2>
             <div className="flex flex-wrap gap-2">
@@ -366,16 +366,16 @@ export default function NotificationsSettingsPage() {
                     <category.icon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                       {category.name}
                     </h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
                       {category.description}
                     </p>
                   </div>
                 </div>
 
-                <div className="hidden sm:grid sm:grid-cols-3 gap-4 mb-4 text-sm font-medium text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800 pb-2">
+                <div className="hidden sm:grid sm:grid-cols-3 gap-4 mb-4 text-sm font-medium text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
                   <div>Notification</div>
                   <div className="text-center">Email</div>
                   <div className="text-center">Push</div>
@@ -388,10 +388,10 @@ export default function NotificationsSettingsPage() {
                       className="sm:grid sm:grid-cols-3 gap-4 items-center py-2"
                     >
                       <div className="mb-2 sm:mb-0">
-                        <p className="font-medium text-gray-900 dark:text-white text-sm">
+                        <p className="font-medium text-slate-900 dark:text-white text-sm">
                           {setting.name}
                         </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           {setting.description}
                         </p>
                       </div>
@@ -403,9 +403,9 @@ export default function NotificationsSettingsPage() {
                             onChange={() => handleToggleEmail(setting.emailKey!)}
                           />
                         ) : (
-                          <span className="text-xs text-gray-400">Not available</span>
+                          <span className="text-xs text-slate-400">Not available</span>
                         )}
-                        <span className="sm:hidden text-sm text-gray-500">Email</span>
+                        <span className="sm:hidden text-sm text-slate-500">Email</span>
                       </div>
                       <div className="flex items-center gap-2 sm:justify-center">
                         {setting.pushKey ? (
@@ -415,9 +415,9 @@ export default function NotificationsSettingsPage() {
                             onChange={() => handleTogglePush(setting.pushKey!)}
                           />
                         ) : (
-                          <span className="text-xs text-gray-400">Not available</span>
+                          <span className="text-xs text-slate-400">Not available</span>
                         )}
-                        <span className="sm:hidden text-sm text-gray-500">Push</span>
+                        <span className="sm:hidden text-sm text-slate-500">Push</span>
                       </div>
                     </div>
                   ))}
@@ -432,10 +432,10 @@ export default function NotificationsSettingsPage() {
                 <Bell className="w-5 h-5 text-primary-600 dark:text-primary-400" />
               </div>
               <div className="flex-1">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                   In-App Notifications
                 </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Alerts inside your ATHENA workspace
                 </p>
               </div>
@@ -453,10 +453,10 @@ export default function NotificationsSettingsPage() {
                 <Shield className="w-5 h-5 text-primary-600 dark:text-primary-400" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                   Security Notifications
                 </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Account-security alerts remain required and are not configurable here.
                 </p>
               </div>

@@ -59,16 +59,16 @@ export default function StoriesStrip() {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-semibold text-gray-900">Status</div>
+        <div className="text-sm font-semibold text-slate-900">Status</div>
         {user && (
           <div className="flex items-center gap-2">
             <button
               type="button"
               disabled={uploading || createStatus.isPending}
               onClick={() => handleAddStory('image/*')}
-              className="text-xs px-3 py-1.5 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Add photo
             </button>
@@ -76,7 +76,7 @@ export default function StoriesStrip() {
               type="button"
               disabled={uploading || createStatus.isPending}
               onClick={() => handleAddStory('video/*')}
-              className="text-xs px-3 py-1.5 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Add video
             </button>
@@ -86,12 +86,12 @@ export default function StoriesStrip() {
 
       {isLoading ? (
         <div className="flex justify-center py-4">
-          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+          <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
         </div>
       ) : isError ? (
-        <div className="text-sm text-gray-500">Failed to load status.</div>
+        <div className="text-sm text-slate-500">Failed to load status.</div>
       ) : buckets.length === 0 ? (
-        <div className="text-sm text-gray-500">No status updates yet.</div>
+        <div className="text-sm text-slate-500">No status updates yet.</div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-1">
           {buckets.map((b) => (
@@ -116,12 +116,12 @@ export default function StoriesStrip() {
                 {b.user.avatar ? (
                   <img src={b.user.avatar} alt={b.user.displayName} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full bg-gray-100 text-gray-700 flex items-center justify-center text-sm font-semibold">
+                  <div className="w-full h-full bg-slate-100 text-slate-700 flex items-center justify-center text-sm font-semibold">
                     {b.user.displayName.slice(0, 2).toUpperCase()}
                   </div>
                 )}
               </div>
-              <div className="text-xs text-gray-600 line-clamp-1 max-w-[64px]">
+              <div className="text-xs text-slate-600 line-clamp-1 max-w-[64px]">
                 {b.user.displayName}
               </div>
             </button>
@@ -130,7 +130,7 @@ export default function StoriesStrip() {
       )}
 
       {user && uploading && (
-        <div className="mt-3 text-xs text-gray-500 flex items-center gap-2">
+        <div className="mt-3 text-xs text-slate-500 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" />
           Uploading story…
         </div>

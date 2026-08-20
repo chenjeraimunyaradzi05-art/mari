@@ -441,8 +441,8 @@ export default function InventoryPage() {
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Inventory</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Inventory</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Track items, costs, and stock levels.
           </p>
         </div>
@@ -453,20 +453,20 @@ export default function InventoryPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Items</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Items</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? '—' : items.length}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Stock Positions</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Stock Positions</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? '—' : levels.length}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
-          <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {loading ? 'Loading' : 'Ready'}
           </p>
         </div>
@@ -480,46 +480,46 @@ export default function InventoryPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Item</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Item</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
               <input
                 value={itemForm.organizationId}
                 onChange={(e) => setItemForm({ ...itemForm, organizationId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">SKU</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">SKU</label>
               <input
                 value={itemForm.sku}
                 onChange={(e) => setItemForm({ ...itemForm, sku: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Name</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Name</label>
               <input
                 value={itemForm.name}
                 onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Unit</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Unit</label>
               <input
                 value={itemForm.unit}
                 onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Valuation</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Valuation</label>
               <select
                 value={itemForm.valuationMethod}
                 onChange={(e) => setItemForm({ ...itemForm, valuationMethod: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               >
                 {['FIFO', 'LIFO', 'AVERAGE'].map((method) => (
                   <option key={method} value={method}>
@@ -529,27 +529,27 @@ export default function InventoryPage() {
               </select>
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Currency</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Currency</label>
               <input
                 value={itemForm.currency}
                 onChange={(e) => setItemForm({ ...itemForm, currency: e.target.value.toUpperCase() })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Cost</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Cost</label>
               <input
                 value={itemForm.cost}
                 onChange={(e) => setItemForm({ ...itemForm, cost: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Price</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Price</label>
               <input
                 value={itemForm.price}
                 onChange={(e) => setItemForm({ ...itemForm, price: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -559,38 +559,38 @@ export default function InventoryPage() {
         </div>
 
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Location</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Location</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Organization ID (optional)</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
               <input
                 value={locationForm.organizationId}
                 onChange={(e) => setLocationForm({ ...locationForm, organizationId: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Name</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Name</label>
               <input
                 value={locationForm.name}
                 onChange={(e) => setLocationForm({ ...locationForm, name: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Code</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Code</label>
               <input
                 value={locationForm.code}
                 onChange={(e) => setLocationForm({ ...locationForm, code: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 dark:text-gray-400">Address</label>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Address</label>
               <input
                 value={locationForm.address}
                 onChange={(e) => setLocationForm({ ...locationForm, address: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -601,14 +601,14 @@ export default function InventoryPage() {
       </div>
 
       <div className="card space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Transaction</h2>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Transaction</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Item</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Item</label>
             <select
               value={transactionForm.itemId}
               onChange={(e) => setTransactionForm({ ...transactionForm, itemId: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             >
               <option value="">Select item</option>
               {items.map((item) => (
@@ -619,20 +619,20 @@ export default function InventoryPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Location (optional)</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Location (optional)</label>
             <input
               value={transactionForm.locationId}
               onChange={(e) => setTransactionForm({ ...transactionForm, locationId: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="location_id"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Type</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Type</label>
             <select
               value={transactionForm.type}
               onChange={(e) => setTransactionForm({ ...transactionForm, type: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             >
               {['PURCHASE', 'SALE', 'ADJUSTMENT', 'TRANSFER', 'RETURN'].map((type) => (
                 <option key={type} value={type}>
@@ -642,44 +642,44 @@ export default function InventoryPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Quantity</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Quantity</label>
             <input
               value={transactionForm.quantity}
               onChange={(e) => setTransactionForm({ ...transactionForm, quantity: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Unit Cost</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Unit Cost</label>
             <input
               value={transactionForm.unitCost}
               onChange={(e) => setTransactionForm({ ...transactionForm, unitCost: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Total Cost</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Total Cost</label>
             <input
               value={transactionForm.totalCost}
               onChange={(e) => setTransactionForm({ ...transactionForm, totalCost: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Reference</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Reference</label>
             <input
               value={transactionForm.reference}
               onChange={(e) => setTransactionForm({ ...transactionForm, reference: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 dark:text-gray-400">Occurred At</label>
+            <label className="text-sm text-slate-600 dark:text-slate-400">Occurred At</label>
             <input
               type="datetime-local"
               value={transactionForm.occurredAt}
               onChange={(e) => setTransactionForm({ ...transactionForm, occurredAt: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
         </div>
@@ -690,39 +690,39 @@ export default function InventoryPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Items</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Items</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading items...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading items...</p>
         ) : items.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No items added yet.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No items added yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">SKU</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Name</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Cost</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Price</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">SKU</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Name</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Cost</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Price</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {items.slice(0, 6).map((item) => (
-                  <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">{item.sku}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{item.name}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                  <tr key={item.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">{item.sku}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{item.name}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {formatCurrency(item.cost || 0, item.currency || 'AUD')}
                     </td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {formatCurrency(item.price || 0, item.currency || 'AUD')}
                     </td>
                     <td className="py-2 text-right">
                       <button
                         onClick={() => startEditItem(item)}
-                        className="text-xs text-gray-600 hover:underline mr-2"
+                        className="text-xs text-slate-600 hover:underline mr-2"
                       >
                         Edit
                       </button>
@@ -743,30 +743,30 @@ export default function InventoryPage() {
 
       {editingItemId && (
         <div className="card space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Item</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit Item</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input
               value={editingItem.sku}
               onChange={(e) => setEditingItem({ ...editingItem, sku: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="SKU"
             />
             <input
               value={editingItem.name}
               onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Name"
             />
             <input
               value={editingItem.unit}
               onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Unit"
             />
             <select
               value={editingItem.valuationMethod}
               onChange={(e) => setEditingItem({ ...editingItem, valuationMethod: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             >
               {['FIFO', 'LIFO', 'AVERAGE'].map((method) => (
                 <option key={method} value={method}>
@@ -777,19 +777,19 @@ export default function InventoryPage() {
             <input
               value={editingItem.currency}
               onChange={(e) => setEditingItem({ ...editingItem, currency: e.target.value.toUpperCase() })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Currency"
             />
             <input
               value={editingItem.cost}
               onChange={(e) => setEditingItem({ ...editingItem, cost: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Cost"
             />
             <input
               value={editingItem.price}
               onChange={(e) => setEditingItem({ ...editingItem, price: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Price"
             />
           </div>
@@ -806,33 +806,33 @@ export default function InventoryPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Locations</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Locations</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading locations...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading locations...</p>
         ) : locations.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No locations added yet.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No locations added yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Name</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Code</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Address</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Name</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Code</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Address</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {locations.slice(0, 6).map((location) => (
-                  <tr key={location.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">{location.name}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{location.code}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{location.address || '—'}</td>
+                  <tr key={location.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">{location.name}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{location.code}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{location.address || '—'}</td>
                     <td className="py-2 text-right">
                       <button
                         onClick={() => startEditLocation(location)}
-                        className="text-xs text-gray-600 hover:underline mr-2"
+                        className="text-xs text-slate-600 hover:underline mr-2"
                       >
                         Edit
                       </button>
@@ -853,24 +853,24 @@ export default function InventoryPage() {
 
       {editingLocationId && (
         <div className="card space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Location</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit Location</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input
               value={editingLocation.name}
               onChange={(e) => setEditingLocation({ ...editingLocation, name: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Name"
             />
             <input
               value={editingLocation.code}
               onChange={(e) => setEditingLocation({ ...editingLocation, code: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Code"
             />
             <input
               value={editingLocation.address}
               onChange={(e) => setEditingLocation({ ...editingLocation, address: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Address"
             />
           </div>
@@ -887,37 +887,37 @@ export default function InventoryPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Transactions</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Recent Transactions</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading transactions...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading transactions...</p>
         ) : transactions.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No transactions yet.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No transactions yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Item</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Qty</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Cost</th>
-                  <th className="text-right py-2 text-xs font-semibold text-gray-500">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Item</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Type</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Qty</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Cost</th>
+                  <th className="text-right py-2 text-xs font-semibold text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {transactions.slice(0, 6).map((tx) => (
-                  <tr key={tx.id} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">{tx.item?.name || '—'}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{tx.type}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{tx.quantity}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">
+                  <tr key={tx.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">{tx.item?.name || '—'}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{tx.type}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{tx.quantity}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {tx.totalCost ? formatCurrency(tx.totalCost, tx.item?.currency || 'AUD') : '—'}
                     </td>
                     <td className="py-2 text-right">
                       <button
                         onClick={() => startEditTransaction(tx)}
-                        className="text-xs text-gray-600 hover:underline mr-2"
+                        className="text-xs text-slate-600 hover:underline mr-2"
                       >
                         Edit
                       </button>
@@ -938,12 +938,12 @@ export default function InventoryPage() {
 
       {editingTransactionId && (
         <div className="card space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Transaction</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit Transaction</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <select
               value={editingTransaction.type}
               onChange={(e) => setEditingTransaction({ ...editingTransaction, type: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             >
               {['PURCHASE', 'SALE', 'ADJUSTMENT', 'TRANSFER', 'RETURN'].map((type) => (
                 <option key={type} value={type}>
@@ -954,32 +954,32 @@ export default function InventoryPage() {
             <input
               value={editingTransaction.quantity}
               onChange={(e) => setEditingTransaction({ ...editingTransaction, quantity: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Quantity"
             />
             <input
               value={editingTransaction.unitCost}
               onChange={(e) => setEditingTransaction({ ...editingTransaction, unitCost: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Unit Cost"
             />
             <input
               value={editingTransaction.totalCost}
               onChange={(e) => setEditingTransaction({ ...editingTransaction, totalCost: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Total Cost"
             />
             <input
               value={editingTransaction.reference}
               onChange={(e) => setEditingTransaction({ ...editingTransaction, reference: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
               placeholder="Reference"
             />
             <input
               type="datetime-local"
               value={editingTransaction.occurredAt}
               onChange={(e) => setEditingTransaction({ ...editingTransaction, occurredAt: e.target.value })}
-              className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+              className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
             />
           </div>
           <div className="flex gap-2">
@@ -995,28 +995,28 @@ export default function InventoryPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Stock Levels</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Stock Levels</h2>
         </div>
         {loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading stock levels...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading stock levels...</p>
         ) : levels.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No stock movements yet.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">No stock movements yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">SKU</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Location</th>
-                  <th className="text-left py-2 text-xs font-semibold text-gray-500">Quantity</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">SKU</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Location</th>
+                  <th className="text-left py-2 text-xs font-semibold text-slate-500">Quantity</th>
                 </tr>
               </thead>
               <tbody>
                 {levels.slice(0, 6).map((level, index) => (
-                  <tr key={`${level.itemId}-${level.locationId || index}`} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 text-sm text-gray-900 dark:text-white">{level.sku}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{level.location || 'Main'}</td>
-                    <td className="py-2 text-sm text-gray-600 dark:text-gray-300">{level.quantity}</td>
+                  <tr key={`${level.itemId}-${level.locationId || index}`} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="py-2 text-sm text-slate-900 dark:text-white">{level.sku}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{level.location || 'Main'}</td>
+                    <td className="py-2 text-sm text-slate-600 dark:text-slate-300">{level.quantity}</td>
                   </tr>
                 ))}
               </tbody>

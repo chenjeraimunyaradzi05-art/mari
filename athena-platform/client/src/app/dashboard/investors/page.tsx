@@ -106,10 +106,10 @@ export default function InvestorsPage() {
             <Users className="w-5 h-5" />
             <span className="text-sm font-semibold uppercase tracking-wider">Investors</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
             Pitch to aligned capital partners
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             {headerLabel} ready to back women-led ventures.
           </p>
         </div>
@@ -118,13 +118,13 @@ export default function InvestorsPage() {
         </Link>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Type</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Type</label>
           <select
             value={type}
             onChange={(event) => setType(event.target.value)}
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           >
             {investorTypes.map((option) => (
               <option key={option.value} value={option.value}>
@@ -134,30 +134,30 @@ export default function InvestorsPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Stage</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Stage</label>
           <input
             value={stage}
             onChange={(event) => setStage(event.target.value)}
             placeholder="e.g. Seed"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Industry</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Industry</label>
           <input
             value={industry}
             onChange={(event) => setIndustry(event.target.value)}
             placeholder="e.g. Health"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Region</label>
+          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Region</label>
           <input
             value={region}
             onChange={(event) => setRegion(event.target.value)}
             placeholder="e.g. ANZ"
-            className="mt-2 w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
       </div>
@@ -167,31 +167,31 @@ export default function InvestorsPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading investors...
         </div>
       ) : investors.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 text-sm text-gray-500">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
           No investors found. Update your filters.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {investors.map((investor) => (
-            <div key={investor.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 flex flex-col gap-4">
+            <div key={investor.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col gap-4">
               <div>
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{investor.name}</h3>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{investor.name}</h3>
                   {investor.isVerified && (
                     <span className="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">Verified</span>
                   )}
                 </div>
-                <p className="text-xs text-gray-500">{investor.type.replace('_', ' ')}</p>
+                <p className="text-xs text-slate-500">{investor.type.replace('_', ' ')}</p>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-300">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
                 {investor.description || investor.thesis || 'Investment thesis available upon request.'}
               </p>
-              <div className="text-xs text-gray-500 space-y-1">
+              <div className="text-xs text-slate-500 space-y-1">
                 <div>Stages: {investor.stages?.length ? investor.stages.join(', ') : 'Flexible'}</div>
                 <div>Industries: {investor.industries?.length ? investor.industries.join(', ') : 'Multi-sector'}</div>
                 <div>Regions: {investor.regions?.length ? investor.regions.join(', ') : 'Global'}</div>
@@ -202,7 +202,7 @@ export default function InvestorsPage() {
                     value={introMessage}
                     onChange={(event) => setIntroMessage(event.target.value)}
                     placeholder="Add a short intro message"
-                    className="w-full min-h-[90px] bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full min-h-[90px] bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                   <div className="flex gap-2">
                     <button
@@ -233,18 +233,18 @@ export default function InvestorsPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Your introductions</h2>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your introductions</h2>
         {introductions.length === 0 ? (
-          <p className="text-sm text-gray-500">No intro requests yet.</p>
+          <p className="text-sm text-slate-500">No intro requests yet.</p>
         ) : (
           <div className="space-y-3">
             {introductions.map((intro) => (
-              <div key={intro.id} className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+              <div key={intro.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-semibold text-gray-900 dark:text-white">{intro.investor.name}</div>
-                    <div className="text-xs text-gray-500">{intro.investor.type.replace('_', ' ')}</div>
+                    <div className="font-semibold text-slate-900 dark:text-white">{intro.investor.name}</div>
+                    <div className="text-xs text-slate-500">{intro.investor.type.replace('_', ' ')}</div>
                   </div>
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary-50 text-primary-700">
                     {intro.status.replace('_', ' ')}

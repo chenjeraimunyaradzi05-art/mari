@@ -101,13 +101,13 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         )}
       </div>
       <div>
-        <div className="font-semibold text-gray-900 dark:text-white hover:text-primary-600 transition">
+        <div className="font-semibold text-slate-900 dark:text-white hover:text-primary-600 transition">
           {post.author.firstName} {post.author.lastName}
         </div>
-        <div className="text-sm text-gray-500 dark:text-gray-400">
+        <div className="text-sm text-slate-500 dark:text-slate-400">
           {post.author.headline || 'ATHENA Member'}
         </div>
-        <div className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+        <div className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1">
           <Clock className="w-3 h-3" />
           <span suppressHydrationWarning>
             {isHydrated
@@ -136,7 +136,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       </div>
 
       {/* Content */}
-      <div className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap mb-4">
+      <div className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap mb-4">
         {post.content}
       </div>
 
@@ -174,7 +174,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
           className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
             isLiked 
               ? 'text-red-500 bg-red-50 dark:bg-red-900/20' 
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
           } ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}
         >
           <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
@@ -183,7 +183,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         {isFallbackPost ? (
           <button
             disabled
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 opacity-70 cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 opacity-70 cursor-not-allowed"
           >
             <MessageSquare className="w-5 h-5" />
             Comment
@@ -191,17 +191,17 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         ) : (
           <Link 
             href={`/dashboard/community/post/${post.id}`}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
           >
             <MessageSquare className="w-5 h-5" />
             Comment
           </Link>
         )}
-        <button disabled={isFallbackPost} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}>
+        <button disabled={isFallbackPost} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}>
           <Share2 className="w-5 h-5" />
           Share
         </button>
-        <button disabled={isFallbackPost} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}>
+        <button disabled={isFallbackPost} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition ${isFallbackPost ? 'cursor-not-allowed opacity-70' : ''}`}>
           <Bookmark className="w-5 h-5" />
           Save
         </button>
@@ -270,16 +270,16 @@ function CreatePostBox() {
         </div>
       </div>
       {!isExpanded && (
-        <div className="flex items-center justify-around mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+        <div className="flex items-center justify-around mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
             <Play className="w-5 h-5 text-red-500" />
             Video
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
             <MessageCircle className="w-5 h-5 text-green-500" />
             Question
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
             <TrendingUp className="w-5 h-5 text-blue-500" />
             Win
           </button>
@@ -322,7 +322,7 @@ export default function FeedPage() {
                     Live
                   </span>
                 </div>
-                <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Your Feed</h1>
+                <h1 className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">Your Feed</h1>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -330,7 +330,7 @@ export default function FeedPage() {
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                     filter === 'latest'
                       ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
                   Latest
@@ -340,7 +340,7 @@ export default function FeedPage() {
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                     filter === 'trending'
                       ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
                   Trending
@@ -350,7 +350,7 @@ export default function FeedPage() {
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                     filter === 'following'
                       ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
                   Following
@@ -450,24 +450,24 @@ export default function FeedPage() {
               <div className="space-y-2">
                 <Link 
                   href="/dashboard/community" 
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition"
                 >
                   <Users className="w-5 h-5 text-primary-600" />
-                  <span className="text-gray-700 dark:text-gray-300">Community Feed</span>
+                  <span className="text-slate-700 dark:text-slate-300">Community Feed</span>
                 </Link>
                 <Link 
                   href="/dashboard/create-post" 
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition"
                 >
                   <Plus className="w-5 h-5 text-green-600" />
-                  <span className="text-gray-700 dark:text-gray-300">Create Post</span>
+                  <span className="text-slate-700 dark:text-slate-300">Create Post</span>
                 </Link>
                 <Link 
                   href="/explore" 
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition"
                 >
                   <Play className="w-5 h-5 text-red-600" />
-                  <span className="text-gray-700 dark:text-gray-300">Explore Videos</span>
+                  <span className="text-slate-700 dark:text-slate-300">Explore Videos</span>
                 </Link>
               </div>
             </div>
@@ -493,9 +493,9 @@ export default function FeedPage() {
 
             {/* Suggested Connections */}
             <div className="card-lift glass-card rounded-xl p-5">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">People to Follow</h3>
+              <h3 className="font-semibold text-slate-900 dark:text-white mb-4">People to Follow</h3>
               <div className="space-y-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Connect with mentors and peers to grow your network.
                 </p>
                 <Link 

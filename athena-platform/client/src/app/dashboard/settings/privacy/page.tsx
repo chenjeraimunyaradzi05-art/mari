@@ -107,10 +107,10 @@ export default function PrivacySettingsPage() {
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Privacy & Data
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Download your data or delete your account
         </p>
       </div>
@@ -121,20 +121,20 @@ export default function PrivacySettingsPage() {
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               Privacy Preferences
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Control how your data is used for personalization and marketing.
             </p>
 
             <div className="mt-4 space-y-3">
               <label className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
+                  <p className="font-medium text-slate-900 dark:text-white">
                     Data processing
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
                     Allow ATHENA to process your data to deliver core services.
                   </p>
                 </div>
@@ -148,10 +148,10 @@ export default function PrivacySettingsPage() {
 
               <label className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
+                  <p className="font-medium text-slate-900 dark:text-white">
                     Cookies & analytics
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
                     Enable cookies for analytics and product improvements.
                   </p>
                 </div>
@@ -165,10 +165,10 @@ export default function PrivacySettingsPage() {
 
               <label className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
+                  <p className="font-medium text-slate-900 dark:text-white">
                     Marketing updates
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
                     Receive product updates and offers via email.
                   </p>
                 </div>
@@ -183,10 +183,10 @@ export default function PrivacySettingsPage() {
               {isUsRegion && (
                 <label className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="font-medium text-slate-900 dark:text-white">
                       Do Not Sell/Share My Personal Information
                     </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
                       Opt out of the sale or sharing of personal information.
                     </p>
                   </div>
@@ -221,13 +221,13 @@ export default function PrivacySettingsPage() {
               <ShieldCheck className="w-5 h-5 text-blue-600" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 UK/EU GDPR Rights
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                 You can request access, correction, restriction, or deletion of your data at any time.
               </p>
-              <div className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+              <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
                 For UK users, ATHENA follows UK GDPR and ICO guidance. Learn more in the{' '}
                 <a className="text-primary-600 hover:underline" href="/privacy">Privacy Policy</a>.
               </div>
@@ -242,10 +242,10 @@ export default function PrivacySettingsPage() {
             <Database className="w-5 h-5 text-primary-600" />
           </div>
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               Download My Data
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Export a JSON copy of your account data.
             </p>
 
@@ -270,10 +270,10 @@ export default function PrivacySettingsPage() {
             <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400" />
           </div>
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               Delete Account
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Deletes personal profile data and revokes access by anonymizing your account.
             </p>
 

@@ -50,7 +50,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
   if (isLoading) {
     return (
       <div className="flex justify-center p-4">
-        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
       </div>
     );
   }
@@ -93,18 +93,18 @@ export default function CommentSection({ postId }: CommentSectionProps) {
         size="sm"
       />
       <div className="flex-1">
-        <div className="bg-white dark:bg-gray-900 p-3 rounded-lg rounded-tl-none shadow-sm border border-gray-100 dark:border-gray-800">
+        <div className="bg-white dark:bg-slate-900 p-3 rounded-lg rounded-tl-none shadow-sm border border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-sm font-semibold text-gray-900 dark:text-white">
+            <span className="text-sm font-semibold text-slate-900 dark:text-white">
               {comment.author.firstName} {comment.author.lastName}
             </span>
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-slate-500">
               {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
             </span>
           </div>
-          <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{comment.content}</p>
+          <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{comment.content}</p>
         </div>
-        <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
+        <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
           <button
             className="hover:text-purple-600"
             onClick={() => setReplyTo(comment)}
@@ -124,7 +124,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
   );
 
   return (
-    <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-4">
+    <div className="border-t border-slate-100 bg-slate-50 p-4 space-y-4">
       {/* Input */}
       {user && (
         <form onSubmit={handleSubmit} className="flex gap-3">
@@ -135,9 +135,9 @@ export default function CommentSection({ postId }: CommentSectionProps) {
           />
           <div className="flex-1 relative">
             {replyTo && (
-              <div className="text-xs text-gray-500 mb-1 flex items-center gap-2">
+              <div className="text-xs text-slate-500 mb-1 flex items-center gap-2">
                 Replying to {replyTo.author.firstName} {replyTo.author.lastName}
-                <button type="button" className="text-gray-400 hover:text-gray-600" onClick={() => setReplyTo(null)}>
+                <button type="button" className="text-slate-400 hover:text-slate-600" onClick={() => setReplyTo(null)}>
                   Cancel
                 </button>
               </div>
@@ -147,13 +147,13 @@ export default function CommentSection({ postId }: CommentSectionProps) {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder={replyTo ? `Reply to ${replyTo.author.firstName}...` : 'Add a comment...'}
-              className="w-full px-4 py-2 pr-10 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+              className="w-full px-4 py-2 pr-10 rounded-full border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
               disabled={addComment.isPending}
             />
             <button
                type="submit"
                disabled={!content.trim() || addComment.isPending}
-               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-purple-600 disabled:opacity-50"
+               className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-purple-600 disabled:opacity-50"
             >
                 <Send className="w-4 h-4" />
             </button>
@@ -164,7 +164,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
       {/* List */}
       <div className="space-y-4">
         {threadedComments.length === 0 ? (
-           <p className="text-center text-sm text-gray-500 py-2">No comments yet. Be the first!</p>
+           <p className="text-center text-sm text-slate-500 py-2">No comments yet. Be the first!</p>
         ) : (
           threadedComments.map((comment) => (
             <CommentItem key={comment.id} comment={comment} />

@@ -74,16 +74,16 @@ export default function AdminContentPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow">
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <header className="bg-white dark:bg-slate-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+            <Link href="/admin" className="text-slate-500 hover:text-slate-700">
               <ChevronLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Content Moderation</h1>
-              <p className="text-gray-600 dark:text-gray-400">Review and moderate user posts</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Content Moderation</h1>
+              <p className="text-slate-600 dark:text-slate-400">Review and moderate user posts</p>
             </div>
           </div>
         </div>
@@ -124,7 +124,7 @@ export default function AdminContentPage() {
             {data?.posts.map((post) => (
               <div
                 key={post.id}
-                className={`bg-white dark:bg-gray-800 rounded-lg shadow p-6 ${
+                className={`bg-white dark:bg-slate-800 rounded-lg shadow p-6 ${
                   post.isHidden ? 'opacity-60 border-2 border-red-300' : ''
                 }`}
               >
@@ -152,11 +152,11 @@ export default function AdminContentPage() {
                       <div className="flex items-center gap-2 mb-1">
                         <Link
                           href={`/dashboard/profile/${post.author.id}`}
-                          className="font-medium text-gray-900 dark:text-white hover:underline"
+                          className="font-medium text-slate-900 dark:text-white hover:underline"
                         >
                           {post.author.firstName} {post.author.lastName}
                         </Link>
-                        <span className="text-gray-500 text-sm">
+                        <span className="text-slate-500 text-sm">
                           {new Date(post.createdAt).toLocaleDateString()}
                         </span>
                         {post.isHidden && (
@@ -165,12 +165,12 @@ export default function AdminContentPage() {
                           </span>
                         )}
                       </div>
-                      <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                      <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
                         {post.content.length > 300 ? `${post.content.slice(0, 300)}...` : post.content}
                       </p>
 
                       {/* Stats */}
-                      <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
+                      <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
                         <span>❤️ {post.likeCount}</span>
                         <span>💬 {post.commentCount}</span>
                         {post.reportCount > 0 && (
@@ -232,8 +232,8 @@ export default function AdminContentPage() {
 
             {data?.posts.length === 0 && (
               <div className="text-center py-12">
-                <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">
+                <MessageSquare className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-500">
                   {showReported ? 'No reported posts found' : 'No posts found'}
                 </p>
               </div>
@@ -244,7 +244,7 @@ export default function AdminContentPage() {
         {/* Pagination */}
         {data && data.pagination.totalPages > 1 && (
           <div className="mt-6 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-slate-500">
               Page {page} of {data.pagination.totalPages}
             </div>
             <div className="flex gap-2">

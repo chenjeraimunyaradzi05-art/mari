@@ -143,15 +143,15 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
       />
 
       {/* Modal */}
-      <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden">
+      <div className="relative bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Create Post
           </h2>
           <button
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <X className="w-5 h-5" />
           </button>
@@ -163,7 +163,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
             {user?.firstName?.charAt(0) || 'U'}
           </div>
           <div className="flex-1">
-            <p className="font-medium text-gray-900 dark:text-white">
+            <p className="font-medium text-slate-900 dark:text-white">
               {user?.firstName} {user?.lastName}
             </p>
             
@@ -171,7 +171,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
             <div className="relative">
               <button
                 onClick={() => setShowVisibilityMenu(!showVisibilityMenu)}
-                className="flex items-center space-x-1 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                className="flex items-center space-x-1 text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
               >
                 {(() => {
                   const option = visibilityOptions.find((o) => o.value === visibility);
@@ -187,7 +187,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
               </button>
 
               {showVisibilityMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-10 min-w-48">
+                <div className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 z-10 min-w-48">
                   {visibilityOptions.map((option) => (
                     <button
                       key={option.value}
@@ -196,16 +196,16 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
                         setShowVisibilityMenu(false);
                       }}
                       className={cn(
-                        'w-full flex items-start space-x-3 px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700',
+                        'w-full flex items-start space-x-3 px-4 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700',
                         visibility === option.value && 'bg-primary-50 dark:bg-primary-900/20'
                       )}
                     >
-                      <option.icon className="w-5 h-5 text-gray-500 mt-0.5" />
+                      <option.icon className="w-5 h-5 text-slate-500 mt-0.5" />
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
+                        <p className="font-medium text-slate-900 dark:text-white">
                           {option.label}
                         </p>
-                        <p className="text-xs text-gray-500">{option.description}</p>
+                        <p className="text-xs text-slate-500">{option.description}</p>
                       </div>
                     </button>
                   ))}
@@ -225,7 +225,7 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
                 'px-3 py-1.5 text-sm rounded-full whitespace-nowrap transition',
                 postType === type.value
                   ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
               )}
             >
               {type.label}
@@ -278,42 +278,42 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
         </div>
 
         {/* Toolbar */}
-        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
           <div className="flex items-center space-x-1">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
               title="Add image"
             >
               <Image className="w-5 h-5" />
             </button>
             <button
               onClick={() => videoInputRef.current?.click()}
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
               title="Add video"
             >
               <Video className="w-5 h-5" />
             </button>
             <button
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
               title="Add link"
             >
               <LinkIcon className="w-5 h-5" />
             </button>
             <button
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
               title="Add hashtag"
             >
               <Hash className="w-5 h-5" />
             </button>
             <button
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
               title="Mention someone"
             >
               <AtSign className="w-5 h-5" />
             </button>
             <button
-              className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
               title="Add emoji"
             >
               <Smile className="w-5 h-5" />
@@ -337,8 +337,8 @@ export default function CreatePostModal({ isOpen, onClose }: CreatePostModalProp
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <span className="text-sm text-gray-500">
+        <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+          <span className="text-sm text-slate-500">
             {content.length}/2000 characters
           </span>
           <button

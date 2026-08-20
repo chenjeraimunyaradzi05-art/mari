@@ -88,7 +88,7 @@ export function ServiceCard({
         onClick={() => onClick?.(service.id)}
       >
         {/* Image */}
-        <div className="w-48 h-32 flex-shrink-0 bg-gray-100 dark:bg-gray-800">
+        <div className="w-48 h-32 flex-shrink-0 bg-slate-100 dark:bg-slate-800">
           {service.images[0] ? (
             <img
               src={service.images[0]}
@@ -96,7 +96,7 @@ export function ServiceCard({
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400">
+            <div className="w-full h-full flex items-center justify-center text-slate-400">
               No image
             </div>
           )}
@@ -106,7 +106,7 @@ export function ServiceCard({
         <div className="flex-1 p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-start justify-between">
-              <h3 className="font-medium text-gray-900 dark:text-white line-clamp-2">
+              <h3 className="font-medium text-slate-900 dark:text-white line-clamp-2">
                 {service.title}
               </h3>
               <button
@@ -119,7 +119,7 @@ export function ServiceCard({
                 <Heart
                   className={cn(
                     'w-5 h-5',
-                    service.isFavorite ? 'text-red-500 fill-current' : 'text-gray-400'
+                    service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-400'
                   )}
                 />
               </button>
@@ -128,16 +128,16 @@ export function ServiceCard({
               <div className="flex items-center gap-1">
                 <Star className="w-4 h-4 text-yellow-400 fill-current" />
                 <span className="text-sm font-medium">{service.rating.toFixed(1)}</span>
-                <span className="text-sm text-gray-500">({service.reviewCount})</span>
+                <span className="text-sm text-slate-500">({service.reviewCount})</span>
               </div>
             </div>
           </div>
           <div className="flex items-center justify-between mt-2">
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-slate-500">
               <Clock className="w-3 h-3 inline mr-1" />
               {quickestDelivery}d delivery
             </span>
-            <span className="font-semibold text-gray-900 dark:text-white">
+            <span className="font-semibold text-slate-900 dark:text-white">
               From {formatPrice(startingPrice)}
             </span>
           </div>
@@ -153,7 +153,7 @@ export function ServiceCard({
         onClick={() => onClick?.(service.id)}
       >
         {/* Image */}
-        <div className="aspect-video bg-gray-100 dark:bg-gray-800 relative">
+        <div className="aspect-video bg-slate-100 dark:bg-slate-800 relative">
           {service.images[0] ? (
             <img
               src={service.images[0]}
@@ -161,7 +161,7 @@ export function ServiceCard({
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400">
+            <div className="w-full h-full flex items-center justify-center text-slate-400">
               No image
             </div>
           )}
@@ -170,12 +170,12 @@ export function ServiceCard({
               e.stopPropagation();
               onFavorite(service.id);
             }}
-            className="absolute top-2 right-2 p-1.5 bg-white/80 dark:bg-gray-900/80 rounded-full"
+            className="absolute top-2 right-2 p-1.5 bg-white/80 dark:bg-slate-900/80 rounded-full"
           >
             <Heart
               className={cn(
                 'w-4 h-4',
-                service.isFavorite ? 'text-red-500 fill-current' : 'text-gray-600'
+                service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-600'
               )}
             />
           </button>
@@ -183,7 +183,7 @@ export function ServiceCard({
 
         {/* Content */}
         <div className="p-3">
-          <h3 className="font-medium text-gray-900 dark:text-white text-sm line-clamp-2 mb-2">
+          <h3 className="font-medium text-slate-900 dark:text-white text-sm line-clamp-2 mb-2">
             {service.title}
           </h3>
           <div className="flex items-center justify-between">
@@ -191,7 +191,7 @@ export function ServiceCard({
               <Star className="w-3 h-3 text-yellow-400 fill-current" />
               <span className="text-xs font-medium">{service.rating.toFixed(1)}</span>
             </div>
-            <span className="text-sm font-semibold text-gray-900 dark:text-white">
+            <span className="text-sm font-semibold text-slate-900 dark:text-white">
               {formatPrice(startingPrice)}
             </span>
           </div>
@@ -210,7 +210,7 @@ export function ServiceCard({
       onClick={() => onClick?.(service.id)}
     >
       {/* Image carousel */}
-      <div className="aspect-video bg-gray-100 dark:bg-gray-800 relative">
+      <div className="aspect-video bg-slate-100 dark:bg-slate-800 relative">
         {service.images[0] ? (
           <img
             src={service.images[0]}
@@ -218,7 +218,7 @@ export function ServiceCard({
             className="w-full h-full object-cover"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-400">
+          <div className="w-full h-full flex items-center justify-center text-slate-400">
             No image
           </div>
         )}
@@ -229,12 +229,12 @@ export function ServiceCard({
             e.stopPropagation();
             onFavorite(service.id);
           }}
-          className="absolute top-3 right-3 p-2 bg-white/90 dark:bg-gray-900/90 rounded-full shadow-sm hover:bg-white dark:hover:bg-gray-900 transition-colors"
+          className="absolute top-3 right-3 p-2 bg-white/90 dark:bg-slate-900/90 rounded-full shadow-sm hover:bg-white dark:hover:bg-slate-900 transition-colors"
         >
           <Heart
             className={cn(
               'w-5 h-5',
-              service.isFavorite ? 'text-red-500 fill-current' : 'text-gray-600'
+              service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-600'
             )}
           />
         </button>
@@ -265,7 +265,7 @@ export function ServiceCard({
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
-              <span className="font-medium text-sm text-gray-900 dark:text-white truncate">
+              <span className="font-medium text-sm text-slate-900 dark:text-white truncate">
                 {service.seller.firstName} {service.seller.lastName}
               </span>
               {getSellerLevelBadge(service.seller.level)}
@@ -274,7 +274,7 @@ export function ServiceCard({
         </div>
 
         {/* Title */}
-        <h3 className="font-medium text-gray-900 dark:text-white line-clamp-2 mb-2 min-h-[2.5rem]">
+        <h3 className="font-medium text-slate-900 dark:text-white line-clamp-2 mb-2 min-h-[2.5rem]">
           {service.title}
         </h3>
 
@@ -284,7 +284,7 @@ export function ServiceCard({
             <Star className="w-4 h-4 text-yellow-400 fill-current" />
             <span className="font-medium text-sm">{service.rating.toFixed(1)}</span>
           </div>
-          <span className="text-sm text-gray-500">({service.reviewCount} reviews)</span>
+          <span className="text-sm text-slate-500">({service.reviewCount} reviews)</span>
         </div>
 
         {/* Tags */}
@@ -292,7 +292,7 @@ export function ServiceCard({
           {service.tags.slice(0, 3).map((tag) => (
             <span
               key={tag}
-              className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-xs rounded"
+              className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs rounded"
             >
               {tag}
             </span>
@@ -300,14 +300,14 @@ export function ServiceCard({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
-          <div className="flex items-center gap-1 text-sm text-gray-500">
+        <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-1 text-sm text-slate-500">
             <Clock className="w-4 h-4" />
             <span>{quickestDelivery}d delivery</span>
           </div>
           <div className="text-right">
-            <p className="text-xs text-gray-500">Starting at</p>
-            <p className="font-semibold text-lg text-gray-900 dark:text-white">
+            <p className="text-xs text-slate-500">Starting at</p>
+            <p className="font-semibold text-lg text-slate-900 dark:text-white">
               {formatPrice(startingPrice)}
             </p>
           </div>

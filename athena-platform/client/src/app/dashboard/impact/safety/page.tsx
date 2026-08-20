@@ -99,10 +99,10 @@ export default function SafetyPage() {
           <Shield className="w-5 h-5" />
           <span className="text-sm font-semibold uppercase tracking-wider">Safety Planning</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mt-2">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
           DV Survivor Support
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
           Safety planning tools and support services
         </p>
       </div>
@@ -122,7 +122,7 @@ export default function SafetyPage() {
               <a href="tel:1800737732" className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
                 <Phone className="w-4 h-4" /> 1800RESPECT (1800 737 732)
               </a>
-              <a href="tel:131114" className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50">
+              <a href="tel:131114" className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50">
                 <Phone className="w-4 h-4" /> Lifeline (13 11 14)
               </a>
             </div>
@@ -135,7 +135,7 @@ export default function SafetyPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading...
         </div>
@@ -144,7 +144,7 @@ export default function SafetyPage() {
           {/* Safety Plan */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                 <Lock className="w-5 h-5" /> My Safety Plan
               </h2>
               <button onClick={() => setShowPlanForm(!showPlanForm)} className="btn-primary text-sm">
@@ -158,9 +158,9 @@ export default function SafetyPage() {
             </div>
 
             {showPlanForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 mb-4 space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Emergency Contacts (one per line)
                   </label>
                   <textarea
@@ -168,11 +168,11 @@ export default function SafetyPage() {
                     onChange={(e) => setEmergencyContacts(e.target.value)}
                     placeholder="Name - Phone number - Relationship"
                     rows={3}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Safe Locations (one per line)
                   </label>
                   <textarea
@@ -180,11 +180,11 @@ export default function SafetyPage() {
                     onChange={(e) => setSafeLocations(e.target.value)}
                     placeholder="Address or description of safe places"
                     rows={3}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Exit Strategies (one per line)
                   </label>
                   <textarea
@@ -192,7 +192,7 @@ export default function SafetyPage() {
                     onChange={(e) => setExitStrategies(e.target.value)}
                     placeholder="Steps to safely leave if needed"
                     rows={3}
-                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -205,15 +205,15 @@ export default function SafetyPage() {
             )}
 
             {safetyPlan && !showPlanForm && (
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
                       <Phone className="w-5 h-5 text-red-600" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">Emergency Contacts</p>
-                      <p className="text-xs text-gray-500">Configured</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">Emergency Contacts</p>
+                      <p className="text-xs text-slate-500">Configured</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -221,8 +221,8 @@ export default function SafetyPage() {
                       <MapPin className="w-5 h-5 text-blue-600" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">Safe Locations</p>
-                      <p className="text-xs text-gray-500">Configured</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">Safe Locations</p>
+                      <p className="text-xs text-slate-500">Configured</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -230,13 +230,13 @@ export default function SafetyPage() {
                       <FileText className="w-5 h-5 text-purple-600" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">Exit Strategies</p>
-                      <p className="text-xs text-gray-500">Configured</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">Exit Strategies</p>
+                      <p className="text-xs text-slate-500">Configured</p>
                     </div>
                   </div>
                 </div>
                 {safetyPlan.lastReviewedAt && (
-                  <p className="text-xs text-gray-500 mt-4">
+                  <p className="text-xs text-slate-500 mt-4">
                     Last reviewed: {new Date(safetyPlan.lastReviewedAt).toLocaleDateString()}
                   </p>
                 )}
@@ -247,13 +247,13 @@ export default function SafetyPage() {
           {/* Support Services */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Support Services
               </h2>
               <select
                 value={serviceType}
                 onChange={(e) => setServiceType(e.target.value)}
-                className="bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 text-sm"
+                className="bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
               >
                 <option value="">All services</option>
                 {Object.entries(serviceTypeLabels).map(([value, label]) => (
@@ -263,13 +263,13 @@ export default function SafetyPage() {
             </div>
 
             {services.length === 0 ? (
-              <p className="text-sm text-gray-500">No services found.</p>
+              <p className="text-sm text-slate-500">No services found.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {services.map((service) => (
                   <div
                     key={service.id}
-                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
                   >
                     <div className="flex items-start justify-between mb-2">
                       <span className="text-xs font-medium text-red-600">
@@ -282,17 +282,17 @@ export default function SafetyPage() {
                           </span>
                         )}
                         {service.isNational && (
-                          <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 px-2 py-1 rounded-full">
+                          <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 px-2 py-1 rounded-full">
                             National
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{service.name}</h3>
+                    <h3 className="font-semibold text-slate-900 dark:text-white">{service.name}</h3>
 
                     {service.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">{service.description}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">{service.description}</p>
                     )}
 
                     <div className="flex flex-wrap gap-3 mt-4">

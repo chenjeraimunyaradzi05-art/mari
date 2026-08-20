@@ -142,10 +142,10 @@ export default function LearnPage() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
             Learn & Grow
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
             Upskill with courses designed for women in tech and leadership
           </p>
         </div>
@@ -220,7 +220,7 @@ export default function LearnPage() {
 
       {featuredCourses.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             Featured Courses
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -239,14 +239,14 @@ export default function LearnPage() {
                     </span>
                   </div>
                 </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 transition mb-2">
+                <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition mb-2">
                   {course.title}
                 </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
+                <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 mb-3">
                   {course.description || 'No description provided.'}
                 </p>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">
+                  <span className="text-slate-500 dark:text-slate-400">
                     {providerNameFor(course)}
                   </span>
                   <span className="font-semibold text-primary-600">
@@ -261,7 +261,7 @@ export default function LearnPage() {
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
             type="text"
             placeholder="Search courses..."
@@ -283,7 +283,7 @@ export default function LearnPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
           <div className="relative">
             <select
@@ -297,7 +297,7 @@ export default function LearnPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
         </div>
       </div>
@@ -329,7 +329,7 @@ export default function LearnPage() {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                   <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-2">
                     {duration && (
-                      <span className="px-2 py-1 text-xs font-medium bg-gray-900/70 text-white rounded-full flex items-center">
+                      <span className="px-2 py-1 text-xs font-medium bg-slate-900/70 text-white rounded-full flex items-center">
                         <Clock className="w-3 h-3 mr-1" />
                         {duration}
                       </span>
@@ -337,7 +337,7 @@ export default function LearnPage() {
                     {modes.slice(0, 2).map((mode) => (
                       <span
                         key={mode}
-                        className="px-2 py-1 text-xs font-medium bg-gray-900/70 text-white rounded-full"
+                        className="px-2 py-1 text-xs font-medium bg-slate-900/70 text-white rounded-full"
                       >
                         {formatLabel(mode)}
                       </span>
@@ -359,16 +359,16 @@ export default function LearnPage() {
                     </span>
                   </div>
 
-                  <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 transition line-clamp-2">
+                  <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition line-clamp-2">
                     {course.title}
                   </h3>
 
-                  <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2">
                     {course.description || 'No description provided.'}
                   </p>
 
                   <div className="flex items-center space-x-2">
-                    <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                       {course.organization?.logo ? (
                         <img
                           src={course.organization.logo}
@@ -376,25 +376,25 @@ export default function LearnPage() {
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs font-medium text-gray-500">
+                        <div className="w-full h-full flex items-center justify-center text-xs font-medium text-slate-500">
                           {providerNameFor(course).charAt(0)}
                         </div>
                       )}
                     </div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                    <span className="text-sm text-slate-600 dark:text-slate-400">
                       {providerNameFor(course)}
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
                       {typeof course.employmentRate === 'number'
                         ? `${course.employmentRate}% employment`
                         : typeof course.avgStartingSalary === 'number'
                           ? `${formatCurrency(course.avgStartingSalary)} avg salary`
                           : 'Outcomes not listed'}
                     </div>
-                    <span className="font-semibold text-gray-900 dark:text-white">
+                    <span className="font-semibold text-slate-900 dark:text-white">
                       {costLabelFor(course)}
                     </span>
                   </div>
@@ -404,11 +404,11 @@ export default function LearnPage() {
           })
         ) : (
           <div className="col-span-full card text-center py-12">
-            <BookOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+            <BookOpen className="w-12 h-12 mx-auto text-slate-400 mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
               No courses found
             </h3>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
               Try adjusting your search or filters
             </p>
             <button
@@ -434,7 +434,7 @@ export default function LearnPage() {
                 'px-4 py-2 rounded-lg font-medium transition',
                 i === 0
                   ? 'bg-primary-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
               )}
             >
               {i + 1}
