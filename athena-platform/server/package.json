@@ -14,6 +14,8 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts",
+    "db:seed:content": "ts-node src/services/seed/content.seed.ts",
+    "db:seed:admin": "ts-node src/services/seed/admin.seed.ts",
     "loadtest:health": "node scripts/loadtest-health.js",
     "loadtest:auth": "node scripts/loadtest-auth.js",
     "loadtest:websocket": "node scripts/loadtest-websocket.js",

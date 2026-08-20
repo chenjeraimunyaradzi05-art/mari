@@ -36,6 +36,7 @@ import mediaRoutes from './routes/media.routes';
 import notificationRoutes from './routes/notification.routes';
 import messageRoutes from './routes/message.routes';
 import adminRoutes from './routes/admin.routes';
+import adminSeedRoutes from './routes/admin-seed.routes';
 import referralRoutes from './routes/referral.routes';
 import employerRoutes from './routes/employer.routes';
 import educationRoutes from './routes/education.routes';
@@ -467,6 +468,10 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/messages', messageRoutes);
+// Mounted before adminRoutes: that router applies authenticate() to every path
+// beneath /api/admin, which would reject seed requests before they are reached.
+// The seed router gates itself (non-production + ALLOW_DB_SEEDING + token).
+app.use('/api/admin/seed', adminSeedRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/referrals', referralRoutes);
 app.use('/api/employer', employerRoutes);
