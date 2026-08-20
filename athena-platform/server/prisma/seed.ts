@@ -6,6 +6,7 @@
 
 import { PrismaClient, Persona, UserRole, JobType, JobStatus, PostType, NotificationType, SubscriptionTier, ApplicationStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { seedAdmin } from '../src/services/seed/admin.seed';
 
 const prisma = new PrismaClient();
 
@@ -236,7 +237,11 @@ async function main() {
   console.log('  ATHENA Platform - Authentic Data Seed');
   console.log('========================================\n');
 
-  const passwordHash = await bcrypt.hash('Demo123!', 10);
+  // Shared password for the demo fixture accounts only. The admin account is
+  // seeded separately via seedAdmin() so it never shares this credential.
+  // Override with SEED_DEMO_PASSWORD; these accounts are for local/demo data.
+  const demoPassword = process.env.SEED_DEMO_PASSWORD ?? 'Demo123!';
+  const passwordHash = await bcrypt.hash(demoPassword, 10);
 
   // ------------------------------------------------------------------
   // 1. SKILLS
@@ -257,19 +262,11 @@ async function main() {
   // 2. ADMIN & DEMO USERS
   // ------------------------------------------------------------------
   console.log('2/9  Creating admin & demo users...');
-  const adminUser = await prisma.user.upsert({
-    where: { email: 'admin@athena.com' },
-    update: {},
-    create: {
-      email: 'admin@athena.com', passwordHash,
-      firstName: 'Admin', lastName: 'User', displayName: 'Admin',
-      role: UserRole.ADMIN, persona: Persona.EMPLOYER,
-      emailVerified: true, emailVerifiedAt: new Date(),
-      city: 'Sydney', state: 'NSW', country: 'Australia',
-      headline: 'Platform Administrator',
-      bio: 'Managing the ATHENA platform operations and community.',
-      referralCode: 'ADMIN001',
-    },
+  // Admin credentials come from ADMIN_EMAIL / ADMIN_PASSWORD, or a strong
+  // random password generated and printed once. Never the demo password.
+  const adminSeed = await seedAdmin(prisma);
+  const adminUser = await prisma.user.findUniqueOrThrow({
+    where: { id: adminSeed.userId },
   });
 
   const demoUser = await prisma.user.upsert({
@@ -571,8 +568,16 @@ async function main() {
   console.log('========================================');
   console.log('');
   console.log('Demo Accounts:');
-  console.log('  Admin:  admin@athena.com / Demo123!');
-  console.log('  User:   demo@athena.com / Demo123!');
+  console.log(`  User:   demo@athena.com / ${demoPassword}`);
+  console.log('');
+  console.log('Admin Account:');
+  console.log(`  Email:    ${adminSeed.email}`);
+  if (adminSeed.generatedPassword) {
+    console.log(`  Password: ${adminSeed.generatedPassword}`);
+    console.log('  ^ generated, shown once and not stored - save it now.');
+  } else {
+    console.log('  Password: from ADMIN_PASSWORD (unchanged if the account existed)');
+  }
   console.log('');
   console.log(`Organisations: ${orgs.length} (${ORGANISATIONS.filter(o => o.type === 'company').length} companies, ${ORGANISATIONS.filter(o => o.type === 'government').length} government, ${ORGANISATIONS.filter(o => o.type === 'university').length} universities, ${ORGANISATIONS.filter(o => o.type === 'tafe').length} TAFEs, ${ORGANISATIONS.filter(o => o.type === 'ngo').length} NGOs)`);
   console.log(`Jobs: ${JOBS_DATA.length}`);
