@@ -21,6 +21,11 @@ import {
 import Image from 'next/image';
 import { useAuth } from '@/lib/hooks';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
+import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
+
+// Matches the login page: the Facebook chain is complete server-side and only
+// needs an app id, so the placeholder shows only while that is unset.
+const facebookEnabled = Boolean(process.env.NEXT_PUBLIC_FACEBOOK_APP_ID);
 
 const inviteCodePattern = /^[A-Za-z0-9-]{4,32}$/;
 
@@ -473,16 +478,36 @@ function RegisterContent() {
                   router.push('/dashboard/persona');
                 }}
               />
-              <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">
-                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M22.675 0h-21.35C.593 0 0 .593 0 1.326v21.348C0 23.407.593 24 1.326 24h11.495v-9.294H9.692v-3.622h3.129V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.794.715-1.794 1.763v2.312h3.587l-.467 3.622h-3.12V24h6.116C23.407 24 24 23.407 24 22.674V1.326C24 .593 23.407 0 22.675 0z" />
-                </svg>
-                Facebook Soon
-              </button>
+              {facebookEnabled ? (
+                <FacebookSignInButton
+                  mode="register"
+                  persona={personaValue || undefined}
+                  womanSelfAttested={womanSelfAttestedValue}
+                  inviteCode={inviteCodeValue?.trim() || undefined}
+                  onError={(message) => setServerError(message)}
+                  onSuccess={() => {
+                    const redirect = searchParams?.get('redirect');
+                    if (redirect && redirect.startsWith('/')) {
+                      router.push(redirect);
+                      return;
+                    }
+                    router.push('/dashboard/persona');
+                  }}
+                />
+              ) : (
+                <button type="button" disabled className="btn-outline py-2.5 opacity-60 cursor-not-allowed">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M22.675 0h-21.35C.593 0 0 .593 0 1.326v21.348C0 23.407.593 24 1.326 24h11.495v-9.294H9.692v-3.622h3.129V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.794.715-1.794 1.763v2.312h3.587l-.467 3.622h-3.12V24h6.116C23.407 24 24 23.407 24 22.674V1.326C24 .593 23.407 0 22.675 0z" />
+                  </svg>
+                  Facebook Soon
+                </button>
+              )}
             </div>
-            <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
-              Google sign-in is live. Facebook sign-in is still being finalized for launch.
-            </p>
+            {!facebookEnabled && (
+              <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
+                Google sign-in is live. Facebook sign-in is still being finalized for launch.
+              </p>
+            )}
           </div>
 
           <p className="mt-8 text-center text-sm text-slate-600 dark:text-slate-400">
