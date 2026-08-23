@@ -322,7 +322,7 @@ export default function PrivacyCenterPage() {
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
         {/* Quick Actions */}
         {isAuthenticated && (
-          <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+          <section id="data-rights" className="scroll-mt-8 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">Your Data Rights</h2>
             <div className="grid md:grid-cols-2 gap-4">
               {/* Export Data */}

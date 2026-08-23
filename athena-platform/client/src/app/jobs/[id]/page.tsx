@@ -35,7 +35,6 @@ export default function JobDetailsPage() {
         setJob(response.data.data);
       } catch (error) {
         console.error('Failed to fetch job:', error);
-        // router.push('/404'); // Optional: redirect on error
       } finally {
         setLoading(false);
       }

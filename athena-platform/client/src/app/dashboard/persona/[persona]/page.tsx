@@ -71,7 +71,7 @@ const personaActions: Record<string, PersonaAction[]> = {
     { title: 'Community feed', detail: 'Publish and respond to community posts.', href: '/dashboard/community', icon: Users },
   ],
   MENTOR: [
-    { title: 'Mentor sessions', detail: 'Manage bookings and session follow-up.', href: '/dashboard/mentor', icon: HeartHandshake },
+    { title: 'Mentor profile', detail: 'Set up or update your mentor listing.', href: '/dashboard/mentors/become-mentor', icon: HeartHandshake },
     { title: 'Mentor marketplace', detail: 'Preview the public mentor directory.', href: '/dashboard/mentors', icon: Users },
     { title: 'Events', detail: 'Find workshops and community sessions.', href: '/dashboard/events', icon: Calendar },
   ],
@@ -82,7 +82,7 @@ const personaActions: Record<string, PersonaAction[]> = {
   ],
   EMPLOYER: [
     { title: 'Employer workspace', detail: 'Manage organizations, jobs, and hiring.', href: '/employer', icon: Briefcase },
-    { title: 'Post a role', detail: 'Create salary-transparent opportunities.', href: '/employer/organizations', icon: FileText },
+    { title: 'Create organization', detail: 'Set up an organization before publishing roles.', href: '/employer/organizations/new', icon: FileText },
     { title: 'Talent search', detail: 'Search people, mentors, and skills.', href: '/dashboard/search', icon: Search },
   ],
   REAL_ESTATE: [

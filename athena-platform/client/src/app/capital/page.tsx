@@ -68,7 +68,7 @@ export default function CapitalPage() {
             </p>
             <div className="flex flex-wrap gap-4">
               <Link
-                href="/capital/investors"
+                href="/contact-sales?intent=funding"
                 className="px-6 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition"
               >
                 Apply for Funding
@@ -196,7 +196,7 @@ export default function CapitalPage() {
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Link
-              href="/capital/investors"
+              href="/contact-sales?intent=funding"
               className="px-8 py-3 bg-white text-green-700 font-semibold rounded-lg hover:bg-slate-100 transition"
             >
               Apply Now
