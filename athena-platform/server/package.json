@@ -10,9 +10,9 @@
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
+    "db:migrate": "node scripts/guard-destructive-migration.js && prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
-    "db:push": "prisma db push",
+    "db:push": "node scripts/guard-destructive-migration.js && prisma db push",
     "db:seed": "ts-node prisma/seed.ts",
     "db:seed:content": "ts-node src/services/seed/content.seed.ts",
     "db:seed:admin": "ts-node src/services/seed/admin.seed.ts",
@@ -23,7 +23,8 @@
     "launch:warm-cdn": "node scripts/warm-cdn.js",
     "launch:incident": "node scripts/send-incident-notification.js",
     "validate:launch-readiness": "node -r ts-node/register src/scripts/validate-launch-readiness.ts",
-    "validate:auth-sessions": "node -r ts-node/register src/scripts/validate-auth-session-routes.ts"
+    "validate:auth-sessions": "node -r ts-node/register src/scripts/validate-auth-session-routes.ts",
+    "db:guard": "node scripts/guard-destructive-migration.js"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.971.0",
