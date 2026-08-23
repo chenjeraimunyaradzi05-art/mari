@@ -21,6 +21,8 @@ router.get('/feed', auth_1.optionalAuth, async (req, res, next) => {
         const limit = parseLimit(req.query.limit, 20, 50);
         const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
         const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+        // The explore tabs pick a feed; `type` stays available for VideoType filtering.
+        const feed = typeof req.query.feed === 'string' ? req.query.feed : undefined;
         const where = {
             status: 'PUBLISHED',
             isHidden: false,
@@ -28,9 +30,23 @@ router.get('/feed', auth_1.optionalAuth, async (req, res, next) => {
         if (type) {
             where.type = type;
         }
+        if (feed === 'following') {
+            // A signed-out viewer follows nobody, so the tab is honestly empty for them
+            // rather than silently falling back to the chronological feed.
+            const following = req.user
+                ? await prisma_1.prisma.follow.findMany({
+                    where: { followerId: req.user.id },
+                    select: { followingId: true },
+                })
+                : [];
+            where.authorId = { in: following.map((f) => f.followingId) };
+        }
+        const orderBy = feed === 'trending'
+            ? [{ engagementScore: 'desc' }, { viewCount: 'desc' }, { id: 'desc' }]
+            : [{ createdAt: 'desc' }, { id: 'desc' }];
         const videos = await prisma_1.prisma.video.findMany({
             where,
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            orderBy,
             cursor: cursor ? { id: cursor } : undefined,
             skip: cursor ? 1 : 0,
             take: limit + 1,

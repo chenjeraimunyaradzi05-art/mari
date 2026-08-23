@@ -5,8 +5,14 @@ import { api, postApi } from './api';
 // ============================================
 export const videoApi = {
   // Get personalized video feed
-  getFeed: (params?: { page?: number; limit?: number; category?: string }) =>
-    api.get('/video/feed', { params }),
+  // Cursor-paginated. `feed` selects the explore tab (for-you default, plus
+  // 'following' and 'trending'); `type` filters by VideoType.
+  getFeed: (params?: {
+    limit?: number;
+    cursor?: string;
+    feed?: string;
+    type?: string;
+  }) => api.get('/video/feed', { params }),
 
   // Get single video
   getVideo: (id: string) => api.get(`/video/${id}`),
@@ -55,9 +61,9 @@ export const videoApi = {
   report: (id: string, reason: string) =>
     api.post(`/video/${id}/report`, { reason }),
 
-  // Track view
-  trackView: (id: string, watchDuration: number) =>
-    api.post(`/video/${id}/view`, { watchDuration }),
+  // Track view. The server requires completionPct alongside watchDuration.
+  trackView: (id: string, watchDuration: number, completionPct: number, source?: string) =>
+    api.post(`/video/${id}/view`, { watchDuration, completionPct, source }),
 
   // Get trending videos
   getTrending: (params?: { period?: 'day' | 'week' | 'month' }) =>

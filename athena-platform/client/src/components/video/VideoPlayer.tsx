@@ -38,7 +38,7 @@ interface VideoPlayerProps {
   onShare: (id: string) => void;
   onComment: (id: string) => void;
   onAuthorClick: (authorId: string) => void;
-  onView?: (id: string, duration: number) => void;
+  onView?: (id: string, watchDuration: number, completionPct: number) => void;
 }
 
 export function VideoPlayer({
@@ -83,7 +83,11 @@ export function VideoPlayer({
       setIsPlaying(false);
       // Track view when video becomes inactive
       if (onView && watchTimeRef.current > 0) {
-        onView(video.id, watchTimeRef.current);
+        const total = videoRef.current.duration;
+        const completionPct = Number.isFinite(total) && total > 0
+          ? Math.min(100, Math.max(0, (watchTimeRef.current / total) * 100))
+          : 0;
+        onView(video.id, watchTimeRef.current, completionPct);
         watchTimeRef.current = 0;
       }
     }
@@ -92,9 +96,10 @@ export function VideoPlayer({
   // Track progress
   const handleTimeUpdate = useCallback(() => {
     if (!videoRef.current) return;
-    const currentProgress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-    setProgress(currentProgress);
-    watchTimeRef.current = videoRef.current.currentTime;
+    const { currentTime, duration } = videoRef.current;
+    // duration is NaN until metadata loads, which would poison the progress bar.
+    setProgress(Number.isFinite(duration) && duration > 0 ? (currentTime / duration) * 100 : 0);
+    watchTimeRef.current = currentTime;
   }, []);
 
   const togglePlay = () => {

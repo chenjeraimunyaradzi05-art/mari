@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { VideoFeed } from '@/components/video';
+import { cn } from '@/lib/utils';
 import { Compass, TrendingUp, Users, Bookmark } from 'lucide-react';
 
 export default function ExplorePage() {
@@ -47,15 +48,15 @@ export default function ExplorePage() {
       <nav className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black to-transparent pb-4 pt-8">
         <div className="flex justify-around items-center max-w-md mx-auto">
           <button
-            onClick={() => router.push('/explore')}
-            className="flex flex-col items-center text-white"
+            onClick={() => setActiveTab('for-you')}
+            className={cn('flex flex-col items-center', activeTab === 'for-you' ? 'text-white' : 'text-white/60 hover:text-white')}
           >
             <Compass className="w-6 h-6" />
             <span className="text-xs mt-1">Explore</span>
           </button>
           <button
-            onClick={() => router.push('/explore/trending')}
-            className="flex flex-col items-center text-white/60 hover:text-white"
+            onClick={() => setActiveTab('trending')}
+            className={cn('flex flex-col items-center', activeTab === 'trending' ? 'text-white' : 'text-white/60 hover:text-white')}
           >
             <TrendingUp className="w-6 h-6" />
             <span className="text-xs mt-1">Trending</span>

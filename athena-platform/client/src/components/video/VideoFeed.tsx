@@ -2,27 +2,35 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { VideoPlayer } from './VideoPlayer';
+import { VideoComments } from './VideoComments';
+import { useRouter } from 'next/navigation';
 import { videoApi } from '@/lib/api-extensions';
 import { Loader2 } from 'lucide-react';
 import { useVideoFeedStore, VideoItem } from '@/lib/stores/video.store';
 import { Skeleton } from '@/components/ui/loading';
 
-// Maps API response to Store Interface
+// Maps a Video row from GET /video/feed onto the store interface. The field names
+// here follow the Prisma model the endpoint returns (likeCount, author.displayName,
+// author.avatar), not the flattened shape an earlier draft of this file assumed.
 function mapApiToVideoItem(v: any): VideoItem {
   return {
-      id: v.id,
-      url: v.videoUrl,
-      thumbnail: v.thumbnailUrl,
-      description: v.description || v.title,
-      creator: {
-          id: v.author.id,
-          username: v.author.firstName, // + ' ' + v.author.lastName,
-          avatar: v.author.avatarUrl
-      },
-      likes: v.likes,
-      comments: v.comments,
-      shares: v.shares,
-      isLiked: v.isLiked
+    id: v.id,
+    url: v.videoUrl,
+    thumbnail: v.thumbnailUrl ?? undefined,
+    description: v.description || v.title || '',
+    creator: {
+      id: v.author?.id,
+      username: v.author?.displayName || 'ATHENA member',
+      avatar: v.author?.avatar ?? undefined,
+    },
+    likes: v.likeCount ?? 0,
+    comments: v.commentCount ?? 0,
+    shares: v.shareCount ?? 0,
+    views: v.viewCount ?? 0,
+    duration: v.duration ?? undefined,
+    isLiked: v.isLiked ?? false,
+    hashtags: v.hashtags ?? undefined,
+    createdAt: v.createdAt,
   };
 }
 
@@ -42,44 +50,72 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
       appendVideos, 
       setIndex,
       toggleLike,
-      isLoading,
-      hasMore 
+      toggleBookmark,
+      bookmarkedVideos,
+      markAsShared,
+      addToHistory,
   } = useVideoFeedStore();
 
-  const [loadingLocal, setLoadingLocal] = useState(false);
+  const router = useRouter();
 
-  // Fetch videos
-  const fetchVideos = useCallback(async (pageNum: number) => {
-    if (loadingLocal || !hasMore) return;
-    
+  const [loadingLocal, setLoadingLocal] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [commentsFor, setCommentsFor] = useState<string | null>(null);
+
+  // A ref, not `loadingLocal`, guards re-entry. Reading the state here would put
+  // it in fetchVideos' dependency list, and because it flips on every call the
+  // callback identity would change, retriggering the load effect and spinning up
+  // an unbounded retry loop whenever the feed request fails.
+  const isFetchingRef = useRef(false);
+
+  // The endpoint paginates by cursor, not page number, so the next cursor it
+  // hands back is what drives loading more.
+  const cursorRef = useRef<string | null>(null);
+
+  const fetchVideos = useCallback(async (mode: 'reset' | 'more') => {
+    if (isFetchingRef.current) return;
+    if (mode === 'more' && !cursorRef.current) return;
+
+    isFetchingRef.current = true;
     setLoadingLocal(true);
     try {
-      const response = await videoApi.getFeed({ page: pageNum, limit: 10, category });
-      const newVideos = response.data.data?.videos || [];
-      
-      const mappedVideos: VideoItem[] = newVideos.map(mapApiToVideoItem);
+      const response = await videoApi.getFeed({
+        limit: 10,
+        feed: category,
+        cursor: mode === 'more' ? cursorRef.current ?? undefined : undefined,
+      });
 
-      if (newVideos.length === 0) {
-         // handle end?
-      } else {
-        if (pageNum === 1) setFeed(mappedVideos);
-        else appendVideos(mappedVideos);
-      }
+      const newVideos: any[] = Array.isArray(response.data?.data) ? response.data.data : [];
+      const mappedVideos: VideoItem[] = newVideos.map(mapApiToVideoItem);
+      cursorRef.current = response.data?.nextCursor ?? null;
+
+      if (mode === 'reset') setFeed(mappedVideos);
+      else if (mappedVideos.length > 0) appendVideos(mappedVideos);
+
+      setLoadError(null);
     } catch (error) {
       console.error('Failed to fetch videos:', error);
+      setLoadError('Videos could not be loaded right now.');
     } finally {
+      isFetchingRef.current = false;
       setLoadingLocal(false);
     }
-  }, [loadingLocal, hasMore, category, setFeed, appendVideos]);
+  }, [category, setFeed, appendVideos]);
 
-  // Initial load
+  // Load on mount and whenever the category changes. Keying the effect on the
+  // category is deliberate: the feed belongs to a category, so switching tabs has
+  // to clear the old videos and pull the new ones. Depending on `feed.length`
+  // instead would leave a category switch showing the previous tab's videos.
   useEffect(() => {
-    if (feed.length === 0 && initialVideos.length === 0) {
-      fetchVideos(1);
-    } else if (initialVideos.length > 0 && feed.length === 0) {
-        setFeed(initialVideos.map(mapApiToVideoItem));
+    if (initialVideos.length > 0) {
+      setFeed(initialVideos.map(mapApiToVideoItem));
+      return;
     }
-  }, [fetchVideos, initialVideos, feed.length, setFeed]);
+    setFeed([]);
+    setIndex(0);
+    void fetchVideos('reset');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
 
   const handleScroll = () => {
       if (!containerRef.current) return;
@@ -91,11 +127,8 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
         setIndex(index);
         
         // Load more
-        if (index > feed.length - 4 && hasMore && !loadingLocal) {
-            // Logic to fetch next page needs slightly better tracking of 'page' in helper
-            // For now, assuming fetchVideos uses store page or we pass calculated page
-             const nextPage = Math.floor(feed.length / 10) + 1;
-             fetchVideos(nextPage);
+        if (index > feed.length - 4) {
+          void fetchVideos('more');
         }
       }
   };
@@ -106,20 +139,69 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
     containerRef.current.scrollTo({ top: index * clientHeight, behavior: 'smooth' });
   };
 
-  // Interactions
-  const handleLike = async (id: string) => {
-    toggleLike(id); // Optimistic update
+  // Interactions. Each one updates the store optimistically and then persists to
+  // the API, reverting only if the write actually failed. Signed-out viewers get
+  // a 401, and for them the locally persisted state is the intended behaviour, so
+  // that case is left alone rather than reverted.
+  const persist = useCallback(async (write: () => Promise<unknown>, revert: () => void) => {
     try {
-       // We'd access the video to check state if we needed exact toggle logic, 
-       // but for now allow the API to handle idempotency or trust the toggle
-       // Assuming API: await videoApi.toggleLike(id);
-    } catch (err) {
-       toggleLike(id); // Revert
+      await write();
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 401 || status === 403) return;
+      revert();
     }
-  };
+  }, []);
+
+  const handleLike = useCallback((id: string) => {
+    const wasLiked = feed.find((v) => v.id === id)?.isLiked ?? false;
+    toggleLike(id);
+    void persist(
+      () => (wasLiked ? videoApi.unlike(id) : videoApi.like(id)),
+      () => toggleLike(id)
+    );
+  }, [feed, toggleLike, persist]);
+
+  const handleBookmark = useCallback((id: string) => {
+    const wasBookmarked = bookmarkedVideos.includes(id);
+    toggleBookmark(id);
+    void persist(
+      () => (wasBookmarked ? videoApi.unbookmark(id) : videoApi.bookmark(id)),
+      () => toggleBookmark(id)
+    );
+  }, [bookmarkedVideos, toggleBookmark, persist]);
+
+  const handleShare = useCallback(async (id: string) => {
+    const shareUrl = `${window.location.origin}/explore?video=${id}`;
+    const description = feed.find((v) => v.id === id)?.description;
+    markAsShared(id);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: description || 'ATHENA', url: shareUrl });
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+      }
+    } catch {
+      // A cancelled share sheet or a blocked clipboard is not a failure worth surfacing.
+    }
+  }, [feed, markAsShared]);
+
+  const handleAuthorClick = useCallback((authorId: string) => {
+    router.push(`/dashboard/profile/${authorId}`);
+  }, [router]);
+
+  const handleView = useCallback((id: string, watchDuration: number, completionPct: number) => {
+    addToHistory(id, completionPct / 100, completionPct >= 90);
+    void videoApi
+      .trackView(id, Math.max(1, Math.round(watchDuration)), completionPct, 'feed')
+      .catch(() => {
+        // View telemetry is best-effort and must never interrupt playback.
+      });
+  }, [addToHistory]);
 
   return (
-    <div 
+    <>
+    <div
       ref={containerRef}
       data-testid="video-feed"
       onScroll={handleScroll}
@@ -151,6 +233,25 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
           </div>
         </div>
       )}
+
+      {feed.length === 0 && !loadingLocal && (
+        <div className="h-full w-full snap-start flex items-center justify-center bg-zinc-900 px-8 text-center">
+          <div>
+            <p className="text-sm text-white/70">
+              {loadError ?? 'There are no videos in this feed yet.'}
+            </p>
+            {loadError && (
+              <button
+                type="button"
+                onClick={() => void fetchVideos('reset')}
+                className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-medium text-black"
+              >
+                Try again
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {feed.map((video, index) => (
         <div
           key={video.id}
@@ -178,15 +279,16 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
                 comments: video.comments,
                 shares: video.shares,
                 isLiked: video.isLiked || false,
-                isBookmarked: false,
-                createdAt: new Date().toISOString()
-            }} 
-            isActive={index === currentIndex} 
+                isBookmarked: bookmarkedVideos.includes(video.id),
+                createdAt: video.createdAt || new Date().toISOString()
+            }}
+            isActive={index === currentIndex}
             onLike={handleLike}
-            onBookmark={() => {}}
-            onShare={() => {}}
-            onComment={() => {}}
-            onAuthorClick={() => {}}
+            onBookmark={handleBookmark}
+            onShare={handleShare}
+            onComment={setCommentsFor}
+            onAuthorClick={handleAuthorClick}
+            onView={handleView}
           />
         </div>
       ))}
@@ -197,5 +299,8 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
         </div>
       )}
     </div>
+
+    <VideoComments videoId={commentsFor} onClose={() => setCommentsFor(null)} />
+    </>
   );
 }
