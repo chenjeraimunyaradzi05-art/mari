@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  backendFailureResponse,
   buildBackendProxyHeaders,
   forwardSetCookieHeaders,
   rejectUntrustedSameOriginRequest,
 } from '../proxy-utils';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+import { BACKEND_API_URL as API_URL } from '@/lib/runtime-config';
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,10 +41,6 @@ export async function POST(request: NextRequest) {
     forwardSetCookieHeaders(response, res);
     return res;
   } catch (error) {
-    console.error('Refresh token API error:', error);
-    return NextResponse.json(
-      { success: false, message: 'Internal server error' },
-      { status: 500 }
-    );
+    return backendFailureResponse('Refresh token API error', error);
   }
 }

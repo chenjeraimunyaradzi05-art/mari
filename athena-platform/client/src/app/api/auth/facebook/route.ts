@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  backendFailureResponse,
   buildBackendProxyHeaders,
   forwardSetCookieHeaders,
   rejectUntrustedSameOriginRequest,
@@ -32,10 +33,6 @@ export async function POST(request: NextRequest) {
     forwardSetCookieHeaders(response, res);
     return res;
   } catch (error) {
-    console.error('Facebook auth API error:', error);
-    return NextResponse.json(
-      { success: false, message: 'Internal server error' },
-      { status: 500 }
-    );
+    return backendFailureResponse('Facebook auth API error', error);
   }
 }

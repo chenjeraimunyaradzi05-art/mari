@@ -1,7 +1,10 @@
 /**
  * Safety Center Page
- * UK Online Safety Act Compliance
- * Phase 4: UK/EU Market Launch
+ * UK Online Safety Act compliance + Australian eSafety resources.
+ *
+ * Resources are listed per region and tagged with `region`, because the app's
+ * default locale is en-AU while the Phase 4 launch targets UK/EU — a reader in
+ * either market has to be able to find a number that actually works for them.
  */
 
 import { Shield, AlertTriangle, Lock, Eye, Phone, Heart, Users, BookOpen, ExternalLink, MessageCircle } from 'lucide-react';
@@ -14,6 +17,39 @@ export const metadata: Metadata = {
 };
 
 const SAFETY_RESOURCES = [
+  {
+    title: '1800RESPECT',
+    description: 'Free 24/7 confidential support for anyone experiencing domestic violence or sexual assault',
+    phone: '1800 737 732',
+    website: 'https://www.1800respect.org.au',
+    region: 'AU',
+  },
+  {
+    title: 'Lifeline Australia',
+    description: '24/7 crisis support and suicide prevention service',
+    phone: '13 11 14',
+    website: 'https://www.lifeline.org.au',
+    region: 'AU',
+  },
+  {
+    title: 'Kids Helpline',
+    description: 'Free confidential support for young people aged 5-25',
+    phone: '1800 551 800',
+    website: 'https://www.kidshelpline.com.au',
+    region: 'AU',
+  },
+  {
+    title: 'eSafety Commissioner',
+    description: 'Report cyberbullying, online abuse, and harmful content online',
+    website: 'https://www.esafety.gov.au',
+    region: 'AU',
+  },
+  {
+    title: 'Scamwatch',
+    description: 'Information and tips about avoiding online scams and fraud',
+    website: 'https://www.scamwatch.gov.au',
+    region: 'AU',
+  },
   {
     title: 'National Domestic Abuse Helpline (UK)',
     description: 'Free 24-hour support for anyone experiencing domestic abuse',
@@ -87,6 +123,13 @@ export default function SafetyCenterPage() {
                 If you're in immediate danger, please call emergency services:
               </p>
               <div className="flex flex-wrap gap-4">
+                <a
+                  href="tel:000"
+                  className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  <Phone className="w-4 h-4 mr-2" />
+                  Call 000 (AU)
+                </a>
                 <a
                   href="tel:999"
                   className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
@@ -238,7 +281,12 @@ export default function SafetyCenterPage() {
               >
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div>
-                    <h3 className="font-semibold text-slate-900 dark:text-white">{resource.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-slate-900 dark:text-white">{resource.title}</h3>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                        {resource.region}
+                      </span>
+                    </div>
                     <p className="text-sm text-slate-600 dark:text-slate-400">{resource.description}</p>
                   </div>
                   <div className="flex flex-wrap gap-3">

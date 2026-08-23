@@ -92,7 +92,6 @@ export function getBackendApiUrl(): string {
       'API_URL',
       'BACKEND_URL',
       'NEXT_PRIVATE_API_URL',
-      'DEPLOY_URL',
       'NEXT_PUBLIC_API_URL',
     ]) ?? (isProductionLike() ? DEFAULT_BACKEND_API_URL : 'http://localhost:5000')
   );

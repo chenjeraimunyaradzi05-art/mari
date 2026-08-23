@@ -82,3 +82,25 @@ export function buildBackendProxyHeaders(
 
   return headers;
 }
+
+function isBackendUnreachable(error: unknown): boolean {
+  // Undici throws a plain TypeError('fetch failed') when the connection never
+  // completes (backend down, DNS failure, refused socket).
+  return error instanceof TypeError;
+}
+
+export function backendFailureResponse(context: string, error: unknown): NextResponse {
+  console.error(`${context}:`, error);
+
+  if (isBackendUnreachable(error)) {
+    return NextResponse.json(
+      { success: false, message: 'Authentication service is unavailable' },
+      { status: 503 }
+    );
+  }
+
+  return NextResponse.json(
+    { success: false, message: 'Internal server error' },
+    { status: 500 }
+  );
+}

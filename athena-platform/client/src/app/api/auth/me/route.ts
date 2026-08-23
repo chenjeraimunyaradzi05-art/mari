@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { backendFailureResponse } from '../proxy-utils';
+import { BACKEND_API_URL as API_URL } from '@/lib/runtime-config';
 
 export const dynamic = 'force-dynamic';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,10 +32,6 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Auth me API error:', error);
-    return NextResponse.json(
-      { success: false, message: 'Internal server error' },
-      { status: 500 }
-    );
+    return backendFailureResponse('Auth me API error', error);
   }
 }
