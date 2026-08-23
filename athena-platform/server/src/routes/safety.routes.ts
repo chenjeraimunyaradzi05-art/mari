@@ -222,6 +222,21 @@ router.delete('/blocks/:blockedUserId', authenticate, async (req: AuthRequest, r
 // ===========================================
 // SAFETY SETTINGS
 // ===========================================
+const MESSAGE_AUDIENCES = ['all', 'connections', 'none'] as const;
+const PROFILE_VISIBILITIES = ['public', 'connections', 'private'] as const;
+
+// Defaults mirror the UserSafetySettings model, so a user who has never saved
+// reads the same values the database would give them on first write.
+const SAFETY_PREFERENCE_DEFAULTS = {
+  allowMessagesFrom: 'connections',
+  filterOffensiveContent: true,
+  hideReadReceipts: false,
+  profileVisibility: 'public',
+  hideOnlineStatus: false,
+  hideLastSeen: false,
+  enableSafetyAlerts: true,
+};
+
 router.get('/settings', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const user = await prisma.user.findUnique({
@@ -234,12 +249,27 @@ router.get('/settings', authenticate, async (req: AuthRequest, res: Response, ne
       select: { isSafeMode: true, hideFromSearch: true },
     });
 
+    const preferences = await prisma.userSafetySettings.findUnique({
+      where: { userId: req.user!.id },
+      select: {
+        allowMessagesFrom: true,
+        filterOffensiveContent: true,
+        hideReadReceipts: true,
+        profileVisibility: true,
+        hideOnlineStatus: true,
+        hideLastSeen: true,
+        enableSafetyAlerts: true,
+      },
+    });
+
     res.json({
       success: true,
       data: {
         allowMessages: user?.allowMessages ?? true,
         isSafeMode: profile?.isSafeMode ?? false,
         hideFromSearch: profile?.hideFromSearch ?? false,
+        ...SAFETY_PREFERENCE_DEFAULTS,
+        ...(preferences ?? {}),
       },
     });
   } catch (error) {
@@ -254,6 +284,13 @@ router.patch(
     body('allowMessages').optional().isBoolean(),
     body('isSafeMode').optional().isBoolean(),
     body('hideFromSearch').optional().isBoolean(),
+    body('allowMessagesFrom').optional().isIn(MESSAGE_AUDIENCES),
+    body('filterOffensiveContent').optional().isBoolean(),
+    body('hideReadReceipts').optional().isBoolean(),
+    body('profileVisibility').optional().isIn(PROFILE_VISIBILITIES),
+    body('hideOnlineStatus').optional().isBoolean(),
+    body('hideLastSeen').optional().isBoolean(),
+    body('enableSafetyAlerts').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -282,6 +319,26 @@ router.patch(
             userId: req.user!.id,
             isSafeMode: typeof isSafeMode === 'boolean' ? isSafeMode : false,
             hideFromSearch: typeof hideFromSearch === 'boolean' ? hideFromSearch : false,
+          },
+        });
+      }
+
+      // Only the keys the caller actually sent are written, so a page that owns
+      // a subset of these preferences cannot clobber the ones it does not show.
+      const preferenceUpdates = Object.fromEntries(
+        Object.keys(SAFETY_PREFERENCE_DEFAULTS)
+          .filter((key) => req.body[key] !== undefined)
+          .map((key) => [key, req.body[key]])
+      );
+
+      if (Object.keys(preferenceUpdates).length > 0) {
+        await prisma.userSafetySettings.upsert({
+          where: { userId: req.user!.id },
+          update: preferenceUpdates,
+          create: {
+            userId: req.user!.id,
+            ...SAFETY_PREFERENCE_DEFAULTS,
+            ...preferenceUpdates,
           },
         });
       }

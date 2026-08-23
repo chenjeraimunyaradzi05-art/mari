@@ -92,6 +92,83 @@ router.get('/', auth_1.optionalAuth, async (req, res, next) => {
     }
 });
 // ===========================================
+// FEATURED APPRENTICESHIPS
+// ===========================================
+// Declared before '/:id' on purpose: Express matches in order, so a later
+// '/featured' would be swallowed by the id route and 404 as "not found".
+router.get('/featured', auth_1.optionalAuth, async (req, res, next) => {
+    try {
+        const limit = parseLimit(req.query.limit, 6, 20);
+        const apprenticeships = await prisma_1.prisma.apprenticeship.findMany({
+            where: { isFeatured: true, status: 'OPEN' },
+            orderBy: { publishedAt: 'desc' },
+            take: limit,
+            include: {
+                rto: { select: { id: true, name: true, logo: true } },
+                hostEmployer: { select: { id: true, name: true, logo: true } },
+            },
+        });
+        res.json({ success: true, data: apprenticeships });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+// ===========================================
+// BOOKMARKS
+// ===========================================
+router.get('/bookmarked', auth_1.authenticate, async (req, res, next) => {
+    try {
+        const bookmarks = await prisma_1.prisma.apprenticeshipBookmark.findMany({
+            where: { userId: req.user.id },
+            orderBy: { createdAt: 'desc' },
+            include: {
+                apprenticeship: {
+                    include: {
+                        rto: { select: { id: true, name: true, logo: true } },
+                        hostEmployer: { select: { id: true, name: true, logo: true } },
+                    },
+                },
+            },
+        });
+        res.json({ success: true, data: bookmarks.map((b) => b.apprenticeship) });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/:id/bookmark', auth_1.authenticate, async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const apprenticeship = await prisma_1.prisma.apprenticeship.findUnique({ where: { id } });
+        if (!apprenticeship) {
+            throw new errorHandler_1.ApiError(404, 'Apprenticeship not found');
+        }
+        // Upsert keeps a repeated bookmark idempotent instead of a unique-constraint error.
+        await prisma_1.prisma.apprenticeshipBookmark.upsert({
+            where: { apprenticeshipId_userId: { apprenticeshipId: id, userId: req.user.id } },
+            update: {},
+            create: { apprenticeshipId: id, userId: req.user.id },
+        });
+        res.status(201).json({ success: true, message: 'Apprenticeship bookmarked' });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.delete('/:id/bookmark', auth_1.authenticate, async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        await prisma_1.prisma.apprenticeshipBookmark.deleteMany({
+            where: { apprenticeshipId: id, userId: req.user.id },
+        });
+        res.json({ success: true, message: 'Bookmark removed' });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+// ===========================================
 // GET APPRENTICESHIP
 // ===========================================
 router.get('/:id', auth_1.optionalAuth, async (req, res, next) => {

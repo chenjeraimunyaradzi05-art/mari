@@ -299,6 +299,55 @@ ${user.education.map(e => `- ${e.degree} in ${e.fieldOfStudy || 'N/A'} from ${e.
     }
 });
 // ===========================================
+// CAREER PATH (targeted)
+// ===========================================
+// The GET above derives everything from the stored profile. The career-path page
+// asks the user for a current role, a target role, and years of experience, so
+// this variant plans against the goal they typed rather than only their history.
+router.post('/career-path', auth_1.authenticate, auth_1.requirePremium, async (req, res, next) => {
+    try {
+        const currentRole = typeof req.body.currentRole === 'string' ? req.body.currentRole.trim() : '';
+        const targetRole = typeof req.body.targetRole === 'string' ? req.body.targetRole.trim() : '';
+        if (!currentRole || !targetRole) {
+            throw new errorHandler_1.ApiError(400, 'currentRole and targetRole are required');
+        }
+        const parsedYears = Number.parseInt(String(req.body.yearsExperience ?? ''), 10);
+        const yearsExperience = Number.isFinite(parsedYears) && parsedYears >= 0 ? parsedYears : null;
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { skills: { include: { skill: true } } },
+        });
+        if (!user) {
+            throw new errorHandler_1.ApiError(404, 'User not found');
+        }
+        const profileSummary = `
+Current Role: ${currentRole.slice(0, 200)}
+Target Role: ${targetRole.slice(0, 200)}
+Years of Experience: ${yearsExperience ?? 'Not specified'}
+Persona: ${user.persona}
+Skills: ${user.skills.map((s) => `${s.skill.name} (${s.level})`).join(', ') || 'Not specified'}
+    `;
+        const data = await ai_service_1.aiService.generateCareerPath(profileSummary);
+        res.json({
+            success: true,
+            data: {
+                ...data,
+                currentProfile: {
+                    headline: currentRole,
+                    targetRole,
+                    persona: user.persona,
+                    skillCount: user.skills.length,
+                    yearsExperience: yearsExperience ?? 0,
+                },
+                analyzedAt: new Date(),
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+// ===========================================
 // CONTENT GENERATOR (For Creators)
 // ===========================================
 router.post('/content-generator', auth_1.authenticate, auth_1.requirePremium, async (req, res, next) => {

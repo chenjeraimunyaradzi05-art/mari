@@ -351,14 +351,35 @@ router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) =>
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: { author: { select: { id: true, displayName: true, avatar: true } } },
+        include: {
+          author: { select: { id: true, displayName: true, avatar: true } },
+          reactions: { select: { emoji: true, userId: true } },
+        },
       }),
       prisma.channelMessage.count({ where: { channelId: id } }),
     ]);
 
+    // The client renders one chip per emoji with a count and whether the viewer
+    // reacted, so collapse the raw rows into that shape here.
+    const viewerId = req.user?.id;
+    const shaped = messages.map(({ reactions, ...message }) => {
+      const byEmoji = new Map<string, { emoji: string; count: number; hasReacted: boolean }>();
+      for (const reaction of reactions) {
+        const entry = byEmoji.get(reaction.emoji) ?? {
+          emoji: reaction.emoji,
+          count: 0,
+          hasReacted: false,
+        };
+        entry.count += 1;
+        if (viewerId && reaction.userId === viewerId) entry.hasReacted = true;
+        byEmoji.set(reaction.emoji, entry);
+      }
+      return { ...message, reactions: [...byEmoji.values()] };
+    });
+
     res.json({
       success: true,
-      data: messages,
+      data: shaped,
       pagination: {
         page,
         limit,
@@ -422,6 +443,207 @@ router.post(
       });
 
       res.status(201).json({ success: true, data: message });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// EDIT / DELETE / PIN A CHANNEL MESSAGE
+// ===========================================
+
+// Resolves a message inside a channel and returns it along with who may act on
+// it. Authors may edit and delete their own; channel owners may delete any
+// message and are the only ones who can pin.
+async function loadChannelMessage(channelId: string, messageId: string, userId: string) {
+  const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+  if (!channel) {
+    throw new ApiError(404, 'Channel not found');
+  }
+
+  const message = await prisma.channelMessage.findUnique({ where: { id: messageId } });
+  if (!message || message.channelId !== channelId) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  return {
+    channel,
+    message,
+    isAuthor: message.authorId === userId,
+    isOwner: channel.ownerId === userId,
+  };
+}
+
+router.patch(
+  '/:channelId/messages/:messageId',
+  authenticate,
+  [body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.channelMessage })],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { channelId, messageId } = req.params;
+      const { isAuthor } = await loadChannelMessage(channelId, messageId, req.user!.id);
+
+      if (!isAuthor) {
+        throw new ApiError(403, 'You can only edit your own messages');
+      }
+
+      const updated = await prisma.channelMessage.update({
+        where: { id: messageId },
+        data: {
+          content: normalizeUserText(req.body.content, {
+            field: 'content',
+            maxLength: CONTENT_LIMITS.channelMessage,
+          }),
+          editedAt: new Date(),
+        },
+      });
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete(
+  '/:channelId/messages/:messageId',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { channelId, messageId } = req.params;
+      const { isAuthor, isOwner } = await loadChannelMessage(channelId, messageId, req.user!.id);
+
+      if (!isAuthor && !isOwner) {
+        throw new ApiError(403, 'You can only delete your own messages');
+      }
+
+      await prisma.channelMessage.delete({ where: { id: messageId } });
+      await prisma.channel.update({
+        where: { id: channelId },
+        data: { messageCount: { decrement: 1 } },
+      });
+
+      res.json({ success: true, message: 'Message deleted' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post(
+  '/:channelId/messages/:messageId/reactions',
+  authenticate,
+  [body('emoji').isString().trim().notEmpty().isLength({ max: 32 })],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { channelId, messageId } = req.params;
+      await loadChannelMessage(channelId, messageId, req.user!.id);
+
+      const emoji = String(req.body.emoji).trim();
+
+      // The unique constraint makes this idempotent: reacting twice with the
+      // same emoji is a no-op rather than a duplicate row or an error.
+      const existing = await prisma.channelMessageReaction.findUnique({
+        where: { messageId_userId_emoji: { messageId, userId: req.user!.id, emoji } },
+      });
+
+      if (!existing) {
+        await prisma.channelMessageReaction.create({
+          data: { messageId, userId: req.user!.id, emoji },
+        });
+        await prisma.channelMessage.update({
+          where: { id: messageId },
+          data: { reactionCount: { increment: 1 } },
+        });
+      }
+
+      res.status(201).json({ success: true, message: 'Reaction added' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete(
+  '/:channelId/messages/:messageId/reactions/:emoji',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { channelId, messageId } = req.params;
+      await loadChannelMessage(channelId, messageId, req.user!.id);
+
+      const emoji = decodeURIComponent(req.params.emoji);
+      const deleted = await prisma.channelMessageReaction.deleteMany({
+        where: { messageId, userId: req.user!.id, emoji },
+      });
+
+      if (deleted.count > 0) {
+        await prisma.channelMessage.update({
+          where: { id: messageId },
+          data: { reactionCount: { decrement: deleted.count } },
+        });
+      }
+
+      res.json({ success: true, message: 'Reaction removed' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post(
+  '/:channelId/messages/:messageId/pin',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { channelId, messageId } = req.params;
+      const { isOwner } = await loadChannelMessage(channelId, messageId, req.user!.id);
+
+      if (!isOwner) {
+        throw new ApiError(403, 'Only the channel owner can pin messages');
+      }
+
+      const updated = await prisma.channelMessage.update({
+        where: { id: messageId },
+        data: { isPinned: true },
+      });
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete(
+  '/:channelId/messages/:messageId/pin',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { channelId, messageId } = req.params;
+      const { isOwner } = await loadChannelMessage(channelId, messageId, req.user!.id);
+
+      if (!isOwner) {
+        throw new ApiError(403, 'Only the channel owner can unpin messages');
+      }
+
+      const updated = await prisma.channelMessage.update({
+        where: { id: messageId },
+        data: { isPinned: false },
+      });
+
+      res.json({ success: true, data: updated });
     } catch (error) {
       next(error);
     }

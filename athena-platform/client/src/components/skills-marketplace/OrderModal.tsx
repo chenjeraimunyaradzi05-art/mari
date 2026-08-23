@@ -21,7 +21,9 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const pkg = service.packages[selectedPackage];
+  // Hourly-rate services carry no packages, so there is nothing to order here.
+  const packages = service.packages ?? [];
+  const pkg = packages[selectedPackage];
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -52,6 +54,20 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
     onClose();
   };
 
+  // Everything below reads the selected package, so bail out before rendering
+  // rather than dereferencing undefined on an hourly-rate service.
+  if (!pkg) {
+    return (
+      <Modal isOpen={isOpen} onClose={handleClose} title="Order Service" size="lg">
+        <div className="p-6">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            This provider does not offer fixed packages. Contact them to agree a scope and rate.
+          </p>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Order Service" size="lg">
       <div className="p-6">
@@ -69,7 +85,7 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {service.packages.map((pkg, index) => (
+              {packages.map((pkg, index) => (
                 <button
                   key={index}
                   onClick={() => setSelectedPackage(index)}

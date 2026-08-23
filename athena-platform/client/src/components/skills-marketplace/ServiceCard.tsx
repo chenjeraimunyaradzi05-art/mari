@@ -31,7 +31,7 @@ export interface SkillService {
   };
   category: string;
   subcategory?: string;
-  packages: ServicePackage[];
+  packages?: ServicePackage[];
   images: string[];
   tags: string[];
   rating: number;
@@ -57,10 +57,14 @@ export function ServiceCard({
   onClick,
   variant = 'default',
 }: ServiceCardProps) {
-  const startingPrice = Math.min(...service.packages.map((p) => p.price));
-  const quickestDelivery = Math.min(...service.packages.map((p) => p.deliveryDays));
+  // A service can be sold by the hour rather than by package, and Math.min() of
+  // an empty list is Infinity, so both cases fall back to null instead of NaN.
+  const packages = service.packages ?? [];
+  const startingPrice = packages.length > 0 ? Math.min(...packages.map((p) => p.price)) : null;
+  const quickestDelivery = packages.length > 0 ? Math.min(...packages.map((p) => p.deliveryDays)) : null;
 
-  const formatPrice = (price: number) => {
+  const formatPrice = (price: number | null) => {
+    if (price === null) return 'Rate on request';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
@@ -135,10 +139,10 @@ export function ServiceCard({
           <div className="flex items-center justify-between mt-2">
             <span className="text-sm text-slate-500">
               <Clock className="w-3 h-3 inline mr-1" />
-              {quickestDelivery}d delivery
+              {quickestDelivery !== null ? `${quickestDelivery}d delivery` : 'Flexible timing'}
             </span>
             <span className="font-semibold text-slate-900 dark:text-white">
-              From {formatPrice(startingPrice)}
+              {startingPrice !== null ? `From ${formatPrice(startingPrice)}` : formatPrice(null)}
             </span>
           </div>
         </div>
@@ -303,7 +307,7 @@ export function ServiceCard({
         <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-1 text-sm text-slate-500">
             <Clock className="w-4 h-4" />
-            <span>{quickestDelivery}d delivery</span>
+            <span>{quickestDelivery !== null ? `${quickestDelivery}d delivery` : 'Flexible timing'}</span>
           </div>
           <div className="text-right">
             <p className="text-xs text-slate-500">Starting at</p>

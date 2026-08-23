@@ -364,6 +364,13 @@ export const safetyApi = {
     allowMessages?: boolean;
     isSafeMode?: boolean;
     hideFromSearch?: boolean;
+    allowMessagesFrom?: 'all' | 'connections' | 'none';
+    filterOffensiveContent?: boolean;
+    hideReadReceipts?: boolean;
+    profileVisibility?: 'public' | 'connections' | 'private';
+    hideOnlineStatus?: boolean;
+    hideLastSeen?: boolean;
+    enableSafetyAlerts?: boolean;
   }) => api.patch('/safety/settings', data),
 };
 
@@ -963,15 +970,15 @@ export const communitySupportApi = {
 // ============================================
 export const aiAlgorithmsApi = {
   // CareerCompass - Career Trajectory Prediction
-  getCareerPrediction: () => api.get('/ai/career-compass'),
-  generateCareerPrediction: () => api.post('/ai/career-compass/generate'),
+  getCareerPrediction: () => api.get('/ai-algorithms/career-compass'),
+  generateCareerPrediction: () => api.post('/ai-algorithms/career-compass/generate'),
 
   // OpportunityScan - Opportunity Matching
   getOpportunities: (params?: { type?: string; viewed?: boolean }) =>
-    api.get('/ai/opportunity-scan', { params }),
-  markOpportunityViewed: (id: string) => api.patch(`/ai/opportunity-scan/${id}/view`),
+    api.get('/ai-algorithms/opportunity-scan', { params }),
+  markOpportunityViewed: (id: string) => api.patch(`/ai-algorithms/opportunity-scan/${id}/view`),
   submitOpportunityFeedback: (id: string, data: { isInterested?: boolean; feedback?: string }) =>
-    api.patch(`/ai/opportunity-scan/${id}/feedback`, data),
+    api.patch(`/ai-algorithms/opportunity-scan/${id}/feedback`, data),
 
   // SalaryEquity - Pay Gap Analysis
   submitSalaryData: (data: {
@@ -992,33 +999,33 @@ export const aiAlgorithmsApi = {
     educationLevel?: string;
     gender?: string;
     ageRange?: string;
-  }) => api.post('/ai/salary-equity/submit', data),
+  }) => api.post('/ai-algorithms/salary-equity/submit', data),
   analyzeSalary: (params: { role: string; location?: string; company?: string }) =>
-    api.get('/ai/salary-equity/analyze', { params }),
-  getMySalaryAnalyses: () => api.get('/ai/salary-equity/my-analyses'),
+    api.get('/ai-algorithms/salary-equity/analyze', { params }),
+  getMySalaryAnalyses: () => api.get('/ai-algorithms/salary-equity/my-analyses'),
 
   // MentorMatch - AI Mentor Pairing
   getMentorMatches: (params?: { skill?: string; industry?: string; minScore?: number }) =>
-    api.get('/ai/mentor-match', { params }),
-  getMentorMatchDetails: (mentorId: string) => api.get(`/ai/mentor-match/${mentorId}`),
+    api.get('/ai-algorithms/mentor-match', { params }),
+  getMentorMatchDetails: (mentorId: string) => api.get(`/ai-algorithms/mentor-match/${mentorId}`),
 
   // SafetyScore - Trust & Verification
-  getMyTrustScore: () => api.get('/ai/trust-score'),
-  getUserTrustScore: (userId: string) => api.get(`/ai/trust-score/${userId}`),
+  getMyTrustScore: () => api.get('/ai-algorithms/trust-score'),
+  getUserTrustScore: (userId: string) => api.get(`/ai-algorithms/trust-score/${userId}`),
   reportContent: (data: {
     contentType: string;
     contentId: string;
     reportedUserId: string;
     reason: string;
     description?: string;
-  }) => api.post('/ai/report', data),
+  }) => api.post('/ai-algorithms/report', data),
 
   // IncomeStream - Creator Analytics
-  getCreatorAnalytics: () => api.get('/ai/creator-analytics'),
-  getIncomeProjections: () => api.get('/ai/creator-analytics/projections'),
+  getCreatorAnalytics: () => api.get('/ai-algorithms/creator-analytics'),
+  getIncomeProjections: () => api.get('/ai-algorithms/creator-analytics/projections'),
 
   // Feed Preferences - OpportunityVerse
-  getFeedPreferences: () => api.get('/ai/feed-preferences'),
+  getFeedPreferences: () => api.get('/ai-algorithms/feed-preferences'),
   updateFeedPreferences: (data: {
     followedCategories?: string[];
     followedHashtags?: string[];
@@ -1029,8 +1036,8 @@ export const aiAlgorithmsApi = {
     trendingRatio?: number;
     preferredDuration?: string;
     autoplayEnabled?: boolean;
-  }) => api.patch('/ai/feed-preferences', data),
-  recordSearch: (query: string) => api.post('/ai/feed-preferences/search', { query }),
+  }) => api.patch('/ai-algorithms/feed-preferences', data),
+  recordSearch: (query: string) => api.post('/ai-algorithms/feed-preferences/search', { query }),
 };
 
 // ============================================

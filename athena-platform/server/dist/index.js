@@ -71,6 +71,7 @@ const media_routes_1 = __importDefault(require("./routes/media.routes"));
 const notification_routes_1 = __importDefault(require("./routes/notification.routes"));
 const message_routes_1 = __importDefault(require("./routes/message.routes"));
 const admin_routes_1 = __importDefault(require("./routes/admin.routes"));
+const admin_seed_routes_1 = __importDefault(require("./routes/admin-seed.routes"));
 const referral_routes_1 = __importDefault(require("./routes/referral.routes"));
 const employer_routes_1 = __importDefault(require("./routes/employer.routes"));
 const education_routes_1 = __importDefault(require("./routes/education.routes"));
@@ -454,6 +455,10 @@ app.use('/api/ai', ai_routes_1.default);
 app.use('/api/media', media_routes_1.default);
 app.use('/api/notifications', notification_routes_1.default);
 app.use('/api/messages', message_routes_1.default);
+// Mounted before adminRoutes: that router applies authenticate() to every path
+// beneath /api/admin, which would reject seed requests before they are reached.
+// The seed router gates itself (non-production + ALLOW_DB_SEEDING + token).
+app.use('/api/admin/seed', admin_seed_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/referrals', referral_routes_1.default);
 app.use('/api/employer', employer_routes_1.default);

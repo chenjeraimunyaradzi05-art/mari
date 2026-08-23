@@ -175,6 +175,19 @@ router.delete('/blocks/:blockedUserId', auth_1.authenticate, async (req, res, ne
 // ===========================================
 // SAFETY SETTINGS
 // ===========================================
+const MESSAGE_AUDIENCES = ['all', 'connections', 'none'];
+const PROFILE_VISIBILITIES = ['public', 'connections', 'private'];
+// Defaults mirror the UserSafetySettings model, so a user who has never saved
+// reads the same values the database would give them on first write.
+const SAFETY_PREFERENCE_DEFAULTS = {
+    allowMessagesFrom: 'connections',
+    filterOffensiveContent: true,
+    hideReadReceipts: false,
+    profileVisibility: 'public',
+    hideOnlineStatus: false,
+    hideLastSeen: false,
+    enableSafetyAlerts: true,
+};
 router.get('/settings', auth_1.authenticate, async (req, res, next) => {
     try {
         const user = await prisma_1.prisma.user.findUnique({
@@ -185,12 +198,26 @@ router.get('/settings', auth_1.authenticate, async (req, res, next) => {
             where: { userId: req.user.id },
             select: { isSafeMode: true, hideFromSearch: true },
         });
+        const preferences = await prisma_1.prisma.userSafetySettings.findUnique({
+            where: { userId: req.user.id },
+            select: {
+                allowMessagesFrom: true,
+                filterOffensiveContent: true,
+                hideReadReceipts: true,
+                profileVisibility: true,
+                hideOnlineStatus: true,
+                hideLastSeen: true,
+                enableSafetyAlerts: true,
+            },
+        });
         res.json({
             success: true,
             data: {
                 allowMessages: user?.allowMessages ?? true,
                 isSafeMode: profile?.isSafeMode ?? false,
                 hideFromSearch: profile?.hideFromSearch ?? false,
+                ...SAFETY_PREFERENCE_DEFAULTS,
+                ...(preferences ?? {}),
             },
         });
     }
@@ -202,6 +229,13 @@ router.patch('/settings', auth_1.authenticate, [
     (0, express_validator_1.body)('allowMessages').optional().isBoolean(),
     (0, express_validator_1.body)('isSafeMode').optional().isBoolean(),
     (0, express_validator_1.body)('hideFromSearch').optional().isBoolean(),
+    (0, express_validator_1.body)('allowMessagesFrom').optional().isIn(MESSAGE_AUDIENCES),
+    (0, express_validator_1.body)('filterOffensiveContent').optional().isBoolean(),
+    (0, express_validator_1.body)('hideReadReceipts').optional().isBoolean(),
+    (0, express_validator_1.body)('profileVisibility').optional().isIn(PROFILE_VISIBILITIES),
+    (0, express_validator_1.body)('hideOnlineStatus').optional().isBoolean(),
+    (0, express_validator_1.body)('hideLastSeen').optional().isBoolean(),
+    (0, express_validator_1.body)('enableSafetyAlerts').optional().isBoolean(),
 ], async (req, res, next) => {
     try {
         const errors = (0, express_validator_1.validationResult)(req);
@@ -226,6 +260,22 @@ router.patch('/settings', auth_1.authenticate, [
                     userId: req.user.id,
                     isSafeMode: typeof isSafeMode === 'boolean' ? isSafeMode : false,
                     hideFromSearch: typeof hideFromSearch === 'boolean' ? hideFromSearch : false,
+                },
+            });
+        }
+        // Only the keys the caller actually sent are written, so a page that owns
+        // a subset of these preferences cannot clobber the ones it does not show.
+        const preferenceUpdates = Object.fromEntries(Object.keys(SAFETY_PREFERENCE_DEFAULTS)
+            .filter((key) => req.body[key] !== undefined)
+            .map((key) => [key, req.body[key]]));
+        if (Object.keys(preferenceUpdates).length > 0) {
+            await prisma_1.prisma.userSafetySettings.upsert({
+                where: { userId: req.user.id },
+                update: preferenceUpdates,
+                create: {
+                    userId: req.user.id,
+                    ...SAFETY_PREFERENCE_DEFAULTS,
+                    ...preferenceUpdates,
                 },
             });
         }

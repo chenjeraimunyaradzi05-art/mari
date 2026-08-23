@@ -1,24 +1,69 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Shield, Eye, EyeOff, Users, Globe, Lock, UserX, Download, Trash2 } from 'lucide-react';
+import { ArrowLeft, Shield, Eye, Users, Globe, Lock, UserX, Download, Trash2 } from 'lucide-react';
+import { safetyApi } from '@/lib/api';
+
+type SaveState = { kind: 'idle' | 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
 
 export default function PrivacySettingsPage() {
+  // Every control here maps to a column the API actually persists. Toggles
+  // without a backing store were removed rather than left to report a save that
+  // never happened.
   const [settings, setSettings] = useState({
     profileVisibility: 'public', // 'public', 'connections', 'private'
-    showEmail: false,
-    showPhone: false,
-    showLocation: true,
-    showActivity: true,
-    showConnections: true,
-    allowIndexing: true,
-    showInMentorSearch: true,
     showOnlineStatus: true,
+    showInMentorSearch: true,
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
 
-  const handleSave = () => {
-    alert('Privacy settings saved!');
+  useEffect(() => {
+    let cancelled = false;
+
+    safetyApi
+      .getSettings()
+      .then((response) => {
+        const data = response.data?.data;
+        if (cancelled || !data) return;
+        setSettings({
+          profileVisibility: data.profileVisibility ?? 'public',
+          showOnlineStatus: !data.hideOnlineStatus,
+          showInMentorSearch: !data.hideFromSearch,
+        });
+      })
+      .catch(() => {
+        // Falls back to the defaults already in state.
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    setSaveState({ kind: 'saving' });
+    try {
+      await safetyApi.updateSettings({
+        profileVisibility: settings.profileVisibility as 'public' | 'connections' | 'private',
+        hideOnlineStatus: !settings.showOnlineStatus,
+        hideFromSearch: !settings.showInMentorSearch,
+      });
+      setSaveState({ kind: 'saved' });
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      setSaveState({
+        kind: 'error',
+        message:
+          status === 401 || status === 403
+            ? 'Sign in again to change your privacy settings.'
+            : 'Your privacy settings could not be saved. Try again.',
+      });
+    }
   };
 
   return (
@@ -80,37 +125,6 @@ export default function PrivacySettingsPage() {
           </div>
         </section>
 
-        {/* Contact Information */}
-        <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-            <EyeOff className="w-5 h-5" />
-            Contact Information Visibility
-          </h2>
-          <div className="space-y-4">
-            {[
-              { key: 'showEmail', label: 'Show email address', desc: 'Display your email on your profile' },
-              { key: 'showPhone', label: 'Show phone number', desc: 'Display your phone number on your profile' },
-              { key: 'showLocation', label: 'Show location', desc: 'Display your city/country on your profile' },
-            ].map((item) => (
-              <div key={item.key} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
-                <div>
-                  <div className="font-medium text-slate-900 dark:text-white">{item.label}</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">{item.desc}</div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings[item.key as keyof typeof settings] as boolean}
-                    onChange={(e) => setSettings({ ...settings, [item.key]: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-primary-600"></div>
-                </label>
-              </div>
-            ))}
-          </div>
-        </section>
-
         {/* Activity & Presence */}
         <section className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm mb-6 border border-slate-200 dark:border-slate-700">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
@@ -119,11 +133,8 @@ export default function PrivacySettingsPage() {
           </h2>
           <div className="space-y-4">
             {[
-              { key: 'showActivity', label: 'Show activity status', desc: 'Let others see when you\'re active' },
-              { key: 'showConnections', label: 'Show connections', desc: 'Display your connection count on your profile' },
               { key: 'showOnlineStatus', label: 'Show online status', desc: 'Display green dot when you\'re online' },
               { key: 'showInMentorSearch', label: 'Appear in mentor search', desc: 'Let mentees find you in search results' },
-              { key: 'allowIndexing', label: 'Allow search engine indexing', desc: 'Let your profile appear in Google search results' },
             ].map((item) => (
               <div key={item.key} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
                 <div>
@@ -165,7 +176,7 @@ export default function PrivacySettingsPage() {
               <span className="text-primary-600">→</span>
             </Link>
             <Link
-              href="/settings/privacy/gdpr"
+              href="/privacy-center#data-rights"
               className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition"
             >
               <div className="flex items-center gap-3">
@@ -191,7 +202,18 @@ export default function PrivacySettingsPage() {
         </section>
 
         {/* Save Button */}
-        <div className="flex justify-end gap-4">
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <p
+            aria-live="polite"
+            className={`mr-auto text-sm ${
+              saveState.kind === 'error'
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            {saveState.kind === 'saved' && 'Privacy settings saved.'}
+            {saveState.kind === 'error' && saveState.message}
+          </p>
           <Link
             href="/dashboard/settings"
             className="px-6 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
@@ -200,9 +222,10 @@ export default function PrivacySettingsPage() {
           </Link>
           <button
             onClick={handleSave}
-            className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
+            disabled={isLoading || saveState.kind === 'saving'}
+            className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition disabled:opacity-60"
           >
-            Save Changes
+            {saveState.kind === 'saving' ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       </div>

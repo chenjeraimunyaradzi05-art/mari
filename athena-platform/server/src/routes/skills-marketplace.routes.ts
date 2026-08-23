@@ -372,4 +372,160 @@ router.post(
   }
 );
 
+// ===========================================
+// FAVOURITES
+// ===========================================
+router.get('/favorites', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const favorites = await prisma.serviceFavorite.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        service: {
+          include: {
+            provider: { select: { id: true, displayName: true, avatar: true, headline: true } },
+          },
+        },
+      },
+    });
+
+    res.json({ success: true, data: favorites.map((f) => f.service) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/services/:id/favorite', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const service = await prisma.skillService.findUnique({ where: { id } });
+    if (!service) {
+      throw new ApiError(404, 'Service not found');
+    }
+
+    await prisma.serviceFavorite.upsert({
+      where: { serviceId_userId: { serviceId: id, userId: req.user!.id } },
+      update: {},
+      create: { serviceId: id, userId: req.user!.id },
+    });
+
+    res.status(201).json({ success: true, message: 'Service favourited' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/services/:id/favorite', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.serviceFavorite.deleteMany({
+      where: { serviceId: id, userId: req.user!.id },
+    });
+
+    res.json({ success: true, message: 'Favourite removed' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// PACKAGE ORDERS
+// ===========================================
+// Distinct from /services/:id/book. A booking buys a block of the provider's
+// time; an order buys one of the fixed-scope packages listed on the service.
+interface ServicePackage {
+  name?: string;
+  price?: number;
+  deliveryDays?: number;
+}
+
+router.post(
+  '/services/:id/order',
+  authenticate,
+  [
+    body('packageIndex').isInt({ min: 0 }),
+    body('requirements').optional().isString().isLength({ max: 5000 }),
+    body('attachments').optional().isArray({ max: 10 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { id } = req.params;
+      const service = await prisma.skillService.findUnique({ where: { id } });
+      if (!service || !service.isAvailable || service.status !== 'ACTIVE') {
+        throw new ApiError(404, 'Service not available');
+      }
+
+      if (service.providerId === req.user!.id) {
+        throw new ApiError(400, 'You cannot order your own service');
+      }
+
+      const packages = Array.isArray(service.packages)
+        ? (service.packages as unknown as ServicePackage[])
+        : [];
+      const packageIndex = Number(req.body.packageIndex);
+      const selected = packages[packageIndex];
+
+      if (!selected || typeof selected.price !== 'number') {
+        throw new ApiError(400, 'Selected package is not available for this service');
+      }
+
+      const totalAmount = Math.round(selected.price);
+      const platformFee = Math.round(totalAmount * 0.2);
+      const deliveryDays =
+        typeof selected.deliveryDays === 'number' ? selected.deliveryDays : null;
+
+      const order = await prisma.serviceOrder.create({
+        data: {
+          serviceId: id,
+          clientId: req.user!.id,
+          packageIndex,
+          packageName: selected.name ?? null,
+          requirements: typeof req.body.requirements === 'string' ? req.body.requirements : null,
+          attachments: Array.isArray(req.body.attachments)
+            ? req.body.attachments.filter((a: unknown): a is string => typeof a === 'string')
+            : [],
+          totalAmount,
+          platformFee,
+          providerPayout: totalAmount - platformFee,
+          deliveryDays,
+          dueAt: deliveryDays ? new Date(Date.now() + deliveryDays * 24 * 60 * 60 * 1000) : null,
+        },
+      });
+
+      res.status(201).json({ success: true, data: order });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.get('/orders/me', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+
+    const orders = await prisma.serviceOrder.findMany({
+      where: { clientId: req.user!.id, ...(status ? { status: status as never } : {}) },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        service: {
+          include: {
+            provider: { select: { id: true, displayName: true, avatar: true } },
+          },
+        },
+      },
+    });
+
+    res.json({ success: true, data: orders });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

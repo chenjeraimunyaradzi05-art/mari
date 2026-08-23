@@ -574,11 +574,11 @@ model User {
   yearsExperience Int?
 
   // Settings
-  isPublic                Boolean @default(true)
-  allowMessages           Boolean @default(true)
-  isSuspended             Boolean @default(false)
+  isPublic                Boolean   @default(true)
+  allowMessages           Boolean   @default(true)
+  isSuspended             Boolean   @default(false)
   notificationPreferences Json?
-  twoFactorEnabled        Boolean @default(false)
+  twoFactorEnabled        Boolean   @default(false)
   twoFactorSecret         String?
   twoFactorEnabledAt      DateTime?
 
@@ -627,6 +627,10 @@ model User {
   apprenticeshipApplications ApprenticeshipApplication[]
   skillServices              SkillService[]
   serviceBookings            ServiceBooking[]            @relation("ServiceBookingsClient")
+  serviceOrders              ServiceOrder[]              @relation("ServiceOrdersClient")
+  serviceFavorites           ServiceFavorite[]
+  apprenticeshipBookmarks    ApprenticeshipBookmark[]
+  channelMessageReactions    ChannelMessageReaction[]
   serviceReviews             ServiceReview[]
   userOutcomes               UserOutcome[]
   mentorSessions             MentorSession[]             @relation("MenteeSessions")
@@ -1736,21 +1740,40 @@ model ChannelMember {
 }
 
 model ChannelMessage {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   channelId     String
   authorId      String
   content       String
   mediaUrls     Json?
-  readCount     Int      @default(0)
-  reactionCount Int      @default(0)
-  isPinned      Boolean  @default(false)
-  createdAt     DateTime @default(now())
+  readCount     Int       @default(0)
+  reactionCount Int       @default(0)
+  isPinned      Boolean   @default(false)
+  editedAt      DateTime?
+  createdAt     DateTime  @default(now())
 
-  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel   Channel                  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User                     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reactions ChannelMessageReaction[]
 
   @@index([channelId])
   @@index([createdAt])
+}
+
+// Channel reactions need their own table: MessageReaction is bound to Message,
+// which is the direct-message model, not ChannelMessage.
+model ChannelMessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message ChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@index([userId])
 }
 
 model Status {
@@ -2116,15 +2139,32 @@ model Apprenticeship {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
+  isFeatured Boolean @default(false)
+
   rto          Organization?               @relation("ApprenticeshipRto", fields: [rtoId], references: [id], onDelete: SetNull)
   hostEmployer Organization?               @relation("ApprenticeshipHost", fields: [hostEmployerId], references: [id], onDelete: SetNull)
   applications ApprenticeshipApplication[]
+  bookmarks    ApprenticeshipBookmark[]
 
   @@index([framework])
   @@index([level])
   @@index([status])
   @@index([rtoId])
   @@index([hostEmployerId])
+  @@index([isFeatured])
+}
+
+model ApprenticeshipBookmark {
+  id               String   @id @default(uuid())
+  apprenticeshipId String
+  userId           String
+  createdAt        DateTime @default(now())
+
+  apprenticeship Apprenticeship @relation(fields: [apprenticeshipId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([apprenticeshipId, userId])
+  @@index([userId])
 }
 
 model ApprenticeshipApplication {
@@ -2165,14 +2205,73 @@ model SkillService {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  provider User             @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  bookings ServiceBooking[]
-  reviews  ServiceReview[]
+  // Fixed-scope packages the marketplace UI sells against, as an array of
+  // { name, description, price, deliveryDays, revisions, features }. Hourly rate
+  // stays for providers who bill by time rather than by package.
+  packages Json?
+
+  provider  User              @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  bookings  ServiceBooking[]
+  orders    ServiceOrder[]
+  favorites ServiceFavorite[]
+  reviews   ServiceReview[]
 
   @@index([providerId])
   @@index([category])
   @@index([status])
   @@index([rating])
+}
+
+model ServiceFavorite {
+  id        String   @id @default(uuid())
+  serviceId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  service SkillService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, userId])
+  @@index([userId])
+}
+
+// A package order, distinct from ServiceBooking: bookings buy a block of the
+// provider's time, orders buy a fixed-scope package with a delivery deadline.
+model ServiceOrder {
+  id             String             @id @default(uuid())
+  serviceId      String
+  clientId       String
+  packageIndex   Int
+  packageName    String?
+  requirements   String?
+  attachments    String[]
+  status         ServiceOrderStatus @default(PENDING)
+  totalAmount    Int
+  platformFee    Int
+  providerPayout Int
+  deliveryDays   Int?
+  dueAt          DateTime?
+  deliveredAt    DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  service SkillService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  client  User         @relation("ServiceOrdersClient", fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@index([clientId])
+  @@index([status])
+}
+
+enum ServiceOrderStatus {
+  PENDING
+  ACCEPTED
+  DELIVERED
+  REVISION_REQUESTED
+  COMPLETED
+  CANCELLED
 }
 
 model ServiceBooking {
