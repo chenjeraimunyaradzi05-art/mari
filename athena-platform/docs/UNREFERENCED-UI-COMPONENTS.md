@@ -74,7 +74,20 @@ These are the reason the list is worth keeping rather than ignoring:
   filter checkboxes already call `onFiltersChange` as they change, so the button
   only needs to dismiss the sheet (`SheetClose` is exported from `ui/sheet`).
 - `studios/mentor/EarningsDashboard.tsx` — `onSetDefault` for payout methods.
-  There is no payout API to call: `paymentsApi` exposes only `getMethods`.
+  The client helper `paymentsApi` exposes only `getMethods`, but the server has
+  more than that: `POST /api/payments/payout`, `/process`, `/convert` and
+  `GET /pricing`, `/currencies`, `/best-provider` all exist and no client code
+  calls them. There is still no *set default method* route, which is what
+  `onSetDefault` specifically needs.
 
-Wiring any of these up means building the missing API first — see
-[CLIENT-API-SURFACE-GAPS.md](./api/CLIENT-API-SURFACE-GAPS.md).
+**Updated 2026-08-24.** The API gaps this used to depend on are closed, so
+wiring these up is now mostly a client-side job — see
+[CLIENT-API-SURFACE-GAPS.md](./api/CLIENT-API-SURFACE-GAPS.md) for the current
+contract and the CI check that keeps it honest.
+
+To find server capability that no client helper reaches yet, which is the usual
+blocker for a component like `EarningsDashboard`:
+
+```bash
+node athena-platform/server/scripts/check-api-contract.js --unreachable
+```

@@ -1,101 +1,84 @@
-# Client API surface gaps
+# Client/server API contract
 
-Generated 2026-08-23 by cross-checking every `api.get/post/patch/delete` call in
-`client/src/lib/api.ts` and `client/src/lib/api-extensions.ts` against every
-`router.<method>` declaration in `server/src/routes/*.ts`, resolved through the
-mount prefixes in `server/src/index.ts`.
+**Status as of 2026-08-24: no gaps. Enforced in CI.**
 
-**Read this before assuming a method on `apiExtensions` works.** The client API
-modules are a superset of what the server implements. The methods below are
-defined, exported, and type-safe — and will return **404** if you call them.
+This document used to list 42 client API methods that were defined, exported and
+type-safe but returned 404 because the route had never been built. All of them
+have since been implemented or repointed, and the audit that produced the list
+is now a committed check that runs on every build.
 
-## Status
+```bash
+npm --prefix athena-platform/server run check:api-contract
+```
 
-| | Count |
-|---|---|
-| Client API calls | 323 |
-| Server routes | 564 |
-| Calls with no matching route | 42 |
-| …of those, called from UI code | 1 |
-| …of those, never called (listed below) | 41 |
+It walks the mount table in `server/src/index.ts`, joins it to the
+`router.<verb>()` declarations in each route file, and matches that against
+every `api.<verb>()` and `fetch()` call under `client/src` the way Express
+actually resolves. It fails the build on three classes:
 
-The single remaining UI-reachable one is `mentorApi.become` → `POST /api/mentors/become`.
-Its only reference is `useBecomeMentor` in `client/src/lib/hooks.ts`, and no page uses
-that hook, so nothing user-facing hits it today. The nearest real routes are
-`POST /api/mentors/me` (create/update a mentor profile) and `POST /api/mentors/enable`.
+| | Meaning | Fix |
+|---|---|---|
+| `MISSING` | No route matches at all | Build the route, or point the client at one that exists |
+| `SHADOWED` | Only a `:param` route matches a literal path | Move the literal route **above** the `/:id` one |
+| `WRONG_VERB` | Path exists, not for that method | Correct one side |
 
-## Unimplemented methods, by module
+`--unreachable` reports the reverse — server routes no client call reaches.
+That one is a report, never a failure: a webhook or an operator endpoint is
+supposed to be unreachable from the app.
 
-### `mentorApi`
-- `updateProfile` → `PATCH /api/mentors/me` — the server implements **`POST`** `/me`, not `PATCH`.
+Known-good exceptions live in an `ALLOWED` map in the script, each with a
+reason. The check also fails on a *stale* allowance, so an exception cannot
+outlive the call it was written for.
 
-### `videoApi`
-- `report` → `POST /api/video/:id/report`
-- `getTrending` → `GET /api/video/trending`
-- `getByCategory` → `GET /api/video/category/:category`
-- `getUserVideos` → `GET /api/video/user/:userId`
-- `getBookmarked` → `GET /api/video/bookmarked`
-- `delete` → `DELETE /api/video/:id`
+## Traps this codebase has actually hit
 
-> **Route-ordering trap.** `video.routes.ts` declares `router.get('/:id')` early.
-> If `/trending` or `/bookmarked` are added *after* it they will never match —
-> Express will bind them to `/:id` and they will 404 as "video not found".
-> Declare them **before** `/:id`, the way `/featured` is declared before `/:id`
-> in `apprenticeship.routes.ts`.
->
-> Trending is already served without these: `GET /api/video/feed?feed=trending`.
+Kept because each one cost real debugging time.
 
-### `channelApi`
-- `delete` → `DELETE /api/channels/:id`
-- `getMembers` / `addMember` / `removeMember` → `/api/channels/:id/members`
-- `leave` → `POST /api/channels/:id/leave` — the server implements **`DELETE`** `/:id/leave`.
-- `markRead` → `POST /api/channels/:id/read`
-- `searchMessages` → `GET /api/channels/:id/search`
-- `getPinnedMessages` → `GET /api/channels/:id/pinned`
-- `getUnreadCounts` → `GET /api/channels/unread`
-- `startTyping` → `POST /api/channels/:id/typing`
-- `discover` → `GET /api/channels/discover`
+### Route ordering
 
-> `/unread` and `/discover` sit behind `router.get('/:id')` — same ordering trap as above.
+Express matches in declaration order, so a literal path declared after a
+parameterised one is unreachable. `router.get('/:id')` appears early in
+`video.routes.ts`, `channel.routes.ts` and `skills-marketplace.routes.ts`;
+`/trending`, `/bookmarked`, `/discover`, `/unread`, `/services/me` and
+`/orders/received` all have to sit above it. They 404 as "not found" rather
+than failing loudly, which is what makes this expensive to spot.
+`/featured` in `apprenticeship.routes.ts` is the pattern to copy.
 
-### `apprenticeshipApi`
-- `getApplicationStatus` → `GET /api/apprenticeships/applications/:id`
-- `withdrawApplication` → `DELETE /api/apprenticeships/applications/:id`
-- `getRecommended` → `GET /api/apprenticeships/recommended`
-- `getCategories` → `GET /api/apprenticeships/categories`
-- `getProgress` → `GET /api/apprenticeships/:id/progress`
-- `submitMilestone` → `POST /api/apprenticeships/:apprenticeshipId/milestones/:milestoneId/submit`
-- `getCertificate` → `GET /api/apprenticeships/:id/certificate`
+The `SHADOWED` class above exists specifically to catch this.
 
-> There is no milestone or certificate model in `schema.prisma`; those two need a
-> migration before a route can be written.
+### Two order models coexist in the marketplace
 
-### `skillsMarketplaceApi`
-- `deleteService` → `DELETE /api/skills-marketplace/services/:id`
-- `getMyServices` → `GET /api/skills-marketplace/services/me`
-- `getSellerProfile` → `GET /api/skills-marketplace/sellers/:userId`
-- `getCategories` → `GET /api/skills-marketplace/categories`
-- `getReceivedOrders` → `GET /api/skills-marketplace/orders/received`
-- `getOrder` → `GET /api/skills-marketplace/orders/:id`
-- `acceptOrder` / `deliverOrder` / `requestRevision` / `completeOrder` / `cancelOrder`
-  → `POST /api/skills-marketplace/orders/:id/<action>`
-- `leaveReview` → `POST /api/skills-marketplace/orders/:orderId/review` — the server
-  implements reviews against the **service** (`POST /services/:id/reviews`), not the order.
-- `getServiceReviews` → `GET /api/skills-marketplace/services/:serviceId/reviews` —
-  the server implements **`POST`** at that path, not `GET`.
-- `sendCustomRequest` / `getCustomRequests` / `submitProposal` — no custom-request
-  model exists in `schema.prisma`.
+`ServiceBooking` buys a block of the provider's time (`scheduledAt`,
+`durationMinutes`, hourly rate). `ServiceOrder` buys a fixed-scope package
+(`packageIndex`, delivery deadline). They are separate tables with separate
+lifecycles — check which one a route means before touching it.
 
-> **Two order models coexist.** `ServiceBooking` buys a block of the provider's
-> time (`scheduledAt`, `durationMinutes`, hourly rate). `ServiceOrder` buys a
-> fixed-scope package (`packageIndex`, delivery deadline). The order lifecycle
-> methods above target `ServiceOrder`; `POST /services/:id/order` and
-> `GET /orders/me` are implemented, the rest of the lifecycle is not.
+`ServiceReview.bookingId` is the generic "what is this review attached to" slot
+and holds a **`ServiceOrder` id** for order reviews. There is no `orderId`
+column; the `(serviceId, clientId, bookingId)` unique constraint is what makes
+a review one-per-order.
 
-## Reproducing this audit
+### Video has no category column
 
-The checker is not committed. It resolves mount prefixes from `index.ts`, collects
-`router.<method>('<path>')` per routes file, normalises `${param}` and `:param` to a
-common placeholder, and diffs against the client call sites — then greps
-`src/app` and `src/components` to separate UI-reachable calls from dead exports.
-Re-run it after adding routes to confirm the count drops.
+`type` is a `VideoType` enum and `hashtags` is the free-form topic field.
+`GET /video/category/:x` filters on `type` when `x` names a VideoType and falls
+back to a hashtag otherwise.
+
+### Reports go through one pipeline
+
+Reporting anything posts to `POST /api/safety/reports`, which handles trust
+scoring and the moderation queue. Do not add per-module report endpoints.
+
+### The completion record is not a qualification
+
+`GET /api/apprenticeships/:id/certificate` returns an ATHENA record of
+completion, not a nationally recognised AQF qualification — only an RTO awards
+those. It carries a `statement` field saying so. Keep it.
+
+## The request path is not obvious
+
+Every client call goes to the Next.js origin (`baseURL = '/api'`), and what
+forwards it to the backend differs between local dev and production. Adding a
+route handler under `client/src/app/api/` can silently break production while
+working locally. Read
+[../runbooks/API-REQUEST-PATH.md](../runbooks/API-REQUEST-PATH.md) first.
