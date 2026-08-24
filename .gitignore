@@ -48,7 +48,10 @@ prisma/*.db
 prisma/*.db-journal
 
 # Uploads
-uploads/
+# Runtime media storage on the API server. Anchored, so it cannot also swallow
+# a source directory that happens to be named "uploads" — it previously hid
+# client/src/app/uploads, the route that proxies this media in production.
+/athena-platform/server/uploads/
 
 # Python
 __pycache__/

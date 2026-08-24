@@ -71,8 +71,10 @@ const nextConfig = {
     ],
   },
   async rewrites() {
-    // On Netlify, the public/_redirects file handles API proxying.
-    // Only use Next.js rewrites for local development.
+    // Local development only. On Netlify these rewrites are skipped and the
+    // route handlers serve the same paths instead — app/api/[...path] for
+    // /api/*, app/uploads/[...path] for /uploads/*. public/_redirects does NOT
+    // proxy them; a rule there cannot read NEXT_PUBLIC_API_URL.
     if (process.env.NETLIFY) return [];
 
     // Auth routes (/api/auth/*) MUST be handled by Next.js API route handlers

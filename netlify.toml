@@ -14,4 +14,14 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Redirect API calls to backend (configure API URL in Netlify env vars)
+# No /api/* or /uploads/* redirect rules here on purpose.
+#
+# Redirects in this file cannot read environment variables, so proxying to the
+# backend from here would mean hardcoding the Railway host. Both paths are
+# proxied in-app instead, reading NEXT_PUBLIC_API_URL at request time:
+#
+#   /api/auth/*   app/api/auth/*        (forwards Set-Cookie itself)
+#   /api/*        app/api/[...path]     (all verbs, generic pass-through)
+#   /uploads/*    app/uploads/[...path] (user media)
+#
+# See athena-platform/client/public/_redirects for the same note.

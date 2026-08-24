@@ -1,5 +1,16 @@
-# Proxy rules for Netlify — processed in order, first match wins.
+# Netlify proxy rules — processed in order, first match wins.
 # The ! suffix = force (apply even if a function exists at the path).
-
-# Uploads
-/uploads/*   /uploads/:splat   200!
+#
+# Intentionally empty of /api/* and /uploads/* rules.
+#
+# A rule here cannot read environment variables, so proxying to the backend
+# from this file would mean hardcoding the Railway host and changing it in two
+# places on every environment move. Both paths are proxied in-app instead,
+# reading NEXT_PUBLIC_API_URL at request time:
+#
+#   /api/auth/*   app/api/auth/*            (needs to forward Set-Cookie itself)
+#   /api/*        app/api/[...path]         (all verbs, generic pass-through)
+#   /uploads/*    app/uploads/[...path]     (user media)
+#
+# This file previously carried `/uploads/* /uploads/:splat 200!`, which pointed
+# at itself rather than at the backend and served nothing.

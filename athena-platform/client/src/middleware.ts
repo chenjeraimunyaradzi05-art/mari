@@ -37,9 +37,12 @@ export function middleware(request: NextRequest) {
   // reliably forward Set-Cookie headers. Instead, auth requests fall
   // through to the Next.js API route handlers in app/api/auth/ which
   // explicitly forward cookies via response.headers.getSetCookie().
-  // On Netlify, netlify.toml redirects handle /api/* and /uploads/* proxying
-  // to Railway more reliably than edge-function rewrites. Only use middleware
-  // rewriting for local development (where there are no Netlify redirects).
+  //
+  // On Netlify this rewrite is skipped and the request is served by the route
+  // handlers instead: app/api/[...path] for /api/*, app/uploads/[...path] for
+  // /uploads/*. Nothing in public/_redirects or netlify.toml proxies those
+  // paths — a rule there cannot read NEXT_PUBLIC_API_URL, so the backend host
+  // would have to be hardcoded. See public/_redirects for the reasoning.
   if (!process.env.NETLIFY) {
     const isAuthRoute = pathname.startsWith('/api/auth');
     if (!isAuthRoute && (pathname.startsWith('/api') || pathname.startsWith('/uploads'))) {
