@@ -7,6 +7,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { gdprService } from '../services/gdpr.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { ApiError } from '../middleware/errorHandler';
 import { DSARType, ConsentType } from '@prisma/client';
 import { logger } from '../utils/logger';
 
@@ -28,6 +29,31 @@ router.get('/dsar', async (req: AuthRequest, res: Response, next: NextFunction) 
     const userId = req.user!.id;
     const requests = await gdprService.getDSARRequests(userId);
     res.json({ success: true, data: requests });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/gdpr/dsar/:requestId
+ * Status of one DSAR request.
+ *
+ * Two segments, so this never shadows GET /dsar above, and the sibling
+ * /dsar/export|delete|rectify|restrict routes are POSTs.
+ */
+router.get('/dsar/:requestId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const request = await gdprService.getDSARRequest(req.params.requestId);
+
+    // getDSARRequest looks up by id alone, so ownership is enforced here. A
+    // request belonging to someone else is reported as absent rather than
+    // forbidden — confirming it exists would itself leak information about
+    // another data subject.
+    if (!request || request.userId !== req.user!.id) {
+      throw new ApiError(404, 'DSAR request not found');
+    }
+
+    res.json({ success: true, data: request });
   } catch (error) {
     next(error);
   }

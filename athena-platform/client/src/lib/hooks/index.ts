@@ -19,4 +19,3 @@ export * from './useCommunity';
 export * from './useCompliance';
 export * from './useGDPR';
 export * from './useMessages';
-export * from './useAnalytics';
