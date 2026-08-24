@@ -133,7 +133,13 @@ const FETCH_PATH = new RegExp(String.raw`/api/${SEGMENT}(?:/${SEGMENT})*`, 'g');
 // Next route handlers that omit an explicit method, since a handler is named
 // after the verb it serves. Absent both, fetch itself defaults to GET.
 function verbForFetch(src, offset, args) {
-  const own = args.split(');')[0].match(/method:\s*['"](get|post|put|patch|delete)['"]/i);
+  // Bounded at whatever closes this call. Splitting on `);` alone was not
+  // enough: inside an object literal a call ends `),`, so the window ran on
+  // into the next entry and reported its method for this one.
+  const end = args.search(/\)\s*[,;)\n]/);
+  const own = (end === -1 ? args : args.slice(0, end)).match(
+    /method:\s*['"](get|post|put|patch|delete)['"]/i
+  );
   if (own) return own[1].toUpperCase();
 
   const before = src.slice(0, offset);
@@ -172,10 +178,16 @@ function collectClientCalls() {
       record(`${m[1].toUpperCase()} ${normalisePath(`/api${raw}`)}`, file);
     }
 
-    // 2. The Next route handlers under app/api, which proxy to the backend with
-    //    `fetch(`${API_URL}/api/...`)`. These carry the full /api prefix and are
-    //    just as much part of the contract as the axios calls.
-    for (const m of src.matchAll(/\bfetch\s*\(/g)) {
+    // 2. Anything calling with a full `/api/...` path:
+    //      - `fetch()` in the Next route handlers under app/api, which proxy to
+    //        the backend
+    //      - `apiFetch()` from lib/api-fetch, the token-refreshing wrapper the
+    //        useMentor / useJobs / useFormation hooks use
+    //
+    //    `\bfetch` alone does not match `apiFetch` — there is no word boundary
+    //    between "i" and "F" — which is how a whole layer of calls went
+    //    unchecked. Both are named explicitly so neither can hide again.
+    for (const m of src.matchAll(/\b(?:apiFetch|fetch)\s*(?:<[^>]*>)?\s*\(/g)) {
       const args = src.slice(m.index, m.index + 600);
       const pathMatch = args.match(FETCH_PATH);
       if (!pathMatch) continue;
