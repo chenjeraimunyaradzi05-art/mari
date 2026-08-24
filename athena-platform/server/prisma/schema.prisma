@@ -601,24 +601,24 @@ model User {
   videoLikes                 VideoLike[]
   videoComments              VideoComment[]
   videoSaves                 VideoSave[]
-  channelsOwned              Channel[]                   @relation("ChannelOwner")
+  channelsOwned              Channel[]                           @relation("ChannelOwner")
   channelMemberships         ChannelMember[]
   channelMessages            ChannelMessage[]
-  groupsCreated              Group[]                     @relation("GroupsCreated")
+  groupsCreated              Group[]                             @relation("GroupsCreated")
   groupMemberships           GroupMember[]
   groupPosts                 GroupPost[]
   groupJoinRequests          GroupJoinRequest[]
-  groupJoinRequestsReviewed  GroupJoinRequest[]          @relation("GroupJoinRequestsReviewed")
+  groupJoinRequestsReviewed  GroupJoinRequest[]                  @relation("GroupJoinRequestsReviewed")
   eventRegistrations         EventRegistration[]
   eventSaves                 EventSave[]
-  jobsPosted                 Job[]                       @relation("PostedJobs")
+  jobsPosted                 Job[]                               @relation("PostedJobs")
   applications               JobApplication[]
   savedJobs                  SavedJob[]
-  sentMessages               Message[]                   @relation("SentMessages")
-  receivedMessages           Message[]                   @relation("ReceivedMessages")
+  sentMessages               Message[]                           @relation("SentMessages")
+  receivedMessages           Message[]                           @relation("ReceivedMessages")
   conversations              ConversationParticipant[]
-  followers                  Follow[]                    @relation("Following")
-  following                  Follow[]                    @relation("Followers")
+  followers                  Follow[]                            @relation("Following")
+  following                  Follow[]                            @relation("Followers")
   notifications              Notification[]
   creatorProfile             CreatorProfile?
   mentorProfile              MentorProfile?
@@ -626,20 +626,24 @@ model User {
   educationApplications      EducationApplication[]
   apprenticeshipApplications ApprenticeshipApplication[]
   skillServices              SkillService[]
-  serviceBookings            ServiceBooking[]            @relation("ServiceBookingsClient")
-  serviceOrders              ServiceOrder[]              @relation("ServiceOrdersClient")
+  serviceBookings            ServiceBooking[]                    @relation("ServiceBookingsClient")
+  postSaves                  PostSave[]
+  serviceOrders              ServiceOrder[]                      @relation("ServiceOrdersClient")
   serviceFavorites           ServiceFavorite[]
   apprenticeshipBookmarks    ApprenticeshipBookmark[]
+  serviceRequests            ServiceRequest[]                    @relation("ServiceRequestsClient")
+  serviceProposals           ServiceProposal[]                   @relation("ServiceProposalsProvider")
+  milestoneReviews           ApprenticeshipMilestoneSubmission[] @relation("MilestoneReviewer")
   channelMessageReactions    ChannelMessageReaction[]
   serviceReviews             ServiceReview[]
   userOutcomes               UserOutcome[]
-  mentorSessions             MentorSession[]             @relation("MenteeSessions")
-  auditLogsAsActor           AuditLog[]                  @relation("AuditLogActorUser")
-  auditLogsAsTarget          AuditLog[]                  @relation("AuditLogTargetUser")
-  verificationBadges         VerificationBadge[]         @relation("VerificationApplicant")
-  verificationReviews        VerificationBadge[]         @relation("VerificationReviewer")
-  appeals                    Appeal[]                    @relation("AppealRequester")
-  appealsReviewed            Appeal[]                    @relation("AppealReviewer")
+  mentorSessions             MentorSession[]                     @relation("MenteeSessions")
+  auditLogsAsActor           AuditLog[]                          @relation("AuditLogActorUser")
+  auditLogsAsTarget          AuditLog[]                          @relation("AuditLogTargetUser")
+  verificationBadges         VerificationBadge[]                 @relation("VerificationApplicant")
+  verificationReviews        VerificationBadge[]                 @relation("VerificationReviewer")
+  appeals                    Appeal[]                            @relation("AppealRequester")
+  appealsReviewed            Appeal[]                            @relation("AppealReviewer")
   sessions                   Session[]
   verificationTokens         VerificationToken[]
 
@@ -1365,9 +1369,25 @@ model Post {
 
   comments Comment[]
   likes    Like[]
+  saves    PostSave[]
 
   @@index([authorId])
   @@index([createdAt])
+}
+
+// Completes the save pattern: SavedJob, EventSave, VideoSave and
+// ApprenticeshipBookmark all existed, but the feed's save button had no store.
+model PostSave {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId])
 }
 
 model Comment {
@@ -1725,11 +1745,14 @@ model Channel {
 }
 
 model ChannelMember {
-  id        String   @id @default(uuid())
-  channelId String
-  userId    String
-  isMuted   Boolean  @default(false)
-  joinedAt  DateTime @default(now())
+  id         String    @id @default(uuid())
+  channelId  String
+  userId     String
+  isMuted    Boolean   @default(false)
+  joinedAt   DateTime  @default(now())
+  // Watermark for unread counts. Null means the member has never opened the
+  // channel, so everything posted since they joined counts as unread.
+  lastReadAt DateTime?
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -2145,6 +2168,7 @@ model Apprenticeship {
   hostEmployer Organization?               @relation("ApprenticeshipHost", fields: [hostEmployerId], references: [id], onDelete: SetNull)
   applications ApprenticeshipApplication[]
   bookmarks    ApprenticeshipBookmark[]
+  milestones   ApprenticeshipMilestone[]
 
   @@index([framework])
   @@index([level])
@@ -2178,13 +2202,67 @@ model ApprenticeshipApplication {
   submittedAt      DateTime                        @default(now())
   updatedAt        DateTime                        @updatedAt
 
-  apprenticeship Apprenticeship @relation(fields: [apprenticeshipId], references: [id], onDelete: Cascade)
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apprenticeship       Apprenticeship                      @relation(fields: [apprenticeshipId], references: [id], onDelete: Cascade)
+  user                 User                                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  milestoneSubmissions ApprenticeshipMilestoneSubmission[]
 
   @@unique([apprenticeshipId, userId])
   @@index([apprenticeshipId])
   @@index([userId])
   @@index([status])
+}
+
+// A unit of competency the apprentice has to demonstrate. Defined per
+// apprenticeship by the RTO or host employer, and ordered so the UI can show a
+// progress bar in the sequence the training package runs.
+model ApprenticeshipMilestone {
+  id               String   @id @default(uuid())
+  apprenticeshipId String
+  title            String
+  description      String?
+  orderIndex       Int
+  competencyCode   String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  apprenticeship Apprenticeship                      @relation(fields: [apprenticeshipId], references: [id], onDelete: Cascade)
+  submissions    ApprenticeshipMilestoneSubmission[]
+
+  @@unique([apprenticeshipId, orderIndex])
+  @@index([apprenticeshipId])
+}
+
+// Evidence submitted against one milestone. Keyed to the application rather
+// than the user: the application is the placement, and it is what carries the
+// ACCEPTED status that says this person actually holds the position.
+model ApprenticeshipMilestoneSubmission {
+  id            String                    @id @default(uuid())
+  milestoneId   String
+  applicationId String
+  notes         String?
+  attachments   String[]
+  status        MilestoneSubmissionStatus @default(SUBMITTED)
+  reviewerId    String?
+  reviewNotes   String?
+  reviewedAt    DateTime?
+  submittedAt   DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  milestone   ApprenticeshipMilestone   @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  application ApprenticeshipApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewer    User?                     @relation("MilestoneReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  // Resubmitting after a rejection updates the row rather than stacking a
+  // second one, so "has this competency been signed off" stays a single answer.
+  @@unique([milestoneId, applicationId])
+  @@index([applicationId])
+  @@index([status])
+}
+
+enum MilestoneSubmissionStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
 model SkillService {
@@ -2272,6 +2350,64 @@ enum ServiceOrderStatus {
   REVISION_REQUESTED
   COMPLETED
   CANCELLED
+}
+
+// The reverse of a SkillService listing: a buyer posts what they need and
+// providers pitch for it, instead of the buyer picking from what is on offer.
+model ServiceRequest {
+  id           String               @id @default(uuid())
+  clientId     String
+  title        String
+  description  String
+  category     ServiceCategory
+  budgetMin    Int
+  budgetMax    Int
+  deliveryDays Int
+  attachments  String[]
+  status       ServiceRequestStatus @default(OPEN)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  closedAt     DateTime?
+
+  client    User              @relation("ServiceRequestsClient", fields: [clientId], references: [id], onDelete: Cascade)
+  proposals ServiceProposal[]
+
+  @@index([clientId])
+  @@index([category])
+  @@index([status])
+}
+
+enum ServiceRequestStatus {
+  OPEN
+  AWARDED
+  CLOSED
+}
+
+model ServiceProposal {
+  id           String                @id @default(uuid())
+  requestId    String
+  providerId   String
+  message      String
+  price        Int
+  deliveryDays Int
+  status       ServiceProposalStatus @default(PENDING)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  request  ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  provider User           @relation("ServiceProposalsProvider", fields: [providerId], references: [id], onDelete: Cascade)
+
+  // One pitch per provider per request; revising means updating that pitch.
+  @@unique([requestId, providerId])
+  @@index([requestId])
+  @@index([providerId])
+}
+
+enum ServiceProposalStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
 }
 
 model ServiceBooking {
