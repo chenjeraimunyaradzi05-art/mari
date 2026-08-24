@@ -336,6 +336,27 @@ export function useMyApplications() {
   });
 }
 
+export function useUpdateMyApplication() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      applicationId,
+      status,
+    }: {
+      applicationId: string;
+      status: 'WITHDRAWN' | 'ACCEPTED';
+    }) => jobApi.updateMyApplication(applicationId, status),
+    onSuccess: (_, { status }) => {
+      queryClient.invalidateQueries({ queryKey: ['my-applications'] });
+      toast.success(status === 'ACCEPTED' ? 'Offer accepted' : 'Application withdrawn');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not update the application');
+    },
+  });
+}
+
 export function useSavedJobs() {
   return useQuery({
     queryKey: ['saved-jobs'],

@@ -203,6 +203,11 @@ export const jobApi = {
 
   getMyApplications: () => api.get('/jobs/me/applications'),
 
+  // The applicant's own two actions. The employer-side route checks job
+  // ownership and so 403s for the candidate.
+  updateMyApplication: (applicationId: string, status: 'WITHDRAWN' | 'ACCEPTED') =>
+    api.patch(`/jobs/me/applications/${applicationId}`, { status }),
+
   getApplications: (jobId: string) => api.get(`/jobs/${jobId}/applications`),
 
   updateApplication: (jobId: string, applicationId: string, data: any) =>

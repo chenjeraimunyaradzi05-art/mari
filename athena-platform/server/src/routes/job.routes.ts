@@ -558,6 +558,85 @@ router.get('/me/applications', authenticate, async (req: AuthRequest, res, next)
 });
 
 // ===========================================
+// CANDIDATE'S OWN APPLICATION ACTIONS
+// ===========================================
+
+// The employer-side route is PATCH /:jobId/applications/:applicationId, which
+// checks job ownership and so 403s for the candidate. This is the other side of
+// it: the two actions an applicant takes on their own application.
+//
+// Two segments deeper than '/me/applications' and scoped under /me, so it
+// cannot collide with the employer route.
+const CANDIDATE_TRANSITIONS: Record<string, string[]> = {
+  // Withdrawable right up until a decision has been recorded either way.
+  WITHDRAWN: ['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED'],
+  // Only an actual offer can be accepted.
+  ACCEPTED: ['OFFERED'],
+};
+
+router.patch(
+  '/me/applications/:applicationId',
+  authenticate,
+  [body('status').isIn(['WITHDRAWN', 'ACCEPTED'])],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { applicationId } = req.params;
+      const { status } = req.body;
+
+      const application = await prisma.jobApplication.findUnique({
+        where: { id: applicationId },
+        include: { job: { select: { id: true, title: true, postedById: true } } },
+      });
+
+      // Someone else's application is reported as absent rather than forbidden.
+      if (!application || application.userId !== req.user!.id) {
+        throw new ApiError(404, 'Application not found');
+      }
+
+      if (application.status === status) {
+        return res.json({ success: true, data: application, message: 'No change' });
+      }
+
+      const allowedFrom = CANDIDATE_TRANSITIONS[status];
+      if (!allowedFrom.includes(application.status)) {
+        throw new ApiError(
+          400,
+          `An application that is ${application.status} cannot be ${status.toLowerCase()}`
+        );
+      }
+
+      const updated = await prisma.jobApplication.update({
+        where: { id: applicationId },
+        data: { status },
+      });
+
+      // The employer needs to know, the same way the candidate is notified when
+      // the employer moves the application.
+      await notificationService.notify({
+        userId: application.job.postedById,
+        type: 'APPLICATION_UPDATE',
+        title: status === 'ACCEPTED' ? 'Offer accepted' : 'Application withdrawn',
+        message:
+          status === 'ACCEPTED'
+            ? `A candidate accepted your offer for ${application.job.title}.`
+            : `A candidate withdrew their application for ${application.job.title}.`,
+        link: `/dashboard/jobs/${application.job.id}/applications`,
+        channels: ['in-app', 'email'],
+      });
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
 // GET JOB APPLICATIONS (For Employers)
 // ===========================================
 router.get('/:id/applications', authenticate, async (req: AuthRequest, res, next) => {

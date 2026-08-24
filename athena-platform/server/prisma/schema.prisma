@@ -89,6 +89,9 @@ enum ApplicationStatus {
   OFFERED
   REJECTED
   WITHDRAWN
+  // The flow previously ended at OFFERED, so the candidate's "Accept Offer"
+  // button had no state to move to and did nothing.
+  ACCEPTED
 }
 
 enum PostType {

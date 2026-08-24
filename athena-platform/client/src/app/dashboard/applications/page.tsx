@@ -17,7 +17,7 @@ import {
   Filter,
   Search,
 } from 'lucide-react';
-import { useMyApplications } from '@/lib/hooks';
+import { useMyApplications, useUpdateMyApplication } from '@/lib/hooks';
 import { formatRelativeTime, JOB_TYPE_LABELS } from '@/lib/utils';
 
 const statusConfig = {
@@ -27,11 +27,20 @@ const statusConfig = {
     color: 'text-yellow-600 bg-yellow-100 dark:bg-yellow-900/30',
     description: 'Your application is being reviewed',
   },
-  REVIEWING: {
+  // The ApplicationStatus enum is REVIEWED, not REVIEWING. The old key never
+  // matched a real status, so these applications fell through to `undefined`
+  // and crashed the row on `status.icon`.
+  REVIEWED: {
     label: 'Under Review',
     icon: FileText,
     color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30',
     description: 'The hiring team is reviewing your application',
+  },
+  SHORTLISTED: {
+    label: 'Shortlisted',
+    icon: CheckCircle2,
+    color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30',
+    description: 'You have been shortlisted for this role',
   },
   INTERVIEW: {
     label: 'Interview Stage',
@@ -57,14 +66,30 @@ const statusConfig = {
     color: 'text-slate-600 bg-slate-100 dark:bg-slate-900/30',
     description: 'You withdrew this application',
   },
+  ACCEPTED: {
+    label: 'Offer Accepted',
+    icon: CheckCircle2,
+    color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30',
+    description: 'You accepted this offer',
+  },
 };
 
 type ApplicationStatus = keyof typeof statusConfig;
+
+// A status this page does not know about should degrade to a plain row, not
+// take the whole list down with it.
+const FALLBACK_STATUS = {
+  label: 'Application',
+  icon: FileText,
+  color: 'text-slate-600 bg-slate-100 dark:bg-slate-900/30',
+  description: '',
+};
 
 export default function ApplicationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const { data: applications, isLoading } = useMyApplications();
+  const updateApplication = useUpdateMyApplication();
 
   const filteredApplications = applications?.filter((app: any) => {
     const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
@@ -113,7 +138,7 @@ export default function ApplicationsPage() {
         </div>
         <div className="card text-center">
           <div className="text-3xl font-bold text-blue-600">
-            {statusCounts['REVIEWING'] || 0}
+            {statusCounts['REVIEWED'] || 0}
           </div>
           <div className="text-sm text-slate-500 dark:text-slate-400">
             Under Review
@@ -204,7 +229,8 @@ export default function ApplicationsPage() {
       ) : (
         <div className="space-y-4">
           {filteredApplications?.map((application: any) => {
-            const status = statusConfig[application.status as ApplicationStatus];
+            const status =
+              statusConfig[application.status as ApplicationStatus] ?? FALLBACK_STATUS;
             const StatusIcon = status.icon;
 
             return (
@@ -281,17 +307,37 @@ export default function ApplicationsPage() {
                       </button>
                     )}
                     {application.status === 'OFFERED' && (
-                      <>
-                        <button className="btn-outline text-sm py-1.5">
-                          View Offer
-                        </button>
-                        <button className="btn-primary text-sm py-1.5">
-                          Accept Offer
-                        </button>
-                      </>
+                      <button
+                        className="btn-primary text-sm py-1.5 disabled:opacity-60"
+                        disabled={updateApplication.isPending}
+                        onClick={() =>
+                          updateApplication.mutate({
+                            applicationId: application.id,
+                            status: 'ACCEPTED',
+                          })
+                        }
+                      >
+                        Accept Offer
+                      </button>
                     )}
-                    {['PENDING', 'REVIEWING'].includes(application.status) && (
-                      <button className="text-red-600 hover:text-red-700 text-sm font-medium">
+                    {/* Withdrawable until a decision is recorded either way, which
+                        is what the server allows — not just while PENDING. */}
+                    {['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED'].includes(
+                      application.status
+                    ) && (
+                      <button
+                        className="text-red-600 hover:text-red-700 text-sm font-medium disabled:opacity-60"
+                        disabled={updateApplication.isPending}
+                        onClick={() => {
+                          if (!window.confirm('Withdraw this application? This cannot be undone.')) {
+                            return;
+                          }
+                          updateApplication.mutate({
+                            applicationId: application.id,
+                            status: 'WITHDRAWN',
+                          });
+                        }}
+                      >
                         Withdraw
                       </button>
                     )}
