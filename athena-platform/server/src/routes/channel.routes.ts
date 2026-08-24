@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { emitToChannel } from '../services/socket.service';
 import {
   CONTENT_LIMITS,
   normalizeMediaUrls,
@@ -141,6 +142,96 @@ router.post(
     }
   }
 );
+
+// `/discover` and `/unread` must stay above `/:id`, or Express treats them as
+// channel ids and answers 404.
+
+// ===========================================
+// DISCOVER PUBLIC CHANNELS
+// ===========================================
+router.get('/discover', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const limit = parseLimit(req.query.limit, 20, 50);
+    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const search = normalizeOptionalUserText(req.query.search, {
+      field: 'search',
+      maxLength: 100,
+      allowEmpty: true,
+    });
+
+    const where: any = { isPublic: true };
+    if (category) where.type = category;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Channels the viewer already belongs to are not discoveries.
+    if (req.user) {
+      where.members = { none: { userId: req.user.id } };
+    }
+
+    const [channels, total] = await Promise.all([
+      prisma.channel.findMany({
+        where,
+        orderBy: [{ memberCount: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { owner: { select: { id: true, displayName: true, avatar: true } } },
+      }),
+      prisma.channel.count({ where }),
+    ]);
+
+    res.json({
+      success: true,
+      data: channels,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// UNREAD COUNTS
+// ===========================================
+router.get('/unread', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const memberships = await prisma.channelMember.findMany({
+      where: { userId: req.user!.id },
+      select: { channelId: true, lastReadAt: true, joinedAt: true },
+    });
+
+    // One grouped count instead of a query per channel. A member who has never
+    // opened the channel is measured from when they joined, so they do not
+    // inherit the channel's entire backlog as unread.
+    const grouped = await Promise.all(
+      memberships.map(async (m) => ({
+        channelId: m.channelId,
+        unreadCount: await prisma.channelMessage.count({
+          where: {
+            channelId: m.channelId,
+            createdAt: { gt: m.lastReadAt ?? m.joinedAt },
+            authorId: { not: req.user!.id },
+          },
+        }),
+      }))
+    );
+
+    res.json({
+      success: true,
+      data: {
+        channels: grouped,
+        total: grouped.reduce((sum, c) => sum + c.unreadCount, 0),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ===========================================
 // GET CHANNEL
@@ -320,6 +411,264 @@ router.delete('/:id/leave', authenticate, async (req: AuthRequest, res, next) =>
 });
 
 // ===========================================
+// SHARED ACCESS CHECKS
+// ===========================================
+
+// Same rule the message routes apply: a public channel is readable by anyone,
+// a private one only by its members and its owner.
+async function requireChannelAccess(channelId: string, userId?: string) {
+  const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+  if (!channel) {
+    throw new ApiError(404, 'Channel not found');
+  }
+
+  if (!channel.isPublic) {
+    if (!userId) {
+      throw new ApiError(403, 'Private channel');
+    }
+    const member = await prisma.channelMember.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+    });
+    if (!member && channel.ownerId !== userId) {
+      throw new ApiError(403, 'Private channel');
+    }
+  }
+
+  return channel;
+}
+
+async function requireChannelOwner(channelId: string, userId: string, role?: string) {
+  const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+  if (!channel) {
+    throw new ApiError(404, 'Channel not found');
+  }
+  if (channel.ownerId !== userId && role !== 'ADMIN') {
+    throw new ApiError(403, 'Only the channel owner can do that');
+  }
+  return channel;
+}
+
+// ===========================================
+// DELETE CHANNEL
+// ===========================================
+router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await requireChannelOwner(id, req.user!.id, req.user!.role);
+
+    // Members, messages and reactions all cascade from the Channel row.
+    await prisma.channel.delete({ where: { id } });
+
+    emitToChannel(id, 'channels:deleted', { channelId: id });
+
+    res.json({ success: true, message: 'Channel deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// MEMBERS
+// ===========================================
+router.get('/:id/members', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await requireChannelAccess(id, req.user?.id);
+
+    const members = await prisma.channelMember.findMany({
+      where: { channelId: id },
+      orderBy: { joinedAt: 'asc' },
+      include: {
+        user: { select: { id: true, displayName: true, avatar: true, headline: true } },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: members.map((member) => ({
+        id: member.id,
+        joinedAt: member.joinedAt,
+        isMuted: member.isMuted,
+        user: member.user,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  '/:id/members',
+  authenticate,
+  [body('userId').isString().notEmpty()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { id } = req.params;
+      const { userId } = req.body;
+      await requireChannelOwner(id, req.user!.id, req.user!.role);
+
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+      if (!user) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const existing = await prisma.channelMember.findUnique({
+        where: { channelId_userId: { channelId: id, userId } },
+      });
+      if (existing) {
+        return res.json({ success: true, message: 'Already a member' });
+      }
+
+      await prisma.channelMember.create({ data: { channelId: id, userId } });
+      await prisma.channel.update({
+        where: { id },
+        data: { memberCount: { increment: 1 } },
+      });
+
+      res.status(201).json({ success: true, message: 'Member added' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id, userId } = req.params;
+    const channel = await prisma.channel.findUnique({ where: { id } });
+    if (!channel) {
+      throw new ApiError(404, 'Channel not found');
+    }
+
+    // The owner can remove anyone; anyone else may only remove themselves.
+    const isOwner = channel.ownerId === req.user!.id || req.user!.role === 'ADMIN';
+    if (!isOwner && userId !== req.user!.id) {
+      throw new ApiError(403, 'Only the channel owner can remove other members');
+    }
+    if (userId === channel.ownerId) {
+      throw new ApiError(400, 'Owner cannot be removed from channel');
+    }
+
+    const deleted = await prisma.channelMember.deleteMany({
+      where: { channelId: id, userId },
+    });
+
+    if (deleted.count > 0) {
+      await prisma.channel.update({
+        where: { id },
+        data: { memberCount: { decrement: 1 } },
+      });
+    }
+
+    res.json({ success: true, message: 'Member removed' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// PINNED MESSAGES
+// ===========================================
+router.get('/:id/pinned', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await requireChannelAccess(id, req.user?.id);
+
+    const messages = await prisma.channelMessage.findMany({
+      where: { channelId: id, isPinned: true },
+      orderBy: { createdAt: 'desc' },
+      include: { author: { select: { id: true, displayName: true, avatar: true } } },
+    });
+
+    res.json({ success: true, data: messages });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// SEARCH MESSAGES
+// ===========================================
+router.get('/:id/search', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await requireChannelAccess(id, req.user?.id);
+
+    const query = normalizeOptionalUserText(req.query.q, {
+      field: 'q',
+      maxLength: 100,
+      allowEmpty: true,
+    });
+    if (!query) {
+      throw new ApiError(400, 'A search query is required');
+    }
+
+    const limit = parseLimit(req.query.limit, 20, 50);
+    const messages = await prisma.channelMessage.findMany({
+      where: { channelId: id, content: { contains: query, mode: 'insensitive' } },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { author: { select: { id: true, displayName: true, avatar: true } } },
+    });
+
+    res.json({ success: true, data: messages, query });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// MARK READ
+// ===========================================
+router.post('/:id/read', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const updated = await prisma.channelMember.updateMany({
+      where: { channelId: id, userId: req.user!.id },
+      data: { lastReadAt: new Date() },
+    });
+
+    if (updated.count === 0) {
+      throw new ApiError(404, 'Not a member of this channel');
+    }
+
+    res.json({ success: true, message: 'Channel marked as read' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// TYPING INDICATOR
+// ===========================================
+
+// Clients with a live socket should emit `channels:typing` directly. This REST
+// entry point exists for callers that only speak HTTP; both land in the same
+// channel room.
+router.post('/:id/typing', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await requireChannelAccess(id, req.user!.id);
+
+    const stopped = req.body?.stopped === true;
+    emitToChannel(id, stopped ? 'channels:user_stopped_typing' : 'channels:user_typing', {
+      channelId: id,
+      userId: req.user!.id,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // CHANNEL MESSAGES
 // ===========================================
 router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) => {
@@ -435,12 +784,18 @@ router.post(
           }),
           mediaUrls: normalizeMediaUrls(req.body.mediaUrls),
         },
+        include: {
+          author: { select: { id: true, displayName: true, avatar: true } },
+        },
       });
 
       await prisma.channel.update({
         where: { id },
         data: { messageCount: { increment: 1 } },
       });
+
+      // Everyone else in the room sees it without waiting for their next poll.
+      emitToChannel(id, 'channels:message', { channelId: id, message });
 
       res.status(201).json({ success: true, data: message });
     } catch (error) {

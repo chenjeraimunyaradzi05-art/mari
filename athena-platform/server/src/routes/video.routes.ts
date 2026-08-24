@@ -84,6 +84,150 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
   }
 });
 
+// The literal-path routes below must stay above `/:id`, or Express hands
+// "trending", "bookmarked" and friends to the lookup-by-id handler.
+
+const PUBLIC_VIDEO_WHERE = { status: 'PUBLISHED' as const, isHidden: false };
+
+const AUTHOR_SELECT = {
+  author: {
+    select: { id: true, displayName: true, avatar: true, headline: true },
+  },
+};
+
+function parsePage(value: unknown): number {
+  const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
+  return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
+}
+
+// Page-based listing shared by the category and per-author browse routes.
+async function listVideos(
+  where: Record<string, unknown>,
+  req: AuthRequest,
+  orderBy: Record<string, string>[] = [{ createdAt: 'desc' }]
+) {
+  const page = parsePage(req.query.page);
+  const limit = parseLimit(req.query.limit, 20, 50);
+
+  const [videos, total] = await Promise.all([
+    prisma.video.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * limit,
+      take: limit,
+      include: AUTHOR_SELECT,
+    }),
+    prisma.video.count({ where }),
+  ]);
+
+  return {
+    data: videos,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+  };
+}
+
+// ===========================================
+// TRENDING
+// ===========================================
+const TRENDING_PERIOD_DAYS: Record<string, number> = { day: 1, week: 7, month: 30 };
+
+router.get('/trending', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const period = typeof req.query.period === 'string' ? req.query.period : 'week';
+    const days = TRENDING_PERIOD_DAYS[period];
+    if (!days) {
+      throw new ApiError(400, 'period must be one of: day, week, month');
+    }
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const result = await listVideos(
+      { ...PUBLIC_VIDEO_WHERE, publishedAt: { gte: since } },
+      req,
+      [{ engagementScore: 'desc' }, { viewCount: 'desc' }, { createdAt: 'desc' }]
+    );
+
+    res.json({ success: true, ...result, period });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// SAVED / BOOKMARKED VIDEOS
+// ===========================================
+router.get('/bookmarked', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const page = parsePage(req.query.page);
+    const limit = parseLimit(req.query.limit, 20, 50);
+    const where = { userId: req.user!.id, video: PUBLIC_VIDEO_WHERE };
+
+    const [saves, total] = await Promise.all([
+      prisma.videoSave.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { video: { include: AUTHOR_SELECT } },
+      }),
+      prisma.videoSave.count({ where }),
+    ]);
+
+    res.json({
+      success: true,
+      data: saves.map((save) => ({ ...save.video, isSaved: true })),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// BROWSE BY CATEGORY
+// ===========================================
+const VIDEO_TYPES = ['REEL', 'STORY', 'TUTORIAL', 'CAREER_STORY', 'MENTOR_TIP', 'LIVE_REPLAY'];
+
+// A Video has no `category` column. The closest thing the model offers is
+// `type`, so a category that names a VideoType filters on that; anything else
+// is treated as a hashtag, which is how the rest of the app tags topics.
+router.get('/category/:category', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const raw = req.params.category;
+    const asType = raw.toUpperCase().replace(/-/g, '_');
+
+    const where = VIDEO_TYPES.includes(asType)
+      ? { ...PUBLIC_VIDEO_WHERE, type: asType as never }
+      : { ...PUBLIC_VIDEO_WHERE, hashtags: { has: raw.toLowerCase() } };
+
+    const result = await listVideos(where, req);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// A USER'S VIDEOS
+// ===========================================
+router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    // Authors (and admins) see their own drafts and processing uploads; everyone
+    // else sees only what is published.
+    const isSelf = req.user?.id === userId || req.user?.role === 'ADMIN';
+    const where = isSelf
+      ? { authorId: userId, isHidden: false }
+      : { ...PUBLIC_VIDEO_WHERE, authorId: userId };
+
+    const result = await listVideos(where, req);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ===========================================
 // GET VIDEO BY ID
 // ===========================================
@@ -257,6 +401,30 @@ router.patch(
     }
   }
 );
+
+// ===========================================
+// DELETE VIDEO
+// ===========================================
+router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.video.findUnique({ where: { id } });
+    if (!existing) {
+      throw new ApiError(404, 'Video not found');
+    }
+
+    if (existing.authorId !== req.user!.id && req.user!.role !== 'ADMIN') {
+      throw new ApiError(403, 'Not authorized');
+    }
+
+    // Likes, comments, saves and views all cascade from the Video row.
+    await prisma.video.delete({ where: { id } });
+
+    res.json({ success: true, message: 'Video deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ===========================================
 // LIKE VIDEO

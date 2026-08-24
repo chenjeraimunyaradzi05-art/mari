@@ -194,6 +194,57 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       socket.to(roomId).emit('messages:user_stopped_typing', { userId });
     });
 
+    // ==========================================
+    // CHANNEL HANDLERS
+    // ==========================================
+
+    // Channels are not conversations: membership decides who may listen, so the
+    // room is only joined after checking ChannelMember (or public visibility).
+    socket.on('channels:join', async (channelId: string) => {
+      try {
+        if (typeof channelId !== 'string' || !channelId) return;
+
+        const channel = await prisma.channel.findUnique({
+          where: { id: channelId },
+          select: { id: true, isPublic: true },
+        });
+        if (!channel) return;
+
+        if (!channel.isPublic) {
+          const membership = await prisma.channelMember.findUnique({
+            where: { channelId_userId: { channelId, userId } },
+            select: { id: true },
+          });
+          if (!membership) {
+            socket.emit('channels:error', { channelId, message: 'Not a member of this channel' });
+            return;
+          }
+        }
+
+        socket.join(getChannelRoomId(channelId));
+        logger.debug('User joined channel room', { userId, channelId });
+      } catch (error) {
+        logger.error('Failed to join channel room', { error, channelId });
+      }
+    });
+
+    socket.on('channels:leave', (channelId: string) => {
+      if (typeof channelId !== 'string' || !channelId) return;
+      socket.leave(getChannelRoomId(channelId));
+    });
+
+    socket.on('channels:typing', (channelId: string) => {
+      if (typeof channelId !== 'string' || !channelId) return;
+      socket.to(getChannelRoomId(channelId)).emit('channels:user_typing', { channelId, userId });
+    });
+
+    socket.on('channels:stop_typing', (channelId: string) => {
+      if (typeof channelId !== 'string' || !channelId) return;
+      socket
+        .to(getChannelRoomId(channelId))
+        .emit('channels:user_stopped_typing', { channelId, userId });
+    });
+
     socket.on('messages:mark_read', async (senderId: string) => {
       try {
         await prisma.message.updateMany({
@@ -249,6 +300,20 @@ export function initializeSocketHandlers(io: SocketIOServer) {
 
 function getConversationRoomId(userId1: string, userId2: string): string {
   return `conversation:${[userId1, userId2].sort().join(':')}`;
+}
+
+export function getChannelRoomId(channelId: string): string {
+  return `channel:${channelId}`;
+}
+
+// Lets the REST channel routes broadcast without importing `io` from index.ts,
+// which would close an import cycle (index -> routes -> index).
+export function emitToChannel(channelId: string, event: string, payload: unknown): void {
+  if (!ioInstance) {
+    logger.debug('Socket.IO not initialized, skipping channel broadcast', { channelId, event });
+    return;
+  }
+  ioInstance.to(getChannelRoomId(channelId)).emit(event, payload);
 }
 
 export function isUserOnline(userId: string): boolean {

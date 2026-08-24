@@ -180,9 +180,15 @@ export const useMessages = (conversationId: string) => {
         queryClient.setQueryData(['messages', conversationId], (old: Message[] | undefined) => {
             return old ? [...old, message] : [message];
         });
-        // Mark as read?
-        // If we are looking at this conversation, we should mark as read.
-        // api.post(`/conversations/${conversationId}/read`);
+
+        // The conversation is on screen, so the message has been seen. There is
+        // no REST route for this; the server marks a sender's messages read off
+        // the `messages:mark_read` socket event and echoes `messages:read` back
+        // to the other participant.
+        if (message.senderId && message.senderId !== user.id) {
+          socket.emit('messages:mark_read', message.senderId);
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        }
       }
     };
 

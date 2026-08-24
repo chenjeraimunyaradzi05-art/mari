@@ -1,4 +1,4 @@
-import { api, postApi } from './api';
+import { api, postApi, safetyApi } from './api';
 
 // ============================================
 // VIDEO FEED API
@@ -17,16 +17,19 @@ export const videoApi = {
   // Get single video
   getVideo: (id: string) => api.get(`/video/${id}`),
 
-  // Create new video post
+  // Create new video post. The fields mirror the Video model: topics are
+  // `hashtags`, and the closest thing to a category is the VideoType `type`.
   create: (data: {
-    title: string;
+    title?: string;
     description?: string;
     videoUrl: string;
     thumbnailUrl?: string;
-    duration: number;
-    category?: string;
-    tags?: string[];
-    visibility?: 'public' | 'followers' | 'private';
+    duration?: number;
+    type?: 'REEL' | 'STORY' | 'TUTORIAL' | 'CAREER_STORY' | 'MENTOR_TIP' | 'LIVE_REPLAY';
+    aspectRatio?: string;
+    hashtags?: string[];
+    mentionedUserIds?: string[];
+    location?: string;
   }) => api.post('/video', data),
 
   // Like a video
@@ -57,9 +60,11 @@ export const videoApi = {
       entityId: id,
     }),
 
-  // Report video
-  report: (id: string, reason: string) =>
-    api.post(`/video/${id}/report`, { reason }),
+  // Report video. Reports go through the one safety pipeline rather than a
+  // parallel per-module endpoint, so they pick up trust scoring and the
+  // moderation queue for free.
+  report: (id: string, reason: string, details?: string) =>
+    safetyApi.createReport({ targetType: 'video', targetId: id, reason, details }),
 
   // Track view. The server requires completionPct alongside watchDuration.
   trackView: (id: string, watchDuration: number, completionPct: number, source?: string) =>
@@ -147,7 +152,7 @@ export const channelApi = {
     api.delete(`/channels/${id}/members/${userId}`),
 
   // Leave channel
-  leave: (id: string) => api.post(`/channels/${id}/leave`),
+  leave: (id: string) => api.delete(`/channels/${id}/leave`),
 
   // Mark channel as read
   markRead: (id: string) => api.post(`/channels/${id}/read`),
@@ -170,8 +175,11 @@ export const channelApi = {
   // Get unread counts
   getUnreadCounts: () => api.get('/channels/unread'),
 
-  // Start typing indicator
-  startTyping: (id: string) => api.post(`/channels/${id}/typing`),
+  // Typing indicator. Clients holding a live socket should emit
+  // `channels:typing` instead; this is the HTTP-only fallback.
+  startTyping: (id: string) => api.post(`/channels/${id}/typing`, {}),
+
+  stopTyping: (id: string) => api.post(`/channels/${id}/typing`, { stopped: true }),
 
   // Discover public channels
   discover: (params?: { category?: string; search?: string }) =>
@@ -238,16 +246,36 @@ export const apprenticeshipApi = {
   // Get apprenticeship categories/industries
   getCategories: () => api.get('/apprenticeships/categories'),
 
-  // Track progress (for active apprentices)
+  // The competencies defined for an apprenticeship, in order.
+  getMilestones: (id: string) => api.get(`/apprenticeships/${id}/milestones`),
+
+  // Provider-only: define a competency on their own apprenticeship.
+  createMilestone: (id: string, data: {
+    title: string;
+    description?: string;
+    orderIndex: number;
+    competencyCode?: string;
+  }) => api.post(`/apprenticeships/${id}/milestones`, data),
+
+  // Track progress. Only available once the placement is ACCEPTED — progress is
+  // tracked against the application, so merely having applied returns 403.
   getProgress: (id: string) => api.get(`/apprenticeships/${id}/progress`),
 
-  // Submit milestone
+  // Submit milestone. Resubmitting after a rejection replaces the evidence and
+  // clears the previous review; an approved milestone cannot be reopened.
   submitMilestone: (apprenticeshipId: string, milestoneId: string, data: {
     notes?: string;
     attachments?: string[];
   }) => api.post(`/apprenticeships/${apprenticeshipId}/milestones/${milestoneId}/submit`, data),
 
-  // Get certificate
+  // Provider-only: sign a submission off or send it back.
+  reviewSubmission: (submissionId: string, data: {
+    status: 'APPROVED' | 'REJECTED';
+    reviewNotes?: string;
+  }) => api.patch(`/apprenticeships/milestones/submissions/${submissionId}`, data),
+
+  // Record of completion, issued once every milestone is approved. 409s while
+  // any are outstanding. This is an ATHENA record, not an AQF qualification.
   getCertificate: (id: string) => api.get(`/apprenticeships/${id}/certificate`),
 };
 
@@ -293,7 +321,8 @@ export const skillsMarketplaceApi = {
   updateService: (id: string, data: any) =>
     api.patch(`/skills-marketplace/services/${id}`, data),
 
-  // Delete service
+  // Archives the listing rather than destroying it — orders, bookings and
+  // reviews hang off the service and would cascade away with it.
   deleteService: (id: string) => api.delete(`/skills-marketplace/services/${id}`),
 
   // Get my services
@@ -342,14 +371,11 @@ export const skillsMarketplaceApi = {
   cancelOrder: (id: string, reason: string) =>
     api.post(`/skills-marketplace/orders/${id}/cancel`, { reason }),
 
-  // Leave review
-  leaveReview: (orderId: string, data: {
-    rating: number;
-    review: string;
-    communicationRating?: number;
-    serviceRating?: number;
-    recommendRating?: number;
-  }) => api.post(`/skills-marketplace/orders/${orderId}/review`, data),
+  // Leave review. Only a completed order can be reviewed, and only by its
+  // buyer. ServiceReview stores a single 1-5 rating, so there are no separate
+  // communication/service/recommend dimensions to send.
+  leaveReview: (orderId: string, data: { rating: number; review?: string }) =>
+    api.post(`/skills-marketplace/orders/${orderId}/review`, data),
 
   // Get reviews for service
   getServiceReviews: (serviceId: string, params?: { page?: number; limit?: number }) =>
@@ -368,22 +394,36 @@ export const skillsMarketplaceApi = {
   sendCustomRequest: (data: {
     title: string;
     description: string;
-    category: string;
+    category: 'PROFESSIONAL' | 'CREATIVE' | 'TECHNICAL' | 'COACHING' | 'TEACHING';
     budget: { min: number; max: number };
     deliveryDays: number;
     attachments?: string[];
   }) => api.post('/skills-marketplace/requests', data),
 
-  // Get custom requests (for sellers)
-  getCustomRequests: (params?: { category?: string }) =>
+  // Browse open requests to pitch on. Excludes the caller's own briefs and
+  // carries `myProposal` so the UI knows whether they have already pitched.
+  getCustomRequests: (params?: { category?: string; page?: number; limit?: number }) =>
     api.get('/skills-marketplace/requests', { params }),
 
-  // Submit proposal for request
+  // The caller's own briefs, with a proposal count on each.
+  getMyRequests: () => api.get('/skills-marketplace/requests/me'),
+
+  // The buyer sees every proposal; a provider sees only their own.
+  getCustomRequest: (id: string) => api.get(`/skills-marketplace/requests/${id}`),
+
+  // Submit proposal for request. Pitching again revises the existing proposal.
   submitProposal: (requestId: string, data: {
     message: string;
     price: number;
     deliveryDays: number;
   }) => api.post(`/skills-marketplace/requests/${requestId}/proposal`, data),
+
+  // Buyer picks a winner: the rest are declined and the brief stops taking pitches.
+  acceptProposal: (requestId: string, proposalId: string) =>
+    api.post(`/skills-marketplace/requests/${requestId}/proposals/${proposalId}/accept`),
+
+  closeRequest: (requestId: string) =>
+    api.post(`/skills-marketplace/requests/${requestId}/close`),
 };
 
 export default {

@@ -236,6 +236,12 @@ export const postApi = {
 
   unlike: (id: string) => api.delete(`/posts/${id}/like`),
 
+  save: (id: string) => api.post(`/posts/${id}/save`),
+
+  unsave: (id: string) => api.delete(`/posts/${id}/save`),
+
+  getSaved: () => api.get('/posts/me/saved'),
+
   comment: (postId: string, content: string) =>
     api.post(`/posts/${postId}/comments`, { content }),
 
@@ -289,14 +295,24 @@ export const courseApi = {
 // ============================================
 // MENTOR API
 // ============================================
+// Mirrors the validators on POST /api/mentors/me.
+export interface MentorProfileInput {
+  specializations?: string[];
+  hourlyRate?: number;
+  yearsExperience?: number;
+  isAvailable?: boolean;
+}
+
 export const mentorApi = {
   getAll: (params?: any) => api.get('/mentors', { params }),
 
   getById: (id: string) => api.get(`/mentors/${id}`),
 
-  become: (data: any) => api.post('/mentors/become', data),
+  // `POST /mentors/me` upserts the mentor profile, so becoming a mentor and
+  // editing the profile are the same call. There is no `/mentors/become`.
+  become: (data: MentorProfileInput) => api.post('/mentors/me', data),
 
-  updateProfile: (data: any) => api.patch('/mentors/me', data),
+  updateProfile: (data: MentorProfileInput) => api.post('/mentors/me', data),
 
   bookSession: (data: {
     mentorId: string;
