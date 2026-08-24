@@ -27,8 +27,10 @@
  *   WRONG_VERB    The path exists but not for that method.
  *
  * Usage:
- *   node scripts/check-api-contract.js          # exits 1 on any finding
- *   node scripts/check-api-contract.js --list   # print the whole contract
+ *   node scripts/check-api-contract.js                # exits 1 on any finding
+ *   node scripts/check-api-contract.js --list         # print the whole contract
+ *   node scripts/check-api-contract.js --unreachable  # server routes no client
+ *                                                     # call reaches (report only)
  *
  * Known-good exceptions live in ALLOWED below, each with a reason.
  */
@@ -116,26 +118,68 @@ function walk(dir, out = []) {
 
 const PARAM = '*PARAM*';
 
+// A path segment is either a literal or an interpolation. Interpolations glued
+// to the end of a segment (`/api/jobs${queryString}`) are query-string builders,
+// not path parameters, so the match stops before them; only a `${...}` that
+// follows a slash becomes a parameter.
+const SEGMENT = String.raw`(?:[A-Za-z0-9._~-]+|\$\{[^{}\`]*\})`;
+const FETCH_PATH = new RegExp(String.raw`/api/${SEGMENT}(?:/${SEGMENT})*`, 'g');
+
+// Which verb a `fetch` uses. `method:` lives in the options object *after* the
+// URL, so it is read from this call's own argument list — bounded at the first
+// `);` so a later call's method cannot leak backwards into this one.
+//
+// Falling back to the enclosing `export async function GET/POST/...` covers the
+// Next route handlers that omit an explicit method, since a handler is named
+// after the verb it serves. Absent both, fetch itself defaults to GET.
+function verbForFetch(src, offset, args) {
+  const own = args.split(');')[0].match(/method:\s*['"](get|post|put|patch|delete)['"]/i);
+  if (own) return own[1].toUpperCase();
+
+  const before = src.slice(0, offset);
+  const handlers = [...before.matchAll(/export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\b/g)];
+  if (handlers.length > 0) return handlers[handlers.length - 1][1];
+
+  return 'GET';
+}
+
+function normalisePath(raw) {
+  return raw
+    .replace(/\$\{[^{}`]*\}/g, PARAM)
+    .split('?')[0]
+    .replace(/\/+$/, '');
+}
+
 function collectClientCalls() {
   if (!fs.existsSync(CLIENT_SRC)) fail(`cannot find ${CLIENT_SRC}`);
 
   const calls = new Map();
+
+  const record = (key, file) => {
+    if (!calls.has(key)) calls.set(key, new Set());
+    calls.get(key).add(path.relative(CLIENT_SRC, file).split(path.sep).join('/'));
+  };
+
   for (const file of walk(CLIENT_SRC)) {
     const src = fs.readFileSync(file, 'utf8');
+
+    // 1. The axios helper: `api.get('/posts/feed')`, path relative to /api.
     for (const m of src.matchAll(
       /\bapi\s*\.\s*(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*([`'"])([^`'"]*)\2/g
     )) {
       const raw = m[3];
       if (!raw.startsWith('/')) continue; // absolute URLs are not our contract
+      record(`${m[1].toUpperCase()} ${normalisePath(`/api${raw}`)}`, file);
+    }
 
-      const normalised = `/api${raw}`
-        .replace(/\$\{[^}]*\}/g, PARAM) // template params
-        .split('?')[0]
-        .replace(/\/+$/, '');
-
-      const key = `${m[1].toUpperCase()} ${normalised}`;
-      if (!calls.has(key)) calls.set(key, new Set());
-      calls.get(key).add(path.relative(CLIENT_SRC, file).split(path.sep).join('/'));
+    // 2. The Next route handlers under app/api, which proxy to the backend with
+    //    `fetch(`${API_URL}/api/...`)`. These carry the full /api prefix and are
+    //    just as much part of the contract as the axios calls.
+    for (const m of src.matchAll(/\bfetch\s*\(/g)) {
+      const args = src.slice(m.index, m.index + 600);
+      const pathMatch = args.match(FETCH_PATH);
+      if (!pathMatch) continue;
+      record(`${verbForFetch(src, m.index, args)} ${normalisePath(pathMatch[0])}`, file);
     }
   }
   return calls;
@@ -182,8 +226,66 @@ function classify(method, segments, serverRoutes) {
 
 // ---------------------------------------------------------------------- main
 
+// Route groups no client helper is expected to reach: called by external
+// systems, by operators, or by infrastructure rather than by the app.
+const NON_CLIENT_PREFIXES = [
+  '/api/webhooks', // payment providers and other third parties call these
+  '/api/admin', // operator tooling, not the member-facing client
+  '/api/status', // health and uptime probes
+  '/api/compliance', // regulator-facing exports
+  '/api/gdpr', // data-subject request tooling
+];
+
+// The reverse of the main check: server routes that no client call can reach.
+// Reported, never enforced — an unreachable route is often perfectly correct
+// (a webhook, an operator endpoint, or a capability the UI has not caught up
+// with yet). The point is to make the list visible rather than to fail on it.
+function reportUnreachable(serverRoutes, clientCalls) {
+  const reachable = new Set();
+
+  for (const key of clientCalls.keys()) {
+    const [method, routePath] = key.split(' ');
+    const { exact, viaParam } = classify(method, routePath.split('/').filter(Boolean), serverRoutes);
+    for (const route of [...exact, ...viaParam]) reachable.add(`${route.method} ${route.raw}`);
+  }
+
+  const byFile = new Map();
+  let skipped = 0;
+
+  for (const route of serverRoutes) {
+    const id = `${route.method} ${route.raw}`;
+    if (reachable.has(id)) continue;
+    if (NON_CLIENT_PREFIXES.some((p) => route.raw.startsWith(p))) {
+      skipped += 1;
+      continue;
+    }
+    if (!byFile.has(route.file)) byFile.set(route.file, []);
+    byFile.get(route.file).push(id);
+  }
+
+  const total = [...byFile.values()].reduce((n, list) => n + list.length, 0);
+
+  console.log(
+    `Server routes with no client caller: ${total}` +
+      ` (excluding ${skipped} under ${NON_CLIENT_PREFIXES.join(', ')})\n`
+  );
+
+  for (const file of [...byFile.keys()].sort()) {
+    const routes = byFile.get(file).sort();
+    console.log(`${file}  (${routes.length})`);
+    for (const id of routes) console.log(`    ${id}`);
+    console.log('');
+  }
+
+  console.log(
+    'These are not failures. Reaching one needs a client helper; leaving it ' +
+      'unreachable is right when nothing in the UI should call it.'
+  );
+}
+
 function main() {
   const listOnly = process.argv.includes('--list');
+  const unreachable = process.argv.includes('--unreachable');
 
   const serverRoutes = collectServerRoutes();
   const clientCalls = collectClientCalls();
@@ -193,6 +295,11 @@ function main() {
       console.log(`${route.method.padEnd(6)} ${route.raw}   (${route.file})`);
     }
     console.log(`\n${serverRoutes.length} server routes, ${clientCalls.size} client call sites`);
+    return;
+  }
+
+  if (unreachable) {
+    reportUnreachable(serverRoutes, clientCalls);
     return;
   }
 
