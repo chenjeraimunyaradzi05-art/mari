@@ -510,9 +510,143 @@ export async function createPayout(input: PayoutInput): Promise<{ payoutId: stri
   }
 }
 
+// ===========================================
+// PAYOUT METHODS
+// ===========================================
+
+export interface PayoutMethod {
+  id: string;
+  type: 'bank' | 'card';
+  name: string;
+  last4: string | null;
+  currency: string | null;
+  isDefault: boolean;
+}
+
+// Resolves the caller's connected account, or explains what they need to do
+// first. Every payout-method operation needs this.
+async function requireConnectedAccountId(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { stripeConnectAccountId: true },
+  });
+
+  if (!user?.stripeConnectAccountId) {
+    throw new ApiError(409, 'Connect a payout account before managing payout methods');
+  }
+
+  return user.stripeConnectAccountId;
+}
+
+/**
+ * Payout destinations for a connected account.
+ *
+ * These live in Stripe as the account's external accounts, not in our database
+ * — Stripe holds the bank and card details and we must not. `isDefault` is
+ * Stripe's `default_for_currency`, which is per-currency: an account paid in
+ * more than one currency has one default per currency, not one overall.
+ */
+export async function listPayoutMethods(userId: string): Promise<PayoutMethod[]> {
+  if (canUseMockStripe('Listing payout methods')) {
+    return [
+      {
+        id: 'ba_mock_default',
+        type: 'bank',
+        name: 'Mock Bank ****4321',
+        last4: '4321',
+        currency: 'aud',
+        isDefault: true,
+      },
+    ];
+  }
+
+  const accountId = await requireConnectedAccountId(userId);
+
+  try {
+    const external = await stripe!.accounts.listExternalAccounts(accountId, { limit: 100 });
+
+    return external.data.map((account) => {
+      const isBank = account.object === 'bank_account';
+      const bank = account as { bank_name?: string; last4?: string };
+      const card = account as { brand?: string; last4?: string };
+
+      return {
+        id: account.id,
+        type: isBank ? 'bank' : 'card',
+        name: isBank
+          ? `${bank.bank_name || 'Bank account'} ****${bank.last4 || ''}`.trim()
+          : `${card.brand || 'Card'} ****${card.last4 || ''}`.trim(),
+        last4: (isBank ? bank.last4 : card.last4) ?? null,
+        currency: (account as { currency?: string }).currency ?? null,
+        isDefault: Boolean((account as { default_for_currency?: boolean }).default_for_currency),
+      };
+    });
+  } catch (error) {
+    logger.error('Failed to list payout methods', { error, userId });
+    throw new ApiError(500, 'Failed to list payout methods');
+  }
+}
+
+/**
+ * Makes one payout method the default for its currency.
+ *
+ * Stripe clears the flag on the previously default account for that currency,
+ * so there is no second call to unset the old one.
+ */
+export async function setDefaultPayoutMethod(
+  userId: string,
+  payoutMethodId: string
+): Promise<PayoutMethod> {
+  if (canUseMockStripe('Setting the default payout method')) {
+    return {
+      id: payoutMethodId,
+      type: 'bank',
+      name: 'Mock Bank ****4321',
+      last4: '4321',
+      currency: 'aud',
+      isDefault: true,
+    };
+  }
+
+  const accountId = await requireConnectedAccountId(userId);
+
+  // Checked against the account's own external accounts first, so one user
+  // cannot point at an id belonging to somebody else's connected account.
+  const owned = await listPayoutMethods(userId);
+  if (!owned.some((method) => method.id === payoutMethodId)) {
+    throw new ApiError(404, 'Payout method not found');
+  }
+
+  try {
+    const updated = await stripe!.accounts.updateExternalAccount(accountId, payoutMethodId, {
+      default_for_currency: true,
+    });
+
+    const isBank = updated.object === 'bank_account';
+    const bank = updated as { bank_name?: string; last4?: string };
+    const card = updated as { brand?: string; last4?: string };
+
+    return {
+      id: updated.id,
+      type: isBank ? 'bank' : 'card',
+      name: isBank
+        ? `${bank.bank_name || 'Bank account'} ****${bank.last4 || ''}`.trim()
+        : `${card.brand || 'Card'} ****${card.last4 || ''}`.trim(),
+      last4: (isBank ? bank.last4 : card.last4) ?? null,
+      currency: (updated as { currency?: string }).currency ?? null,
+      isDefault: true,
+    };
+  } catch (error) {
+    logger.error('Failed to set default payout method', { error, userId, payoutMethodId });
+    throw new ApiError(500, 'Failed to set default payout method');
+  }
+}
+
 export const stripeConnectService = {
   createConnectedAccount,
   getOnboardingLink,
+  listPayoutMethods,
+  setDefaultPayoutMethod,
   getAccountStatus,
   createEscrowPayment,
   captureEscrowPayment,

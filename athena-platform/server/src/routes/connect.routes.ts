@@ -169,6 +169,52 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res: Response, ne
 });
 
 /**
+ * @route GET /api/connect/payout-methods
+ * @desc List the connected account's payout destinations
+ * @access Private (Mentor/Creator)
+ */
+router.get('/payout-methods', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const methods = await stripeConnectService.listPayoutMethods(req.user!.id);
+
+    res.json({
+      success: true,
+      data: methods,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route POST /api/connect/payout-methods/:methodId/default
+ * @desc Make one payout method the default for its currency
+ * @access Private (Mentor/Creator)
+ *
+ * Declared above '/payout' only for readability — the paths do not overlap.
+ */
+router.post(
+  '/payout-methods/:methodId/default',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const method = await stripeConnectService.setDefaultPayoutMethod(
+        req.user!.id,
+        req.params.methodId
+      );
+
+      res.json({
+        success: true,
+        data: method,
+        message: 'Default payout method updated',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
  * @route POST /api/connect/payout
  * @desc Request a payout to bank account
  * @access Private (Mentor/Creator)

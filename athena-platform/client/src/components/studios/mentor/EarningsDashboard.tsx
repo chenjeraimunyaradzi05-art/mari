@@ -14,6 +14,9 @@
  */
 
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { connectApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   DollarSign,
@@ -83,11 +86,14 @@ interface Transaction {
   };
 }
 
+// Mirrors the payout methods the Connect API returns. These are Stripe
+// external accounts, so `isDefault` is per-currency rather than one overall.
 interface PayoutMethod {
   id: string;
-  type: 'bank' | 'paypal' | 'stripe';
+  type: 'bank' | 'card';
   name: string;
-  last4?: string;
+  last4?: string | null;
+  currency?: string | null;
   isDefault: boolean;
 }
 
@@ -550,14 +556,120 @@ function TaxDocuments() {
 // MAIN COMPONENT
 // ============================================
 
+// Stripe reports money in the currency's smallest unit.
+const fromMinorUnits = (cents: number) => Math.round(cents) / 100;
+
+// Escrow payment statuses mapped onto the four the table renders.
+const ESCROW_STATUS: Record<string, Transaction['status']> = {
+  CAPTURED: 'completed',
+  AUTHORIZED: 'processing',
+  PENDING: 'pending',
+  CANCELLED: 'failed',
+  FAILED: 'failed',
+};
+
+interface EarningsResponse {
+  totalEarnings: number;
+  pendingPayouts: number;
+  availableBalance: number;
+  recentTransactions: {
+    id: string;
+    amount: number;
+    status: string;
+    description: string | null;
+    createdAt: string;
+    capturedAt: string | null;
+  }[];
+}
+
 export function EarningsDashboard({ className }: { className?: string }) {
-  const earningsData: EarningsData[] = [];
-  const transactions: Transaction[] = [];
-  const payoutMethods: PayoutMethod[] = [];
-  const totalEarnings = 0;
-  const totalSessions = 0;
-  const pendingBalance = 0;
-  const availableBalance = 0;
+  const queryClient = useQueryClient();
+
+  const earningsQuery = useQuery({
+    queryKey: ['connect', 'earnings'],
+    queryFn: async () => {
+      const { data } = await connectApi.getEarnings();
+      return data.data as EarningsResponse;
+    },
+  });
+
+  const payoutMethodsQuery = useQuery({
+    queryKey: ['connect', 'payout-methods'],
+    queryFn: async () => {
+      const { data } = await connectApi.getPayoutMethods();
+      return data.data as PayoutMethod[];
+    },
+    // A user who has not onboarded to Connect yet gets a 409 rather than an
+    // empty list, which is expected rather than an error worth retrying.
+    retry: false,
+  });
+
+  const setDefault = useMutation({
+    mutationFn: (methodId: string) => connectApi.setDefaultPayoutMethod(methodId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['connect', 'payout-methods'] });
+      toast.success('Default payout method updated');
+    },
+    onError: (error: unknown) => {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        'Could not update the default payout method';
+      toast.error(message);
+    },
+  });
+
+  const earnings = earningsQuery.data;
+  const payoutMethods = payoutMethodsQuery.data ?? [];
+
+  const totalEarnings = fromMinorUnits(earnings?.totalEarnings ?? 0);
+  const pendingBalance = fromMinorUnits(earnings?.pendingPayouts ?? 0);
+  const availableBalance = fromMinorUnits(earnings?.availableBalance ?? 0);
+
+  const transactions: Transaction[] = (earnings?.recentTransactions ?? []).map((t) => ({
+    id: t.id,
+    // Escrow payments are all session work today; the endpoint does not yet
+    // distinguish courses, tips or referrals.
+    type: 'earning',
+    source: 'sessions',
+    description: t.description || 'Session payment',
+    amount: fromMinorUnits(t.amount),
+    status: ESCROW_STATUS[t.status] ?? 'pending',
+    date: new Date(t.capturedAt ?? t.createdAt),
+  }));
+
+  const totalSessions = transactions.filter((t) => t.status === 'completed').length;
+
+  // The chart wants a series over time; the endpoint returns recent
+  // transactions rather than buckets, so group the ones we have by month.
+  const earningsData: EarningsData[] = Object.values(
+    transactions
+      .filter((t) => t.status === 'completed')
+      .reduce<Record<string, EarningsData>>((acc, t) => {
+        const period = t.date.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+        acc[period] ??= { period, sessions: 0, courses: 0, tips: 0, referrals: 0 };
+        acc[period].sessions += t.amount;
+        return acc;
+      }, {})
+  );
+
+  if (earningsQuery.isLoading) {
+    return (
+      <div className={cn('container mx-auto py-16 text-center text-muted-foreground', className)}>
+        Loading your earnings…
+      </div>
+    );
+  }
+
+  if (earningsQuery.isError) {
+    return (
+      <div className={cn('container mx-auto py-16 text-center', className)}>
+        <p className="font-medium">We could not load your earnings.</p>
+        <Button variant="outline" className="mt-4" onClick={() => earningsQuery.refetch()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('container mx-auto py-8 space-y-8', className)}>
@@ -642,12 +754,14 @@ export function EarningsDashboard({ className }: { className?: string }) {
                   <PayoutMethodCard
                     key={method.id}
                     method={method}
-                    onSetDefault={() => {}}
+                    onSetDefault={() => setDefault.mutate(method.id)}
                   />
                 ))
               ) : (
                 <div className="py-10 text-center text-sm text-muted-foreground">
-                  No payout methods are connected yet.
+                  {payoutMethodsQuery.isError
+                    ? 'Connect a payout account to add a payout method.'
+                    : 'No payout methods are connected yet.'}
                 </div>
               )}
 

@@ -1060,7 +1060,93 @@ export const aiAlgorithmsApi = {
 // PAYMENTS API
 // ============================================
 export const paymentsApi = {
+  // The payment methods available in a region — a catalogue, not the caller's
+  // saved cards. Payout destinations live in connectApi below.
   getMethods: (region?: string) => api.get('/payments/methods', { params: { region } }),
+
+  getPricing: (region?: string) => api.get('/payments/pricing', { params: { region } }),
+
+  getCurrencies: () => api.get('/payments/currencies'),
+
+  getBestProvider: (region?: string) => api.get('/payments/best-provider', { params: { region } }),
+
+  process: (data: {
+    amount: number;
+    currency: string;
+    description: string;
+    paymentMethodId?: string;
+    returnUrl?: string;
+    metadata?: Record<string, unknown>;
+  }) => api.post('/payments/process', data),
+
+  convert: (data: { amount: number; from: string; to: string }) =>
+    api.post('/payments/convert', data),
+};
+
+// ============================================
+// STRIPE CONNECT API
+// ============================================
+export interface PayoutMethod {
+  id: string;
+  type: 'bank' | 'card';
+  name: string;
+  last4: string | null;
+  currency: string | null;
+  isDefault: boolean;
+}
+
+export const connectApi = {
+  getAccount: () => api.get('/connect/account'),
+
+  createAccount: (data?: { country?: string; businessType?: string }) =>
+    api.post('/connect/account', data ?? {}),
+
+  getOnboardingLink: () => api.post('/connect/account/onboarding'),
+
+  getEarnings: () => api.get('/connect/earnings'),
+
+  // Payout destinations are Stripe external accounts on the connected account,
+  // so `isDefault` is per-currency: an account paid in several currencies has
+  // one default for each, not one overall.
+  getPayoutMethods: () => api.get<{ data: PayoutMethod[] }>('/connect/payout-methods'),
+
+  setDefaultPayoutMethod: (methodId: string) =>
+    api.post(`/connect/payout-methods/${methodId}/default`),
+
+  requestPayout: (data: { amount: number; currency?: string; connectedAccountId: string }) =>
+    api.post('/connect/payout', data),
+};
+
+// ============================================
+// CREATOR API
+// ============================================
+export const creatorApi = {
+  getProfile: () => api.get('/creator/profile'),
+
+  getPublicProfile: (userId: string) => api.get(`/creator/profile/${userId}`),
+
+  enable: () => api.post('/creator/enable'),
+
+  onboard: () => api.post('/creator/onboard'),
+
+  getStripeLoginLink: () => api.post('/creator/stripe-login'),
+
+  getBalance: () => api.get('/creator/balance'),
+
+  getEarnings: (params?: { period?: string }) => api.get('/creator/earnings', { params }),
+
+  getPayouts: () => api.get('/creator/payouts'),
+
+  requestPayout: (data: { amount: number }) => api.post('/creator/payouts/request', data),
+
+  getGifts: () => api.get('/creator/gifts'),
+
+  getSentGifts: () => api.get('/creator/gifts/sent'),
+
+  getTiers: () => api.get('/creator/tiers'),
+
+  getLeaderboard: (params?: { period?: string; limit?: number }) =>
+    api.get('/creator/leaderboard', { params }),
 };
 
 export default api;
