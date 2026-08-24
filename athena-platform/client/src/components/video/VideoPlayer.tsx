@@ -190,7 +190,14 @@ export function VideoPlayer({
         >
           <Avatar
             src={video.author.avatarUrl}
-            fallback={`${video.author.firstName[0]}${video.author.lastName[0]}`}
+            // Indexing a possibly-empty name yields undefined, which the
+            // template then printed literally — every reel avatar read
+            // "Aundefined", because VideoFeed maps a single displayName into
+            // firstName and hardcodes lastName to ''.
+            fallback={
+              `${video.author.firstName?.[0] ?? ''}${video.author.lastName?.[0] ?? ''}`.toUpperCase() ||
+              '?'
+            }
             size="md"
             className="ring-2 ring-white"
           />

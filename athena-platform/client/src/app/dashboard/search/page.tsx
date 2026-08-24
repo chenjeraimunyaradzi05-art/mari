@@ -12,7 +12,7 @@ import {
   FileText,
   X,
 } from 'lucide-react';
-import { cn, formatSalary, formatRelativeTime } from '@/lib/utils';
+import { cn, formatSalary, formatRelativeTime, formatCurrency } from '@/lib/utils';
 import { Avatar, Badge } from '@/components/ui';
 import { searchApi } from '@/lib/api';
 
@@ -133,7 +133,17 @@ function SearchContent() {
         image: result.metadata?.organization?.logo || undefined,
         url: `/dashboard/learn/${result.id}`,
         metadata: {
-          price: result.metadata?.cost ? `$${result.metadata.cost}` : 'Free',
+          // Course.cost is nullable: 0 is genuinely free, null means the
+          // provider has not published a price. Treating both as "Free" told
+          // learners a paid course cost nothing. Matches costLabelFor() on
+          // the learn page, and uses formatCurrency so the symbol follows the
+          // viewer's locale rather than assuming dollars.
+          price:
+            typeof result.metadata?.cost !== 'number'
+              ? 'Contact provider'
+              : result.metadata.cost === 0
+                ? 'Free'
+                : formatCurrency(result.metadata.cost),
           ...(result.metadata?.durationMonths && { duration: `${result.metadata.durationMonths} months` }),
         },
       };

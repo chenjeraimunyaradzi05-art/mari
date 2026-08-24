@@ -124,65 +124,106 @@ const EVENTS = [
 // ===========================================
 
 const COMMONS = 'https://upload.wikimedia.org/wikipedia/commons';
-const SCIENCE_SPEAKS = 'Science_Speaks_-_Talking_to_Women_in_Science';
+const SS = 'Science_Speaks_-_Talking_to_Women_in_Science';
 
-// Paths resolved through the Commons imageinfo API — the two hex directory
-// segments are content-addressed and cannot be guessed. Tracking parameters
-// the API appends are stripped.
-const REELS = [
+// One verified path per reel; both the video and its poster frame derive from
+// it. The two hex directory segments are content-addressed and cannot be
+// guessed — these came from the Commons imageinfo API.
+//
+// thumbWidth is per-file because Commons caps the poster at the source
+// resolution: most of these render at 960px, Tara's master is smaller and caps
+// at 500. Hardcoding one width would 404 the odd one out.
+interface ReelSource {
+  slug: string;
+  title: string;
+  description: string;
+  path: string;
+  thumbWidth: number;
+  duration: number;
+  hashtags: string[];
+}
+
+const REELS: ReelSource[] = [
   {
     slug: 'science-speaks-deborah-engineer',
-    title: 'Deborah, Engineer — Talking to Women in Science',
-    url: `${COMMONS}/f/f7/${SCIENCE_SPEAKS}_%28Deborah%2C_Engineer%29.webm`,
+    title: 'Deborah, Engineer',
+    description: 'An engineer on her work and how she came into the field.',
+    path: `f/f7/${SS}_%28Deborah%2C_Engineer%29.webm`,
+    thumbWidth: 960,
     duration: 267,
     hashtags: ['engineering', 'womeninstem', 'careers'],
   },
   {
     slug: 'science-speaks-sara-epidemiologist',
-    title: 'Sara, Epidemiologist — Talking to Women in Science',
-    url: `${COMMONS}/a/ac/${SCIENCE_SPEAKS}_%28Sara%2C_Epidemiologist%29.webm`,
+    title: 'Sara, Epidemiologist',
+    description: 'An epidemiologist on the questions her work tries to answer.',
+    path: `a/ac/${SS}_%28Sara%2C_Epidemiologist%29.webm`,
+    thumbWidth: 960,
     duration: 262,
     hashtags: ['epidemiology', 'womeninstem', 'publichealth'],
   },
   {
     slug: 'science-speaks-tara-epidemiologist',
-    title: 'Tara, Epidemiologist — Talking to Women in Science',
-    url: `${COMMONS}/9/9d/${SCIENCE_SPEAKS}_%28Tara%2C_Epidemiologist%29.webm`,
+    title: 'Tara, Epidemiologist',
+    description: 'An epidemiologist on tracking disease and why the work matters.',
+    path: `9/9d/${SS}_%28Tara%2C_Epidemiologist%29.webm`,
+    thumbWidth: 500,
     duration: 228,
     hashtags: ['epidemiology', 'womeninstem', 'research'],
   },
   {
     slug: 'science-speaks-kellie-psychologist',
-    title: 'Kellie, Psychologist — Talking to Women in Science',
-    url: `${COMMONS}/7/73/${SCIENCE_SPEAKS}_%28Kellie%2C_Psychologist%29.webm`,
+    title: 'Kellie, Psychologist',
+    description: 'A psychologist on what drew her to the science of behaviour.',
+    path: `7/73/${SS}_%28Kellie%2C_Psychologist%29.webm`,
+    thumbWidth: 960,
     duration: 243,
     hashtags: ['psychology', 'womeninstem', 'careers'],
   },
   {
     slug: 'science-speaks-sudha-medical-officer',
-    title: 'Sudha, Medical Officer — Talking to Women in Science',
-    url: `${COMMONS}/d/d9/${SCIENCE_SPEAKS}_%28Sudha%2C_Medical_Officer%29.webm`,
+    title: 'Sudha, Medical Officer',
+    description: 'A medical officer on practising medicine in public health.',
+    path: `d/d9/${SS}_%28Sudha%2C_Medical_Officer%29.webm`,
+    thumbWidth: 960,
     duration: 262,
     hashtags: ['medicine', 'womeninstem', 'publichealth'],
   },
   {
     slug: 'science-speaks-rebecca-health-communication',
-    title: 'Rebecca, Health Communication Specialist — Talking to Women in Science',
-    url: `${COMMONS}/a/aa/${SCIENCE_SPEAKS}_%28Rebecca%2C_Health_Communication_Specialist%29.webm`,
+    title: 'Rebecca, Health Communication Specialist',
+    description: 'A health communication specialist on making science land.',
+    path: `a/aa/${SS}_%28Rebecca%2C_Health_Communication_Specialist%29.webm`,
+    thumbWidth: 960,
     duration: 261,
     hashtags: ['communication', 'womeninstem', 'publichealth'],
   },
   {
     slug: 'nasa-anne-mcclain-crew10',
-    title: 'Meet NASA Astronaut Anne McClain, Crew-10 Commander',
-    url: `${COMMONS}/2/21/Meet_NASA_Astronaut_Anne_McClain%2C_Crew-10_Commander_%28jsc2025m000014%29.webm`,
+    title: 'Anne McClain, NASA Astronaut',
+    description: 'NASA astronaut and Crew-10 commander on the road to command.',
+    path: `2/21/Meet_NASA_Astronaut_Anne_McClain%2C_Crew-10_Commander_%28jsc2025m000014%29.webm`,
+    thumbWidth: 960,
     duration: 188,
     hashtags: ['space', 'nasa', 'womeninstem', 'leadership'],
   },
 ];
 
-const REEL_CREDIT =
-  'Public domain footage via Wikimedia Commons. Shared here so the women telling these stories are heard in their own words.';
+const videoUrlFor = (r: ReelSource) => `${COMMONS}/${r.path}`;
+
+// Commons renders a poster frame at thumb/<dir>/<file>/<width>px--<file>.jpg.
+// Without this the rail falls back to <video preload="metadata"> and pulls
+// tens of megabytes just to show a still.
+const thumbUrlFor = (r: ReelSource) => {
+  const file = r.path.slice(r.path.lastIndexOf('/') + 1);
+  return `${COMMONS}/thumb/${r.path}/${r.thumbWidth}px--${file}.jpg`;
+};
+
+// Appended to each reel's own description rather than replacing it. The rails
+// caption tiles with `description || title`, so a shared credit line as the
+// description made every tile read identically instead of naming the woman in
+// it.
+const REEL_CREDIT = 'Public domain, via Wikimedia Commons.';
 
 // ===========================================
 // STORIES — summarised from the source each one links to
@@ -268,8 +309,9 @@ export async function seedRealContent(): Promise<void> {
     const data = {
       authorId: curatorId,
       title: r.title,
-      description: REEL_CREDIT,
-      videoUrl: r.url,
+      description: `${r.description} ${REEL_CREDIT}`,
+      videoUrl: videoUrlFor(r),
+      thumbnailUrl: thumbUrlFor(r),
       duration: r.duration,
       type: 'CAREER_STORY' as const,
       status: 'PUBLISHED' as const,
