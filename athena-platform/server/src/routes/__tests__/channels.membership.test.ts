@@ -11,7 +11,7 @@ jest.mock('../../utils/prisma', () => ({
       deleteMany: jest.fn(),
       updateMany: jest.fn(),
     },
-    channelMessage: { findMany: jest.fn(), count: jest.fn() },
+    channelMessage: { findMany: jest.fn(), count: jest.fn(), groupBy: jest.fn() },
     user: { findUnique: jest.fn() },
   },
 }));
@@ -103,16 +103,43 @@ describe('Channel discovery and unread counts avoid the /:id route', () => {
     (prisma.channelMember.findMany as any).mockResolvedValue([
       { channelId: 'c1', lastReadAt, joinedAt: new Date('2025-01-01T00:00:00Z') },
     ]);
-    (prisma.channelMessage.count as any).mockResolvedValue(4);
+    (prisma.channelMessage.groupBy as any).mockResolvedValue([
+      { channelId: 'c1', _count: { _all: 4 } },
+    ]);
 
     const res = await request(app).get('/api/channels/unread').set(as(MEMBER)).expect(200);
 
     expect(res.body.data.total).toBe(4);
     expect(res.body.data.channels).toEqual([{ channelId: 'c1', unreadCount: 4 }]);
 
-    const where = (prisma.channelMessage.count as any).mock.calls[0][0].where;
-    expect(where.createdAt).toEqual({ gt: lastReadAt });
+    const where = (prisma.channelMessage.groupBy as any).mock.calls[0][0].where;
     expect(where.authorId).toEqual({ not: MEMBER });
+    expect(where.OR).toEqual([{ channelId: 'c1', createdAt: { gt: lastReadAt } }]);
+  });
+
+  it('stays one query no matter how many channels the member is in', async () => {
+    const joinedAt = new Date('2025-01-01T00:00:00Z');
+    (prisma.channelMember.findMany as any).mockResolvedValue(
+      ['c1', 'c2', 'c3', 'c4'].map((channelId) => ({ channelId, lastReadAt: null, joinedAt }))
+    );
+    (prisma.channelMessage.groupBy as any).mockResolvedValue([
+      { channelId: 'c2', _count: { _all: 3 } },
+    ]);
+
+    const res = await request(app).get('/api/channels/unread').set(as(MEMBER)).expect(200);
+
+    // Four memberships, still a single grouped query rather than one count each.
+    expect((prisma.channelMessage.groupBy as any).mock.calls).toHaveLength(1);
+    expect(prisma.channelMessage.count).not.toHaveBeenCalled();
+
+    // Channels with nothing unread still appear, which groupBy alone would omit.
+    expect(res.body.data.channels).toEqual([
+      { channelId: 'c1', unreadCount: 0 },
+      { channelId: 'c2', unreadCount: 3 },
+      { channelId: 'c3', unreadCount: 0 },
+      { channelId: 'c4', unreadCount: 0 },
+    ]);
+    expect(res.body.data.total).toBe(3);
   });
 
   it('a member who never opened a channel is measured from when they joined', async () => {
@@ -120,13 +147,22 @@ describe('Channel discovery and unread counts avoid the /:id route', () => {
     (prisma.channelMember.findMany as any).mockResolvedValue([
       { channelId: 'c1', lastReadAt: null, joinedAt },
     ]);
-    (prisma.channelMessage.count as any).mockResolvedValue(0);
+    (prisma.channelMessage.groupBy as any).mockResolvedValue([]);
 
     await request(app).get('/api/channels/unread').set(as(MEMBER)).expect(200);
 
-    expect((prisma.channelMessage.count as any).mock.calls[0][0].where.createdAt).toEqual({
-      gt: joinedAt,
-    });
+    expect((prisma.channelMessage.groupBy as any).mock.calls[0][0].where.OR).toEqual([
+      { channelId: 'c1', createdAt: { gt: joinedAt } },
+    ]);
+  });
+
+  it('a member of no channels does not query messages at all', async () => {
+    (prisma.channelMember.findMany as any).mockResolvedValue([]);
+
+    const res = await request(app).get('/api/channels/unread').set(as(MEMBER)).expect(200);
+
+    expect(prisma.channelMessage.groupBy).not.toHaveBeenCalled();
+    expect(res.body.data).toEqual({ channels: [], total: 0 });
   });
 });
 

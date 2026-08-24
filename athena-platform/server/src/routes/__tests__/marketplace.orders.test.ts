@@ -133,6 +133,20 @@ describe('Service order lifecycle', () => {
     expect(data.deliveredAt).toBeInstanceOf(Date);
     // The original brief is kept, not replaced by the delivery.
     expect(data.attachments).toEqual({ set: ['brief.pdf', 'final.zip'] });
+    // The note is stored, not accepted and dropped.
+    expect(data.deliveryMessage).toBe('Here it is');
+  });
+
+  it('a delivery with no note stores null rather than undefined', async () => {
+    mockOrder({ status: 'ACCEPTED' });
+
+    await request(app)
+      .post('/api/skills-marketplace/orders/o1/deliver')
+      .set(as(PROVIDER))
+      .send({})
+      .expect(200);
+
+    expect((prisma.serviceOrder.update as any).mock.calls[0][0].data.deliveryMessage).toBeNull();
   });
 
   it('allows delivery again after a revision request', async () => {
@@ -157,6 +171,8 @@ describe('Service order lifecycle', () => {
     const data = (prisma.serviceOrder.update as any).mock.calls[0][0].data;
     expect(data.status).toBe('REVISION_REQUESTED');
     expect(data.deliveredAt).toBeNull();
+    // Kept for dispute resolution rather than discarded after validation.
+    expect(data.revisionReason).toBe('Wrong colours');
   });
 
   it('requires a reason for a revision', async () => {
@@ -210,6 +226,10 @@ describe('Service order lifecycle', () => {
       .set(as(PROVIDER))
       .send({ reason: 'Overbooked' })
       .expect(200);
+
+    expect((prisma.serviceOrder.update as any).mock.calls[0][0].data.cancellationReason).toBe(
+      'Overbooked'
+    );
 
     jest.clearAllMocks();
     (prisma.serviceOrder.update as any).mockResolvedValue({});

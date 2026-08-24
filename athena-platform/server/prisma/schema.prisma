@@ -2332,6 +2332,13 @@ model ServiceOrder {
   deliveredAt    DateTime?
   completedAt    DateTime?
   cancelledAt    DateTime?
+
+  // What each side said at the transition. `requirements` above is the buyer's
+  // original brief; these three are the running record of the handover and of
+  // anything that went wrong, which is what a dispute is decided on.
+  deliveryMessage    String?
+  revisionReason     String?
+  cancellationReason String?
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 

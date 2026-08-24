@@ -205,27 +205,38 @@ router.get('/unread', authenticate, async (req: AuthRequest, res, next) => {
       select: { channelId: true, lastReadAt: true, joinedAt: true },
     });
 
-    // One grouped count instead of a query per channel. A member who has never
-    // opened the channel is measured from when they joined, so they do not
-    // inherit the channel's entire backlog as unread.
-    const grouped = await Promise.all(
-      memberships.map(async (m) => ({
-        channelId: m.channelId,
-        unreadCount: await prisma.channelMessage.count({
+    // One grouped query for every channel, rather than a count per channel:
+    // each membership contributes its own (channelId, since) pair to a single
+    // OR. A member who has never opened the channel is measured from when they
+    // joined, so they do not inherit the channel's entire backlog as unread.
+    const counts = memberships.length
+      ? await prisma.channelMessage.groupBy({
+          by: ['channelId'],
           where: {
-            channelId: m.channelId,
-            createdAt: { gt: m.lastReadAt ?? m.joinedAt },
             authorId: { not: req.user!.id },
+            OR: memberships.map((m) => ({
+              channelId: m.channelId,
+              createdAt: { gt: m.lastReadAt ?? m.joinedAt },
+            })),
           },
-        }),
-      }))
-    );
+          _count: { _all: true },
+        })
+      : [];
+
+    const countByChannel = new Map(counts.map((c) => [c.channelId, c._count._all]));
+
+    // Mapped back over memberships so a channel with nothing unread still
+    // appears with a zero, which groupBy alone would omit.
+    const channels = memberships.map((m) => ({
+      channelId: m.channelId,
+      unreadCount: countByChannel.get(m.channelId) ?? 0,
+    }));
 
     res.json({
       success: true,
       data: {
-        channels: grouped,
-        total: grouped.reduce((sum, c) => sum + c.unreadCount, 0),
+        channels,
+        total: channels.reduce((sum, c) => sum + c.unreadCount, 0),
       },
     });
   } catch (error) {

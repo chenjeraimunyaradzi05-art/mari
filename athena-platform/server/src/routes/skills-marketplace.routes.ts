@@ -850,9 +850,9 @@ router.post(
         data: {
           status: 'DELIVERED',
           deliveredAt: new Date(),
-          // The delivery note lands in `requirements`' sibling field; the model
-          // has no separate delivery message column, so attachments carry the
-          // work and the note rides along with them.
+          deliveryMessage: typeof req.body.message === 'string' ? req.body.message : null,
+          // Appended, not replaced: the buyer's original brief attachments stay
+          // alongside the delivered work.
           ...(attachments.length ? { attachments: { set: [...order.attachments, ...attachments] } } : {}),
         },
       });
@@ -880,7 +880,11 @@ router.post(
 
       const updated = await prisma.serviceOrder.update({
         where: { id: order.id },
-        data: { status: 'REVISION_REQUESTED', deliveredAt: null },
+        data: {
+          status: 'REVISION_REQUESTED',
+          deliveredAt: null,
+          revisionReason: req.body.reason,
+        },
       });
 
       res.json({ success: true, data: updated, message: 'Revision requested' });
@@ -928,7 +932,13 @@ router.post(
 
       const updated = await prisma.serviceOrder.update({
         where: { id: order.id },
-        data: { status: 'CANCELLED', cancelledAt: new Date() },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          // Records who-said-what without a separate column per side: the
+          // status already says it was cancelled, and cancel is open to both.
+          cancellationReason: typeof req.body.reason === 'string' ? req.body.reason : null,
+        },
       });
 
       res.json({ success: true, data: updated, message: 'Order cancelled' });
