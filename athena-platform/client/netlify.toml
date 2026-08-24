@@ -4,7 +4,14 @@
 # Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  command = "node ../../scripts/netlify-build.mjs"
+  # Kept identical to the root netlify.toml, which is the one Netlify actually
+  # resolved on the last deploy. Two config files disagreeing about the build
+  # is how the publish directory ended up unset in the first place.
+  #
+  # This previously ran `node ../../scripts/netlify-build.mjs`, which does not
+  # exist in this repository — not here and not on main. Any deploy that
+  # resolved this file rather than the root one would have failed outright.
+  command = "npm ci --legacy-peer-deps && npm run build"
   publish = ".next"
 
 [build.environment]
@@ -28,16 +35,24 @@
 # ===========================================
 # RUNTIME ROUTING
 # ===========================================
-# Keep only the uploads self-rewrite here.
-# Realtime should connect directly to the backend using:
-#   NEXT_PUBLIC_SOCKET_URL
-# falling back to:
-#   NEXT_PUBLIC_API_URL
-[[redirects]]
-  from = "/uploads/*"
-  to = "/uploads/:splat"
-  status = 200
-  force = true
+# No /api/* or /uploads/* rules here on purpose.
+#
+# There used to be `/uploads/* -> /uploads/:splat` with force = true. It
+# pointed at itself rather than at the backend, so it served nothing — and
+# because `force` wins over a function, it would now also shadow the
+# app/uploads/[...path] route that actually proxies user media.
+#
+# A redirect in this file cannot read an environment variable, so sending
+# these to the backend from here would mean hardcoding the Railway host.
+# Both paths are proxied in-app instead, reading NEXT_PUBLIC_API_URL at
+# request time:
+#
+#   /api/auth/*   app/api/auth/*        (forwards Set-Cookie itself)
+#   /api/*        app/api/[...path]     (all verbs, generic pass-through)
+#   /uploads/*    app/uploads/[...path] (user media)
+#
+# Realtime connects directly to the backend via NEXT_PUBLIC_SOCKET_URL,
+# falling back to NEXT_PUBLIC_API_URL.
 
 # ===========================================
 # SECURITY HEADERS

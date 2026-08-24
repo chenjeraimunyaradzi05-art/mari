@@ -1,7 +1,18 @@
 [build]
   base = "athena-platform/client"
   command = "npm ci --legacy-peer-deps && npm run build"
-  # publish = ".next" # Let Next.js plugin handle the publish directory
+  # Must be set here, and must not equal `base`.
+  #
+  # Leaving it to "the plugin" did not do that: with no publish directory in
+  # any netlify.toml, Netlify fell back to the value in the site's dashboard,
+  # which was athena-platform/client — the same path as `base`. The Next.js
+  # runtime rejects that outright:
+  #
+  #   Error: Your publish directory cannot be the same as the base directory
+  #
+  # The build itself was fine; it compiled all 167 pages before failing on
+  # this. Resolved relative to `base`, so this is athena-platform/client/.next.
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
