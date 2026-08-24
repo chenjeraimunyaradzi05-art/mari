@@ -16,38 +16,93 @@ import {
   MoreHorizontal,
   Plus,
   TrendingUp,
-  Clock
+  Clock,
+  ImagePlus,
+  Loader2,
+  X
 } from 'lucide-react';
 import { useFeed, useCreatePost, useLikePost, useUnlikePost, useAuth } from '@/lib/hooks';
+import StoriesStrip from '@/components/community/StoriesStrip';
 import { formatDistanceToNow } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { mediaApi } from '@/lib/api';
+
+type FeedFilter = 'latest' | 'trending' | 'following';
+
+// GET /posts/feed accepts tab ('for-you' | 'following') and algorithm
+// ('chronological' | 'engagement' | 'personalized').
+const FEED_QUERY: Record<FeedFilter, Record<string, string>> = {
+  latest: { tab: 'for-you', algorithm: 'chronological' },
+  trending: { tab: 'for-you', algorithm: 'engagement' },
+  following: { tab: 'following' },
+};
 
 interface Post {
   id: string;
   content: string;
   createdAt: string;
+  // The feed endpoint returns { id, displayName, avatar, headline }. The
+  // following-tab branch additionally selects firstName/lastName, so both are
+  // optional here and resolved through authorName()/authorInitials().
   author: {
     id: string;
-    firstName: string;
-    lastName: string;
-    profileImage?: string;
-    headline?: string;
+    displayName?: string | null;
+    avatar?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    headline?: string | null;
   };
+  type?: string;
+  mediaUrls?: string[] | null;
+  likeCount?: number;
+  commentCount?: number;
+  isLiked?: boolean;
   _count?: {
     likes: number;
     comments: number;
   };
   likes?: { userId: string }[];
-  media?: { url: string; type: string }[];
+}
+
+const VIDEO_EXTENSIONS = /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i;
+
+function isVideoUrl(url: string): boolean {
+  return VIDEO_EXTENSIONS.test(url);
+}
+
+function authorName(author: Post['author']): string {
+  const full = [author.firstName, author.lastName].filter(Boolean).join(' ').trim();
+  return author.displayName?.trim() || full || 'ATHENA Member';
+}
+
+function authorInitials(author: Post['author']): string {
+  if (author.firstName || author.lastName) {
+    return `${author.firstName?.[0] ?? ''}${author.lastName?.[0] ?? ''}`.toUpperCase() || 'A';
+  }
+  // displayName can be a single word, so take the first letter of up to two parts.
+  return (
+    authorName(author)
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase() || 'A'
+  );
 }
 
 function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string }) {
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
+  // The API returns isLiked and likeCount directly; the likes[]/_count shapes
+  // are kept as fallbacks for any caller still passing them.
   const [isLiked, setIsLiked] = useState(
-    post.likes?.some(like => like.userId === currentUserId) || false
+    post.isLiked ?? post.likes?.some((like) => like.userId === currentUserId) ?? false
   );
-  const [likeCount, setLikeCount] = useState(post._count?.likes || 0);
+  const [likeCount, setLikeCount] = useState(post.likeCount ?? post._count?.likes ?? 0);
   const [isHydrated, setIsHydrated] = useState(false);
+  const mediaUrls = (post.mediaUrls ?? []).filter(
+    (url): url is string => typeof url === 'string' && url.length > 0
+  );
 
   useEffect(() => {
     setIsHydrated(true);
@@ -71,21 +126,21 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       <div className="flex items-start justify-between mb-4">
         <Link href={`/profile/${post.author.id}`} className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-pink-500 flex items-center justify-center text-white font-semibold overflow-hidden">
-            {post.author.profileImage ? (
-              <Image 
-                src={post.author.profileImage} 
-                alt={post.author.firstName}
+            {post.author.avatar ? (
+              <Image
+                src={post.author.avatar}
+                alt={authorName(post.author)}
                 width={48}
                 height={48}
                 className="object-cover"
               />
             ) : (
-              `${post.author.firstName[0]}${post.author.lastName[0]}`
+              authorInitials(post.author)
             )}
           </div>
           <div>
             <div className="font-semibold text-slate-900 dark:text-white hover:text-primary-600 transition">
-              {post.author.firstName} {post.author.lastName}
+              {authorName(post.author)}
             </div>
             <div className="text-sm text-slate-500 dark:text-slate-400">
               {post.author.headline || 'ATHENA Member'}
@@ -110,30 +165,44 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         {post.content}
       </div>
 
-      {/* Media */}
-      {post.media && post.media.length > 0 && (
-        <div className="mb-4 rounded-lg overflow-hidden">
-          {post.media.map((m, idx) => (
-            m.type === 'image' ? (
-              <Image 
-                key={idx}
-                src={m.url} 
-                alt="Post media"
-                width={600}
-                height={400}
-                className="w-full object-cover"
+      {/* Media. The API returns mediaUrls: string[] alongside a post type; an
+          earlier shape (post.media) never existed on the wire, so image posts
+          rendered without their image. Plain <img> keeps one bad URL from
+          taking down the whole feed. */}
+      {mediaUrls.length > 0 && (
+        <div
+          className={cn(
+            'mb-4 grid gap-1 overflow-hidden rounded-lg',
+            mediaUrls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+          )}
+        >
+          {mediaUrls.map((url) =>
+            isVideoUrl(url) ? (
+              <video
+                key={url}
+                src={url}
+                controls
+                playsInline
+                className="max-h-[32rem] w-full bg-black object-contain"
               />
-            ) : m.type === 'video' ? (
-              <video key={idx} src={m.url} controls className="w-full" />
-            ) : null
-          ))}
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={url}
+                src={url}
+                alt=""
+                loading="lazy"
+                className="max-h-[32rem] w-full object-cover"
+              />
+            )
+          )}
         </div>
       )}
 
       {/* Stats */}
       <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 py-2 border-t border-b border-slate-100 dark:border-slate-700">
         <span>{likeCount} likes</span>
-        <span>{post._count?.comments || 0} comments</span>
+        <span>{post.commentCount ?? post._count?.comments ?? 0} comments</span>
       </div>
 
       {/* Actions */}
@@ -146,7 +215,10 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
           }`}
         >
-          <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
+          <Heart
+            key={String(isLiked)}
+            className={cn('w-5 h-5', isLiked && 'fill-current animate-heart-pop')}
+          />
           Like
         </button>
         <Link 
@@ -172,15 +244,57 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
 function CreatePostBox() {
   const [content, setContent] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [media, setMedia] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const createPost = useCreatePost();
   const { user } = useAuth();
 
+  const attach = (accept: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      setUploadError(null);
+      setUploading(true);
+      try {
+        const uploadType = file.type.startsWith('video/') ? 'video' : 'post';
+        const res = await mediaApi.upload(uploadType, file);
+        const url = res.data?.data?.url as string | undefined;
+        if (!url) {
+          setUploadError('Upload finished but returned no file.');
+          return;
+        }
+        // The endpoint accepts at most 10 media urls per post.
+        setMedia((current) => [...current, url].slice(0, 10));
+        setIsExpanded(true);
+      } catch {
+        setUploadError('That file could not be uploaded. Try again.');
+      } finally {
+        setUploading(false);
+      }
+    };
+    input.click();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!content.trim()) return;
-    
-    await createPost.mutateAsync({ content, visibility: 'public' });
+    if (!content.trim() || uploading) return;
+
+    // The endpoint reads mediaUrls/type/isPublic; the old `visibility` key was
+    // never part of its contract and was silently dropped.
+    await createPost.mutateAsync({
+      content,
+      isPublic: true,
+      ...(media.length > 0
+        ? { mediaUrls: media, type: media.some(isVideoUrl) ? 'VIDEO' : 'IMAGE' }
+        : {}),
+    });
     setContent('');
+    setMedia([]);
     setIsExpanded(false);
   };
 
@@ -201,21 +315,77 @@ function CreatePostBox() {
                 rows={4}
                 autoFocus
               />
-              <div className="flex justify-end gap-2 mt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsExpanded(false)}
-                  className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!content.trim() || createPost.isPending}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
-                >
-                  {createPost.isPending ? 'Posting...' : 'Post'}
-                </button>
+
+              {media.length > 0 && (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {media.map((url) => (
+                    <div key={url} className="group relative overflow-hidden rounded-lg">
+                      {isVideoUrl(url) ? (
+                        <video src={url} className="h-24 w-full bg-black object-cover" />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={url} alt="" className="h-24 w-full object-cover" />
+                      )}
+                      <button
+                        type="button"
+                        aria-label="Remove attachment"
+                        onClick={() => setMedia((c) => c.filter((u) => u !== url))}
+                        className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white transition hover:bg-black"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {uploadError && (
+                <p className="mt-2 text-sm text-red-600 dark:text-red-400">{uploadError}</p>
+              )}
+
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => attach('image/*')}
+                    disabled={uploading || media.length >= 10}
+                    aria-label="Add photo"
+                    className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                  >
+                    <ImagePlus className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => attach('video/*')}
+                    disabled={uploading || media.length >= 10}
+                    aria-label="Add video"
+                    className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+                  >
+                    <Play className="h-5 w-5" />
+                  </button>
+                  {uploading && (
+                    <span className="ml-1 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Uploading
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsExpanded(false)}
+                    className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!content.trim() || createPost.isPending || uploading}
+                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
+                  >
+                    {createPost.isPending ? 'Posting...' : 'Post'}
+                  </button>
+                </div>
               </div>
             </form>
           ) : (
@@ -249,8 +419,10 @@ function CreatePostBox() {
 }
 
 export default function FeedPage() {
-  const [filter, setFilter] = useState<'latest' | 'trending' | 'following'>('latest');
-  const { data: posts, isLoading, error } = useFeed({ sort: filter });
+  const [filter, setFilter] = useState<FeedFilter>('latest');
+  // The endpoint takes tab + algorithm; it has never read a `sort` param, so
+  // all three tabs were returning the same for-you feed.
+  const { data: posts, isLoading, error } = useFeed(FEED_QUERY[filter]);
   const { user, isAuthenticated } = useAuth();
 
   return (
@@ -301,6 +473,28 @@ export default function FeedPage() {
                 </button>
               </div>
             </div>
+
+            {/* Stories */}
+            <StoriesStrip />
+
+            {/* Reels entry point */}
+            <Link
+              href="/explore"
+              className="flex items-center gap-4 rounded-xl border border-slate-200 bg-gradient-to-r from-rose-500 via-purple-600 to-cyan-500 p-[1px] transition hover:shadow-md dark:border-slate-700"
+            >
+              <span className="flex w-full items-center gap-4 rounded-[11px] bg-white p-4 dark:bg-slate-800">
+                <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 text-white">
+                  <Play className="h-5 w-5 fill-current" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold text-slate-900 dark:text-white">Reels</span>
+                  <span className="block text-sm text-slate-600 dark:text-slate-400">
+                    Short videos from women building their careers
+                  </span>
+                </span>
+                <ArrowRight className="h-5 w-5 flex-shrink-0 text-slate-400" />
+              </span>
+            </Link>
 
             {/* Create Post */}
             {isAuthenticated && <CreatePostBox />}

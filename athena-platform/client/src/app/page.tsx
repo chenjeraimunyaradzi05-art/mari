@@ -1,5 +1,5 @@
-import HomepageLanding from '@/components/home/HomepageLanding';
+import InstagramHome from '@/components/home/InstagramHome';
 
 export default function HomePage() {
-  return <HomepageLanding />;
+  return <InstagramHome />;
 }

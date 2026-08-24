@@ -80,6 +80,14 @@
     @apply text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400;
   }
 
+  /* Section titles in the home rails. These used .kicker, which meant every
+     warm heading ("Find your people") rendered as a 10px shouted label and read
+     like a B2B dashboard module. .kicker stays for genuine eyebrows — a small
+     word ABOVE a heading — but a heading is not an eyebrow. */
+  .rail-title {
+    @apply text-lg font-semibold tracking-tight text-slate-900 dark:text-white;
+  }
+
   .btn {
     @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
   }
@@ -293,4 +301,143 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/* ── Social surfaces ──────────────────────────────────────────────────────── */
+/* Primitives shared by the feed, stories and reels. These were previously
+   repeated inline on every card, and `.no-scrollbar` was referenced by the
+   reels feed without ever being defined, so it always showed a scrollbar. */
+
+@layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Instagram's "there is something unwatched here" ring. */
+  .story-ring {
+    @apply rounded-full bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 p-[2px];
+  }
+
+  .story-ring-seen {
+    @apply bg-none bg-slate-300 dark:bg-slate-700;
+  }
+
+  /* 9:16 media tile with a scrim so overlaid text stays legible on any frame. */
+  .reel-tile {
+    @apply relative block aspect-[9/16] overflow-hidden rounded-xl bg-slate-900;
+  }
+
+  .reel-tile-media {
+    @apply h-full w-full object-cover transition-transform duration-300;
+  }
+
+  .reel-tile:hover .reel-tile-media {
+    @apply scale-105;
+  }
+
+  .reel-scrim {
+    @apply pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent;
+  }
+
+  .engagement-chip {
+    @apply inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400;
+  }
+
+  .hover-lift {
+    @apply transition duration-200 hover:-translate-y-0.5 hover:shadow-lg;
+  }
+}
+
+@keyframes heartPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  70% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+.animate-heart-pop {
+  animation: heartPop 0.35s ease-out;
+}
+
+/* Honour the OS setting: everything above is decoration, not information. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Softer, warmer surfaces ──────────────────────────────────────────────── */
+/* The home rails were hard 1px slate borders on flat white, which reads
+   clinical. A warm-tinted hairline plus a soft shadow is friendlier without
+   leaving the existing slate system. */
+
+@layer utilities {
+  /* Light values only. The dark values live in plain rules below, because a
+     dark: variant inside @apply lands in the same layer as the light one and
+     loses the cascade about half the time. */
+  .surface {
+    @apply rounded-2xl border border-rose-100/70 bg-white
+           shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-16px_rgba(244,63,94,0.25)];
+  }
+
+  /* Every interactive element gets a visible keyboard state. */
+  .focusable {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400
+           focus-visible:ring-offset-2 focus-visible:ring-offset-white
+           dark:focus-visible:ring-offset-slate-950;
+  }
+}
+
+/* Keyboard users get a ring on anything focusable, not just styled controls. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #f43f5e;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Dark values for the surface utilities, as plain rules outside the layer. */
+.dark .surface {
+  background-color: rgb(15 23 42);
+  border-color: rgb(30 41 59);
+  box-shadow: none;
+}
+
+/* Inset tiles inside the home rails.
+   Deliberately unlayered: rules outside @layer beat layered utilities, so the
+   dark values win without depending on Tailwind's layer ordering. Earlier
+   attempts using dark: utilities on these elements silently lost the cascade. */
+.tile-soft {
+  background-color: rgb(248 250 252 / 0.6);
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tile-soft:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgb(15 23 42 / 0.1);
+}
+
+.dark .tile-soft {
+  background-color: rgb(2 6 23 / 0.4);
+  border-color: rgb(30 41 59);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-soft:hover { transform: none; }
 }

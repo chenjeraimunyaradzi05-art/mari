@@ -1,43 +1,33 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import { LiveCommunityFeed } from './LiveCommunityFeed';
+import { HomeReelsRail } from './HomeReelsRail';
 import {
-  Activity,
   ArrowRight,
-  BookOpen,
   Brain,
   Briefcase,
   Building2,
   Calendar,
-  Check,
   Command,
   Compass,
-  Crown,
-  Database,
   DollarSign,
   Facebook,
-  FileText,
   Gem,
   Globe2,
   GraduationCap,
   Heart,
   Instagram,
-  MessageCircle,
-  Mic,
-  Network,
-  PenSquare,
   Play,
   Radar,
   Rocket,
   ShieldCheck,
   Sparkles,
   Star,
-  Target,
   Twitter,
   Users,
   UsersRound,
   Video,
   Wand2,
-  Zap,
 } from 'lucide-react';
 import { ClientOnly } from '@/components/ClientOnly';
 import PublicThemeToggle from '@/components/theme/PublicThemeToggle';
@@ -61,19 +51,6 @@ const socialLinks = [
   { href: 'https://instagram.com/athena.platform', label: 'Instagram', icon: Instagram },
   { href: 'https://facebook.com/athena.platform', label: 'Facebook', icon: Facebook },
   { href: 'https://x.com/athenaplatform', label: 'X (Twitter)', icon: Twitter },
-];
-
-const commandSignals = [
-  { label: 'Role match', value: '92%', icon: Radar, tone: 'text-emerald-300' },
-  { label: 'Mentor fit', value: '8 new', icon: Users, tone: 'text-sky-300' },
-  { label: 'Skills gap', value: '3 tasks', icon: BookOpen, tone: 'text-amber-300' },
-  { label: 'Trust state', value: 'clear', icon: ShieldCheck, tone: 'text-rose-300' },
-];
-
-const liveRails = [
-  { label: 'Database', value: 'Neon linked', detail: 'Pooled runtime, direct migrations', icon: Database },
-  { label: 'Deployment', value: 'Netlify ready', detail: 'Scripted env sync and production build', icon: Rocket },
-  { label: 'Security', value: 'Prod audit clean', detail: 'Patched dependencies and stricter headers', icon: ShieldCheck },
 ];
 
 const intelligenceCards = [
@@ -142,204 +119,20 @@ const audienceRoutes = [
   { label: 'Developers', href: '/developers', icon: Command, gradient: 'from-sky-500 to-cyan-500' },
 ];
 
-const platformChecks = [
-  'Neon-ready PostgreSQL configuration',
-  'Netlify frontend and portable backend runtime',
-  'GDPR-aware consent, safety, moderation, and audit surfaces',
-  'Stripe subscriptions, AI routes, messaging, jobs, and learning paths',
-];
-
-// Full platform abilities — what ATHENA can do end-to-end.
-// Each ability has a distinctive gradient and icon so the grid pops.
+// The eight abilities that carry the product story. The previous sixteen made
+// the section a wall of tiles nobody read.
 const platformAbilities = [
-  { icon: Briefcase, title: 'Smart job search', description: 'AI-matched roles with salary insights and one-click apply.', gradient: 'from-rose-500 to-pink-500' },
-  { icon: FileText, title: 'Resume optimizer', description: 'Tailor your resume to any job in seconds with AI feedback.', gradient: 'from-fuchsia-500 to-purple-500' },
+  { icon: Heart, title: 'Social feed', description: 'Post wins, ask questions, follow women building in public.', gradient: 'from-pink-500 to-rose-500' },
+  { icon: Video, title: 'Reels', description: 'Short-form career video, salary talk, and founder stories.', gradient: 'from-purple-500 to-fuchsia-500' },
+  { icon: Users, title: 'Mentorship', description: 'Find mentors, run 1:1s, and track growth milestones.', gradient: 'from-sky-500 to-cyan-500' },
+  { icon: Briefcase, title: 'Smart job search', description: 'AI-matched roles with salary insight and one-click apply.', gradient: 'from-rose-500 to-pink-500' },
   { icon: Brain, title: 'AI career coach', description: 'Always-on copilot for interview prep, planning, and mindset.', gradient: 'from-violet-500 to-indigo-500' },
-  { icon: Users, title: 'Mentorship circles', description: 'Find mentors, run 1:1s, and track growth milestones.', gradient: 'from-sky-500 to-cyan-500' },
   { icon: GraduationCap, title: 'Learning paths', description: 'Curated courses, micro-credentials, and skills tracks.', gradient: 'from-teal-500 to-emerald-500' },
-  { icon: Heart, title: 'Social feed', description: 'Post wins, ask questions, follow inspiring women worldwide.', gradient: 'from-pink-500 to-rose-500' },
-  { icon: Video, title: 'Video discovery', description: 'Short-form career videos, events, and creator content.', gradient: 'from-purple-500 to-fuchsia-500' },
-  { icon: Calendar, title: 'Events & meetups', description: 'Join workshops, AMAs, and community calls that matter.', gradient: 'from-amber-500 to-orange-500' },
-  { icon: DollarSign, title: 'Earning pathways', description: 'Turn expertise into income as a creator, mentor, or consultant.', gradient: 'from-yellow-500 to-amber-500' },
-  { icon: PenSquare, title: 'Creator tools', description: 'Publish articles, run paid workshops, launch digital products.', gradient: 'from-orange-500 to-rose-500' },
-  { icon: Building2, title: 'Employer branding', description: 'Showcase culture, post roles, and engage top talent.', gradient: 'from-indigo-500 to-blue-500' },
-  { icon: Network, title: 'Warm referrals', description: 'Connect with employees and mentors who can open doors.', gradient: 'from-cyan-500 to-sky-500' },
-  { icon: Target, title: 'Goal tracking', description: 'Set weekly intentions and watch momentum compound.', gradient: 'from-emerald-500 to-teal-500' },
-  { icon: ShieldCheck, title: 'Safety first', description: 'Built-in moderation, consent controls, and safety centre.', gradient: 'from-rose-500 to-red-500' },
-  { icon: Mic, title: 'Voice notes', description: 'Send voice intros, check-ins, and mentor reflections.', gradient: 'from-fuchsia-500 to-pink-500' },
-  { icon: Crown, title: 'Your life OS', description: 'Everything connected — one dashboard for your whole chapter.', gradient: 'from-amber-400 via-rose-500 to-purple-500' },
+  { icon: DollarSign, title: 'Earning pathways', description: 'Turn expertise into income as a creator, mentor, or consultant.', gradient: 'from-amber-500 to-orange-500' },
+  { icon: ShieldCheck, title: 'Safety first', description: 'Built-in moderation, consent controls, and a safety centre.', gradient: 'from-rose-500 to-red-500' },
 ];
 
 // Instagram-style sample feed preview (static, links to live feed)
-const feedPreview = [
-  {
-    name: 'Amara Okonkwo',
-    role: 'Product Designer',
-    avatar: '#fde4ec',
-    badge: 'Win',
-    caption: 'Signed my first staff design role today after 6 weeks of ATHENA mentor sessions!',
-    likes: 248,
-    comments: 41,
-  },
-  {
-    name: 'Priya Singh',
-    role: 'ML Engineer',
-    avatar: '#ede9fe',
-    badge: 'Question',
-    caption: 'Any mentors who have navigated the transition from research to industry AI? Would love a chat.',
-    likes: 76,
-    comments: 18,
-  },
-  {
-    name: 'Sofia Martinez',
-    role: 'Founder, QueenBee Labs',
-    avatar: '#ffedd5',
-    badge: 'Live',
-    caption: 'Going live in 10min: how I raised my pre-seed as a solo, first-time, non-technical founder.',
-    likes: 512,
-    comments: 88,
-  },
-];
-
-function SignalPanel() {
-  return (
-    <div className="rounded-2xl border border-white/15 bg-slate-950/70 p-4 text-white shadow-2xl shadow-slate-950/30 backdrop-blur">
-      <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-rose-600">
-            <Activity className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold">ATHENA Signal Console</div>
-            <div className="text-xs text-slate-400">Live growth pathways</div>
-          </div>
-        </div>
-        <span className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-xs font-semibold text-emerald-200">
-          Online
-        </span>
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {commandSignals.map((signal) => (
-          <div key={signal.label} className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="flex items-center justify-between">
-              <signal.icon className={`h-5 w-5 ${signal.tone}`} />
-              <span className="text-lg font-semibold">{signal.value}</span>
-            </div>
-            <div className="mt-3 text-sm text-slate-300">{signal.label}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] p-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-white">
-          <Zap className="h-4 w-4 text-amber-300" />
-          Suggested next action
-        </div>
-        <p className="mt-2 text-sm leading-6 text-slate-300">
-          Update your profile, compare three matched roles, and send one mentor request before your next application.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function SocialFeedPreview() {
-  return (
-    <div className="rounded-2xl border border-rose-200/60 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-rose-400/10 dark:bg-slate-900/70">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-60" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
-          </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-rose-600 dark:text-rose-300">
-            Live community
-          </span>
-        </div>
-        <Link
-          href="/feed"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-300"
-        >
-          Open feed <ArrowRight className="h-3 w-3" />
-        </Link>
-      </div>
-
-      <div className="space-y-3">
-        {feedPreview.map((post) => (
-          <div
-            key={post.name}
-            className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-rose-200 hover:shadow dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-rose-400/20"
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold text-rose-700 ring-2 ring-white dark:ring-slate-900"
-                style={{ backgroundColor: post.avatar, color: '#9f1239' }}
-              >
-                {post.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-white">{post.name}</span>
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-                      post.badge === 'Live'
-                        ? 'bg-rose-600 text-white'
-                        : post.badge === 'Win'
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-                          : 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
-                    }`}
-                  >
-                    {post.badge}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">{post.role}</div>
-                <p className="mt-1 text-xs leading-5 text-slate-700 dark:text-slate-300 line-clamp-2">
-                  {post.caption}
-                </p>
-                <div className="mt-2 flex items-center gap-4 text-[11px] text-slate-500 dark:text-slate-400">
-                  <span className="inline-flex items-center gap-1">
-                    <Heart className="h-3 w-3" /> {post.likes}
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <MessageCircle className="h-3 w-3" /> {post.comments}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function LiveOpsRail() {
-  return (
-    <div className="relative mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
-      <div className="grid gap-3 rounded-lg border border-slate-900/10 bg-white/75 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/55 md:grid-cols-3">
-        {liveRails.map((item) => (
-          <div
-            key={item.label}
-            className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]"
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-white dark:bg-white dark:text-slate-950">
-              <item.icon className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                {item.label}
-              </div>
-              <div className="mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white">{item.value}</div>
-              <div className="truncate text-xs text-slate-600 dark:text-slate-300">{item.detail}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function HomepageLanding() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
@@ -457,31 +250,12 @@ export default function HomepageLanding() {
                 </Link>
               </div>
 
-              <div className="mt-10 grid gap-3 sm:grid-cols-3">
-                {[
-                  { label: 'Jobs', icon: Briefcase },
-                  { label: 'Mentors', icon: Users },
-                  { label: 'AI coach', icon: Sparkles },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center gap-3 rounded-xl border border-rose-200/60 bg-white/70 p-4 backdrop-blur dark:border-rose-400/15 dark:bg-white/5"
-                  >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
-                      <item.icon className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <div className="text-lg font-semibold text-slate-900 dark:text-white">{item.label}</div>
-                      <div className="text-xs text-slate-600 dark:text-slate-300">Connected in one flow</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
 
-            <SignalPanel />
+            {/* Real posts, above the fold — the fastest way to show this is a
+                living community rather than a brochure. */}
+            <LiveCommunityFeed />
           </div>
-          <LiveOpsRail />
         </section>
 
         {/* Intelligence layer */}
@@ -525,6 +299,9 @@ export default function HomepageLanding() {
           </div>
         </section>
 
+        {/* Reels */}
+        <HomeReelsRail />
+
         {/* Full platform abilities */}
         <section className="border-y border-slate-200 bg-gradient-to-br from-rose-50 via-white to-purple-50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900/60 dark:to-slate-950">
           <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
@@ -535,7 +312,7 @@ export default function HomepageLanding() {
                   The full <span className="gradient-text-feminine">life OS</span> for women&apos;s careers.
                 </h2>
                 <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                  Sixteen connected abilities that turn scattered tabs into a single momentum engine.
+                  Eight connected abilities that turn scattered tabs into a single momentum engine.
                 </p>
               </div>
               <Link
@@ -572,7 +349,7 @@ export default function HomepageLanding() {
 
         {/* Social preview + operating layers */}
         <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="grid gap-10">
             <div>
               <div className="kicker">Social network, built for wins</div>
               <h2 className="mt-2 max-w-3xl text-3xl font-semibold text-slate-950 dark:text-white">
@@ -617,7 +394,6 @@ export default function HomepageLanding() {
               </div>
             </div>
 
-            <SocialFeedPreview />
           </div>
         </section>
 
@@ -646,21 +422,6 @@ export default function HomepageLanding() {
                     </div>
                     <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-rose-600" />
                   </Link>
-                ))}
-              </div>
-            </div>
-
-            <div className="panel p-5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-white">
-                <ShieldCheck className="h-4 w-4 text-rose-600" />
-                Production posture
-              </div>
-              <div className="mt-4 space-y-3">
-                {platformChecks.map((check) => (
-                  <div key={check} className="flex gap-3 text-sm leading-6 text-slate-700 dark:text-slate-300">
-                    <Check className="mt-1 h-4 w-4 shrink-0 text-rose-600" />
-                    {check}
-                  </div>
                 ))}
               </div>
             </div>
