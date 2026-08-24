@@ -114,6 +114,91 @@ const PATTERNS = [
   ['not-implemented notice', /(?:toast|alert)\s*[.(][^\n]{0,80}?(coming soon|not implemented|not yet available)/gi],
 ];
 
+// ------------------------------------------------ buttons with no handler
+
+// An `onClick={() => {}}` is easy to spot. A <Button> with no handler *at all*
+// is the same bug and was previously invisible, so it is detected here — but
+// only after ruling out every legitimate way a button gets its behaviour from
+// somewhere other than its own onClick.
+
+// Attributes that mean this button does something.
+const WIRED_ATTRS = [
+  /\bon(?:Click|MouseDown|PointerDown|KeyDown|Submit)\b/,
+  /\btype\s*=\s*(?:["']submit["']|\{\s*["']submit["']\s*\})/,
+  // `asChild` hands rendering to a child that carries the behaviour.
+  /\basChild\b/,
+  // A spread can carry onClick; assuming it does is the safe direction.
+  /\{\s*\.\.\./,
+  // Link-like buttons navigate rather than handle a click.
+  /\bhref\b/,
+  // A visibly disabled control is honest about doing nothing. This codebase
+  // uses `disabled title="… not connected yet"` deliberately.
+  /\bdisabled\b/,
+];
+
+// Wrappers whose own job is to open something when the child is clicked, so the
+// child needs no handler. TooltipTrigger is deliberately absent: a tooltip only
+// shows text on hover, so a Button inside one still needs its own onClick.
+const ACTION_TRIGGER =
+  /<(?:Dialog|Sheet|Popover|DropdownMenu|AlertDialog|Collapsible|Menubar|ContextMenu|HoverCard|Select|Tabs|Accordion)[A-Za-z]*Trigger\b[^>]*\basChild\b/;
+
+// Reads a JSX opening tag from `<` to its matching `>`, ignoring any `>` that
+// sits inside a string or an expression container.
+function readOpeningTag(src, start) {
+  let depth = 0;
+  let quote = null;
+
+  for (let i = start; i < src.length && i < start + 4000; i++) {
+    const ch = src[i];
+
+    if (quote) {
+      if (ch === quote && src[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '{') { depth++; continue; }
+    if (ch === '}') { depth--; continue; }
+    if (ch === '>' && depth === 0) return src.slice(start, i + 1);
+  }
+  return null;
+}
+
+// Whether the offset sits inside a <form> element, where a button with no
+// explicit type submits by default and is therefore wired.
+function insideForm(src, offset) {
+  const before = src.slice(0, offset);
+  const opens = (before.match(/<form\b/g) || []).length;
+  const closes = (before.match(/<\/form>/g) || []).length;
+  return opens > closes;
+}
+
+function findUnhandledButtons(src, file, lines) {
+  const findings = [];
+
+  for (const m of src.matchAll(/<(Button|button)(?=[\s/>])/g)) {
+    const tag = readOpeningTag(src, m.index);
+    if (!tag) continue;
+
+    if (WIRED_ATTRS.some((re) => re.test(tag))) continue;
+    if (insideForm(src, m.index)) continue;
+
+    // Look back a few lines for a wrapper that supplies the behaviour.
+    const lineNo = src.slice(0, m.index).split('\n').length;
+    const context = lines.slice(Math.max(0, lineNo - 4), lineNo - 1).join('\n');
+    if (ACTION_TRIGGER.test(context)) continue;
+    if (/<Link\b/.test(context)) continue;
+
+    findings.push({
+      file: path.relative(SRC, file).split(path.sep).join('/'),
+      line: lineNo,
+      label: 'button with no handler',
+      text: (lines[lineNo - 1] || '').trim().slice(0, 120),
+    });
+  }
+
+  return findings;
+}
+
 function scan(files) {
   const findings = [];
   for (const file of files) {
@@ -132,15 +217,51 @@ function scan(files) {
         });
       }
     }
+
+    findings.push(...findUnhandledButtons(src, file, lines));
   }
   return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
-function print(findings) {
+function print(findings, stream = console.error) {
   for (const f of findings) {
-    console.error(`  ${f.file}:${f.line}  [${f.label}]`);
-    console.error(`      ${f.text}`);
+    stream(`  ${f.file}:${f.line}  [${f.label}]`);
+    stream(`      ${f.text}`);
   }
+}
+
+// ------------------------------------------------------------------ baseline
+
+// Adding the "button with no handler" rule surfaced 51 pre-existing findings.
+// Gating on the total would either fail the build indefinitely or force the
+// rule to be disabled, so the known set is recorded and only *new* findings
+// fail. Keyed on file + label + the source line rather than line number, so
+// unrelated edits above a finding do not silently re-admit it.
+const BASELINE_PATH = path.join(__dirname, 'dead-interactions-baseline.json');
+
+const keyOf = (f) => `${f.file}|${f.label}|${f.text.replace(/\s+/g, ' ')}`;
+
+function loadBaseline() {
+  if (!fs.existsSync(BASELINE_PATH)) return new Set();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
+    return new Set(parsed.known ?? []);
+  } catch {
+    fail(`${path.basename(BASELINE_PATH)} is not valid JSON`);
+  }
+}
+
+function writeBaseline(findings) {
+  const payload = {
+    // eslint-disable-next-line max-len
+    comment:
+      'Known dead interactions, recorded so CI fails only on new ones. Burn this list down; do not add to it. Regenerate with: node scripts/check-dead-interactions.js --update-baseline',
+    generated: new Date().toISOString().slice(0, 10),
+    count: findings.length,
+    known: findings.map(keyOf).sort(),
+  };
+  fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(payload, null, 2)}\n`);
+  console.log(`Baseline written: ${findings.length} known findings recorded.`);
 }
 
 // ----------------------------------------------------------------------- main
@@ -171,23 +292,57 @@ function main() {
     console.log('');
   }
 
-  if (reachableFindings.length > 0) {
+  if (process.argv.includes('--update-baseline')) {
+    writeBaseline(reachableFindings);
+    return;
+  }
+
+  const baseline = loadBaseline();
+  const seen = new Set(reachableFindings.map(keyOf));
+
+  const newFindings = reachableFindings.filter((f) => !baseline.has(keyOf(f)));
+  const knownCount = reachableFindings.length - newFindings.length;
+  const fixed = [...baseline].filter((k) => !seen.has(k));
+
+  if (newFindings.length > 0) {
     console.error(
-      `\nDead interactions in components the user can reach (${reachableFindings.length}).` +
+      `\nNew dead interactions in components the user can reach (${newFindings.length}).` +
         '\nThese are controls a real person can operate for no result:\n'
     );
-    print(reachableFindings);
+    print(newFindings);
     console.error(
-      `\nChecked ${reachable.size} reachable modules from ${entries.length} entry files.\n`
+      '\nIf a control legitimately gets its behaviour elsewhere — a form submit, an' +
+        '\nasChild trigger, a Link wrapper — wire it or say so in the markup rather' +
+        '\nthan adding it to the baseline.\n'
     );
     process.exit(1);
   }
 
+  if (process.argv.includes('--all') && knownCount > 0) {
+    console.log(`Known dead interactions still outstanding (${knownCount}):`);
+    print(
+      reachableFindings.filter((f) => baseline.has(keyOf(f))),
+      console.log
+    );
+    console.log('');
+  }
+
   console.log(
-    `No dead interactions in reachable UI — ${reachable.size} modules from ` +
-      `${entries.length} entry files. ` +
-      `(${unreachableFindings.length} in unmounted components; --all to list.)`
+    `No new dead interactions — ${reachable.size} modules from ${entries.length} entry files.`
   );
+  if (knownCount > 0) {
+    console.log(
+      `  ${knownCount} known findings still outstanding (baseline); --all to list.`
+    );
+  }
+  if (fixed.length > 0) {
+    console.log(
+      `  ${fixed.length} baseline entries no longer occur — run --update-baseline to drop them.`
+    );
+  }
+  if (unreachableFindings.length > 0) {
+    console.log(`  ${unreachableFindings.length} in unmounted components.`);
+  }
 }
 
 main();
