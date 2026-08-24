@@ -16,6 +16,7 @@
     "db:seed": "ts-node prisma/seed.ts",
     "db:seed:content": "ts-node src/services/seed/content.seed.ts",
     "db:seed:admin": "ts-node src/services/seed/admin.seed.ts",
+    "db:seed:real": "ts-node src/services/seed/real-content.seed.ts",
     "loadtest:health": "node scripts/loadtest-health.js",
     "loadtest:auth": "node scripts/loadtest-auth.js",
     "loadtest:websocket": "node scripts/loadtest-websocket.js",

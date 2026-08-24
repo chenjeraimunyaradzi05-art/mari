@@ -79,7 +79,9 @@ function eventView(dbEvent: any, userId?: string) {
     },
     attendees: (dbEvent.baseAttendees ?? 0) + regCount,
     maxAttendees: dbEvent.maxAttendees,
-    price: dbEvent.price ?? 0,
+    // Passed through rather than coerced to 0: null means the organiser has
+    // not published a price, which the card shows differently from "Free".
+    price: dbEvent.price ?? null,
     tags: Array.isArray(dbEvent.tags) ? dbEvent.tags : [],
     isRegistered,
     isSaved,

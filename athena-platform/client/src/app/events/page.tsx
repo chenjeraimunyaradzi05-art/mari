@@ -176,7 +176,14 @@ export default function EventsPage() {
                       {formatEventType(event.type)}
                     </span>
                     <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {event.price ? `$${event.price}` : 'Free'}
+                      {/* null means the organiser has not published a price.
+                          Showing "Free" there would assert something untrue of
+                          a paid conference. */}
+                      {event.price == null
+                        ? 'See organiser'
+                        : event.price
+                          ? `$${event.price}`
+                          : 'Free'}
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       <Users className="h-3 w-3" />
