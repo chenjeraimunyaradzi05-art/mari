@@ -77,3 +77,13 @@ google-service-account.json
 
 # Railway
 .railway/
+
+# Claude Code local worktrees (each contains a nested git repo)
+.claude/worktrees/
+
+# Personal financial documents that live in this working tree but must never
+# be published. Kept as explicit patterns rather than a blanket *.zip so real
+# project archives are still committable.
+/xx.html
+/bank_statements_*.zip
+/bsb-*.zip

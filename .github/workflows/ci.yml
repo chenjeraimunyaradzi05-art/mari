@@ -46,6 +46,14 @@ jobs:
           cd athena-platform/server
           npx prisma db push --accept-data-loss
 
+      # Static check, so it needs no database and no client install. Catches a
+      # client call whose server route was never built, sits behind a `/:id`
+      # route, or answers a different verb.
+      - name: Check client/server API contract
+        run: |
+          cd athena-platform/server
+          npm run check:api-contract
+
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres

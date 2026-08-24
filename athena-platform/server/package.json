@@ -24,7 +24,8 @@
     "launch:incident": "node scripts/send-incident-notification.js",
     "validate:launch-readiness": "node -r ts-node/register src/scripts/validate-launch-readiness.ts",
     "validate:auth-sessions": "node -r ts-node/register src/scripts/validate-auth-session-routes.ts",
-    "db:guard": "node scripts/guard-destructive-migration.js"
+    "db:guard": "node scripts/guard-destructive-migration.js",
+    "check:api-contract": "node scripts/check-api-contract.js"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.971.0",
