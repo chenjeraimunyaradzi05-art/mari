@@ -21,11 +21,20 @@ import {
   Loader2,
   X
 } from 'lucide-react';
-import { useFeed, useCreatePost, useLikePost, useUnlikePost, useAuth } from '@/lib/hooks';
+import {
+  useFeed,
+  useCreatePost,
+  useLikePost,
+  useUnlikePost,
+  useSavePost,
+  useUnsavePost,
+  useAuth,
+} from '@/lib/hooks';
+import toast from 'react-hot-toast';
 import StoriesStrip from '@/components/community/StoriesStrip';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { mediaApi } from '@/lib/api';
+import { mediaApi, safetyApi } from '@/lib/api';
 
 type FeedFilter = 'latest' | 'trending' | 'following';
 
@@ -57,6 +66,9 @@ interface Post {
   likeCount?: number;
   commentCount?: number;
   isLiked?: boolean;
+  // Returned per post by GET /posts/feed for a signed-in viewer, so the
+  // bookmark shows the right state on first paint rather than after a toggle.
+  isSaved?: boolean;
   _count?: {
     likes: number;
     comments: number;
@@ -93,12 +105,17 @@ function authorInitials(author: Post['author']): string {
 function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string }) {
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
+  const savePost = useSavePost();
+  const unsavePost = useUnsavePost();
   // The API returns isLiked and likeCount directly; the likes[]/_count shapes
   // are kept as fallbacks for any caller still passing them.
   const [isLiked, setIsLiked] = useState(
     post.isLiked ?? post.likes?.some((like) => like.userId === currentUserId) ?? false
   );
   const [likeCount, setLikeCount] = useState(post.likeCount ?? post._count?.likes ?? 0);
+  const [isSaved, setIsSaved] = useState(post.isSaved ?? false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [reported, setReported] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const mediaUrls = (post.mediaUrls ?? []).filter(
     (url): url is string => typeof url === 'string' && url.length > 0
@@ -117,6 +134,62 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       setIsLiked(true);
       setLikeCount(prev => prev + 1);
       likePost.mutate(post.id);
+    }
+  };
+
+  // Optimistic like the heart, and rolled back if the request fails so the
+  // bookmark never claims a save the server did not record.
+  const handleSave = () => {
+    const next = !isSaved;
+    setIsSaved(next);
+    const mutation = next ? savePost : unsavePost;
+    mutation.mutate(post.id, { onError: () => setIsSaved(!next) });
+  };
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/dashboard/community/post/${post.id}`;
+    const title = `${post.author.displayName || 'Someone'} on ATHENA`;
+
+    // The Web Share API is the right thing on mobile, where it opens the
+    // system sheet. Everywhere else, copying the link is more useful than a
+    // dialog that cannot actually reach the user's apps.
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url });
+        return;
+      } catch {
+        // A cancelled share is not a failure; fall through to copying.
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied');
+    } catch {
+      toast.error('Could not copy the link');
+    }
+  };
+
+  // Goes through the one safety pipeline, which handles trust scoring and the
+  // moderation queue. The reason is deliberately unspecified here — the
+  // moderation team triages, and asking for a category inline is a worse
+  // experience than letting someone flag it and move on.
+  const handleReport = async () => {
+    setMenuOpen(false);
+    try {
+      await safetyApi.createReport({
+        targetType: 'post',
+        targetId: post.id,
+        reason: 'OTHER',
+        details: 'Reported from the feed',
+      });
+      setReported(true);
+      toast.success('Reported. Our team will take a look.');
+    } catch (error: unknown) {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        'Could not send that report';
+      toast.error(message);
     }
   };
 
@@ -155,9 +228,52 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
             </div>
           </div>
         </Link>
-        <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition">
-          <MoreHorizontal className="w-5 h-5 text-slate-500" />
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="Post options"
+            className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+          >
+            <MoreHorizontal className="w-5 h-5 text-slate-500" />
+          </button>
+
+          {menuOpen && (
+            <>
+              {/* Full-screen catcher so a click anywhere dismisses the menu,
+                  including on touch where there is no blur event to rely on. */}
+              <button
+                className="fixed inset-0 z-10 cursor-default"
+                aria-label="Close menu"
+                onClick={() => setMenuOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800"
+              >
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void handleShare();
+                  }}
+                  className="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  Copy link
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={handleReport}
+                  disabled={reported}
+                  className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  {reported ? 'Reported' : 'Report post'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -228,13 +344,25 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
           <MessageSquare className="w-5 h-5" />
           Comment
         </Link>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+        <button
+          onClick={handleShare}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+        >
           <Share2 className="w-5 h-5" />
           Share
         </button>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
-          <Bookmark className="w-5 h-5" />
-          Save
+        <button
+          onClick={handleSave}
+          aria-pressed={isSaved}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-lg transition hover:bg-slate-100 dark:hover:bg-slate-700',
+            isSaved
+              ? 'text-primary-600 dark:text-primary-400'
+              : 'text-slate-600 dark:text-slate-400'
+          )}
+        >
+          <Bookmark className={cn('w-5 h-5', isSaved && 'fill-current')} />
+          {isSaved ? 'Saved' : 'Save'}
         </button>
       </div>
     </article>
@@ -249,6 +377,14 @@ function CreatePostBox() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const createPost = useCreatePost();
   const { user } = useAuth();
+
+  // Opens the composer with a prompt already typed. Appends rather than
+  // overwrites so a shortcut pressed twice, or after typing, never eats what
+  // is already there.
+  const startWith = (prompt: string) => {
+    setIsExpanded(true);
+    setContent((current) => (current ? current : prompt));
+  };
 
   const attach = (accept: string) => {
     const input = document.createElement('input');
@@ -400,15 +536,28 @@ function CreatePostBox() {
       </div>
       {!isExpanded && (
         <div className="flex items-center justify-around mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+          {/* Shortcuts into the composer. Video opens the file picker
+              directly, since that is the one that needs an attachment; the
+              other two open the composer with an opening line already in it,
+              which is the part people stall on. */}
+          <button
+            onClick={() => attach('video/*')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+          >
             <Play className="w-5 h-5 text-red-500" />
             Video
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+          <button
+            onClick={() => startWith('Something I have been wondering about: ')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+          >
             <MessageCircle className="w-5 h-5 text-green-500" />
             Question
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition">
+          <button
+            onClick={() => startWith('A win worth sharing: ')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+          >
             <TrendingUp className="w-5 h-5 text-blue-500" />
             Win
           </button>

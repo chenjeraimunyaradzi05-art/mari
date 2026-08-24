@@ -600,6 +600,46 @@ export function useUnlikePost() {
   });
 }
 
+// Saving mirrors liking. The feed already returns isSaved per post, so the
+// only thing missing was the button calling this.
+export function useSavePost() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: postApi.save,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-posts'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not save that post');
+    },
+  });
+}
+
+export function useUnsavePost() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: postApi.unsave,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-posts'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not remove that save');
+    },
+  });
+}
+
+export function useSavedPosts() {
+  return useQuery({
+    queryKey: ['saved-posts'],
+    queryFn: postApi.getSaved,
+    select: (response) => response.data.data,
+  });
+}
+
 export function useDeletePost() {
   const queryClient = useQueryClient();
 

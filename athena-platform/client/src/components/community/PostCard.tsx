@@ -6,6 +6,7 @@ import { Heart, MessageCircle, Share2, MoreHorizontal, Trash2 } from 'lucide-rea
 import { useLikePost, useUnlikePost, useDeletePost, useAuthStore } from '@/lib/hooks';
 import { Avatar } from '@/components/ui/avatar';
 import CommentSection from './CommentSection';
+import toast from 'react-hot-toast';
 
 interface PostCardProps {
   post: any;
@@ -52,6 +53,28 @@ export default function PostCard({ post }: PostCardProps) {
       unlikePost.mutate(post.id);
     } else {
       likePost.mutate(post.id);
+    }
+  };
+
+  // Same behaviour as the feed's share: the system sheet on mobile, a copied
+  // link everywhere else.
+  const handleShare = async () => {
+    const url = `${window.location.origin}/dashboard/community/post/${post.id}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `${authorName} on ATHENA`, url });
+        return;
+      } catch {
+        // Cancelled, not failed — fall through to copying.
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied');
+    } catch {
+      toast.error('Could not copy the link');
     }
   };
 
@@ -192,7 +215,10 @@ export default function PostCard({ post }: PostCardProps) {
           <MessageCircle size={20} />
           <span>Comment</span>
         </button>
-        <button className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100">
+        <button
+          onClick={handleShare}
+          className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
+        >
           <Share2 size={20} />
           <span>Share</span>
         </button>
