@@ -251,7 +251,14 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // Rate limiting
 const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED !== 'false';
 const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10);
-const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX || '100', 10);
+// Production keeps the strict budget. Outside production it is relaxed, the way
+// authLimiter below already does: one homepage load fans out to six API calls,
+// so 100 per 15 minutes trips during any E2E run or manual QA pass and the app
+// starts serving 429s to the developer testing it. RATE_LIMIT_MAX still wins.
+const rateLimitMax = parseInt(
+  process.env.RATE_LIMIT_MAX || (process.env.NODE_ENV === 'production' ? '100' : '2000'),
+  10
+);
 
 const limiter = rateLimit({
   windowMs: Number.isFinite(rateLimitWindowMs) ? rateLimitWindowMs : 15 * 60 * 1000,

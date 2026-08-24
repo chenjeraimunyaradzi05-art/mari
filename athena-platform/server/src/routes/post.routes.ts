@@ -71,15 +71,27 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
         prisma.post.count({ where }),
       ]);
 
-      const likes = await prisma.like.findMany({
-        where: { userId: req.user.id, postId: { in: posts.map((p) => p.id) } },
-        select: { postId: true },
-      });
+      const postIds = posts.map((p) => p.id);
+      const [likes, saves] = await Promise.all([
+        prisma.like.findMany({
+          where: { userId: req.user.id, postId: { in: postIds } },
+          select: { postId: true },
+        }),
+        prisma.postSave.findMany({
+          where: { userId: req.user.id, postId: { in: postIds } },
+          select: { postId: true },
+        }),
+      ]);
       const likedPostIds = new Set(likes.map((l) => l.postId));
+      const savedPostIds = new Set(saves.map((s) => s.postId));
 
       res.json({
         success: true,
-        data: posts.map((post) => ({ ...post, isLiked: likedPostIds.has(post.id) })),
+        data: posts.map((post) => ({
+          ...post,
+          isLiked: likedPostIds.has(post.id),
+          isSaved: savedPostIds.has(post.id),
+        })),
         pagination: {
           page,
           limit,
@@ -114,9 +126,21 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       algorithm: normalizedAlgorithm,
     });
 
+    // generateFeed does not know about saves, so decorate here rather than
+    // leaving every card's save button showing the wrong state.
+    let posts: unknown[] = result.posts;
+    if (req.user) {
+      const saves = await prisma.postSave.findMany({
+        where: { userId: req.user.id, postId: { in: result.posts.map((p) => p.id) } },
+        select: { postId: true },
+      });
+      const savedPostIds = new Set(saves.map((s) => s.postId));
+      posts = result.posts.map((post) => ({ ...post, isSaved: savedPostIds.has(post.id) }));
+    }
+
     res.json({
       success: true,
-      data: result.posts,
+      data: posts,
       pagination: {
         page,
         limit,
@@ -855,6 +879,77 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
         pages: Math.ceil(total / limit),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// SAVE / UNSAVE A POST
+// ===========================================
+
+// Mirrors the visibility rule the like routes use: a hidden post, or a private
+// post belonging to someone else, is treated as absent rather than forbidden.
+async function loadVisiblePost(id: string, userId: string) {
+  const post = await prisma.post.findUnique({ where: { id } });
+  if (!post || post.isHidden || (!post.isPublic && post.authorId !== userId)) {
+    throw new ApiError(404, 'Post not found');
+  }
+  return post;
+}
+
+router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const saves = await prisma.postSave.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        post: {
+          include: {
+            author: {
+              select: { id: true, displayName: true, avatar: true, headline: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: saves.map((save) => ({ ...save.post, isSaved: true })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await loadVisiblePost(id, req.user!.id);
+
+    // Upsert keeps a double-tap idempotent instead of a unique-constraint error.
+    await prisma.postSave.upsert({
+      where: { postId_userId: { postId: id, userId: req.user!.id } },
+      update: {},
+      create: { postId: id, userId: req.user!.id },
+    });
+
+    res.status(201).json({ success: true, message: 'Post saved' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.postSave.deleteMany({
+      where: { postId: id, userId: req.user!.id },
+    });
+
+    res.json({ success: true, message: 'Save removed' });
   } catch (error) {
     next(error);
   }
