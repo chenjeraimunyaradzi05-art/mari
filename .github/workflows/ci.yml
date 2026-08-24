@@ -54,6 +54,11 @@ jobs:
           cd athena-platform/server
           npm run check:api-contract
 
+      # Also dependency-free, so it runs with plain node rather than installing
+      # the client. Fails on a control a user can reach that does nothing.
+      - name: Check for dead interactions in reachable UI
+        run: node athena-platform/client/scripts/check-dead-interactions.js
+
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres

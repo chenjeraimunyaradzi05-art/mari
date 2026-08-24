@@ -65,6 +65,22 @@ duplicate `CookieConsentBanner` under `components/gdpr/` that is also unused.
 The whole `chat/` directory (1,839 lines across four files) is unmounted — the
 messaging UI in use lives elsewhere.
 
+## This is now checked
+
+```bash
+npm --prefix athena-platform/client run check:dead-interactions
+```
+
+`client/scripts/check-dead-interactions.js` computes which files are reachable
+from an `app/` entry point and fails the build on a dead interaction in any of
+them — an empty handler, a log-only handler, `href="#"`, a "coming soon" notice.
+It runs in CI.
+
+The reachable set is currently **clean**: every no-op below sits in a component
+no route renders, which is why they are a backlog rather than a bug. Mounting one
+of these files without wiring its handlers will now fail CI. `--all` lists the
+unmounted findings too.
+
 ## Known no-op handlers inside these files
 
 These are the reason the list is worth keeping rather than ignoring:
