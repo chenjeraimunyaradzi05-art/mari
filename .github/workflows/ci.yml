@@ -2,13 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  server:
+    name: Server
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: athena-platform/server
     services:
       postgres:
         image: postgres:15
@@ -20,6 +28,9 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      NODE_ENV: test
 
     steps:
       - uses: actions/checkout@v4
@@ -27,42 +38,99 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: athena-platform/server/package-lock.json
 
       - name: Install dependencies
-        run: |
-          cd athena-platform/server
-          npm ci
+        run: npm ci
 
       - name: Generate Prisma client
-        run: |
-          cd athena-platform/server
-          npx prisma generate
+        run: npx prisma generate
 
       - name: Apply schema to test DB
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-        run: |
-          cd athena-platform/server
-          npx prisma db push --accept-data-loss
+        run: npx prisma db push --accept-data-loss
+
+      # `build` is `tsc`, so this typechecks the whole server as well as
+      # producing dist/. Running it before the tests means a type error is
+      # reported once, here, instead of once per ts-jest suite.
+      - name: Build
+        run: npm run build
 
       # Static check, so it needs no database and no client install. Catches a
       # client call whose server route was never built, sits behind a `/:id`
       # route, or answers a different verb.
       - name: Check client/server API contract
-        run: |
-          cd athena-platform/server
-          npm run check:api-contract
+        run: npm run check:api-contract
+
+      # Fails when a document cites a path the repository does not contain.
+      # Reads the git index rather than the filesystem, so it needs nothing
+      # installed.
+      - name: Check documentation references
+        run: node scripts/check-doc-references.js
 
       # Also dependency-free, so it runs with plain node rather than installing
       # the client. Fails on a control a user can reach that does nothing.
       - name: Check for dead interactions in reachable UI
-        run: node athena-platform/client/scripts/check-dead-interactions.js
+        run: node ../client/scripts/check-dead-interactions.js
 
       - name: Run tests
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-          NODE_ENV: test
-        run: |
-          cd athena-platform/server
-          npm test --silent
+        run: npm test --silent
+
+  client:
+    name: Client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: athena-platform/client
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:5000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: athena-platform/client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run unit tests
+        run: npm run test:unit -- --passWithNoTests
+
+      - name: Build
+        run: npm run build
+
+      # Playwright's webServer starts `next start` against the build above, so
+      # the browser has to be installed after it and the build must not be
+      # skipped.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # A pull request runs the smoke spec only. The rest of the suite drives
+      # long authenticated journeys and adds several minutes to every review;
+      # it runs on the merge instead, where nobody is waiting on it.
+      - name: Run E2E smoke spec
+        if: github.event_name == 'pull_request'
+        run: npx playwright test tests/smoke.spec.ts --project=chromium
+
+      - name: Run full E2E suite
+        if: github.event_name != 'pull_request'
+        run: npx playwright test --project=chromium
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: athena-platform/client/playwright-report
+          retention-days: 7

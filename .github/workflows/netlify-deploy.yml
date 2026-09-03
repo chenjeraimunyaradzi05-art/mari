@@ -1,65 +1,72 @@
-name: Deploy to Netlify
+name: Netlify Preview
+
+# Preview deploys for pull requests only. The production deploy lives in
+# "Build and Deploy", so that main is never published twice for one commit.
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'athena-platform/client/**'
-      - 'netlify.toml'
   pull_request:
-    branches: [main, master]
+    branches: [main]
     paths:
       - 'athena-platform/client/**'
+      - 'athena-platform/shared/**'
+      - 'netlify.toml'
   workflow_dispatch:
 
+concurrency:
+  group: netlify-preview-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  deploy:
-    name: Deploy to Netlify
+  # A pull request from a fork gets no secrets, so the credentials arrive empty
+  # and a deploy would fail on nothing the author did. `secrets` cannot be read
+  # from an `if`, so it is resolved to a boolean here and the deploy is gated on
+  # that instead.
+  preflight:
+    name: Resolve Netlify credentials
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: athena-platform/client
+    outputs:
+      netlify: ${{ steps.probe.outputs.netlify }}
+    steps:
+      - name: Probe Netlify credentials
+        id: probe
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -n "$NETLIFY_AUTH_TOKEN" ] && [ -n "$NETLIFY_SITE_ID" ]; then
+            echo "netlify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "netlify=false" >> "$GITHUB_OUTPUT"
+            echo "Netlify credentials are not configured; skipping the preview deploy."
+          fi
+
+  deploy:
+    name: Deploy preview
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.netlify == 'true'
+    environment:
+      name: preview
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: athena-platform/client/package-lock.json
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
-
-      - name: Build application
-        run: npm run build
+      # `--build` runs the build described by netlify.toml, including the
+      # Next.js runtime plugin. Uploading a prebuilt .next directory skips the
+      # plugin and publishes a preview with no server routes, which is worse
+      # than no preview at all.
+      - name: Build and deploy preview
         env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          NODE_ENV: production
-
-      - name: Deploy to Netlify (Production)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        uses: nwtgck/actions-netlify@v3
-        with:
-          publish-dir: 'athena-platform/client/.next'
-          production-deploy: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          deploy-message: "Deploy from GitHub Actions - ${{ github.sha }}"
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-
-      - name: Deploy to Netlify (Preview)
-        if: github.event_name == 'pull_request'
-        uses: nwtgck/actions-netlify@v3
-        with:
-          publish-dir: 'athena-platform/client/.next'
-          production-deploy: false
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          deploy-message: "Preview Deploy - PR #${{ github.event.pull_request.number }}"
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_TELEMETRY_DISABLED: '1'
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          npx --yes netlify-cli deploy --build --message "PR #${PR_NUMBER:-manual}"

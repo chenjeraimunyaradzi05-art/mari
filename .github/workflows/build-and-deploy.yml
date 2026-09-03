@@ -1,143 +1,188 @@
 name: Build and Deploy
 
+# The main-branch release pipeline: migrate the database, then push the API and
+# the web app to whichever hosts are configured. Verification lives in CI, which
+# runs on the same commit; nothing is rebuilt here that CI already builds.
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 jobs:
-  api-build:
+  # The `secrets` context is readable from `env` and `with`, but not from any
+  # `if` — job level or step level. Gating a deploy on `secrets.X != ''` in an
+  # `if` does not evaluate to false, it makes the whole workflow invalid, which
+  # is why every optional target is resolved to a boolean here first.
+  preflight:
+    name: Resolve configured targets
     runs-on: ubuntu-latest
+    outputs:
+      database: ${{ steps.probe.outputs.database }}
+      railway-api: ${{ steps.probe.outputs.railway-api }}
+      railway-web: ${{ steps.probe.outputs.railway-web }}
+      netlify: ${{ steps.probe.outputs.netlify }}
+    steps:
+      - name: Probe deployment credentials
+        id: probe
+        env:
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_SERVICE: ${{ secrets.RAILWAY_API_SERVICE }}
+          RAILWAY_WEB_SERVICE: ${{ secrets.RAILWAY_WEB_SERVICE }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          configured() {
+            for value in "$@"; do
+              if [ -z "$value" ]; then echo false; return; fi
+            done
+            echo true
+          }
+          {
+            echo "database=$(configured "$DIRECT_DATABASE_URL")"
+            echo "railway-api=$(configured "$RAILWAY_TOKEN" "$RAILWAY_API_SERVICE")"
+            echo "railway-web=$(configured "$RAILWAY_TOKEN" "$RAILWAY_WEB_SERVICE")"
+            echo "netlify=$(configured "$NETLIFY_AUTH_TOKEN" "$NETLIFY_SITE_ID")"
+          } >> "$GITHUB_OUTPUT"
+
+  migrate:
+    name: Migrate database
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.database == 'true'
+    environment:
+      name: production
     defaults:
       run:
         working-directory: athena-platform/server
+    env:
+      DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
           cache: npm
           cache-dependency-path: athena-platform/server/package-lock.json
-      - name: Install
-        run: npm install
-      - name: Generate Prisma Client
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
         run: npx prisma generate
-      - name: Build
-        run: npm run build
 
-  web-build:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: athena-platform/client
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # The pooled connection cannot run DDL, so migrations go through the
+      # direct URL.
+      - name: Deploy migrations
+        run: npx prisma migrate deploy
+
+      - name: Open an issue on failure
+        if: failure()
+        uses: actions/github-script@v7
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: athena-platform/client/package-lock.json
-      - name: Install
-        run: npm install --legacy-peer-deps
-      - name: Build
-        run: npm run build
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Database migration failed on main',
+              body: `Migration workflow failed.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['bug', 'database'],
+            })
 
-  railway-deploy-api:
+  # `!cancelled()` rather than `success()`: when no database URL is configured
+  # the migrate job is skipped, and a skipped dependency would otherwise skip
+  # every deploy behind it. A failed migration still blocks them.
+  deploy-api:
+    name: Deploy API to Railway
     runs-on: ubuntu-latest
-    needs: api-build
-    if: ${{ secrets.RAILWAY_TOKEN != '' && secrets.RAILWAY_API_SERVICE != '' }}
-    defaults:
-      run:
-        working-directory: athena-platform/server
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-      - name: Deploy API
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --service ${{ secrets.RAILWAY_API_SERVICE }} --detach
-
-  railway-deploy-web:
-    runs-on: ubuntu-latest
-    needs: web-build
-    if: ${{ secrets.RAILWAY_TOKEN != '' && secrets.RAILWAY_WEB_SERVICE != '' }}
-    defaults:
-      run:
-        working-directory: athena-platform/client
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-      - name: Deploy Web
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --service ${{ secrets.RAILWAY_WEB_SERVICE }} --detach
-
-  mobile-build:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: athena-platform/mobile
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: athena-platform/mobile/package-lock.json
-      - name: Install
-        run: npm install
-      - name: Build
-        run: npm run build
-
-  mobile-eas-build:
-    runs-on: ubuntu-latest
-    needs: mobile-build
-    if: ${{ secrets.EXPO_TOKEN != '' }}
-    defaults:
-      run:
-        working-directory: athena-platform/mobile
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: athena-platform/mobile/package-lock.json
-      - name: Install
-        run: npm install
-      - name: Install EAS CLI
-        run: npm install -g eas-cli
-      - name: EAS Build (All Platforms)
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform all --non-interactive
-
-  postgres-migrate:
-    runs-on: ubuntu-latest
-    needs: api-build
-    if: ${{ secrets.DATABASE_URL != '' }}
+    needs: [preflight, migrate]
+    if: ${{ !cancelled() && !failure() && needs.preflight.outputs.railway-api == 'true' }}
+    environment:
+      name: production
     defaults:
       run:
         working-directory: athena-platform/server
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: athena-platform/server/package-lock.json
-      - name: Install
-        run: npm install
-      - name: Apply Prisma Migrations
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npm run db:migrate:deploy
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_API_SERVICE }}
+        run: railway up --service "$RAILWAY_SERVICE" --detach
+
+  deploy-web-railway:
+    name: Deploy web to Railway
+    runs-on: ubuntu-latest
+    needs: [preflight, migrate]
+    if: ${{ !cancelled() && !failure() && needs.preflight.outputs.railway-web == 'true' }}
+    environment:
+      name: production
+    defaults:
+      run:
+        working-directory: athena-platform/client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_WEB_SERVICE }}
+        run: railway up --service "$RAILWAY_SERVICE" --detach
+
+  deploy-web-netlify:
+    name: Deploy web to Netlify
+    runs-on: ubuntu-latest
+    needs: [preflight, migrate]
+    if: ${{ !cancelled() && !failure() && needs.preflight.outputs.netlify == 'true' }}
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # `--build` runs the build described by netlify.toml, which is the only
+      # way the Next.js runtime plugin gets a chance to run. Uploading a bare
+      # .next directory skips it and publishes a site with no server routes.
+      - name: Build and deploy
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_STRIPE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_KEY }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npx --yes netlify-cli deploy --build --prod --message "main @ ${GITHUB_SHA}"

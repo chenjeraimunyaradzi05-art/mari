@@ -1,56 +1,42 @@
-name: Deploy to Railway
+name: Railway Redeploy
+
+# Manual redeploy of a single Railway service, for when a service needs pushing
+# without a commit behind it. The automatic main-branch deploy lives in "Build
+# and Deploy"; this workflow deliberately has no push trigger, so a merge cannot
+# start two deploys of the same service against each other.
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
     inputs:
       service:
-        description: 'Service to deploy'
-        required: false
-        default: 'all'
+        description: 'Service to redeploy'
+        required: true
+        default: 'api'
         type: choice
         options:
-          - all
           - api
           - web
+          - all
 
-env:
-  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+concurrency:
+  group: railway-redeploy
+  cancel-in-progress: false
 
 jobs:
-  deploy-api:
-    name: Deploy API Service
+  api:
+    name: Redeploy API
     runs-on: ubuntu-latest
-    if: github.event.inputs.service == 'api' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Deploy API to Railway
-        run: railway up --service athena-api
+    if: inputs.service == 'api' || inputs.service == 'all'
+    environment:
+      name: production
+    defaults:
+      run:
         working-directory: athena-platform/server
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-  deploy-web:
-    name: Deploy Web Service
-    runs-on: ubuntu-latest
-    needs: deploy-api
-    if: always() && (github.event.inputs.service == 'web' || github.event.inputs.service == 'all' || github.event.inputs.service == '')
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -58,8 +44,38 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy Web to Railway
-        run: railway up --service athena-web
-        working-directory: athena-platform/client
+      # The service name is a secret so that a rename does not mean editing
+      # every workflow; it falls back to the name the Railway project was
+      # created with.
+      - name: Deploy
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_API_SERVICE }}
+        run: railway up --service "${RAILWAY_SERVICE:-athena-api}" --detach
+
+  web:
+    name: Redeploy web
+    runs-on: ubuntu-latest
+    if: inputs.service == 'web' || inputs.service == 'all'
+    environment:
+      name: production
+    defaults:
+      run:
+        working-directory: athena-platform/client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_WEB_SERVICE }}
+        run: railway up --service "${RAILWAY_SERVICE:-athena-web}" --detach
