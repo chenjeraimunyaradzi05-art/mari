@@ -194,14 +194,19 @@ export const channelApi = {
 // ============================================
 export const apprenticeshipApi = {
   // Get all apprenticeships
+  // Param names match what apprenticeship.routes.ts actually reads. It has no
+  // `industry` or `location`: the training package is `framework` and the
+  // place is `city`, and `level` must be an ApprenticeshipLevel enum value.
   getAll: (params?: {
     page?: number;
     limit?: number;
-    industry?: string;
+    framework?: string;
     level?: string;
-    location?: string;
+    city?: string;
+    country?: string;
     remote?: boolean;
     search?: string;
+    status?: string;
   }) => api.get('/apprenticeships', { params }),
 
   // Get single apprenticeship
@@ -284,15 +289,15 @@ export const apprenticeshipApi = {
 // ============================================
 export const skillsMarketplaceApi = {
   // Get all services/gigs
+  // Param names match what skills-marketplace.routes.ts actually reads. The
+  // route has no deliveryTime or rating filter, and prices are minRate/maxRate.
   getServices: (params?: {
     page?: number;
     limit?: number;
-    category?: string;
-    minPrice?: number;
-    maxPrice?: number;
-    rating?: number;
-    deliveryTime?: string;
     search?: string;
+    category?: string;
+    minRate?: number;
+    maxRate?: number;
   }) => api.get('/skills-marketplace/services', { params }),
 
   // Get single service

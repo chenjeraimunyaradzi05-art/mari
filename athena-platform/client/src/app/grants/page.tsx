@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { businessApi } from '@/lib/api';
+import { BackToHome, EmptyState } from '@/components/layout/PageShell';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 const providerTypes = [
@@ -140,6 +141,9 @@ export default function GrantsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <div className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6">
+        <BackToHome />
+      </div>
       <section className="relative bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-600 text-white overflow-hidden">
         <div className="container mx-auto px-4 py-20 relative z-10">
           <div className="max-w-3xl">
@@ -227,15 +231,37 @@ export default function GrantsPage() {
             Loading grants...
           </div>
         ) : filteredGrants.length === 0 ? (
-          <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-            <Gift className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">No active grants available</h3>
-            <p className="text-slate-600 dark:text-slate-400">
-              {searchQuery || selectedProviderType
-                ? 'Try adjusting your search or provider filter.'
-                : 'No published grant programs are accepting applications yet.'}
-            </p>
-          </div>
+          // An empty catalogue and an over-narrow filter are different
+          // problems, and neither is helped by a dead end: each case now
+          // offers the action that actually moves the reader forward.
+          <EmptyState
+            icon={Gift}
+            reason={searchQuery || selectedProviderType ? 'filtered' : 'empty'}
+            title={
+              searchQuery || selectedProviderType
+                ? 'Nothing matches those filters'
+                : 'No grant programmes listed yet'
+            }
+            description={
+              searchQuery || selectedProviderType
+                ? 'Widen the search and see what else is open.'
+                : 'Grant bodies are still coming on board. Register and we will tell you when one opens that you are eligible for.'
+            }
+            onClear={() => {
+              setSearchQuery('');
+              setSelectedProviderType('');
+            }}
+            primaryAction={
+              searchQuery || selectedProviderType
+                ? undefined
+                : { label: 'Get notified', href: '/register' }
+            }
+            secondaryAction={
+              searchQuery || selectedProviderType
+                ? undefined
+                : { label: 'List a grant programme', href: '/contact-sales?intent=grants' }
+            }
+          />
         ) : (
           <div className="grid md:grid-cols-2 gap-6">
             {filteredGrants.map((grant) => (

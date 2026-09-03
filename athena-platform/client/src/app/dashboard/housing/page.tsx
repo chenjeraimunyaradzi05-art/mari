@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Home, Loader2, MapPin, BedDouble, ShieldCheck, Heart, Search } from 'lucide-react';
 import { housingApi } from '@/lib/api';
+import { EmptyState } from '@/components/layout/PageShell';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 const listingTypes = [
@@ -66,6 +67,22 @@ export default function HousingPage() {
   const [accessible, setAccessible] = useState(false);
 
   const [listings, setListings] = useState<HousingListing[]>([]);
+
+  const hasHousingFilters = Boolean(
+    type || city || state || minRent || maxRent || bedrooms || dvSafe || petFriendly || accessible
+  );
+
+  const clearHousingFilters = () => {
+    setType('');
+    setCity('');
+    setState('');
+    setMinRent('');
+    setMaxRent('');
+    setBedrooms('');
+    setDvSafe(false);
+    setPetFriendly(false);
+    setAccessible(false);
+  };
   const [inquiries, setInquiries] = useState<HousingInquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -275,9 +292,27 @@ export default function HousingPage() {
           Loading listings...
         </div>
       ) : listings.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
-          No listings found. Try adjusting your filters.
-        </div>
+        // "Try adjusting your filters" was shown to everyone, including the
+        // majority who set none — sending them hunting for listings that are
+        // not there. Housing is also the one place where a dead end matters
+        // most, so the empty case names the services that can actually help.
+        <EmptyState
+          icon={Home}
+          reason={hasHousingFilters ? 'filtered' : 'empty'}
+          title={hasHousingFilters ? 'Nothing matches those filters' : 'No listings yet'}
+          description={
+            hasHousingFilters
+              ? 'Widen the search and see what else is available.'
+              : 'No one has listed a place here yet. If you need somewhere to go now, the safety centre lists services that can help today.'
+          }
+          onClear={clearHousingFilters}
+          primaryAction={
+            hasHousingFilters ? undefined : { label: 'List a place', href: '/contact-sales?intent=housing' }
+          }
+          secondaryAction={
+            hasHousingFilters ? undefined : { label: 'Get support now', href: '/help/safety-center' }
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {listings.map((listing) => (

@@ -1,46 +1,21 @@
 'use client';
 
-import { Star, Clock, CheckCircle, Heart, Share2 } from 'lucide-react';
+import { Heart, Star, Clock, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card } from '@/components/ui/card';
-import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Avatar } from '@/components/ui/avatar';
+import {
+  SkillService,
+  categoryLabel,
+  formatAud,
+  providerInitials,
+  providerName,
+  quickestDelivery,
+  startingPrice,
+} from './types';
 
-export interface ServicePackage {
-  name: string;
-  description: string;
-  price: number;
-  deliveryDays: number;
-  revisions?: number;
-  features: string[];
-}
-
-export interface SkillService {
-  id: string;
-  title: string;
-  description: string;
-  seller: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    avatarUrl?: string;
-    level?: 'new' | 'rising' | 'top' | 'pro';
-    rating: number;
-    reviewCount: number;
-    completedOrders: number;
-  };
-  category: string;
-  subcategory?: string;
-  packages?: ServicePackage[];
-  images: string[];
-  tags: string[];
-  rating: number;
-  reviewCount: number;
-  ordersInQueue?: number;
-  isFavorite: boolean;
-  isFeatured?: boolean;
-  createdAt: string;
-}
+export type { SkillService, ServicePackage } from './types';
 
 interface ServiceCardProps {
   service: SkillService;
@@ -50,6 +25,38 @@ interface ServiceCardProps {
   variant?: 'default' | 'compact' | 'horizontal';
 }
 
+// A service with no reviews yet shows "New" rather than a fabricated 0.0 stars.
+function RatingLine({ service, small = false }: { service: SkillService; small?: boolean }) {
+  const hasRating = typeof service.rating === 'number' && (service.reviewCount ?? 0) > 0;
+
+  if (!hasRating) {
+    return (
+      <span className={cn('text-slate-500', small ? 'text-xs' : 'text-sm')}>New service</span>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1">
+      <Star className={cn('text-yellow-400 fill-current', small ? 'w-3 h-3' : 'w-4 h-4')} />
+      <span className={cn('font-medium', small ? 'text-xs' : 'text-sm')}>
+        {(service.rating as number).toFixed(1)}
+      </span>
+      {!small && <span className="text-sm text-slate-500">({service.reviewCount})</span>}
+    </span>
+  );
+}
+
+function PriceLine({ service }: { service: SkillService }) {
+  const start = startingPrice(service);
+  if (!start) return <span className="font-semibold">Rate on request</span>;
+  return (
+    <span className="font-semibold text-slate-900 dark:text-white">
+      {formatAud(start.amount)}
+      <span className="ml-1 text-xs font-normal text-slate-500">/ {start.unit}</span>
+    </span>
+  );
+}
+
 export function ServiceCard({
   service,
   onFavorite,
@@ -57,33 +64,25 @@ export function ServiceCard({
   onClick,
   variant = 'default',
 }: ServiceCardProps) {
-  // A service can be sold by the hour rather than by package, and Math.min() of
-  // an empty list is Infinity, so both cases fall back to null instead of NaN.
-  const packages = service.packages ?? [];
-  const startingPrice = packages.length > 0 ? Math.min(...packages.map((p) => p.price)) : null;
-  const quickestDelivery = packages.length > 0 ? Math.min(...packages.map((p) => p.deliveryDays)) : null;
+  const delivery = quickestDelivery(service);
+  const name = providerName(service);
+  const tags = service.tags ?? [];
 
-  const formatPrice = (price: number | null) => {
-    if (price === null) return 'Rate on request';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-    }).format(price);
-  };
-
-  const getSellerLevelBadge = (level?: string) => {
-    switch (level) {
-      case 'pro':
-        return <Badge className="bg-purple-100 text-purple-700">Pro</Badge>;
-      case 'top':
-        return <Badge className="bg-amber-100 text-amber-700">Top Rated</Badge>;
-      case 'rising':
-        return <Badge className="bg-green-100 text-green-700">Rising Star</Badge>;
-      default:
-        return null;
-    }
-  };
+  const favoriteButton = (className: string, iconClass: string) => (
+    <button
+      type="button"
+      aria-label={service.isFavorite ? 'Remove from saved' : 'Save service'}
+      onClick={(e) => {
+        e.stopPropagation();
+        onFavorite(service.id);
+      }}
+      className={className}
+    >
+      <Heart
+        className={cn(iconClass, service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-400')}
+      />
+    </button>
+  );
 
   if (variant === 'horizontal') {
     return (
@@ -91,59 +90,25 @@ export function ServiceCard({
         className="flex overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
         onClick={() => onClick?.(service.id)}
       >
-        {/* Image */}
-        <div className="w-48 h-32 flex-shrink-0 bg-slate-100 dark:bg-slate-800">
-          {service.images[0] ? (
-            <img
-              src={service.images[0]}
-              alt={service.title}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-slate-400">
-              No image
-            </div>
-          )}
-        </div>
-
-        {/* Content */}
         <div className="flex-1 p-4 flex flex-col justify-between">
           <div>
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
               <h3 className="font-medium text-slate-900 dark:text-white line-clamp-2">
                 {service.title}
               </h3>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onFavorite(service.id);
-                }}
-                className="p-1"
-              >
-                <Heart
-                  className={cn(
-                    'w-5 h-5',
-                    service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-400'
-                  )}
-                />
-              </button>
+              {favoriteButton('p-1 flex-shrink-0', 'w-5 h-5')}
             </div>
+            <p className="mt-1 text-sm text-slate-500 truncate">{name}</p>
             <div className="flex items-center gap-2 mt-1">
-              <div className="flex items-center gap-1">
-                <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                <span className="text-sm font-medium">{service.rating.toFixed(1)}</span>
-                <span className="text-sm text-slate-500">({service.reviewCount})</span>
-              </div>
+              <RatingLine service={service} />
             </div>
           </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-sm text-slate-500">
               <Clock className="w-3 h-3 inline mr-1" />
-              {quickestDelivery !== null ? `${quickestDelivery}d delivery` : 'Flexible timing'}
+              {delivery !== null ? `${delivery} day delivery` : 'Booked by the hour'}
             </span>
-            <span className="font-semibold text-slate-900 dark:text-white">
-              {startingPrice !== null ? `From ${formatPrice(startingPrice)}` : formatPrice(null)}
-            </span>
+            <PriceLine service={service} />
           </div>
         </div>
       </Card>
@@ -156,164 +121,88 @@ export function ServiceCard({
         className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
         onClick={() => onClick?.(service.id)}
       >
-        {/* Image */}
-        <div className="aspect-video bg-slate-100 dark:bg-slate-800 relative">
-          {service.images[0] ? (
-            <img
-              src={service.images[0]}
-              alt={service.title}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-slate-400">
-              No image
-            </div>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onFavorite(service.id);
-            }}
-            className="absolute top-2 right-2 p-1.5 bg-white/80 dark:bg-slate-900/80 rounded-full"
-          >
-            <Heart
-              className={cn(
-                'w-4 h-4',
-                service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-600'
-              )}
-            />
-          </button>
-        </div>
-
-        {/* Content */}
         <div className="p-3">
-          <h3 className="font-medium text-slate-900 dark:text-white text-sm line-clamp-2 mb-2">
-            {service.title}
-          </h3>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <Star className="w-3 h-3 text-yellow-400 fill-current" />
-              <span className="text-xs font-medium">{service.rating.toFixed(1)}</span>
-            </div>
-            <span className="text-sm font-semibold text-slate-900 dark:text-white">
-              {formatPrice(startingPrice)}
-            </span>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="font-medium text-slate-900 dark:text-white text-sm line-clamp-2">
+              {service.title}
+            </h3>
+            {favoriteButton('p-1 flex-shrink-0', 'w-4 h-4')}
+          </div>
+          <p className="mt-1 truncate text-xs text-slate-500">{name}</p>
+          <div className="mt-2 flex items-center justify-between">
+            <RatingLine service={service} small />
+            <PriceLine service={service} />
           </div>
         </div>
       </Card>
     );
   }
 
-  // Default variant
   return (
     <Card
-      className={cn(
-        'overflow-hidden cursor-pointer hover:shadow-lg transition-shadow',
-        service.isFeatured && 'ring-2 ring-primary-500'
-      )}
+      className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
       onClick={() => onClick?.(service.id)}
     >
-      {/* Image carousel */}
-      <div className="aspect-video bg-slate-100 dark:bg-slate-800 relative">
-        {service.images[0] ? (
-          <img
-            src={service.images[0]}
-            alt={service.title}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-400">
-            No image
-          </div>
-        )}
-
-        {/* Favorite button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onFavorite(service.id);
-          }}
-          className="absolute top-3 right-3 p-2 bg-white/90 dark:bg-slate-900/90 rounded-full shadow-sm hover:bg-white dark:hover:bg-slate-900 transition-colors"
-        >
-          <Heart
-            className={cn(
-              'w-5 h-5',
-              service.isFavorite ? 'text-red-500 fill-current' : 'text-slate-600'
-            )}
-          />
-        </button>
-
-        {/* Featured badge */}
-        {service.isFeatured && (
-          <div className="absolute top-3 left-3 bg-primary-500 text-white text-xs font-medium px-2 py-1 rounded">
-            Featured
-          </div>
-        )}
-
-        {/* Image count indicator */}
-        {service.images.length > 1 && (
-          <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-1 rounded">
-            1/{service.images.length}
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
       <div className="p-4">
-        {/* Seller info */}
+        {/* Provider. A SkillService has no cover image, so the person offering
+            it leads the card rather than a grey "No image" placeholder. */}
         <div className="flex items-center gap-2 mb-3">
           <Avatar
-            src={service.seller.avatarUrl}
-            fallback={`${service.seller.firstName[0]}${service.seller.lastName[0]}`}
+            src={service.provider?.avatar ?? undefined}
+            fallback={providerInitials(service)}
             size="sm"
           />
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1">
-              <span className="font-medium text-sm text-slate-900 dark:text-white truncate">
-                {service.seller.firstName} {service.seller.lastName}
-              </span>
-              {getSellerLevelBadge(service.seller.level)}
-            </div>
+            <p className="font-medium text-sm text-slate-900 dark:text-white truncate">{name}</p>
+            {service.provider?.headline && (
+              <p className="truncate text-xs text-slate-500">{service.provider.headline}</p>
+            )}
           </div>
+          {favoriteButton(
+            'p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex-shrink-0',
+            'w-5 h-5'
+          )}
         </div>
 
-        {/* Title */}
+        <div className="mb-2">
+          <Badge variant="outline">{categoryLabel(String(service.category))}</Badge>
+        </div>
+
         <h3 className="font-medium text-slate-900 dark:text-white line-clamp-2 mb-2 min-h-[2.5rem]">
           {service.title}
         </h3>
 
-        {/* Rating */}
         <div className="flex items-center gap-2 mb-3">
-          <div className="flex items-center gap-1">
-            <Star className="w-4 h-4 text-yellow-400 fill-current" />
-            <span className="font-medium text-sm">{service.rating.toFixed(1)}</span>
-          </div>
-          <span className="text-sm text-slate-500">({service.reviewCount} reviews)</span>
-        </div>
-
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1 mb-3">
-          {service.tags.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs rounded"
-            >
-              {tag}
+          <RatingLine service={service} />
+          {(service.completedCount ?? 0) > 0 && (
+            <span className="flex items-center gap-1 text-sm text-slate-500">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {service.completedCount} completed
             </span>
-          ))}
+          )}
         </div>
 
-        {/* Footer */}
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-3">
+            {tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs rounded"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-1 text-sm text-slate-500">
             <Clock className="w-4 h-4" />
-            <span>{quickestDelivery !== null ? `${quickestDelivery}d delivery` : 'Flexible timing'}</span>
+            <span>{delivery !== null ? `${delivery} day delivery` : 'Booked by the hour'}</span>
           </div>
           <div className="text-right">
-            <p className="text-xs text-slate-500">Starting at</p>
-            <p className="font-semibold text-lg text-slate-900 dark:text-white">
-              {formatPrice(startingPrice)}
-            </p>
+            <p className="text-xs text-slate-500">From</p>
+            <PriceLine service={service} />
           </div>
         </div>
       </div>

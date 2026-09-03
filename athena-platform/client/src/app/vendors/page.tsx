@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { businessApi } from '@/lib/api';
+import { BackToHome, EmptyState } from '@/components/layout/PageShell';
 
 const categories = [
   { id: '', name: 'All vendors' },
@@ -118,6 +119,9 @@ export default function VendorsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <div className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6">
+        <BackToHome />
+      </div>
       <section className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl">
@@ -174,15 +178,34 @@ export default function VendorsPage() {
             Loading vendors...
           </div>
         ) : filteredVendors.length === 0 ? (
-          <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-            <Store className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">No vendors available</h3>
-            <p className="text-slate-600 dark:text-slate-400">
-              {searchQuery || selectedCategory
-                ? 'Try adjusting your search or category.'
-                : 'The marketplace has no published vendors yet.'}
-            </p>
-          </div>
+          <EmptyState
+            icon={Store}
+            reason={searchQuery || selectedCategory ? 'filtered' : 'empty'}
+            title={
+              searchQuery || selectedCategory
+                ? 'Nothing matches those filters'
+                : 'No suppliers listed yet'
+            }
+            description={
+              searchQuery || selectedCategory
+                ? 'Widen the search and see who else is listed.'
+                : 'This is where members recommend suppliers they have actually used. Nobody has added one yet — if you run a business worth knowing about, put it forward.'
+            }
+            onClear={() => {
+              setSearchQuery('');
+              setSelectedCategory('');
+            }}
+            primaryAction={
+              searchQuery || selectedCategory
+                ? undefined
+                : { label: 'List your business', href: '/contact-sales?intent=vendors' }
+            }
+            secondaryAction={
+              searchQuery || selectedCategory
+                ? undefined
+                : { label: 'Post what you need instead', href: '/dashboard/rfps' }
+            }
+          />
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredVendors.map((vendor) => (

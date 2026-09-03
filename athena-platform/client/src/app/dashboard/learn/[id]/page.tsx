@@ -26,7 +26,9 @@ interface CourseDetails {
   organization?: {
     id?: string;
     name?: string | null;
+    slug?: string | null;
     logo?: string | null;
+    website?: string | null;
   } | null;
   type?: string | null;
   durationMonths?: number | null;
@@ -142,6 +144,11 @@ export default function CourseDetailPage() {
   const typeLabel = displayCourse.type ? formatLabel(displayCourse.type) : 'Course';
   const progress = displayCourse.enrollment?.progress ?? 0;
   const isEnrolled = Boolean(displayCourse.enrollment);
+
+  // Courses here are provider-run programs, not lessons hosted on ATHENA, so an
+  // enrolled learner continues on the provider's own page.
+  const providerSlug = displayCourse.organization?.slug;
+  const providerWebsite = displayCourse.organization?.website;
 
   const highlights = [
     { label: 'Provider', value: providerName },
@@ -363,10 +370,33 @@ export default function CourseDetailPage() {
                   <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
                 </div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">{progress}% complete</p>
-                <button className="w-full btn-primary py-3 flex items-center justify-center space-x-2">
-                  <BookOpen className="w-5 h-5" />
-                  <span>Continue Learning</span>
-                </button>
+                {providerSlug ? (
+                  <Link
+                    href={`/dashboard/learn/providers/${providerSlug}`}
+                    className="w-full btn-primary py-3 flex items-center justify-center space-x-2"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                    <span>Continue with {providerName}</span>
+                  </Link>
+                ) : providerWebsite ? (
+                  <a
+                    href={providerWebsite}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full btn-primary py-3 flex items-center justify-center space-x-2"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                    <span>Continue with {providerName}</span>
+                  </a>
+                ) : (
+                  <Link
+                    href="/dashboard/learn/my-courses"
+                    className="w-full btn-primary py-3 flex items-center justify-center space-x-2"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                    <span>View in My Courses</span>
+                  </Link>
+                )}
               </div>
             ) : (
               <button

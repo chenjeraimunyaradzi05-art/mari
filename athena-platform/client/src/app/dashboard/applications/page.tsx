@@ -300,12 +300,12 @@ export default function ApplicationsPage() {
                     {status.description}
                   </p>
                   <div className="flex items-center space-x-3">
-                    {application.status === 'INTERVIEW' && (
-                      <button className="btn-outline text-sm py-1.5 flex items-center space-x-1">
-                        <Calendar className="w-4 h-4" />
-                        <span>Schedule</span>
-                      </button>
-                    )}
+                    {/* A "Schedule" button sat here doing nothing. There is no
+                        interview-scheduling capability: no endpoint under
+                        /jobs or /employer creates an interview, and the
+                        Application model carries no interview time to show or
+                        change. The employer arranges the time off-platform, so
+                        the status description is the whole truth here. */}
                     {application.status === 'OFFERED' && (
                       <button
                         className="btn-primary text-sm py-1.5 disabled:opacity-60"

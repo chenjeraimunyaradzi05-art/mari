@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Check, Clock, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { SkillService, ServicePackage } from './ServiceCard';
+import { SkillService, formatAud, providerName, readPackages } from './types';
 import { cn } from '@/lib/utils';
 
 interface OrderModalProps {
@@ -21,17 +21,14 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // Hourly-rate services carry no packages, so there is nothing to order here.
-  const packages = service.packages ?? [];
+  // `packages` is a Json column, so it is parsed rather than trusted.
+  // Hourly-rate services carry none, and there is nothing to order here.
+  const packages = readPackages(service.packages);
   const pkg = packages[selectedPackage];
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-    }).format(price);
-  };
+  // Providers are billed and paid in AUD; this used to render every price in
+  // US dollars.
+  const formatPrice = (price: number) => formatAud(price);
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -115,14 +112,16 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
                       <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                         <RefreshCw className="w-4 h-4" />
                         <span>
-                          {pkg.revisions === -1 ? 'Unlimited' : pkg.revisions} revisions
+                          {pkg.revisions === -1
+                            ? 'Unlimited revisions'
+                            : `${pkg.revisions} revision${pkg.revisions === 1 ? '' : 's'}`}
                         </span>
                       </div>
                     )}
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1">
-                    {pkg.features.map((feature, i) => (
+                    {(pkg.features ?? []).map((feature, i) => (
                       <div key={i} className="flex items-start gap-2 text-sm">
                         <Check className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
                         <span className="text-slate-600 dark:text-slate-300">{feature}</span>
@@ -176,21 +175,14 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
             </h3>
 
             <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl space-y-4">
+              {/* A SkillService has no image gallery, so the order summary
+                  names the service and who is providing it. */}
               <div className="flex items-start gap-4">
-                {service.images[0] && (
-                  <img
-                    src={service.images[0]}
-                    alt={service.title}
-                    className="w-20 h-16 object-cover rounded"
-                  />
-                )}
                 <div className="flex-1">
                   <h4 className="font-medium text-slate-900 dark:text-white">
                     {service.title}
                   </h4>
-                  <p className="text-sm text-slate-500">
-                    by {service.seller.firstName} {service.seller.lastName}
-                  </p>
+                  <p className="text-sm text-slate-500">by {providerName(service)}</p>
                 </div>
               </div>
 

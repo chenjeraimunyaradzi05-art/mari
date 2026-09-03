@@ -13,6 +13,17 @@ import {
 import { apprenticeshipApi } from '@/lib/api-extensions';
 import { Loader2, GraduationCap, TrendingUp, Bookmark, Award } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PageShell, PageHero } from '@/components/layout/PageShell';
+
+const PAGE_SIZE = 12;
+
+const EMPTY_FILTERS: ApprenticeshipFilters = {
+  search: '',
+  framework: [],
+  level: [],
+  location: '',
+  remote: null,
+};
 
 export default function ApprenticeshipsPage() {
   const router = useRouter();
@@ -21,58 +32,65 @@ export default function ApprenticeshipsPage() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<ApprenticeshipFilters>({
     search: '',
-    industry: [],
+    framework: [],
     level: [],
     location: '',
     remote: null,
   });
+  const [frameworks, setFrameworks] = useState<{ name: string; count: number }[]>([]);
+  const [total, setTotal] = useState(0);
   const [selectedApprenticeship, setSelectedApprenticeship] = useState<Apprenticeship | null>(null);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  // Static data for filters (would come from API)
-  const industries = [
-    'Technology',
-    'Healthcare',
-    'Finance',
-    'Marketing',
-    'Design',
-    'Engineering',
-    'Legal',
-    'Education',
-  ];
+  // The cities we can actually filter on. `location` maps to the server's
+  // `city` param, so these are city names rather than "City, Country" labels —
+  // sending the label matched nothing.
   const locations = [
-    'Sydney, Australia',
-    'Melbourne, Australia',
-    'Brisbane, Australia',
-    'Auckland, New Zealand',
-    'Remote',
+    'Brisbane',
+    'Sydney',
+    'Melbourne',
+    'Perth',
+    'Adelaide',
+    'Canberra',
+    'Hobart',
+    'Darwin',
   ];
 
   // Fetch apprenticeships
   const fetchApprenticeships = useCallback(async (pageNum: number, reset: boolean = false) => {
     try {
       setLoading(true);
+      // The server reads `framework` and `city`, one value each, and matches
+      // `level` against the AQF enum. It has no `industry` param at all.
       const response = await apprenticeshipApi.getAll({
         page: pageNum,
-        limit: 12,
-        search: filters.search,
-        industry: filters.industry.join(','),
-        level: filters.level.join(','),
-        location: filters.location,
+        limit: PAGE_SIZE,
+        search: filters.search || undefined,
+        framework: filters.framework[0] || undefined,
+        level: filters.level[0] || undefined,
+        city: filters.location || undefined,
         remote: filters.remote ?? undefined,
       });
-      
-      const data = response.data.data?.apprenticeships || [];
-      
+
+      // `{ success, data: [...], pagination }` — data is the array itself. This
+      // used to read `data.apprenticeships`, a key that has never existed, so
+      // the grid was permanently empty however many listings were open.
+      const payload = response.data;
+      const data: Apprenticeship[] = Array.isArray(payload?.data) ? payload.data : [];
+      const pagination = payload?.pagination;
+
       if (reset) {
         setApprenticeships(data);
       } else {
         setApprenticeships((prev) => [...prev, ...data]);
       }
-      
-      setHasMore(data.length === 12);
+
+      setTotal(pagination?.total ?? data.length);
+      setHasMore(
+        pagination ? pagination.page < pagination.pages : data.length === PAGE_SIZE
+      );
     } catch (error) {
       console.error('Failed to fetch apprenticeships:', error);
     } finally {
@@ -85,7 +103,8 @@ export default function ApprenticeshipsPage() {
     const fetchFeatured = async () => {
       try {
         const response = await apprenticeshipApi.getFeatured();
-        setFeaturedApprenticeships(response.data.data?.apprenticeships || []);
+        const data = response.data?.data;
+        setFeaturedApprenticeships(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Failed to fetch featured:', error);
       }
@@ -93,11 +112,33 @@ export default function ApprenticeshipsPage() {
     fetchFeatured();
   }, []);
 
+  // The filter bar offers what the catalogue actually contains rather than a
+  // hardcoded list of industries the schema has no column for.
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await apprenticeshipApi.getCategories();
+        const data = response.data?.data;
+        setFrameworks(Array.isArray(data?.frameworks) ? data.frameworks : []);
+      } catch (error) {
+        console.error('Failed to fetch apprenticeship categories:', error);
+      }
+    };
+    fetchCategories();
+  }, []);
+
   // Initial load and filter changes
   useEffect(() => {
     setPage(1);
     fetchApprenticeships(1, true);
   }, [fetchApprenticeships]);
+
+  const hasActiveFilters =
+    Boolean(filters.search) ||
+    filters.framework.length > 0 ||
+    filters.level.length > 0 ||
+    Boolean(filters.location) ||
+    filters.remote !== null;
 
   const handleLoadMore = () => {
     const nextPage = page + 1;
@@ -161,44 +202,20 @@ export default function ApprenticeshipsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      {/* Hero Section */}
-      <div className="bg-gradient-to-br from-primary-600 to-primary-800 text-white">
-        <div className="container mx-auto px-4 py-12">
-          <div className="max-w-3xl">
-            <h1 className="text-4xl font-bold mb-4">
-              Launch Your Career with an Apprenticeship
-            </h1>
-            <p className="text-lg text-primary-100 mb-8">
-              Gain hands-on experience, earn while you learn, and build the skills employers are looking for. 
-              Designed specifically for women entering or advancing in their careers.
-            </p>
-            <div className="flex flex-wrap gap-4">
-              <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
-                <GraduationCap className="w-5 h-5" />
-                <span>Earn certifications</span>
-              </div>
-              <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
-                <TrendingUp className="w-5 h-5" />
-                <span>Career growth</span>
-              </div>
-              <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
-                <Award className="w-5 h-5" />
-                <span>Mentorship included</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+    <PageShell width="wide">
+      <PageHero
+        kicker="Apprenticeships"
+        title="Get paid while you learn the trade"
+        description="Apprenticeships and traineeships with a registered training organisation — you work, you study, and you finish with a nationally recognised qualification."
+        primaryAction={{ label: 'Browse openings', href: '#all-apprenticeships' }}
+        secondaryAction={{ label: 'How it works', href: '/help/getting-started' }}
+      />
 
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="mt-8">
         {/* Featured Section */}
         {featuredApprenticeships.length > 0 && (
           <section className="mb-12">
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">
-              Featured Opportunities
-            </h2>
+            <h2 className="rail-title mb-4">Featured</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {featuredApprenticeships.slice(0, 3).map((apprenticeship) => (
                 <ApprenticeshipCard
@@ -219,7 +236,7 @@ export default function ApprenticeshipsPage() {
           <ApprenticeshipFiltersBar
             filters={filters}
             onFiltersChange={setFilters}
-            industries={industries}
+            frameworks={frameworks}
             locations={locations}
           />
         </section>
@@ -227,36 +244,59 @@ export default function ApprenticeshipsPage() {
         {/* Results */}
         <section>
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
-              All Apprenticeships
+            <h2 id="all-apprenticeships" className="rail-title">
+              All apprenticeships
             </h2>
             <span className="text-sm text-slate-500">
-              {apprenticeships.length} opportunities found
+              {total} {total === 1 ? 'opportunity' : 'opportunities'} found
             </span>
           </div>
 
           {loading && apprenticeships.length === 0 ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
+              <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
             </div>
           ) : apprenticeships.length === 0 ? (
             <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-xl">
               <GraduationCap className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-                No apprenticeships found
-              </h3>
-              <p className="text-slate-500 mb-4">
-                Try adjusting your filters to see more opportunities
-              </p>
-              <Button variant="outline" onClick={() => setFilters({
-                search: '',
-                industry: [],
-                level: [],
-                location: '',
-                remote: null,
-              })}>
-                Clear Filters
-              </Button>
+              {hasActiveFilters ? (
+                <>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+                    Nothing matches those filters
+                  </h3>
+                  <p className="text-slate-500 mb-4">
+                    Widen the search and see what else is open.
+                  </p>
+                  <Button variant="outline" onClick={() => setFilters(EMPTY_FILTERS)}>
+                    Clear filters
+                  </Button>
+                </>
+              ) : (
+                /* Telling someone to adjust filters they never set sends them
+                   hunting for listings that are not there. When the catalogue
+                   itself is empty, say so and point at the people who can fill
+                   it. */
+                <>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+                    No apprenticeships listed yet
+                  </h3>
+                  <p className="mx-auto mb-4 max-w-md text-slate-500">
+                    Providers and host employers are still coming on board. Register
+                    and we will tell you the moment one opens in your trade.
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button onClick={() => router.push('/register')}>
+                      Get notified
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => router.push('/contact-sales?intent=apprenticeships')}
+                    >
+                      List an apprenticeship
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <>
@@ -308,6 +348,6 @@ export default function ApprenticeshipsPage() {
           onSubmit={handleApplicationSubmit}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

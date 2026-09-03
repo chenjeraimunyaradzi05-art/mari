@@ -371,11 +371,21 @@ export default function ApplicationsPage() {
                 </Button>
               </Link>
               {selectedApp.user.profile?.resumeUrl && (
-                <a href={selectedApp.user.profile.resumeUrl} target="_blank" rel="noopener noreferrer">
-                  <Button variant="outline">
+                // asChild so the anchor IS the control: a nested button inside
+                // an anchor is invalid HTML, and the click was reaching the
+                // link only by accident of bubbling. It is also icon-only, so
+                // it needs a name for screen readers.
+                <Button asChild variant="outline">
+                  <a
+                    href={selectedApp.user.profile.resumeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open ${selectedApp.user.firstName}'s resume`}
+                    title="Open resume"
+                  >
                     <Download className="h-4 w-4" />
-                  </Button>
-                </a>
+                  </a>
+                </Button>
               )}
             </div>
 

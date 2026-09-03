@@ -14,25 +14,34 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { jobApi } from '@/lib/api';
+import { useAuthStore } from '@/lib/hooks';
 import { Job } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Avatar } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
+import { Modal, ModalContent, ModalFooter } from '@/components/ui/modal';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
 
 export default function JobDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
+
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasApplied, setHasApplied] = useState(false);
+  const [isApplyOpen, setIsApplyOpen] = useState(false);
+  const [coverLetter, setCoverLetter] = useState('');
+  const [isApplying, setIsApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchJob = async () => {
       try {
         const response = await jobApi.getById(params.id as string);
         setJob(response.data.data);
+        setHasApplied(Boolean(response.data.data?.hasApplied));
       } catch (error) {
         console.error('Failed to fetch job:', error);
       } finally {
@@ -44,6 +53,38 @@ export default function JobDetailsPage() {
       fetchJob();
     }
   }, [params.id]);
+
+  // Applying needs a session, so an anonymous visitor signs in and lands back on
+  // this job instead of losing their place in the listing.
+  const handleApplyClick = () => {
+    if (!job) return;
+
+    if (!isAuthenticated) {
+      router.push(`/login?redirect=${encodeURIComponent(`/jobs/${job.id}`)}`);
+      return;
+    }
+
+    setApplyError(null);
+    setIsApplyOpen(true);
+  };
+
+  const handleApplySubmit = async () => {
+    if (!job) return;
+
+    setIsApplying(true);
+    setApplyError(null);
+    try {
+      await jobApi.apply(job.id, { coverLetter: coverLetter.trim() || undefined });
+      setHasApplied(true);
+      setIsApplyOpen(false);
+      setCoverLetter('');
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setApplyError(message || 'Your application could not be submitted. Please try again.');
+    } finally {
+      setIsApplying(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -108,8 +149,13 @@ export default function JobDetailsPage() {
                   entityId={job.id}
                 />
               </div>
-              <Button size="lg" className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700">
-                Apply Now
+              <Button
+                size="lg"
+                className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700"
+                onClick={handleApplyClick}
+                disabled={isAuthLoading || hasApplied || job.status !== 'ACTIVE'}
+              >
+                {hasApplied ? 'Applied' : job.status === 'ACTIVE' ? 'Apply Now' : 'Closed'}
               </Button>
             </div>
           </div>
@@ -187,7 +233,7 @@ export default function JobDetailsPage() {
                 />
                 <div>
                   <p className="font-medium">{job.organization?.name}</p>
-                  <p className="text-xs text-muted-foreground">{job.organization?.industry}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{job.organization?.industry}</p>
                 </div>
               </div>
               
@@ -217,6 +263,50 @@ export default function JobDetailsPage() {
 
         </div>
       </div>
+
+      <Modal
+        isOpen={isApplyOpen}
+        onClose={() => setIsApplyOpen(false)}
+        title={`Apply to ${job.title}`}
+        description={job.organization?.name ? `at ${job.organization.name}` : undefined}
+        size="lg"
+      >
+        <ModalContent className="space-y-4">
+          <div className="grid gap-2">
+            <label htmlFor="cover-letter" className="text-sm font-medium text-slate-700">
+              Cover letter (optional)
+            </label>
+            <textarea
+              id="cover-letter"
+              value={coverLetter}
+              onChange={(event) => setCoverLetter(event.target.value)}
+              rows={6}
+              placeholder="Introduce yourself and explain why you're a great fit for this role..."
+              className="w-full rounded-lg border border-slate-200 p-3 text-sm resize-none"
+            />
+          </div>
+          <p className="text-sm text-slate-600">
+            Your ATHENA profile is shared with {job.organization?.name || 'the employer'} when you apply.
+          </p>
+          {applyError && (
+            <p className="text-sm text-red-600" role="alert">
+              {applyError}
+            </p>
+          )}
+        </ModalContent>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setIsApplyOpen(false)} disabled={isApplying}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-blue-600 hover:bg-blue-700"
+            onClick={handleApplySubmit}
+            disabled={isApplying}
+          >
+            {isApplying ? 'Submitting...' : 'Submit application'}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

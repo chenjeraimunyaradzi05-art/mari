@@ -5,7 +5,7 @@ import { Upload, X, Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
-import { Apprenticeship } from './ApprenticeshipCard';
+import { Apprenticeship, primaryOrg } from './types';
 import { cn } from '@/lib/utils';
 
 interface ApplicationModalProps {
@@ -29,6 +29,9 @@ export function ApplicationModal({
   apprenticeship,
   onSubmit,
 }: ApplicationModalProps) {
+  // Either the host employer or the RTO fronts the listing; there is no
+  // single `organization` field on an apprenticeship.
+  const orgName = primaryOrg(apprenticeship)?.name ?? 'the provider';
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -114,7 +117,7 @@ export function ApplicationModal({
           </h2>
           <p className="text-slate-500 dark:text-slate-400 mb-6">
             Your application for <strong>{apprenticeship.title}</strong> at{' '}
-            <strong>{apprenticeship.organization.name}</strong> has been submitted successfully.
+            <strong>{orgName}</strong> has been submitted successfully.
           </p>
           <p className="text-sm text-slate-500 mb-6">
             You'll receive an email confirmation shortly. The team will review your application and get back to you within 5-7 business days.
@@ -246,7 +249,7 @@ I am excited to apply for this apprenticeship opportunity because..."
                 <p className="text-slate-900 dark:text-white font-medium">
                   {apprenticeship.title}
                 </p>
-                <p className="text-sm text-slate-500">{apprenticeship.organization.name}</p>
+                <p className="text-sm text-slate-500">{orgName}</p>
               </div>
 
               <div>

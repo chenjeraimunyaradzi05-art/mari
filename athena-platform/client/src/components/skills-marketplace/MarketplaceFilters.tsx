@@ -21,7 +21,8 @@ export interface MarketplaceFilters {
 interface MarketplaceFiltersBarProps {
   filters: MarketplaceFilters;
   onFiltersChange: (filters: MarketplaceFilters) => void;
-  categories: Array<{ name: string; subcategories: string[] }>;
+  /** Real ServiceCategory values with live counts, from the server. */
+  categories: Array<{ value: string; label: string; count: number }>;
   viewMode: 'grid' | 'list';
   onViewModeChange: (mode: 'grid' | 'list') => void;
   resultCount?: number;
@@ -95,7 +96,7 @@ export function MarketplaceFiltersBar({
     filters.sellerLevel.length +
     (filters.minRating ? 1 : 0);
 
-  const selectedCategory = categories.find((c) => c.name === filters.category);
+  const selectedCategory = categories.find((c) => c.value === filters.category);
 
   return (
     <div className="space-y-4">
@@ -112,38 +113,22 @@ export function MarketplaceFiltersBar({
           />
         </div>
 
-        {/* Category dropdown */}
+        {/* Category dropdown. The enum value is what travels to the server;
+            the label is what shows. SkillService has no subcategory column, so
+            the second dropdown that used to sit here is gone. */}
         <select
           value={filters.category}
-          onChange={(e) => {
-            updateFilter('category', e.target.value);
-            updateFilter('subcategory', '');
-          }}
+          onChange={(e) => updateFilter('category', e.target.value)}
+          aria-label="Category"
           className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
         >
-          <option value="">All Categories</option>
+          <option value="">All categories</option>
           {categories.map((cat) => (
-            <option key={cat.name} value={cat.name}>
-              {cat.name}
+            <option key={cat.value} value={cat.value}>
+              {cat.label} ({cat.count})
             </option>
           ))}
         </select>
-
-        {/* Subcategory (if category selected) */}
-        {selectedCategory && selectedCategory.subcategories.length > 0 && (
-          <select
-            value={filters.subcategory}
-            onChange={(e) => updateFilter('subcategory', e.target.value)}
-            className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-          >
-            <option value="">All Subcategories</option>
-            {selectedCategory.subcategories.map((sub) => (
-              <option key={sub} value={sub}>
-                {sub}
-              </option>
-            ))}
-          </select>
-        )}
 
         {/* Filters toggle */}
         <Button
@@ -203,7 +188,7 @@ export function MarketplaceFiltersBar({
       {/* Results count */}
       {resultCount !== undefined && (
         <p className="text-sm text-slate-500">
-          {resultCount.toLocaleString()} services available
+          {resultCount.toLocaleString()} {resultCount === 1 ? 'service' : 'services'} available
         </p>
       )}
 
@@ -313,7 +298,7 @@ export function MarketplaceFiltersBar({
         <div className="flex flex-wrap gap-2">
           {filters.category && (
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 rounded-full text-sm">
-              {filters.category}
+              {selectedCategory?.label ?? filters.category}
               <button onClick={() => updateFilter('category', '')}>
                 <X className="w-3 h-3" />
               </button>

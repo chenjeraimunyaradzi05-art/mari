@@ -5,10 +5,13 @@ import { Search, Filter, MapPin, Clock, Briefcase, X, ChevronDown } from 'lucide
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { APPRENTICESHIP_LEVELS, levelLabel } from './types';
 
 export interface ApprenticeshipFilters {
   search: string;
-  industry: string[];
+  /** Training packages, sent to the server as `framework`. */
+  framework: string[];
+  /** AQF enum values, never the display labels. */
   level: string[];
   location: string;
   remote: boolean | null;
@@ -19,19 +22,18 @@ export interface ApprenticeshipFilters {
 interface ApprenticeshipFiltersProps {
   filters: ApprenticeshipFilters;
   onFiltersChange: (filters: ApprenticeshipFilters) => void;
-  industries: string[];
+  /** Frameworks with counts, from GET /apprenticeships/categories. */
+  frameworks: { name: string; count: number }[];
   locations: string[];
 }
 
 export function ApprenticeshipFiltersBar({
   filters,
   onFiltersChange,
-  industries,
+  frameworks,
   locations,
 }: ApprenticeshipFiltersProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-
-  const levels = ['entry', 'intermediate', 'advanced'];
 
   const updateFilter = <K extends keyof ApprenticeshipFilters>(
     key: K,
@@ -40,7 +42,7 @@ export function ApprenticeshipFiltersBar({
     onFiltersChange({ ...filters, [key]: value });
   };
 
-  const toggleArrayFilter = (key: 'industry' | 'level', value: string) => {
+  const toggleArrayFilter = (key: 'framework' | 'level', value: string) => {
     const current = filters[key];
     const updated = current.includes(value)
       ? current.filter((v) => v !== value)
@@ -51,7 +53,7 @@ export function ApprenticeshipFiltersBar({
   const clearFilters = () => {
     onFiltersChange({
       search: '',
-      industry: [],
+      framework: [],
       level: [],
       location: '',
       remote: null,
@@ -59,7 +61,7 @@ export function ApprenticeshipFiltersBar({
   };
 
   const activeFiltersCount =
-    filters.industry.length +
+    filters.framework.length +
     filters.level.length +
     (filters.location ? 1 : 0) +
     (filters.remote !== null ? 1 : 0);
@@ -107,19 +109,20 @@ export function ApprenticeshipFiltersBar({
           Remote Only
         </button>
 
-        {/* Level filters */}
-        {levels.map((level) => (
+        {/* Level filters. The enum value is what travels; the label is what
+            shows. Sending the label made Prisma reject the query outright. */}
+        {APPRENTICESHIP_LEVELS.map((level) => (
           <button
             key={level}
             onClick={() => toggleArrayFilter('level', level)}
             className={cn(
-              'px-3 py-1.5 rounded-full text-sm font-medium transition-colors capitalize',
+              'px-3 py-1.5 rounded-full text-sm font-medium transition-colors',
               filters.level.includes(level)
                 ? 'bg-primary-500 text-white'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             )}
           >
-            {level}
+            {levelLabel(level)}
           </button>
         ))}
 
@@ -138,21 +141,27 @@ export function ApprenticeshipFiltersBar({
       {showAdvanced && (
         <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Industry */}
+            {/* Training package. Comes from the server with live counts, so it
+                only ever offers frameworks that have listings behind them. */}
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Industry
+                Training package
               </label>
               <div className="space-y-2 max-h-40 overflow-y-auto">
-                {industries.map((industry) => (
-                  <label key={industry} className="flex items-center gap-2 cursor-pointer">
+                {frameworks.length === 0 && (
+                  <p className="text-sm text-slate-400">None listed yet</p>
+                )}
+                {frameworks.map((fw) => (
+                  <label key={fw.name} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={filters.industry.includes(industry)}
-                      onChange={() => toggleArrayFilter('industry', industry)}
+                      checked={filters.framework.includes(fw.name)}
+                      onChange={() => toggleArrayFilter('framework', fw.name)}
                       className="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
                     />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{industry}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">
+                      {fw.name} <span className="text-slate-400">({fw.count})</span>
+                    </span>
                   </label>
                 ))}
               </div>

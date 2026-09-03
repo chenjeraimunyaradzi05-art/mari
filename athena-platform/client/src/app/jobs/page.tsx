@@ -1,14 +1,21 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { Search, MapPin, Filter } from 'lucide-react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Briefcase, MapPin, Search } from 'lucide-react';
 import { jobApi } from '@/lib/api';
 import { Job } from '@/lib/types';
-import JobCard from '@/components/jobs/JobCard';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Spinner as LoadingSpinner } from '@/components/ui/loading';
+import JobCard, { JOB_TYPES } from '@/components/jobs/JobCard';
+import {
+  EmptyState,
+  FilterPill,
+  PageHero,
+  PageShell,
+  Section,
+  TileSkeleton,
+} from '@/components/layout/PageShell';
+
+const PAGE_SIZE = 10;
 
 export default function JobsPage() {
   return (
@@ -21,181 +28,306 @@ export default function JobsPage() {
 function JobsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  
-  // Filter States
-  const [search, setSearch] = useState(searchParams.get('q') || '');
-  const [location, setLocation] = useState(searchParams.get('loc') || '');
-  const [type, setType] = useState(searchParams.get('type') || '');
-  const [isRemote, setIsRemote] = useState(searchParams.get('remote') === 'true');
 
-  const fetchJobs = async () => {
-    setLoading(true);
-    try {
-      const response = await jobApi.search({
-        page,
-        limit: 10,
-        search,
-        city: location, // Naive location search
-        type: type || undefined,
-        remote: isRemote || undefined,
-      });
-      
-      setJobs(response.data.data);
-      setTotal(response.data.pagination.total);
-    } catch (error) {
-      console.error('Failed to fetch jobs:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  /* The URL is the single source of truth for the filters. Before this, the
+     pills and the fetch both read component state, so applying a filter raced
+     the state update and searched with the previous value. */
+  const query = searchParams.get('q') ?? '';
+  const city = searchParams.get('loc') ?? '';
+  /* An unknown ?type= — a hand-edited or stale URL — would filter every job
+     out while no pill looked selected, so it is dropped rather than sent. */
+  const typeParam = searchParams.get('type') ?? '';
+  const type = JOB_TYPES.some((t) => t.value === typeParam) ? typeParam : '';
+  const remoteOnly = searchParams.get('remote') === 'true';
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  const hasFilters = Boolean(query || city || type || remoteOnly);
+
+  /* Draft values for the two text inputs, which only commit on submit. */
+  const [draftQuery, setDraftQuery] = useState(query);
+  const [draftCity, setDraftCity] = useState(city);
+  useEffect(() => setDraftQuery(query), [query]);
+  useEffect(() => setDraftCity(city), [city]);
+
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const setParams = useCallback(
+    (next: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(next)) {
+        if (value) params.set(key, value);
+        else params.delete(key);
+      }
+      const qs = params.toString();
+      router.push(qs ? `/jobs?${qs}` : '/jobs');
+    },
+    [router, searchParams]
+  );
 
   useEffect(() => {
-    fetchJobs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, searchParams]); // Refetch when URL params change or page changes
+    let cancelled = false;
+    setLoading(true);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchJobs();
-    
-    // Update URL
-    const params = new URLSearchParams();
-    if (search) params.set('q', search);
-    if (location) params.set('loc', location);
-    if (type) params.set('type', type);
-    if (isRemote) params.set('remote', 'true');
-    router.push(`/jobs?${params.toString()}`);
-  };
+    jobApi
+      .search({
+        page,
+        limit: PAGE_SIZE,
+        search: query || undefined,
+        city: city || undefined,
+        type: type || undefined,
+        remote: remoteOnly || undefined,
+      })
+      .then((response) => {
+        if (cancelled) return;
+        const data = response.data?.data;
+        setJobs(Array.isArray(data) ? data : []);
+        setTotal(response.data?.pagination?.total ?? 0);
+        setFailed(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setJobs([]);
+        setTotal(0);
+        setFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [query, city, type, remoteOnly, page, reloadKey]);
+
+  const clearFilters = () => router.push('/jobs');
+
+  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  /* Back to page one of the same search, for a ?page= past the last result. */
+  const firstPageHref = (() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('page');
+    const qs = params.toString();
+    return qs ? `/jobs?${qs}` : '/jobs';
+  })();
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      <div className="flex flex-col md:flex-row gap-8">
-        {/* Sidebar Filters - Hidden on mobile for MVP simplicity, or stacked */}
-        <aside className="w-full md:w-64 flex-shrink-0 space-y-6">
-          <div className="bg-white p-6 rounded-lg border shadow-sm">
-            <h3 className="font-semibold mb-4 flex items-center gap-2">
-              <Filter className="h-4 w-4" /> Filters
-            </h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">Job Type</label>
-                <select 
-                  className="w-full p-2 border rounded-md text-sm"
-                  value={type}
-                  onChange={(e) => setType(e.target.value)}
-                >
-                  <option value="">All Types</option>
-                  <option value="FULL_TIME">Full Time</option>
-                  <option value="PART_TIME">Part Time</option>
-                  <option value="CONTRACT">Contract</option>
-                  <option value="INTERNSHIP">Internship</option>
-                  <option value="freelance">Freelance</option>
-                </select>
-              </div>
+    <PageShell width="wide">
+      <div className="space-y-6">
+        <PageHero
+          kicker="Jobs"
+          title="Find work that fits the life you're building"
+          description="Every role here was listed by an employer on ATHENA, with the pay they're offering and where the work actually happens. Whatever you're working towards, you don't have to do it alone."
+          primaryAction={{ label: 'Your applications', href: '/dashboard/applications' }}
+          secondaryAction={{ label: 'Hiring? List a role', href: '/employer' }}
+        />
 
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  id="remote" 
-                  checked={isRemote}
-                  onChange={(e) => setIsRemote(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300" 
-                />
-                <label htmlFor="remote" className="text-sm">Remote Only</label>
+        {/* Search and filters */}
+        <section className="surface p-5">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setParams({ q: draftQuery.trim(), loc: draftCity.trim(), page: null });
+            }}
+            className="flex flex-col gap-3 sm:flex-row"
+          >
+            <div className="relative flex-1">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <input
+                type="search"
+                value={draftQuery}
+                onChange={(e) => setDraftQuery(e.target.value)}
+                aria-label="Search job titles and descriptions"
+                placeholder="Job title, skill or keyword"
+                className="focusable w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+              />
+            </div>
+
+            <div className="relative sm:w-56">
+              <MapPin
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <input
+                type="text"
+                value={draftCity}
+                onChange={(e) => setDraftCity(e.target.value)}
+                aria-label="Filter by city"
+                placeholder="City"
+                className="focusable w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="focusable rounded-lg bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+            >
+              Search
+            </button>
+          </form>
+
+          <div className="mt-5 space-y-3">
+            <div>
+              <p className="kicker mb-2">Type of work</p>
+              <div className="flex flex-wrap gap-2">
+                <FilterPill active={!type} onClick={() => setParams({ type: null, page: null })}>
+                  Any type
+                </FilterPill>
+                {JOB_TYPES.map((option) => (
+                  <FilterPill
+                    key={option.value}
+                    active={type === option.value}
+                    onClick={() =>
+                      setParams({
+                        type: type === option.value ? null : option.value,
+                        page: null,
+                      })
+                    }
+                  >
+                    {option.label}
+                  </FilterPill>
+                ))}
               </div>
-              
-              <Button onClick={() => { setPage(1); fetchJobs(); }} className="w-full mt-2">
-                Apply Filters
-              </Button>
+            </div>
+
+            <div>
+              <p className="kicker mb-2">Where you work</p>
+              <FilterPill
+                active={remoteOnly}
+                onClick={() => setParams({ remote: remoteOnly ? null : 'true', page: null })}
+              >
+                Remote only
+              </FilterPill>
             </div>
           </div>
-        </aside>
+        </section>
 
-        {/* Main Content */}
-        <div className="flex-1">
-          {/* Search Header */}
-          <div className="bg-white p-4 rounded-lg border shadow-sm mb-6">
-            <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Search job titles or keywords..." 
-                  className="pl-9"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <div className="w-full md:w-48 relative">
-                <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Location" 
-                  className="pl-9"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                />
-              </div>
-              <Button type="submit">Search</Button>
-            </form>
-          </div>
-
-          {/* Job List */}
-          {loading ? (
-             <div className="flex justify-center py-12">
-               <LoadingSpinner />
-             </div>
+        <Section
+          icon={Briefcase}
+          title="Open roles"
+          description={resultLine({ loading, failed, total, shown: jobs.length, hasFilters })}
+        >
+          {failed ? (
+            <div className="rounded-xl border border-slate-200 px-6 py-10 text-center dark:border-slate-800">
+              <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+                Something went wrong loading the jobs. Your filters are still here, so try again in
+                a moment.
+              </p>
+              <button
+                type="button"
+                onClick={() => setReloadKey((k) => k + 1)}
+                className="focusable mt-4 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+              >
+                Try again
+              </button>
+            </div>
+          ) : loading ? (
+            <ul className="grid gap-3 lg:grid-cols-2">
+              <TileSkeleton count={6} className="h-40" />
+            </ul>
+          ) : jobs.length === 0 ? (
+            total > 0 ? (
+              /* Results exist, this page number is simply past the end of them.
+                 Neither empty state below is true here, and saying "nothing
+                 listed" to someone on ?page=9 of a real result set is a lie. */
+              <EmptyState
+                icon={Briefcase}
+                reason="empty"
+                title="That page is past the last result"
+                description={`This search has ${lastPage} ${lastPage === 1 ? 'page' : 'pages'} of results, and you are past the end of them.`}
+                primaryAction={{ label: 'Back to the first page', href: firstPageHref }}
+              />
+            ) : hasFilters ? (
+              <EmptyState
+                icon={Search}
+                reason="filtered"
+                title="No roles match those filters"
+                description="Nothing open fits that combination right now. Widening the search, or dropping the city, usually turns something up."
+                onClear={clearFilters}
+              />
+            ) : (
+              <EmptyState
+                icon={Briefcase}
+                reason="empty"
+                title="No roles have been listed yet"
+                description="No employer has posted a job on ATHENA so far. If you are hiring, yours would be the first one people see."
+                primaryAction={{ label: 'List a role', href: '/employer' }}
+              />
+            )
           ) : (
-            <div className="space-y-4">
-              <div className="mb-2 text-sm text-muted-foreground">
-                Found {total} jobs
-              </div>
-              
-              {jobs.length > 0 ? (
-                jobs.map((job) => (
-                  <JobCard key={job.id} job={job} />
-                ))
-              ) : (
-                <div className="text-center py-12 bg-white rounded-lg border border-dashed">
-                  <h3 className="text-lg font-medium text-slate-900">No jobs found</h3>
-                  <p className="text-muted-foreground mt-1">Try adjusting your filters or search terms.</p>
-                  <Button 
-                    variant="link" 
-                    onClick={() => { setSearch(''); setLocation(''); setType(''); setIsRemote(false); setPage(1); setTimeout(fetchJobs, 100); }}
-                  >
-                    Clear all filters
-                  </Button>
-                </div>
-              )}
+            <>
+              <ul className="grid gap-3 lg:grid-cols-2">
+                {jobs.map((job) => (
+                  <li key={job.id}>
+                    <JobCard job={job} />
+                  </li>
+                ))}
+              </ul>
 
-              {/* Pagination */}
-              {total > 10 && (
-                <div className="flex justify-center gap-2 mt-8">
-                  <Button 
-                    variant="outline" 
-                    disabled={page === 1}
-                    onClick={() => setPage(p => p - 1)}
+              {total > PAGE_SIZE && (
+                <nav
+                  aria-label="Job results pages"
+                  className="mt-6 flex items-center justify-center gap-3"
+                >
+                  <button
+                    type="button"
+                    disabled={page <= 1}
+                    onClick={() => setParams({ page: page > 2 ? String(page - 1) : null })}
+                    className="focusable rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
                   >
                     Previous
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    disabled={page * 10 >= total}
-                    onClick={() => setPage(p => p + 1)}
+                  </button>
+                  <span className="text-sm text-slate-600 dark:text-slate-400">
+                    Page {page} of {lastPage}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={page >= lastPage}
+                    onClick={() => setParams({ page: String(page + 1) })}
+                    className="focusable rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
                   >
                     Next
-                  </Button>
-                </div>
+                  </button>
+                </nav>
               )}
-            </div>
+            </>
           )}
-        </div>
+        </Section>
       </div>
-    </div>
+    </PageShell>
   );
+}
+
+/**
+ * The count line under the section heading. It says which of the four states
+ * the list is in, so "0 roles" never reads as a failure and a failure never
+ * reads as an empty marketplace.
+ */
+function resultLine({
+  loading,
+  failed,
+  total,
+  shown,
+  hasFilters,
+}: {
+  loading: boolean;
+  failed: boolean;
+  total: number;
+  shown: number;
+  hasFilters: boolean;
+}): string {
+  if (loading) return 'Loading roles.';
+  if (failed) return 'We could not reach the job listings just now.';
+  if (total === 0) return hasFilters ? 'Nothing matched.' : 'Nothing listed so far.';
+  if (shown === 0) return 'That page is past the end of the results.';
+  const noun = total === 1 ? 'role' : 'roles';
+  return hasFilters
+    ? `${total} ${noun} match what you asked for.`
+    : `${total} ${noun} open right now.`;
 }

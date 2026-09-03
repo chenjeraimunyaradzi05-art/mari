@@ -102,7 +102,14 @@ export default function OrganizationDetailPage() {
     );
   }
 
-  const jobs = jobsData?.jobs || [];
+  // `{ success, data: [...], pagination }` — after the `response.data.data`
+  // select above, jobsData IS the array. Reading `.jobs` off it meant the
+  // page always claimed "No open positions" however many were live.
+  const jobs = Array.isArray(jobsData) ? jobsData : [];
+  const courses = Array.isArray(org.courses) ? org.courses : [];
+
+  // Organization stores the address in three columns; there is no `location`.
+  const location = [org.city, org.state, org.country].filter(Boolean).join(', ');
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
@@ -119,9 +126,10 @@ export default function OrganizationDetailPage() {
       <div className="card overflow-hidden">
         {/* Cover */}
         <div className="h-32 md:h-48 -mx-6 -mt-6 mb-4 bg-gradient-to-r from-primary-500 to-secondary-500 relative">
-          {org.coverUrl && (
+          {org.banner && (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={org.coverUrl}
+              src={org.banner}
               alt={`${org.name} cover`}
               className="w-full h-full object-cover"
             />
@@ -131,9 +139,10 @@ export default function OrganizationDetailPage() {
         {/* Logo and Info */}
         <div className="flex flex-col md:flex-row md:items-end gap-4 -mt-16 md:-mt-20 relative z-10 px-4">
           <div className="w-24 h-24 md:w-32 md:h-32 bg-white dark:bg-slate-800 rounded-xl border-4 border-white dark:border-slate-900 shadow-lg flex items-center justify-center overflow-hidden">
-            {org.logoUrl ? (
+            {org.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={org.logoUrl}
+                src={org.logo}
                 alt={org.name}
                 className="w-full h-full object-contain p-2"
               />
@@ -170,10 +179,10 @@ export default function OrganizationDetailPage() {
 
         {/* Stats */}
         <div className="flex flex-wrap items-center gap-6 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
-          {org.location && (
+          {location && (
             <span className="flex items-center">
               <MapPin className="w-4 h-4 mr-1" />
-              {org.location}
+              {location}
             </span>
           )}
           {org.size && (
@@ -182,15 +191,18 @@ export default function OrganizationDetailPage() {
               {org.size} employees
             </span>
           )}
-          {org.founded && (
-            <span className="flex items-center">
-              <Calendar className="w-4 h-4 mr-1" />
-              Founded {org.founded}
+          {/* There is no `founded` column on Organization, so the date that
+              used to sit here never rendered. Verification is a real field
+              and worth surfacing in its place. */}
+          {org.isVerified && (
+            <span className="flex items-center text-emerald-600 dark:text-emerald-400">
+              <Star className="w-4 h-4 mr-1" />
+              Verified
             </span>
           )}
           <span className="flex items-center">
             <Briefcase className="w-4 h-4 mr-1" />
-            {jobs.length} open positions
+            {jobs.length} open {jobs.length === 1 ? 'position' : 'positions'}
           </span>
         </div>
       </div>
@@ -208,21 +220,28 @@ export default function OrganizationDetailPage() {
             </p>
           </div>
 
-          {/* Culture & Benefits */}
-          {org.benefits?.length > 0 && (
+          {/* Courses. The slug endpoint has always included these and nothing
+              rendered them. This replaces a "Benefits & Perks" block that read
+              an org.benefits column which does not exist. */}
+          {courses.length > 0 && (
             <div className="card">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-                Benefits & Perks
+                Courses ({courses.length})
               </h2>
-              <div className="grid grid-cols-2 gap-3">
-                {org.benefits.map((benefit: string, index: number) => (
-                  <div
-                    key={index}
-                    className="flex items-center space-x-2 text-slate-600 dark:text-slate-300"
+              <div className="space-y-3">
+                {courses.map((course: any) => (
+                  <Link
+                    key={course.id}
+                    href={`/dashboard/learn/${course.id}`}
+                    className="block p-4 border border-slate-100 dark:border-slate-800 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                   >
-                    <Star className="w-4 h-4 text-yellow-400" />
-                    <span className="text-sm">{benefit}</span>
-                  </div>
+                    <h3 className="font-medium text-slate-900 dark:text-white">{course.title}</h3>
+                    {course.description && (
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-500 dark:text-slate-400">
+                        {course.description}
+                      </p>
+                    )}
+                  </Link>
                 ))}
               </div>
             </div>
@@ -252,13 +271,21 @@ export default function OrganizationDetailPage() {
                           {job.title}
                         </h3>
                         <div className="flex items-center space-x-2 mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          <span>{job.location}</span>
+                          {/* Job stores city/state/country and isRemote. There is
+                              no `location` or `remote` field, so this line read
+                              blank and labelled every role "On-site". */}
+                          <span>
+                            {job.isRemote
+                              ? 'Remote'
+                              : [job.city, job.state].filter(Boolean).join(', ') ||
+                                'Location not given'}
+                          </span>
                           <span>•</span>
-                          <span>{job.type}</span>
+                          <span className="capitalize">{String(job.type || '').replace(/_/g, ' ').toLowerCase()}</span>
                         </div>
                       </div>
-                      <Badge variant={job.remote ? 'success' : 'secondary'}>
-                        {job.remote ? 'Remote' : 'On-site'}
+                      <Badge variant={job.isRemote ? 'success' : 'secondary'}>
+                        {job.isRemote ? 'Remote' : 'On-site'}
                       </Badge>
                     </div>
                   </Link>
@@ -295,48 +322,38 @@ export default function OrganizationDetailPage() {
               <div>
                 <dt className="text-sm text-slate-500 dark:text-slate-400">Headquarters</dt>
                 <dd className="font-medium text-slate-900 dark:text-white">
-                  {org.location || 'Not specified'}
+                  {location || 'Not specified'}
                 </dd>
               </div>
-              <div>
-                <dt className="text-sm text-slate-500 dark:text-slate-400">Founded</dt>
-                <dd className="font-medium text-slate-900 dark:text-white">
-                  {org.founded || 'Not specified'}
-                </dd>
-              </div>
+              {org.type && (
+                <div>
+                  <dt className="text-sm text-slate-500 dark:text-slate-400">Type</dt>
+                  <dd className="font-medium capitalize text-slate-900 dark:text-white">
+                    {org.type}
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 
-          {/* Social Links */}
-          {(org.linkedinUrl || org.twitterUrl) && (
+          {/* A "Connect" card used to sit here reading org.linkedinUrl and
+              org.twitterUrl. Organization has neither column, so the guard was
+              always false and the card never rendered. The website is the one
+              external link we actually store, and it is already in the header. */}
+          {org.website && (
             <div className="card">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
                 Connect
               </h2>
-              <div className="space-y-2">
-                {org.linkedinUrl && (
-                  <a
-                    href={org.linkedinUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center text-slate-600 dark:text-slate-300 hover:text-primary-600 transition"
-                  >
-                    <span>LinkedIn</span>
-                    <ExternalLink className="w-3 h-3 ml-1" />
-                  </a>
-                )}
-                {org.twitterUrl && (
-                  <a
-                    href={org.twitterUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center text-slate-600 dark:text-slate-300 hover:text-primary-600 transition"
-                  >
-                    <span>Twitter</span>
-                    <ExternalLink className="w-3 h-3 ml-1" />
-                  </a>
-                )}
-              </div>
+              <a
+                href={org.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center text-slate-600 dark:text-slate-300 hover:text-primary-600 transition"
+              >
+                <span>{org.website.replace(/^https?:\/\//, '')}</span>
+                <ExternalLink className="w-3 h-3 ml-1" />
+              </a>
             </div>
           )}
         </div>
