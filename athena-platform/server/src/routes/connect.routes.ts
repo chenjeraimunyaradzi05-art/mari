@@ -114,8 +114,11 @@ router.post('/escrow', authenticate, async (req: AuthRequest, res: Response, nex
 router.post('/escrow/:paymentId/capture', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { paymentId } = req.params;
-    
-    const result = await stripeConnectService.captureEscrowPayment(paymentId);
+
+    const result = await stripeConnectService.captureEscrowPayment(paymentId, {
+      id: req.user!.id,
+      role: req.user!.role,
+    });
     
     res.json({
       success: true,
@@ -135,8 +138,12 @@ router.post('/escrow/:paymentId/cancel', authenticate, async (req: AuthRequest, 
   try {
     const { paymentId } = req.params;
     const { reason } = req.body;
-    
-    const result = await stripeConnectService.cancelEscrowPayment(paymentId, reason);
+
+    const result = await stripeConnectService.cancelEscrowPayment(
+      paymentId,
+      { id: req.user!.id, role: req.user!.role },
+      reason
+    );
     
     res.json({
       success: true,
@@ -221,15 +228,19 @@ router.post(
  */
 router.post('/payout', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { amount, currency, connectedAccountId } = req.body;
-    
+    const { amount, currency } = req.body;
+
     if (!amount) {
       throw new ApiError(400, 'amount is required');
     }
-    if (!connectedAccountId) {
-      throw new ApiError(400, 'connectedAccountId is required');
-    }
-    
+
+    // The destination is resolved from the session, never from the request.
+    // Taking it from the body let any authenticated user name someone else's
+    // connected account and move money out of it.
+    const connectedAccountId = await stripeConnectService.requireConnectedAccountId(
+      req.user!.id
+    );
+
     const payout = await stripeConnectService.createPayout({
       connectedAccountId,
       amount,

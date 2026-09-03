@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
-import { authenticate, AuthRequest, optionalAuth } from '../middleware/auth';
+import { authenticate, requireRole, AuthRequest, optionalAuth } from '../middleware/auth';
 import crypto from 'crypto';
 
 const router = Router();
@@ -202,17 +202,19 @@ router.post('/track', authenticate, async (req: AuthRequest, res: Response, next
 
 /**
  * POST /referrals/:id/complete
- * Mark a referral as completed and grant rewards
- * Called when referred user completes qualifying action (e.g., first post, subscription)
+ * Mark a referral as completed and grant rewards to both parties
+ *
+ * Completion pays out real credit, so it is not something either side of a
+ * referral can trigger on their own referral. It is recorded by staff once the
+ * referred user's qualifying action has been verified.
  */
-router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/:id/complete', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const referral = await prisma.referral.findUnique({
       where: { id },
       include: {
-        referrer: true,
-        referred: true,
+        referred: { select: { firstName: true } },
       },
     });
 
@@ -227,40 +229,52 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
     // Update referral and grant credits to both users
     const REFERRAL_CREDITS = 100; // Credits for each party
 
-    await prisma.$transaction([
-      // Update referral status
-      prisma.referral.update({
-        where: { id },
+    const granted = await prisma.$transaction(async (tx) => {
+      // Moving the row out of PENDING is the claim on the reward. A replay, or
+      // a second request racing this one, updates no rows and mints nothing.
+      const claimed = await tx.referral.updateMany({
+        where: { id, status: { not: 'COMPLETED' } },
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
           rewardGranted: true,
         },
-      }),
+      });
+
+      if (claimed.count === 0) {
+        return false;
+      }
+
       // Grant credits to referrer
-      prisma.user.update({
+      await tx.user.update({
         where: { id: referral.referrerId },
         data: {
           referralCredits: { increment: REFERRAL_CREDITS },
         },
-      }),
+      });
       // Grant credits to referred user
-      prisma.user.update({
+      await tx.user.update({
         where: { id: referral.referredId },
         data: {
           referralCredits: { increment: REFERRAL_CREDITS },
         },
-      }),
+      });
       // Notify referrer
-      prisma.notification.create({
+      await tx.notification.create({
         data: {
           userId: referral.referrerId,
           type: 'SYSTEM',
           title: 'Referral Completed!',
           message: `${referral.referred.firstName} completed signup! You both earned ${REFERRAL_CREDITS} credits.`,
         },
-      }),
-    ]);
+      });
+
+      return true;
+    });
+
+    if (!granted) {
+      return res.status(400).json({ error: 'Referral already completed' });
+    }
 
     res.json({ success: true, creditsGranted: REFERRAL_CREDITS });
   } catch (error) {

@@ -7,10 +7,80 @@
 import { Router } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { invoiceService } from '../services/invoice.service';
-import { authenticate } from '../middleware/auth';
+import { prisma } from '../utils/prisma';
+import { authenticate, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 
 const router = Router();
+
+const ATHENA_BILLING = {
+  name: 'ATHENA Platform Pty Ltd',
+  address: [
+    'Australia',
+    'Final billing address to be published before production invoicing is enabled',
+  ],
+  email: 'billing@athena.app',
+};
+
+const PAYMENT_DESCRIPTIONS: Record<string, string> = {
+  SUBSCRIPTION: 'Athena Subscription',
+  MENTOR_SESSION: 'Mentorship Session',
+  COURSE: 'Course Purchase',
+  FORMATION: 'Business Formation Service',
+  JOB_BOOST: 'Job Posting Boost',
+};
+
+/**
+ * Re-render a stored invoice.
+ *
+ * A download renders the invoice that was already issued rather than asking the
+ * service to issue one: generating afresh would file a second Invoice row, and
+ * a second invoice number, every time somebody clicked download.
+ */
+async function renderStoredInvoice(invoice: any): Promise<Buffer> {
+  const payment = invoice.paymentId
+    ? await prisma.payment.findUnique({ where: { id: invoice.paymentId } })
+    : null;
+
+  const amount = Number(invoice.amount);
+  const issuedAt = invoice.issuedAt ?? invoice.createdAt;
+
+  const description = invoice.subscription
+    ? `Athena ${invoice.subscription.tier} Subscription`
+    : (payment?.type && PAYMENT_DESCRIPTIONS[payment.type]) || 'Athena Platform Service';
+
+  return invoiceService.generateInvoicePDF({
+    invoiceNumber: invoice.invoiceNumber,
+    invoiceDate: issuedAt,
+    dueDate: invoice.dueAt ?? issuedAt,
+    status: invoice.status,
+
+    seller: ATHENA_BILLING,
+
+    buyer: {
+      name: invoice.user?.displayName || 'Customer',
+      email: invoice.user?.email || '',
+    },
+
+    items: [
+      {
+        description,
+        quantity: 1,
+        unitPrice: amount,
+        amount,
+      },
+    ],
+
+    subtotal: amount,
+    taxTotal: 0,
+    total: amount,
+    currency: invoice.currency,
+
+    paymentMethod: payment?.method ?? undefined,
+    paymentDate: invoice.paidAt ?? undefined,
+    transactionId: payment?.stripePaymentIntentId ?? undefined,
+  });
+}
 
 /**
  * @route GET /api/invoices
@@ -79,12 +149,8 @@ router.get('/:invoiceId/pdf', authenticate, async (req: AuthRequest, res, next) 
       throw new ApiError(403, 'Not authorized to download this invoice');
     }
     
-    // Generate PDF on the fly (or retrieve from storage)
-    const { pdf } = await invoiceService.createInvoiceForPayment(
-      invoice.paymentId,
-      { sendEmail: false }
-    );
-    
+    const pdf = await renderStoredInvoice(invoice);
+
     // Set security headers - prevent caching of sensitive financial data
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.setHeader('Pragma', 'no-cache');
@@ -104,7 +170,7 @@ router.get('/:invoiceId/pdf', authenticate, async (req: AuthRequest, res, next) 
  * @desc Generate invoice for a payment
  * @access Private (Admin)
  */
-router.post('/payment/:paymentId', authenticate, async (req, res, next) => {
+router.post('/payment/:paymentId', authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try {
     const { paymentId } = req.params;
     const { sendEmail } = req.body;

@@ -12,6 +12,27 @@ function parseLimit(value: unknown, fallback = 20, max = 50): number {
   return Math.min(parsed, max);
 }
 
+/**
+ * Marks which of these services the viewer has saved.
+ *
+ * The card renders a heart toggle, so without this every service came back
+ * looking unsaved and the icon reset on each load. One query for the page
+ * rather than one per row.
+ */
+async function withFavoriteState<T extends { id: string }>(items: T[], userId?: string) {
+  if (!userId || items.length === 0) {
+    return items.map((item) => ({ ...item, isFavorite: false }));
+  }
+
+  const favorites = await prisma.serviceFavorite.findMany({
+    where: { userId, serviceId: { in: items.map((i) => i.id) } },
+    select: { serviceId: true },
+  });
+  const favorited = new Set(favorites.map((f) => f.serviceId));
+
+  return items.map((item) => ({ ...item, isFavorite: favorited.has(item.id) }));
+}
+
 // ===========================================
 // LIST SERVICES
 // ===========================================
@@ -55,7 +76,7 @@ router.get('/services', optionalAuth, async (req: AuthRequest, res, next) => {
 
     res.json({
       success: true,
-      data: services,
+      data: await withFavoriteState(services, req.user?.id),
       pagination: {
         page,
         limit,

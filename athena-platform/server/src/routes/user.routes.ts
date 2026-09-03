@@ -3,6 +3,12 @@ import { body, param, query, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import {
+  gdprRegionMiddleware,
+  anonymizeIP,
+  auditIpAddress,
+  dsarRateLimit,
+} from '../middleware/gdpr.middleware';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRegionConfig, normalizeRegion } from '../utils/region';
 import { logger } from '../utils/logger';
@@ -170,7 +176,15 @@ const syncUserToIndex = async (userId: string) => {
 // ===========================================
 // DOWNLOAD MY DATA (DSAR Export)
 // ===========================================
-router.get('/me/export', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get(
+  '/me/export',
+  authenticate,
+  gdprRegionMiddleware,
+  anonymizeIP,
+  // The same right as POST /api/gdpr/dsar/export, so the same quota: a member
+  // must not be able to sidestep the throttle by using the older route.
+  dsarRateLimit(5, 60 * 60 * 1000, 'dsar-export'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
 
@@ -347,7 +361,9 @@ router.get('/me/export', authenticate, async (req: AuthRequest, res: Response, n
         action: 'DSAR_EXPORT',
         actorUserId: userId,
         targetUserId: userId,
-        ipAddress: req.ip,
+        // Truncated inside the GDPR footprint: an accountability record does not
+        // need a full address to place the request.
+        ipAddress: auditIpAddress(req) || undefined,
         userAgent: req.get('user-agent') || undefined,
         metadata: {
           exportedAt: new Date().toISOString(),

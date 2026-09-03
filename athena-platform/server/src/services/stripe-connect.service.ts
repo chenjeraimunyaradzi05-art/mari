@@ -47,6 +47,16 @@ export interface PayoutInput {
   description?: string;
 }
 
+/**
+ * Who is asking for an escrow transition. Escrow moves real money between two
+ * named people, so a transition has to be authorised against the row itself —
+ * holding a valid session is not enough.
+ */
+export interface EscrowActor {
+  id: string;
+  role?: string;
+}
+
 export interface EscrowPaymentInput {
   buyerId: string;
   sellerId: string;
@@ -314,9 +324,37 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
 }
 
 /**
+ * Authorise an escrow transition against the row it targets.
+ *
+ * 'buyer' is for releasing funds: only the person who paid can confirm the
+ * service actually arrived. 'cancel' returns the money to the buyer, so either
+ * party backing out is safe.
+ *
+ * A non-party gets the same 404 an unknown id gets, deliberately — otherwise
+ * this endpoint becomes an oracle for which payment intents exist.
+ */
+function assertEscrowParty(
+  escrow: { buyerId: string; sellerId: string },
+  actor: EscrowActor,
+  allow: 'buyer' | 'either'
+): void {
+  if (actor.role === 'ADMIN') return;
+
+  const isBuyer = escrow.buyerId === actor.id;
+  const isSeller = escrow.sellerId === actor.id;
+
+  if (allow === 'buyer' ? isBuyer : isBuyer || isSeller) return;
+
+  throw new ApiError(404, 'Escrow payment not found');
+}
+
+/**
  * Capture escrowed payment (release funds to seller after service delivered)
  */
-export async function captureEscrowPayment(paymentIntentId: string): Promise<{
+export async function captureEscrowPayment(
+  paymentIntentId: string,
+  actor: EscrowActor
+): Promise<{
   status: string;
   amountCaptured: number;
 }> {
@@ -327,6 +365,8 @@ export async function captureEscrowPayment(paymentIntentId: string): Promise<{
   if (!escrow) {
     throw new ApiError(404, 'Escrow payment not found');
   }
+
+  assertEscrowParty(escrow, actor, 'buyer');
 
   if (escrow.status !== 'PENDING' && escrow.status !== 'AUTHORIZED') {
     throw new ApiError(400, `Cannot capture payment in ${escrow.status} status`);
@@ -369,6 +409,7 @@ export async function captureEscrowPayment(paymentIntentId: string): Promise<{
  */
 export async function cancelEscrowPayment(
   paymentIntentId: string,
+  actor: EscrowActor,
   reason?: string
 ): Promise<{ status: string }> {
   const escrow = await prisma.escrowPayment.findUnique({
@@ -378,6 +419,8 @@ export async function cancelEscrowPayment(
   if (!escrow) {
     throw new ApiError(404, 'Escrow payment not found');
   }
+
+  assertEscrowParty(escrow, actor, 'either');
 
   if (escrow.status === 'REFUNDED' || escrow.status === 'CANCELED') {
     throw new ApiError(400, 'Payment already canceled or refunded');
@@ -525,7 +568,7 @@ export interface PayoutMethod {
 
 // Resolves the caller's connected account, or explains what they need to do
 // first. Every payout-method operation needs this.
-async function requireConnectedAccountId(userId: string): Promise<string> {
+export async function requireConnectedAccountId(userId: string): Promise<string> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { stripeConnectAccountId: true },
@@ -653,4 +696,5 @@ export const stripeConnectService = {
   cancelEscrowPayment,
   getEarningsDashboard,
   createPayout,
+  requireConnectedAccountId,
 };

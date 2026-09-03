@@ -6,6 +6,9 @@ jest.mock('../../utils/prisma', () => ({
     apprenticeship: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), groupBy: jest.fn() },
     apprenticeshipApplication: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     apprenticeshipBookmark: { findMany: jest.fn() },
+    // Staff reach an application through membership of the RTO or the host
+    // employer named on the apprenticeship, never through their role alone.
+    organizationMember: { findFirst: jest.fn(), findMany: jest.fn() },
     user: { findUnique: jest.fn() },
   },
 }));
@@ -121,6 +124,12 @@ describe('Apprenticeship categories and recommendations', () => {
 describe('A single apprenticeship application', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (prisma.apprenticeship.findUnique as any).mockResolvedValue({
+      id: 'ap1',
+      rtoId: 'rto-1',
+      hostEmployerId: 'employer-1',
+    });
+    (prisma.organizationMember.findFirst as any).mockResolvedValue(null);
     (prisma.apprenticeshipApplication.update as any).mockImplementation(async (args: any) => ({
       id: 'a1',
       ...args.data,
@@ -138,19 +147,49 @@ describe('A single apprenticeship application', () => {
     expect(res.body.data.id).toBe('a1');
   });
 
-  it('an unrelated user cannot read it', async () => {
+  it('an unrelated user is answered 404, not 403', async () => {
     mockApplication();
 
-    await request(app).get('/api/apprenticeships/applications/a1').set(as(OTHER)).expect(403);
+    // 403 would confirm to anyone guessing ids that this application exists.
+    await request(app).get('/api/apprenticeships/applications/a1').set(as(OTHER)).expect(404);
   });
 
-  it('provider staff can read it', async () => {
+  it('provider staff of the owning RTO can read it', async () => {
     mockApplication();
+    (prisma.organizationMember.findFirst as any).mockResolvedValue({ id: 'm1' });
 
     await request(app)
       .get('/api/apprenticeships/applications/a1')
       .set(as(OTHER, 'EDUCATION_PROVIDER'))
       .expect(200);
+
+    expect((prisma.organizationMember.findFirst as any).mock.calls[0][0].where).toMatchObject({
+      userId: OTHER,
+      organizationId: { in: ['rto-1', 'employer-1'] },
+    });
+  });
+
+  it('provider staff from an unrelated organization cannot read it', async () => {
+    mockApplication();
+    (prisma.organizationMember.findFirst as any).mockResolvedValue(null);
+
+    // Holding the EDUCATION_PROVIDER role is not entitlement to another
+    // provider's applicants.
+    await request(app)
+      .get('/api/apprenticeships/applications/a1')
+      .set(as(OTHER, 'EDUCATION_PROVIDER'))
+      .expect(404);
+  });
+
+  it('an admin can read it without an organization membership', async () => {
+    mockApplication();
+
+    await request(app)
+      .get('/api/apprenticeships/applications/a1')
+      .set(as(OTHER, 'ADMIN'))
+      .expect(200);
+
+    expect(prisma.organizationMember.findFirst).not.toHaveBeenCalled();
   });
 
   it('/applications/me is not captured by /applications/:applicationId', async () => {

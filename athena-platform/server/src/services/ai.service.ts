@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger';
+import { sanitizeChatHistory, truncate, DEFAULT_MAX_TOKENS } from '../utils/llm';
 
 class AiService {
   private openai: OpenAI | null = null;
@@ -360,18 +361,22 @@ Candidate answer: ${params.answer}`;
      
      try {
          const systemPrompt = "You are ATHENA, an AI career assistant designed to empower women in their professional journeys. Be supportive but professional.";
-         // Validate history structure to be safe
-         const validHistory = Array.isArray(history) ? history.map(h => ({ role: h.role || 'user', content: h.content || '' })) : [];
+         // The previous version defaulted a missing role to 'user' but passed a
+         // supplied one through untouched, so a caller could send role 'system'
+         // and replace the prompt above. sanitizeChatHistory drops anything
+         // that is not a well-formed user/assistant turn.
+         const validHistory = sanitizeChatHistory(history);
 
          const messages: any[] = [
              { role: 'system', content: systemPrompt },
              ...validHistory,
-             { role: 'user', content: message }
+             { role: 'user', content: truncate(message, 8000) }
          ];
 
          const completion = await this.openai.chat.completions.create({
              messages,
              model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+             max_tokens: DEFAULT_MAX_TOKENS,
          });
          return completion.choices[0]?.message?.content || '';
      } catch (e) {

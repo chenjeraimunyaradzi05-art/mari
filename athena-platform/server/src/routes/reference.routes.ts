@@ -6,10 +6,63 @@
 
 import { Router } from 'express';
 import { referenceCheckService } from '../services/reference-check.service';
+import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 
 const router = Router();
+
+/**
+ * References hang off the candidate's own job application, so an applicationId
+ * arriving in a request body proves nothing on its own. An application that is
+ * not the caller's is reported as missing: a 403 would let anyone confirm which
+ * application ids exist.
+ */
+async function requireOwnApplication(applicationId: string, userId: string): Promise<void> {
+  const application = await prisma.jobApplication.findUnique({
+    where: { id: applicationId },
+    select: { userId: true },
+  });
+
+  if (!application || application.userId !== userId) {
+    throw new ApiError(404, 'Application not found');
+  }
+}
+
+/**
+ * Referee feedback is readable by the candidate it is about and by the employer
+ * hiring for the job, which means the person who posted it or the staff of the
+ * organization behind it.
+ */
+async function canReadApplicationReferences(
+  applicationId: string,
+  user: { id: string; role: string }
+): Promise<boolean> {
+  const application = await prisma.jobApplication.findUnique({
+    where: { id: applicationId },
+    select: {
+      userId: true,
+      job: { select: { postedById: true, organizationId: true } },
+    },
+  });
+
+  if (!application) return false;
+  if (application.userId === user.id || user.role === 'ADMIN') return true;
+  if (application.job.postedById === user.id) return true;
+  if (!application.job.organizationId) return false;
+
+  const membership = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: application.job.organizationId,
+        userId: user.id,
+      },
+    },
+    select: { id: true },
+  });
+
+  return Boolean(membership);
+}
 
 // ==========================================
 // CANDIDATE ROUTES
@@ -36,7 +89,11 @@ router.post('/request', authenticate, async (req: AuthRequest, res, next) => {
     if (!refereeEmail || !refereeName || !relationship || !type) {
       throw new ApiError(400, 'refereeEmail, refereeName, relationship, and type are required');
     }
-    
+
+    if (applicationId) {
+      await requireOwnApplication(applicationId, req.user!.id);
+    }
+
     const request = await referenceCheckService.createReferenceRequest({
       candidateId: req.user!.id,
       applicationId,
@@ -70,7 +127,11 @@ router.post('/batch', authenticate, async (req: AuthRequest, res, next) => {
     if (!referees || !Array.isArray(referees) || referees.length === 0) {
       throw new ApiError(400, 'referees array is required');
     }
-    
+
+    if (applicationId) {
+      await requireOwnApplication(applicationId, req.user!.id);
+    }
+
     const result = await referenceCheckService.batchSendReferenceRequests(
       req.user!.id,
       referees,
@@ -94,7 +155,18 @@ router.post('/batch', authenticate, async (req: AuthRequest, res, next) => {
 router.post('/:referenceId/send', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { referenceId } = req.params;
-    
+
+    const reference = await prisma.referenceRequest.findUnique({
+      where: { id: referenceId },
+      select: { candidateId: true },
+    });
+
+    // Only the candidate the reference is about can put their name in front of
+    // a referee.
+    if (!reference || reference.candidateId !== req.user!.id) {
+      throw new ApiError(404, 'Reference request not found');
+    }
+
     const success = await referenceCheckService.sendReferenceRequest(referenceId);
     
     res.json({
@@ -127,12 +199,16 @@ router.get('/summary', authenticate, async (req: AuthRequest, res, next) => {
 /**
  * @route GET /api/references/application/:applicationId
  * @desc Get references for a job application
- * @access Private
+ * @access Private (Candidate or hiring employer)
  */
-router.get('/application/:applicationId', authenticate, async (req, res, next) => {
+router.get('/application/:applicationId', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { applicationId } = req.params;
-    
+
+    if (!(await canReadApplicationReferences(applicationId, req.user!))) {
+      throw new ApiError(404, 'Application not found');
+    }
+
     const references = await referenceCheckService.getApplicationReferences(applicationId);
     
     res.json({

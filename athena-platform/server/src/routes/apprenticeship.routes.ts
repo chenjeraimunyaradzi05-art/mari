@@ -27,6 +27,71 @@ async function uniqueSlug(base: string): Promise<string> {
   return `${base}-${uuidv4().slice(0, 6)}`;
 }
 
+type StaffUser = { id: string; role: string };
+
+// An apprenticeship belongs to the RTO and the host employer named on it, so
+// staff reach it through membership of one of those organizations. Holding the
+// EMPLOYER or EDUCATION_PROVIDER role is not by itself entitlement to another
+// provider's listing, its applicants or their evidence.
+//
+// Returns null both for "no such apprenticeship" and "not yours", so callers
+// answer 404 either way: a 403 would confirm an unpublished listing exists to a
+// competitor who guessed its id.
+async function findApprenticeshipForStaff(apprenticeshipId: string, user: StaffUser) {
+  const apprenticeship = await prisma.apprenticeship.findUnique({ where: { id: apprenticeshipId } });
+
+  if (!apprenticeship) return null;
+  if (user.role === 'ADMIN') return apprenticeship;
+
+  const orgIds = [apprenticeship.rtoId, apprenticeship.hostEmployerId].filter(
+    (orgId): orgId is string => Boolean(orgId)
+  );
+
+  if (orgIds.length === 0) return null;
+
+  const membership = await prisma.organizationMember.findFirst({
+    where: { userId: user.id, organizationId: { in: orgIds } },
+    select: { id: true },
+  });
+
+  return membership ? apprenticeship : null;
+}
+
+/**
+ * Marks which of these listings the viewer has bookmarked.
+ *
+ * The card renders a bookmark toggle, so without this every listing came back
+ * looking un-bookmarked and the icon reset on each page load. One query for the
+ * whole page rather than one per row.
+ */
+async function withBookmarkState<T extends { id: string }>(items: T[], userId?: string) {
+  if (!userId || items.length === 0) {
+    return items.map((item) => ({ ...item, isBookmarked: false }));
+  }
+
+  const bookmarks = await prisma.apprenticeshipBookmark.findMany({
+    where: { userId, apprenticeshipId: { in: items.map((i) => i.id) } },
+    select: { apprenticeshipId: true },
+  });
+  const bookmarked = new Set(bookmarks.map((b) => b.apprenticeshipId));
+
+  return items.map((item) => ({ ...item, isBookmarked: bookmarked.has(item.id) }));
+}
+
+async function requireOrgMembership(organizationIds: string[], user: StaffUser) {
+  if (user.role === 'ADMIN' || organizationIds.length === 0) return;
+
+  const memberships = await prisma.organizationMember.findMany({
+    where: { userId: user.id, organizationId: { in: organizationIds } },
+    select: { organizationId: true },
+  });
+
+  const joined = new Set(memberships.map((m) => m.organizationId));
+  if (organizationIds.some((orgId) => !joined.has(orgId))) {
+    throw new ApiError(403, 'You can only list an apprenticeship for an organization you belong to');
+  }
+}
+
 // ===========================================
 // LIST APPRENTICESHIPS
 // ===========================================
@@ -79,7 +144,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
 
     res.json({
       success: true,
-      data: items,
+      data: await withBookmarkState(items, req.user?.id),
       pagination: {
         page,
         limit,
@@ -111,7 +176,7 @@ router.get('/featured', optionalAuth, async (req: AuthRequest, res, next) => {
       },
     });
 
-    res.json({ success: true, data: apprenticeships });
+    res.json({ success: true, data: await withBookmarkState(apprenticeships, req.user?.id) });
   } catch (error) {
     next(error);
   }
@@ -351,6 +416,18 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const orgIds = [req.body.rtoId, req.body.hostEmployerId].filter(
+        (orgId: unknown): orgId is string => typeof orgId === 'string' && orgId.length > 0
+      );
+
+      // Without an owning organization the listing would be unreachable for
+      // everyone but an admin afterwards, and its applicants unscopable.
+      if (orgIds.length === 0 && req.user!.role !== 'ADMIN') {
+        throw new ApiError(400, 'An apprenticeship must name its RTO or its host employer');
+      }
+
+      await requireOrgMembership(orgIds, req.user!);
+
       const baseSlug = slugify(req.body.title);
       const slug = await uniqueSlug(baseSlug);
 
@@ -420,7 +497,7 @@ router.patch(
       }
 
       const { id } = req.params;
-      const existing = await prisma.apprenticeship.findUnique({ where: { id } });
+      const existing = await findApprenticeshipForStaff(id, req.user!);
       if (!existing) {
         throw new ApiError(404, 'Apprenticeship not found');
       }
@@ -461,7 +538,7 @@ router.patch(
 router.post('/:id/publish', authenticate, requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'), async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const existing = await prisma.apprenticeship.findUnique({ where: { id } });
+    const existing = await findApprenticeshipForStaff(id, req.user!);
     if (!existing) {
       throw new ApiError(404, 'Apprenticeship not found');
     }
@@ -573,9 +650,12 @@ router.get('/applications/:applicationId', authenticate, async (req: AuthRequest
     }
 
     const isApplicant = application.userId === req.user!.id;
-    const isStaff = ['EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'].includes(req.user!.role);
-    if (!isApplicant && !isStaff) {
-      throw new ApiError(403, 'Not authorized to view this application');
+    const staffAccess = isApplicant
+      ? null
+      : await findApprenticeshipForStaff(application.apprenticeshipId, req.user!);
+
+    if (!isApplicant && !staffAccess) {
+      throw new ApiError(404, 'Application not found');
     }
 
     res.json({ success: true, data: application });
@@ -628,6 +708,12 @@ router.delete('/applications/:applicationId', authenticate, async (req: AuthRequ
 router.get('/:id/applications', authenticate, requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'), async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
+
+    const apprenticeship = await findApprenticeshipForStaff(id, req.user!);
+    if (!apprenticeship) {
+      throw new ApiError(404, 'Apprenticeship not found');
+    }
+
     const applications = await prisma.apprenticeshipApplication.findMany({
       where: { apprenticeshipId: id },
       orderBy: { submittedAt: 'desc' },
@@ -695,7 +781,7 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const apprenticeship = await prisma.apprenticeship.findUnique({ where: { id: req.params.id } });
+      const apprenticeship = await findApprenticeshipForStaff(req.params.id, req.user!);
       if (!apprenticeship) {
         throw new ApiError(404, 'Apprenticeship not found');
       }
@@ -865,8 +951,18 @@ router.patch(
 
       const submission = await prisma.apprenticeshipMilestoneSubmission.findUnique({
         where: { id: req.params.submissionId },
+        include: { milestone: { select: { apprenticeshipId: true } } },
       });
       if (!submission) {
+        throw new ApiError(404, 'Submission not found');
+      }
+
+      // Only the provider running the placement signs its competencies off.
+      const apprenticeship = await findApprenticeshipForStaff(
+        submission.milestone.apprenticeshipId,
+        req.user!
+      );
+      if (!apprenticeship) {
         throw new ApiError(404, 'Submission not found');
       }
 

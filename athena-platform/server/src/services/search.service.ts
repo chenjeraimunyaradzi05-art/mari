@@ -286,7 +286,21 @@ async function searchUsers(
       ...(filters?.role && { role: filters.role as any }),
       ...(filters?.verified && { isVerified: true }),
     },
-    include: {
+    // Selected explicitly rather than `include`. A bare `include` asks Postgres
+    // for every scalar on User — which pulls passwordHash and twoFactorSecret
+    // into memory just to rank a search, and makes the whole query fail with
+    // P2022 whenever the schema has a column the database has not been
+    // migrated to yet. These are the only fields the result card reads.
+    select: {
+      id: true,
+      displayName: true,
+      bio: true,
+      headline: true,
+      avatar: true,
+      role: true,
+      persona: true,
+      isVerified: true,
+      createdAt: true,
       _count: { select: { followers: true, posts: true } },
     },
     take: 50,

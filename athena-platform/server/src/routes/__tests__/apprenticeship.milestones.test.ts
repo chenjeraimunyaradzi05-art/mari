@@ -12,6 +12,9 @@ jest.mock('../../utils/prisma', () => ({
       upsert: jest.fn(),
       update: jest.fn(),
     },
+    // Signing a submission off is scoped to the provider running the
+    // placement, which is resolved through organization membership.
+    organizationMember: { findFirst: jest.fn(), findMany: jest.fn() },
     user: { findUnique: jest.fn() },
   },
 }));
@@ -210,7 +213,16 @@ describe('Submitting milestone evidence', () => {
   });
 
   it('an assessor signs a submission off and is recorded as the reviewer', async () => {
-    (prisma.apprenticeshipMilestoneSubmission.findUnique as any).mockResolvedValue({ id: 's1' });
+    (prisma.apprenticeshipMilestoneSubmission.findUnique as any).mockResolvedValue({
+      id: 's1',
+      milestone: { apprenticeshipId: 'ap1' },
+    });
+    (prisma.apprenticeship.findUnique as any).mockResolvedValue({
+      id: 'ap1',
+      rtoId: 'rto-1',
+      hostEmployerId: null,
+    });
+    (prisma.organizationMember.findFirst as any).mockResolvedValue({ id: 'm1' });
     (prisma.apprenticeshipMilestoneSubmission.update as any).mockResolvedValue({ id: 's1' });
 
     await request(app)
@@ -226,6 +238,29 @@ describe('Submitting milestone evidence', () => {
       reviewNotes: 'Evidence sighted',
     });
     expect(data.reviewedAt).toBeInstanceOf(Date);
+  });
+
+  it('an assessor from an unrelated provider cannot sign it off', async () => {
+    (prisma.apprenticeshipMilestoneSubmission.findUnique as any).mockResolvedValue({
+      id: 's1',
+      milestone: { apprenticeshipId: 'ap1' },
+    });
+    (prisma.apprenticeship.findUnique as any).mockResolvedValue({
+      id: 'ap1',
+      rtoId: 'rto-1',
+      hostEmployerId: null,
+    });
+    (prisma.organizationMember.findFirst as any).mockResolvedValue(null);
+
+    // Answered 404 rather than 403 so a submission id cannot be confirmed by
+    // anyone holding the provider role.
+    await request(app)
+      .patch('/api/apprenticeships/milestones/submissions/s1')
+      .set(as('assessor-1', 'EDUCATION_PROVIDER'))
+      .send({ status: 'APPROVED' })
+      .expect(404);
+
+    expect(prisma.apprenticeshipMilestoneSubmission.update).not.toHaveBeenCalled();
   });
 
   it('a review must be an approval or a rejection', async () => {

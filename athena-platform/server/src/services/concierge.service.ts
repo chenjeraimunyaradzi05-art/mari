@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { sanitizeChatHistory, truncate, DEFAULT_MAX_TOKENS } from '../utils/llm';
 
 // Initialize OpenAI client (optional - will skip AI features if not configured)
 const apiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -84,17 +85,19 @@ export async function chat(
       return getSimulatedResponse(message, userContext);
     }
 
+    // Roles are re-derived here rather than echoed: a caller could otherwise
+    // send role 'system' in their history and overwrite the prompt above.
     const messages: any[] = [
       { role: 'system', content: systemPrompt },
-      ...history.slice(-10).map(h => ({ role: h.role, content: h.content })),
-      { role: 'user', content: message },
+      ...sanitizeChatHistory(history),
+      { role: 'user', content: truncate(message, 8000) },
     ];
 
     const completion = await openai.chat.completions.create({
       messages,
       model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-4-turbo-preview',
       temperature: 0.7,
-      max_tokens: 500,
+      max_tokens: DEFAULT_MAX_TOKENS,
     });
 
     const responseText = completion.choices[0]?.message?.content || '';

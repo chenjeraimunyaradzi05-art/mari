@@ -1,8 +1,27 @@
 /**
  * Salary Equity Routes
  * Pay gap detection, salary benchmarking, negotiation coaching
- * 
+ *
  * Matches the existing salary-equity.service.ts function signatures
+ *
+ * ## These routes serve SIMULATED data and are blocked outside development
+ *
+ * `salary-equity.service.ts` is backed by a hardcoded array its own comment
+ * labels "Simulated salary database (would be real data in production)" — 15
+ * invented rows carrying invented salaries and invented genders, every one
+ * flagged `isVerified: true`. `getCompanyTransparencyScore` likewise returns
+ * hardcoded "Simulated scoring".
+ *
+ * Serving that to a member would publish an invented gender pay gap on the one
+ * subject where being wrong does real damage: someone could walk into a pay
+ * negotiation quoting a number nobody ever earned. The routes stay mounted so
+ * the work is not lost and the shapes stay addressable, but they refuse to
+ * answer unless SALARY_SIMULATED_API=true is set, which no deployment sets.
+ *
+ * The real, database-backed pay endpoints live at
+ * `/api/ai-algorithms/salary-equity/*`, which read the `SalaryDataPoint` table
+ * and enforce a minimum-contributors threshold before reporting anything.
+ * `/salary-insights` uses those. Point new work there, not here.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -11,6 +30,24 @@ import salaryEquityService from '../services/salary-equity.service';
 import { logger } from '../utils/logger';
 
 const router = Router();
+
+const SIMULATED_API_ENABLED = process.env.SALARY_SIMULATED_API === 'true';
+
+// Applied to every route below, so a new handler added later cannot leak the
+// simulated dataset by forgetting the guard.
+router.use((_req: Request, res: Response, next: NextFunction) => {
+  if (SIMULATED_API_ENABLED) return next();
+
+  logger.warn('Blocked a request to the simulated salary API', {
+    hint: 'Use /api/ai-algorithms/salary-equity/* for real, database-backed pay data',
+  });
+
+  return res.status(501).json({
+    success: false,
+    message:
+      'This endpoint is backed by a simulated dataset and is disabled. Use /api/ai-algorithms/salary-equity/* for real pay data.',
+  });
+});
 
 /**
  * @route GET /api/salary/benchmark

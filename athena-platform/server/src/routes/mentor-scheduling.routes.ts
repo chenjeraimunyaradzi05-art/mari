@@ -17,11 +17,26 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import mentorSchedulingService from '../services/mentor-scheduling.service';
 import { logger } from '../utils/logger';
 
 const router = Router();
+
+/**
+ * A mentor profile id in the URL is not proof of anything: the caller has to
+ * own that profile before they can flip its availability or read who has been
+ * booking it. ADMIN is the platform-wide exception. Someone else's profile is
+ * reported as missing rather than forbidden, so ids cannot be probed.
+ */
+async function findOwnMentorProfile(req: AuthRequest, mentorProfileId: string) {
+  const profile = await mentorSchedulingService.getMentorAvailability(mentorProfileId);
+
+  if (!profile) return null;
+  if (req.user!.role === 'ADMIN') return profile;
+
+  return profile.userId === req.user!.id ? profile : null;
+}
 
 /**
  * @route GET /api/mentoring/mentors
@@ -69,13 +84,19 @@ router.get('/availability/:mentorProfileId', authenticate, async (req: Request, 
  * @desc Update mentor's availability (on/off)
  * @access Private (Mentor)
  */
-router.put('/availability/:mentorProfileId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.put('/availability/:mentorProfileId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { mentorProfileId } = req.params;
     const { isAvailable } = req.body;
 
     if (typeof isAvailable !== 'boolean') {
       return res.status(400).json({ error: 'isAvailable must be a boolean' });
+    }
+
+    const owned = await findOwnMentorProfile(req, mentorProfileId);
+
+    if (!owned) {
+      return res.status(404).json({ error: 'Mentor profile not found' });
     }
 
     const availability = await mentorSchedulingService.setMentorAvailability(
@@ -101,10 +122,16 @@ router.put('/availability/:mentorProfileId', authenticate, async (req: Request, 
  * @desc Get sessions for a mentor
  * @access Private (Mentor)
  */
-router.get('/sessions/mentor/:mentorProfileId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/sessions/mentor/:mentorProfileId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { mentorProfileId } = req.params;
     const { status } = req.query;
+
+    const owned = await findOwnMentorProfile(req, mentorProfileId);
+
+    if (!owned) {
+      return res.status(404).json({ error: 'Mentor profile not found' });
+    }
 
     const sessions = await mentorSchedulingService.getMentorSessions(
       mentorProfileId,

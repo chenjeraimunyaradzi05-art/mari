@@ -6,6 +6,11 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { getPriceIdForTier, SubscriptionTierKey } from '../config/regions';
 import { getCurrencyForUser } from '../utils/region';
 
+// Must match TRIAL_DAYS in client/src/lib/pricing.ts, which is what the
+// pricing page and its FAQ render. If these two drift, the site advertises
+// one trial length and Stripe grants another.
+const TRIAL_DAYS = 14;
+
 const router = Router();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
@@ -86,7 +91,22 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
     const currency = getCurrencyForUser(user);
     const priceId = getPriceIdForTier(tier as SubscriptionTierKey, currency);
 
-    // Create checkout session
+    // Whether this customer has already used their trial. Stripe will happily
+    // grant a fresh trial on every new subscription, so without this check
+    // someone could cancel and resubscribe indefinitely and never pay.
+    const previousSubscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: 'all',
+      limit: 1,
+    });
+    const isFirstSubscription = previousSubscriptions.data.length === 0;
+
+    // Create checkout session.
+    //
+    // The pricing page advertises a 14-day free trial. Until now the session
+    // carried no trial at all, so anyone who took that offer was charged the
+    // full amount immediately — a representation we made and did not honour.
+    // TRIAL_DAYS is the same constant the marketing copy renders from.
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
@@ -97,12 +117,21 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
           quantity: 1,
         },
       ],
+      ...(isFirstSubscription
+        ? {
+            subscription_data: {
+              trial_period_days: TRIAL_DAYS,
+              metadata: { userId: user.id, tier },
+            },
+          }
+        : {}),
       success_url: `${process.env.CLIENT_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.CLIENT_URL}/subscription/cancel`,
       metadata: {
         userId: user.id,
         tier,
         currency,
+        trialGranted: String(isFirstSubscription),
       },
     });
 

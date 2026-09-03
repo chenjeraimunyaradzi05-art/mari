@@ -1,5 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
 import {
@@ -59,6 +59,9 @@ const updateTaxReturnSchema = z.object({
 });
 
 // Tax Rates
+//
+// Rates are platform configuration that every organization's invoicing reads
+// from, so anyone signed in may look them up but only an admin may change them.
 router.get('/rates', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId, region } = req.query;
@@ -72,7 +75,7 @@ router.get('/rates', authenticate, async (req: AuthRequest, res: Response, next:
   }
 });
 
-router.post('/rates', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/rates', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = createTaxRateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -85,7 +88,7 @@ router.post('/rates', authenticate, async (req: AuthRequest, res: Response, next
   }
 });
 
-router.patch('/rates/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/rates/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const parsed = updateTaxRateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -98,7 +101,7 @@ router.patch('/rates/:id', authenticate, async (req: AuthRequest, res: Response,
   }
 });
 
-router.delete('/rates/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/rates/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await deleteTaxRate(req.params.id);
     res.status(204).send();
