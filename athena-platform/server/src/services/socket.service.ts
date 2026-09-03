@@ -10,7 +10,7 @@ import { prisma } from '../utils/prisma';
 import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
 import { CONTENT_LIMITS, normalizeUserText } from '../utils/contentSafety';
-import { getOrCreateDirectConversation } from './direct-message.service';
+import { findDirectConversation, getOrCreateDirectConversation } from './direct-message.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -161,11 +161,20 @@ export function initializeSocketHandlers(io: SocketIOServer) {
 
         const roomId = getConversationRoomId(userId, receiverId);
 
-        // Emit to conversation room
-        io.to(roomId).emit('messages:new', message);
+        // Union of the two rooms, so a receiver who has not opened the thread
+        // still gets the message and one who has does not get it twice.
+        io.to(roomId).to(`user:${receiverId}`).emit('messages:new', message);
 
         // Also emit to receiver's personal room for notification badge
         io.to(`user:${receiverId}`).emit('messages:unread_count_updated');
+
+        if (isUserOnline(receiverId)) {
+          io.to(`user:${userId}`).emit('messages:delivered', {
+            conversationId: conversation.id,
+            messageIds: [message.id],
+            receiverId,
+          });
+        }
 
         // Create notification for receiver
         await createNotification(io, {
@@ -184,14 +193,18 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       }
     });
 
-    socket.on('messages:typing', (receiverId: string) => {
+    socket.on('messages:typing', (payload: TypingPayload) => {
+      const { receiverId, conversationId } = parseTypingPayload(payload);
+      if (!receiverId) return;
       const roomId = getConversationRoomId(userId, receiverId);
-      socket.to(roomId).emit('messages:user_typing', { userId });
+      socket.to(roomId).emit('messages:user_typing', { userId, conversationId });
     });
 
-    socket.on('messages:stop_typing', (receiverId: string) => {
+    socket.on('messages:stop_typing', (payload: TypingPayload) => {
+      const { receiverId, conversationId } = parseTypingPayload(payload);
+      if (!receiverId) return;
       const roomId = getConversationRoomId(userId, receiverId);
-      socket.to(roomId).emit('messages:user_stopped_typing', { userId });
+      socket.to(roomId).emit('messages:user_stopped_typing', { userId, conversationId });
     });
 
     // ==========================================
@@ -247,17 +260,31 @@ export function initializeSocketHandlers(io: SocketIOServer) {
 
     socket.on('messages:mark_read', async (senderId: string) => {
       try {
+        if (typeof senderId !== 'string' || !senderId) return;
+
+        // The sender needs to know *which* of their messages turned blue, and
+        // in which thread — a bare readerId leaves the client guessing.
+        const conversationId = await findDirectConversation(userId, senderId);
+        if (!conversationId) return;
+
+        const unread = await prisma.message.findMany({
+          where: { conversationId, senderId, receiverId: userId, isRead: false },
+          select: { id: true },
+        });
+        if (unread.length === 0) return;
+
+        const messageIds = unread.map((message) => message.id);
         await prisma.message.updateMany({
-          where: {
-            senderId,
-            receiverId: userId,
-            isRead: false,
-          },
+          where: { id: { in: messageIds } },
           data: { isRead: true, readAt: new Date() },
         });
 
+        const payload = { conversationId, readerId: userId, messageIds };
         const roomId = getConversationRoomId(userId, senderId);
-        io.to(roomId).emit('messages:read', { readerId: userId });
+        io.to(roomId).emit('messages:read', payload);
+        // The sender may have the thread closed and so not be in the room; their
+        // personal room always reaches them.
+        io.to(`user:${senderId}`).emit('messages:read', payload);
       } catch (error) {
         logger.error('Failed to mark messages read', { error });
       }
@@ -302,6 +329,29 @@ function getConversationRoomId(userId1: string, userId2: string): string {
   return `conversation:${[userId1, userId2].sort().join(':')}`;
 }
 
+// Typing used to be a bare counterpart id. Clients that know their DB
+// conversation id may send it too, so the receiver can key the indicator
+// without re-deriving it; older callers keep working unchanged.
+type TypingPayload = string | { receiverId?: unknown; conversationId?: unknown } | undefined;
+
+function parseTypingPayload(payload: TypingPayload): {
+  receiverId: string | null;
+  conversationId?: string;
+} {
+  if (typeof payload === 'string') {
+    return { receiverId: payload || null };
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return { receiverId: null };
+  }
+
+  return {
+    receiverId: typeof payload.receiverId === 'string' && payload.receiverId ? payload.receiverId : null,
+    conversationId: typeof payload.conversationId === 'string' ? payload.conversationId : undefined,
+  };
+}
+
 export function getChannelRoomId(channelId: string): string {
   return `channel:${channelId}`;
 }
@@ -314,6 +364,16 @@ export function emitToChannel(channelId: string, event: string, payload: unknown
     return;
   }
   ioInstance.to(getChannelRoomId(channelId)).emit(event, payload);
+}
+
+// Same reason as emitToChannel: the REST message routes need to push without
+// importing `io` from index.ts.
+export function emitToUserRoom(userId: string, event: string, payload: unknown): void {
+  if (!ioInstance) {
+    logger.debug('Socket.IO not initialized, skipping user broadcast', { userId, event });
+    return;
+  }
+  ioInstance.to(`user:${userId}`).emit(event, payload);
 }
 
 export function isUserOnline(userId: string): boolean {
@@ -351,7 +411,18 @@ export async function sendRealTimeMessage(receiverId: string, message: any) {
   // 2. Emit to `user:${receiverId}` with the full message
   ioInstance.to(`user:${receiverId}`).emit('messages:new', message);
 
-  // 3. Emit matching notification (Notification Center)
+  // 3. Tell the sender it actually reached a live client. This is the only
+  // honest "delivered" signal we have — anything stronger would need an ack
+  // from the receiver, and claiming delivery to an offline user would be a lie.
+  if (message?.senderId && message?.id && isUserOnline(receiverId)) {
+    ioInstance.to(`user:${message.senderId}`).emit('messages:delivered', {
+      conversationId: message.conversationId,
+      messageIds: [message.id],
+      receiverId,
+    });
+  }
+
+  // 4. Emit matching notification (Notification Center)
   // We avoid createNotification here to prevent double-DB write via socket service if createNotification writes to DB too?
   // Check createNotification logic: Yes it does.
   // Actually, messages usually don't populate the "Bell" notification list in apps like LinkedIn, 

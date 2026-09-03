@@ -16,7 +16,7 @@ export default function ConversationList() {
     if (apiConversations) {
       const mappedConversations: StoreConversation[] = apiConversations.map((c: {
         id: string;
-        participant: { id: string; firstName: string; lastName: string; avatar?: string };
+        participant: { id: string; firstName: string; lastName: string; avatar?: string; isVerified?: boolean };
         lastMessage?: { senderId: string; content: string; createdAt: string };
         unreadCount: number;
         updatedAt: string;
@@ -26,6 +26,7 @@ export default function ConversationList() {
           id: p.id,
           name: `${p.firstName} ${p.lastName}`,
           avatar: p.avatar || undefined,
+          isVerified: p.isVerified,
         })),
         lastMessage: c.lastMessage ? {
           id: 'temp-id', // API might not be returning ID on the list view

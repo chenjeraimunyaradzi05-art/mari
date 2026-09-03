@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 export interface ChatMessageReply {
   id: string;
@@ -17,6 +16,16 @@ export interface ChatMessageAttachment {
   thumbnailUrl?: string; // For video/image previews
 }
 
+// One chip per emoji, already collapsed by the API — the client never sees the
+// individual reaction rows.
+export interface ChatMessageReaction {
+  emoji: string;
+  count: number;
+  hasReacted: boolean;
+}
+
+export type ChatMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'error';
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -24,18 +33,89 @@ export interface ChatMessage {
   createdAt: string;
   type: 'text' | 'image' | 'video' | 'file';
   mediaUrl?: string;
-  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'error';
+  status?: ChatMessageStatus;
   replyTo?: ChatMessageReply;
   attachments?: ChatMessageAttachment[];
+  reactions?: ChatMessageReaction[];
   // Optimistic update tracking
   isOptimistic?: boolean;
   retryCount?: number;
   errorMessage?: string;
 }
 
+// Receipts can arrive out of order (a read receipt can overtake the delivery
+// one), so status only ever moves forward.
+const STATUS_RANK: Record<ChatMessageStatus, number> = {
+  error: -1,
+  sending: 0,
+  sent: 1,
+  delivered: 2,
+  read: 3,
+};
+
+function isStatusUpgrade(current: ChatMessageStatus | undefined, next: ChatMessageStatus): boolean {
+  if (!current) return true;
+  if (current === 'error') return false; // a failed send is terminal until retried
+  return STATUS_RANK[next] > STATUS_RANK[current];
+}
+
+/**
+ * Maps an API/socket message row onto the shape the chat UI reads. Both the
+ * REST fetch and the socket push go through here so a live message and a
+ * refetched one are indistinguishable.
+ */
+export function toChatMessage(raw: any, viewerId?: string): ChatMessage {
+  const attachments = Array.isArray(raw?.metadata?.attachments) ? raw.metadata.attachments : [];
+  const isMine = !!viewerId && raw?.senderId === viewerId;
+
+  return {
+    id: raw.id,
+    senderId: raw.senderId,
+    content: raw.content ?? '',
+    createdAt: raw.createdAt,
+    type: mapMessageType(raw?.type),
+    // Only the sender has a receipt to show; an inbound message is simply here.
+    status: isMine ? (raw?.isRead ? 'read' : 'sent') : undefined,
+    replyTo: raw?.replyTo
+      ? { id: raw.replyTo.id, senderId: raw.replyTo.senderId, content: raw.replyTo.content }
+      : undefined,
+    attachments: attachments.length
+      ? attachments.map((attachment: any, index: number) => ({
+          id: attachment.key || attachment.url || `${raw.id}-${index}`,
+          type: attachmentType(attachment?.contentType),
+          url: attachment.url,
+          name: attachment.name,
+          size: attachment.size,
+          mimeType: attachment.contentType,
+        }))
+      : undefined,
+    reactions: Array.isArray(raw?.reactions) ? raw.reactions : undefined,
+  };
+}
+
+function mapMessageType(type: unknown): ChatMessage['type'] {
+  switch (String(type || '').toUpperCase()) {
+    case 'IMAGE':
+      return 'image';
+    case 'VIDEO':
+      return 'video';
+    case 'FILE':
+      return 'file';
+    default:
+      return 'text';
+  }
+}
+
+function attachmentType(contentType: unknown): ChatMessageAttachment['type'] {
+  const value = String(contentType || '');
+  if (value.startsWith('image/')) return 'image';
+  if (value.startsWith('video/')) return 'video';
+  return 'file';
+}
+
 export interface Conversation {
   id: string;
-  participants: { id: string; name: string; avatar?: string }[];
+  participants: { id: string; name: string; avatar?: string; isVerified?: boolean }[];
   lastMessage?: ChatMessage;
   unreadCount: number;
   updatedAt: string;
@@ -60,9 +140,17 @@ interface ChatState {
   // Actions
   setActiveConversation: (id: string | null) => void;
   setConversations: (conversations: Conversation[]) => void;
-  addMessage: (conversationId: string, message: ChatMessage) => void;
+  addMessage: (conversationId: string, message: ChatMessage, options?: { countAsUnread?: boolean }) => void;
   setMessages: (conversationId: string, messages: ChatMessage[]) => void;
   updateMessageStatus: (conversationId: string, messageId: string, status: ChatMessage['status']) => void;
+  updateMessagesStatus: (conversationId: string, messageIds: string[], status: ChatMessageStatus) => void;
+  applyReaction: (
+    conversationId: string,
+    messageId: string,
+    emoji: string,
+    action: 'added' | 'removed',
+    isOwn: boolean
+  ) => void;
   markConversationAsRead: (conversationId: string) => void;
   setTyping: (conversationId: string, isTyping: boolean) => void;
   getUnreadCount: () => number;
@@ -94,30 +182,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setActiveConversation: (id) => set({ activeConversationId: id }),
 
-  setConversations: (conversations) => set({ 
-    conversations,
-    totalUnread: conversations.reduce((acc, c) => acc + c.unreadCount, 0)
+  setConversations: (conversations) => set((state) => {
+    // isTyping is live UI state the API knows nothing about, so a refetch must
+    // not wipe an indicator that is still true.
+    const typing = new Set(state.conversations.filter((c) => c.isTyping).map((c) => c.id));
+
+    return {
+      conversations: conversations.map((c) => (typing.has(c.id) ? { ...c, isTyping: true } : c)),
+      totalUnread: conversations.reduce((acc, c) => acc + c.unreadCount, 0),
+    };
   }),
 
-  addMessage: (conversationId, message) => {
+  // `countAsUnread` is false for messages the viewer sent themselves — those
+  // arrive here too (own send, or an echo to a second tab) and must not inflate
+  // the badge.
+  addMessage: (conversationId, message, options) => {
+    const countAsUnread = options?.countAsUnread ?? true;
+
     set((state) => {
       const currentMessages = state.messages[conversationId] || [];
       // Prevent duplicates
       if (currentMessages.some(m => m.id === message.id)) return state;
 
+      const isUnread = countAsUnread && state.activeConversationId !== conversationId;
+
       // Update conversations list (last message)
       const conversationIndex = state.conversations.findIndex(c => c.id === conversationId);
       const updatedConversations = [...state.conversations];
-      
+
       if (conversationIndex > -1) {
         const conv = updatedConversations[conversationIndex];
         updatedConversations[conversationIndex] = {
             ...conv,
             lastMessage: message,
             updatedAt: message.createdAt,
-            // If active, unread count doesn't increase, handled by UI effect usually. 
-            // But if we are just receiving in background:
-            unreadCount: state.activeConversationId === conversationId ? 0 : conv.unreadCount + 1
+            unreadCount: isUnread ? conv.unreadCount + 1 : conv.unreadCount,
         };
         // Move to top
         updatedConversations.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -129,20 +228,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [conversationId]: [...currentMessages, message],
         },
         conversations: updatedConversations,
-        totalUnread: state.activeConversationId === conversationId 
-            ? state.totalUnread 
-            : state.totalUnread + 1
+        totalUnread: isUnread ? state.totalUnread + 1 : state.totalUnread,
       };
     });
   },
 
   setMessages: (conversationId, messages) => {
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [conversationId]: messages,
-      },
-    }));
+    set((state) => {
+      const previousStatuses = new Map(
+        (state.messages[conversationId] || []).map((msg) => [msg.id, msg.status])
+      );
+
+      // A history refetch carries whatever the row says, which can be behind the
+      // receipts we already got over the socket — never walk a status backwards.
+      const merged = messages.map((msg) => {
+        const previous = previousStatuses.get(msg.id);
+        return previous && !isStatusUpgrade(previous, msg.status ?? 'sent') && msg.status
+          ? { ...msg, status: previous }
+          : msg;
+      });
+
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: merged,
+        },
+      };
+    });
   },
 
   updateMessageStatus: (conversationId, messageId, status) => {
@@ -153,6 +265,80 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const updatedMessages = conversationMessages.map((msg) =>
         msg.id === messageId ? { ...msg, status } : msg
       );
+
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: updatedMessages,
+        },
+      };
+    });
+  },
+
+  updateMessagesStatus: (conversationId, messageIds, status) => {
+    set((state) => {
+      const conversationMessages = state.messages[conversationId];
+      if (!conversationMessages || messageIds.length === 0) return state;
+
+      const targets = new Set(messageIds);
+      let changed = false;
+
+      const updatedMessages = conversationMessages.map((msg) => {
+        if (!targets.has(msg.id) || !isStatusUpgrade(msg.status, status)) return msg;
+        changed = true;
+        return { ...msg, status };
+      });
+
+      if (!changed) return state;
+
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: updatedMessages,
+        },
+      };
+    });
+  },
+
+  applyReaction: (conversationId, messageId, emoji, action, isOwn) => {
+    set((state) => {
+      const conversationMessages = state.messages[conversationId];
+      if (!conversationMessages) return state;
+
+      const updatedMessages = conversationMessages.map((msg) => {
+        if (msg.id !== messageId) return msg;
+
+        const reactions = msg.reactions || [];
+        const existing = reactions.find((reaction) => reaction.emoji === emoji);
+
+        if (action === 'added') {
+          // The API is idempotent, so a repeat of one's own reaction must not
+          // double the count.
+          if (existing?.hasReacted && isOwn) return msg;
+          const next = existing
+            ? reactions.map((reaction) =>
+                reaction.emoji === emoji
+                  ? { ...reaction, count: reaction.count + 1, hasReacted: reaction.hasReacted || isOwn }
+                  : reaction
+              )
+            : [...reactions, { emoji, count: 1, hasReacted: isOwn }];
+          return { ...msg, reactions: next };
+        }
+
+        if (!existing) return msg;
+        const next = reactions
+          .map((reaction) =>
+            reaction.emoji === emoji
+              ? {
+                  ...reaction,
+                  count: reaction.count - 1,
+                  hasReacted: isOwn ? false : reaction.hasReacted,
+                }
+              : reaction
+          )
+          .filter((reaction) => reaction.count > 0);
+        return { ...msg, reactions: next };
+      });
 
       return {
         messages: {

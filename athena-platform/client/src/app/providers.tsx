@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore as useAppUIStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
+import { socketClient } from '@/lib/socket';
 import { setTokens, clearTokens } from '@/lib/auth';
 import { getPreferredLocale } from '@/lib/utils';
 import CookieConsentBanner from '@/components/CookieConsentBanner';
@@ -76,6 +77,25 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   }, [setLoading, storeLogin, storeLogout]);
 
   return <>{children}</>;
+}
+
+function SocketBridge() {
+  const { user, accessToken, isAuthenticated } = useAuthStore();
+
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken || !user?.id) {
+      // Covers logout and token expiry alike: no credentials, no socket.
+      socketClient.disconnect();
+      return;
+    }
+
+    socketClient.connect(accessToken, user.id);
+  }, [isAuthenticated, accessToken, user?.id]);
+
+  // Deliberately not disconnecting on unmount — this lives at the root, so an
+  // unmount is a full teardown and React 18 strict-mode double effects would
+  // otherwise tear down a healthy connection.
+  return null;
 }
 
 function ThemeSync({ children }: { children: React.ReactNode }) {
@@ -182,6 +202,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
                   <SkipLinks />
                   <AuthInitializer>
                     {children}
+                    <ClientOnly>
+                      <SocketBridge />
+                    </ClientOnly>
                     <ClientOnly>
                       <PWAInstallPrompt />
                     </ClientOnly>

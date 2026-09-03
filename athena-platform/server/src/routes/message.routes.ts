@@ -3,15 +3,71 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { sendRealTimeMessage } from '../services/socket.service';
+import { emitToUserRoom, sendRealTimeMessage } from '../services/socket.service';
 import { parsePagination } from '../utils/pagination';
-import { CONTENT_LIMITS, normalizeUserText, parseOptionalDate } from '../utils/contentSafety';
+import {
+  CONTENT_LIMITS,
+  SanitizedAttachment,
+  normalizeMessageAttachments,
+  normalizeUserText,
+  parseOptionalDate,
+} from '../utils/contentSafety';
 import {
   assertCanSendInConversation,
   getOrCreateDirectConversation,
 } from '../services/direct-message.service';
+import { assertContentAllowed } from '../services/moderation.service';
+import { isBlockedRelationship } from '../utils/safety-store';
 
 const router = Router();
+
+type RawReaction = { emoji: string; userId: string };
+
+// Message.type drives how clients render a row, so it has to describe the
+// payload rather than the endpoint that produced it.
+function messageTypeFor(attachments: SanitizedAttachment[] | undefined): 'TEXT' | 'IMAGE' | 'FILE' {
+  if (!attachments || attachments.length === 0) return 'TEXT';
+  return attachments.every((attachment) => attachment.contentType?.startsWith('image/'))
+    ? 'IMAGE'
+    : 'FILE';
+}
+
+// The client renders one chip per emoji with a count and whether the viewer
+// reacted, so collapse the raw rows into that shape here (same contract the
+// channel message list uses).
+function shapeReactions(reactions: RawReaction[], viewerId: string) {
+  const byEmoji = new Map<string, { emoji: string; count: number; hasReacted: boolean }>();
+  for (const reaction of reactions) {
+    const entry = byEmoji.get(reaction.emoji) ?? { emoji: reaction.emoji, count: 0, hasReacted: false };
+    entry.count += 1;
+    if (reaction.userId === viewerId) entry.hasReacted = true;
+    byEmoji.set(reaction.emoji, entry);
+  }
+  return [...byEmoji.values()];
+}
+
+// A reaction lands in the other person's thread like a message does, so it is
+// gated by exactly the same rules as sending one — participation, the
+// recipient's allowMessages setting, and blocks. Returns the counterpart so the
+// caller can push the change to them.
+async function loadReactableMessage(messageId: string, userId: string) {
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { id: true, conversationId: true, deletedAt: true },
+  });
+
+  if (!message || message.deletedAt || !message.conversationId) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  const { receiverId } = await assertCanSendInConversation(message.conversationId, userId);
+
+  if (await isBlockedRelationship(userId, receiverId)) {
+    throw new ApiError(403, 'You cannot message this user');
+  }
+
+  return { conversationId: message.conversationId, counterpartId: receiverId };
+}
 
 // ===========================================
 // GET CONVERSATIONS
@@ -144,12 +200,21 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
             avatar: true,
           },
         },
+        replyTo: {
+          select: { id: true, senderId: true, content: true },
+        },
+        reactions: { select: { emoji: true, userId: true } },
       },
     });
 
+    const shaped = messages.map(({ reactions, ...message }) => ({
+      ...message,
+      reactions: shapeReactions(reactions, userId),
+    }));
+
     res.json({
       success: true,
-      data: messages.reverse(),
+      data: shaped.reverse(),
     });
   } catch (error) {
     next(error);
@@ -173,6 +238,11 @@ router.post(
       const { userId: targetUserId } = req.body;
       const myUserId = req.user!.id;
 
+      // Neither side of a block gets to open a thread with the other.
+      if (await isBlockedRelationship(myUserId, targetUserId)) {
+        throw new ApiError(403, 'You cannot message this user');
+      }
+
       const conversation = await getOrCreateDirectConversation(myUserId, targetUserId);
 
       res.status(conversation.isNew ? 201 : 200).json({
@@ -191,7 +261,11 @@ router.post(
 router.post(
   '/conversations/:id/messages',
   authenticate,
-  [body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.directMessage })],
+  [
+    body('content').optional().isString().isLength({ max: CONTENT_LIMITS.directMessage }),
+    body('attachments').optional().isArray({ max: 5 }),
+    body('replyToId').optional().isString().notEmpty(),
+  ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
@@ -200,13 +274,47 @@ router.post(
       }
 
       const { id } = req.params;
-      const content = normalizeUserText(req.body.content, {
-        field: 'content',
-        maxLength: CONTENT_LIMITS.directMessage,
-      });
+      const attachments = normalizeMessageAttachments(req.body?.attachments);
+      // An attachment-only message is legitimate, so content may be empty — but
+      // only when something else is actually being delivered.
+      const content = req.body?.content === undefined || req.body?.content === null
+        ? ''
+        : normalizeUserText(req.body.content, {
+            field: 'content',
+            maxLength: CONTENT_LIMITS.directMessage,
+            allowEmpty: true,
+          });
+      const replyToId = typeof req.body?.replyToId === 'string' && req.body.replyToId.trim()
+        ? req.body.replyToId.trim()
+        : undefined;
       const userId = req.user!.id;
 
+      if (!content && (!attachments || attachments.length === 0)) {
+        throw new ApiError(400, 'Content or attachments required');
+      }
+
       const { receiverId } = await assertCanSendInConversation(id, userId);
+
+      if (await isBlockedRelationship(userId, receiverId)) {
+        throw new ApiError(403, 'You cannot message this user');
+      }
+
+      // A reply may only quote a live message from this same thread, otherwise
+      // the quote leaks content the recipient never had access to.
+      if (replyToId) {
+        const replyTo = await prisma.message.findUnique({
+          where: { id: replyToId },
+          select: { conversationId: true, deletedAt: true },
+        });
+
+        if (!replyTo || replyTo.conversationId !== id || replyTo.deletedAt) {
+          throw new ApiError(400, 'Invalid reply target');
+        }
+      }
+
+      if (content) {
+        await assertContentAllowed(content, { kind: 'message', userId });
+      }
 
       const [message] = await prisma.$transaction([
         prisma.message.create({
@@ -215,11 +323,16 @@ router.post(
             senderId: userId,
             receiverId,
             content,
-            type: 'TEXT',
+            type: messageTypeFor(attachments),
+            replyToId,
+            ...(attachments ? { metadata: { attachments } } : {}),
           },
           include: {
             sender: {
                 select: { id: true, firstName: true, lastName: true, avatar: true }
+            },
+            replyTo: {
+                select: { id: true, senderId: true, content: true }
             }
           }
         }),
@@ -248,6 +361,81 @@ router.post(
         success: true,
         data: message,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// REACT TO A MESSAGE
+// ===========================================
+router.post(
+  '/:messageId/reactions',
+  authenticate,
+  [body('emoji').isString().trim().notEmpty().isLength({ max: 32 })],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { messageId } = req.params;
+      const userId = req.user!.id;
+      const { conversationId, counterpartId } = await loadReactableMessage(messageId, userId);
+
+      const emoji = String(req.body.emoji).trim();
+
+      // The unique constraint makes this idempotent: reacting twice with the
+      // same emoji is a no-op rather than a duplicate row or an error.
+      const existing = await prisma.messageReaction.findUnique({
+        where: { messageId_userId_emoji: { messageId, userId, emoji } },
+      });
+
+      if (!existing) {
+        await prisma.messageReaction.create({ data: { messageId, userId, emoji } });
+        emitToUserRoom(counterpartId, 'messages:reaction', {
+          conversationId,
+          messageId,
+          emoji,
+          userId,
+          action: 'added',
+        });
+      }
+
+      res.status(201).json({ success: true, message: 'Reaction added' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete(
+  '/:messageId/reactions/:emoji',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { messageId } = req.params;
+      const userId = req.user!.id;
+      const { conversationId, counterpartId } = await loadReactableMessage(messageId, userId);
+
+      const emoji = decodeURIComponent(req.params.emoji);
+      const deleted = await prisma.messageReaction.deleteMany({
+        where: { messageId, userId, emoji },
+      });
+
+      if (deleted.count > 0) {
+        emitToUserRoom(counterpartId, 'messages:reaction', {
+          conversationId,
+          messageId,
+          emoji,
+          userId,
+          action: 'removed',
+        });
+      }
+
+      res.json({ success: true, message: 'Reaction removed' });
     } catch (error) {
       next(error);
     }

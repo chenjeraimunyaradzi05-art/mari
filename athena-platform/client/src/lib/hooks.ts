@@ -1,13 +1,15 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  authApi, 
-  userApi, 
-  jobApi, 
-  postApi, 
-  notificationApi, 
-  messageApi, 
+import {
+  api,
+  authApi,
+  userApi,
+  jobApi,
+  postApi,
+  notificationApi,
+  messageApi,
+  mediaApi,
   aiApi,
   mentorApi,
   courseApi,
@@ -967,28 +969,115 @@ export function useConversations() {
   });
 }
 
-export function useMessages(userId: string) {
+export function useMessages(conversationId: string) {
   return useQuery({
-    queryKey: ['messages', userId],
-    queryFn: () => messageApi.getMessages(userId),
-    enabled: !!userId,
+    queryKey: ['messages', conversationId],
+    queryFn: () => messageApi.getMessages(conversationId),
+    enabled: !!conversationId,
     select: (response) => response.data.data,
-    refetchInterval: 5000, // Refetch every 5 seconds for active chat
+    // The socket is the delivery path now; this poll is only a safety net that
+    // backfills whatever a dropped connection missed.
+    refetchInterval: 30000,
   });
+}
+
+// What the send endpoint accepts alongside the text — an already-uploaded file,
+// described by the URL the media service handed back.
+export interface OutgoingAttachment {
+  url: string;
+  name?: string;
+  contentType?: string;
+  size?: number;
 }
 
 export function useSendMessage() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ conversationId, content }: { conversationId: string; content: string }) =>
-      messageApi.send(conversationId, content),
+    // messageApi.send only carries content, so attachments and quoted replies
+    // go through the same endpoint by hand.
+    mutationFn: ({
+      conversationId,
+      content,
+      attachments,
+      replyToId,
+    }: {
+      conversationId: string;
+      content: string;
+      attachments?: OutgoingAttachment[];
+      replyToId?: string;
+    }) =>
+      api.post(`/messages/conversations/${conversationId}/messages`, {
+        content,
+        ...(attachments?.length ? { attachments } : {}),
+        ...(replyToId ? { replyToId } : {}),
+      }),
     onSuccess: (_, { conversationId }) => {
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to send message');
+    },
+  });
+}
+
+// Opens the thread with someone, creating it on first contact. The server
+// returns the existing conversation when there already is one.
+export function useStartConversation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (userId: string) => messageApi.startConversation(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not open that conversation');
+    },
+  });
+}
+
+export function useToggleMessageReaction() {
+  return useMutation({
+    mutationFn: ({
+      messageId,
+      emoji,
+      hasReacted,
+    }: {
+      conversationId: string;
+      messageId: string;
+      emoji: string;
+      hasReacted: boolean;
+    }) =>
+      hasReacted
+        ? api.delete(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`)
+        : api.post(`/messages/${messageId}/reactions`, { emoji }),
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not update that reaction');
+    },
+  });
+}
+
+// Chat attachments ride the shared media pipeline, which only serves the
+// `posts` and `videos` folders publicly — a recipient cannot read anything we
+// put in the private folders, so those types are refused at the picker.
+export function useUploadChatAttachment() {
+  return useMutation({
+    mutationFn: async (file: File): Promise<OutgoingAttachment> => {
+      const uploadType = file.type.startsWith('video/') ? 'video' : 'post';
+      const response = await mediaApi.upload(uploadType, file);
+      const uploaded = response.data.data;
+
+      return {
+        url: uploaded.url,
+        name: file.name,
+        contentType: uploaded.contentType,
+        size: uploaded.size,
+      };
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to upload attachment');
     },
   });
 }
