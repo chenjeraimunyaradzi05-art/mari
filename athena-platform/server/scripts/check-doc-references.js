@@ -114,6 +114,10 @@ const NOT_A_PATH = [
   /\s/, // prose that happened to sit in brackets
   /[*?<>{}$|]/, // globs, placeholders, shell fragments
   /^~/, // a home directory, not ours
+  // A path into an installed dependency. node_modules is ignored by git, so
+  // nothing under it can ever be in the index; a document pointing a reader at
+  // a dependency's own docs is citing the package, not this repository.
+  /(^|\/)node_modules\//,
 ];
 
 // Strips the parts of a citation that are not the path: an anchor, a query, a
