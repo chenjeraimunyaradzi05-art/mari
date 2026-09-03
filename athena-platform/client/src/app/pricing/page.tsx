@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '@/lib/utils';
 import { useAuthStore } from '@/lib/store';
+import { TRIAL_DAYS, REFUND_DAYS, PLAN_PRICING, yearlySavingsPercent } from '@/lib/pricing';
 
 const plans = [
   {
@@ -86,7 +87,7 @@ const plans = [
       { name: 'SSO/SAML integration', included: true },
       { name: 'API access', included: true },
       { name: 'Custom contracts', included: true },
-      { name: '24/7 priority support', included: true },
+      { name: 'Priority support', included: true },
     ],
     cta: 'Contact Sales',
     disabled: false,
@@ -101,8 +102,10 @@ const faqs = [
   },
   {
     question: 'Is there a free trial for Pro?',
-    answer:
-      'Yes, we offer a 14-day free trial of Pro. No credit card required. You\'ll have full access to all Pro features during the trial.',
+    // Stripe Checkout collects card details to start a subscription trial, so
+    // "no credit card required" was never true. The trial itself is real —
+    // subscription.routes.ts sets trial_period_days from the same constant.
+    answer: `Yes — ${TRIAL_DAYS} days of Pro, free. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing.`,
   },
   {
     question: 'What happens when my trial ends?',
@@ -111,8 +114,9 @@ const faqs = [
   },
   {
     question: 'Do you offer refunds?',
-    answer:
-      'We offer a 30-day money-back guarantee for first-time subscribers. If you\'re not satisfied, contact us within 30 days for a full refund.',
+    // Honest about the mechanism: there is no automated refund path, so saying
+    // so beats implying an instant one.
+    answer: `Yes. First-time subscribers have ${REFUND_DAYS} days — contact us inside that window and we refund in full. Refunds are processed by hand, so allow a few working days for the money to reach your account.`,
   },
   {
     question: 'Can I get a discount for non-profits?',
@@ -172,8 +176,12 @@ export default function PricingPage() {
               )}
             >
               Yearly
+              {/* Computed, not asserted. $29/mo against $290/yr is a 16% saving,
+                  and lib/pricing.ts floors it precisely so the badge can never
+                  overstate what someone actually saves. The hardcoded "Save 20%"
+                  that used to sit here overstated it by four points. */}
               <span className="ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-xs rounded-full">
-                Save 20%
+                Save {yearlySavingsPercent(PLAN_PRICING.pro)}%
               </span>
             </button>
           </div>
@@ -298,7 +306,7 @@ export default function PricingPage() {
           <div className="flex flex-wrap items-center justify-center gap-8 text-slate-400 dark:text-slate-500">
             <div className="flex items-center space-x-2">
               <Check className="w-5 h-5 text-green-500" />
-              <span>30-day money-back guarantee</span>
+              <span>{REFUND_DAYS}-day money-back guarantee</span>
             </div>
             <div className="flex items-center space-x-2">
               <Check className="w-5 h-5 text-green-500" />
@@ -365,7 +373,7 @@ export default function PricingPage() {
               <ArrowRight className="w-5 h-5 ml-2" />
             </button>
             <p className="text-white/70 text-sm mt-4">
-              14-day free trial • No credit card required
+              {TRIAL_DAYS}-day free trial &bull; Cancel before it ends and pay nothing
             </p>
           </div>
         </div>

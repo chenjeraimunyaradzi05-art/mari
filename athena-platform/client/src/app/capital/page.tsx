@@ -6,45 +6,28 @@ import { DollarSign, TrendingUp, Users, Building, ArrowRight, CheckCircle, Brief
 export default function CapitalPage() {
   const fundingOptions = [
     {
-      title: 'Seed Funding',
-      amount: '$50K - $500K',
+      title: 'Seed',
       description: 'For early-stage startups with a validated idea and initial traction.',
       icon: Target,
       requirements: ['MVP or prototype', 'Initial users/revenue', 'Scalable business model'],
     },
     {
       title: 'Series A',
-      amount: '$1M - $5M',
       description: 'For startups ready to scale operations and expand market reach.',
       icon: TrendingUp,
-      requirements: ['Product-market fit', '$100K+ ARR', 'Growth metrics'],
+      requirements: ['Product-market fit', 'Recurring revenue', 'Growth metrics'],
     },
     {
-      title: 'Growth Capital',
-      amount: '$5M+',
+      title: 'Growth',
       description: 'For established companies looking to accelerate growth.',
       icon: BarChart,
       requirements: ['Proven business model', 'Strong unit economics', 'Clear path to profitability'],
     },
   ];
 
-  const portfolio = [
-    { name: 'TechFlow', sector: 'SaaS', raised: '$2.5M', status: 'Series A' },
-    { name: 'EcoStyle', sector: 'E-commerce', raised: '$1.2M', status: 'Seed' },
-    { name: 'HealthAI', sector: 'HealthTech', raised: '$4M', status: 'Series A' },
-    { name: 'FinSync', sector: 'FinTech', raised: '$800K', status: 'Seed' },
-  ];
-
-  const stats = [
-    { value: '$50M+', label: 'Capital Deployed' },
-    { value: '75+', label: 'Portfolio Companies' },
-    { value: '3.2x', label: 'Avg. Return Multiple' },
-    { value: '85%', label: 'Follow-on Rate' },
-  ];
-
   const benefits = [
-    { icon: Users, title: 'Network Access', description: 'Connect with our network of 500+ mentors and industry experts' },
-    { icon: Building, title: 'Workspace', description: 'Access to co-working spaces and startup resources' },
+    { icon: Users, title: 'Network Access', description: 'Introductions to the mentors and operators in the ATHENA network' },
+    { icon: Building, title: 'Founder Resources', description: 'Playbooks and the vendor directory on the ATHENA platform' },
     { icon: Briefcase, title: 'Talent Pipeline', description: 'Recruit top talent through the ATHENA platform' },
     { icon: Zap, title: 'Growth Support', description: 'Marketing, legal, and operational support' },
   ];
@@ -64,7 +47,7 @@ export default function CapitalPage() {
               Funding the Next Generation of Innovators
             </h1>
             <p className="text-xl text-green-100 mb-8">
-              We invest in exceptional founders building transformative companies. Beyond capital, we provide the network, resources, and support to help you succeed.
+              We are building ATHENA Capital to back exceptional founders, and to pair that capital with the network, resources, and support behind it.
             </p>
             <div className="flex flex-wrap gap-4">
               <Link
@@ -84,15 +67,15 @@ export default function CapitalPage() {
         </div>
       </section>
 
-      {/* Stats */}
+      {/* Track record */}
       <section className="container mx-auto px-4 -mt-8 relative z-20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
-              <div className="text-3xl font-bold text-green-600">{stat.value}</div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
-            </div>
-          ))}
+        <div className="mx-auto max-w-3xl rounded-xl bg-white p-6 shadow-lg dark:bg-slate-800">
+          <h2 className="font-semibold text-slate-900 dark:text-white">Where we are today</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+            ATHENA Capital is new. We have no deployment figures, portfolio returns, or company
+            count to report yet, and we would rather say so than publish projections as results.
+            Track record will be published here once there is one to publish.
+          </p>
         </div>
       </section>
 
@@ -107,8 +90,7 @@ export default function CapitalPage() {
               <div className="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center mb-4">
                 <option.icon className="w-7 h-7 text-green-600" />
               </div>
-              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-1">{option.title}</h3>
-              <p className="text-2xl font-bold text-green-600 mb-3">{option.amount}</p>
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">{option.title}</h3>
               <p className="text-slate-600 dark:text-slate-400 mb-4">{option.description}</p>
               <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-2">Requirements:</h4>
               <ul className="space-y-2">
@@ -147,24 +129,15 @@ export default function CapitalPage() {
       {/* Portfolio */}
       <section className="container mx-auto px-4 py-16">
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
-          Portfolio Highlights
+          Portfolio
         </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-4xl mx-auto">
-          {portfolio.map((company) => (
-            <div key={company.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
-              <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg mb-4 flex items-center justify-center">
-                <Building className="w-6 h-6 text-white" />
-              </div>
-              <h3 className="font-semibold text-slate-900 dark:text-white">{company.name}</h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400">{company.sector}</p>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-green-600 font-medium">{company.raised}</span>
-                <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-full">
-                  {company.status}
-                </span>
-              </div>
-            </div>
-          ))}
+        <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-800">
+          <Building className="mx-auto mb-4 h-14 w-14 text-slate-300 dark:text-slate-600" />
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">No investments to announce yet</h3>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            Companies we back will be listed here with their permission. Until then this page
+            stays empty rather than showing examples.
+          </p>
         </div>
       </section>
 
@@ -192,7 +165,7 @@ export default function CapitalPage() {
         <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-3xl p-8 md:p-12 text-white text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to Build Something Great?</h2>
           <p className="text-green-100 mb-8 max-w-2xl mx-auto">
-            We&apos;re always looking for exceptional founders. Apply for funding or schedule a call with our investment team.
+            We&apos;re always looking for exceptional founders. Apply for funding or book a call to talk through what you&apos;re building.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Link

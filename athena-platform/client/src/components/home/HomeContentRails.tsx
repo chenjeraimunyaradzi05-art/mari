@@ -213,16 +213,16 @@ export function CommunityRail() {
 
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {groups === null
-          ? [0, 1, 2, 3, 4, 5].map((i) => (
+          ? [0, 1, 2, 3].map((i) => (
               <li
                 key={i}
                 className="h-24 animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800"
               />
             ))
-          : groups.map((group, index) => (
+          : groups.slice(0, 4).map((group, index) => (
               <li key={group.id}>
                 <Link
-                  href={`/groups/${group.id}`}
+                  href={`/dashboard/groups/${group.id}`}
                   className="tile-soft flex h-full gap-3 p-4"
                 >
                   <span
@@ -237,7 +237,7 @@ export function CommunityRail() {
                       {group.name}
                     </span>
                     {group.description && (
-                      <span className="mt-0.5 line-clamp-2 block text-xs leading-4 text-slate-500 dark:text-slate-400">
+                      <span className="mt-0.5 line-clamp-1 block text-xs leading-4 text-slate-500 dark:text-slate-400">
                         {group.description}
                       </span>
                     )}

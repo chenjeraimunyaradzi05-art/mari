@@ -54,7 +54,7 @@ export function JobSpotlight() {
     let cancelled = false;
 
     jobApi
-      .search({ limit: 4 })
+      .search({ limit: 3 })
       .then((response) => {
         if (cancelled) return;
         const data = response.data?.data;
@@ -96,7 +96,7 @@ export function JobSpotlight() {
 
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {jobs === null
-          ? [0, 1, 2, 3].map((i) => (
+          ? [0, 1, 2].map((i) => (
               <li
                 key={i}
                 className="h-[92px] animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800"

@@ -21,6 +21,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { contactLink } from '@/lib/contact';
 
 const faqCategories = [
   {
@@ -137,7 +138,7 @@ const quickLinks = [
     title: 'Contact Support',
     description: 'Get help from our team',
     icon: Mail,
-    href: 'mailto:support@athena.com',
+    href: contactLink('support').href,
   },
   {
     title: 'Community Guidelines',
@@ -302,23 +303,30 @@ export default function HelpSupportPage() {
           Still need help?
         </h3>
         <p className="text-slate-600 dark:text-slate-300 mb-4">
-          Our support team is available 24/7 to assist you
+          Send us a message and a person will get back to you
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <a
-            href="mailto:support@athena.com"
+            href={contactLink('support').href}
             className="btn-primary flex items-center space-x-2"
           >
             <Mail className="w-4 h-4" />
-            <span>Email Support</span>
+            <span>{contactLink('support').isEmail ? 'Email support' : 'Contact support'}</span>
           </a>
-          <button className="btn-outline flex items-center space-x-2">
-            <MessageCircle className="w-4 h-4" />
-            <span>Live Chat</span>
-          </button>
+          {/* A "Live Chat" button used to sit here with no handler. There is no
+              live-chat service behind it — the concierge endpoint is an AI
+              assistant, not the person this card promises — so it is gone
+              rather than dressed up. Appeals are the one other support route
+              that genuinely exists. */}
+          <Link href="/help/appeal" className="btn-outline flex items-center space-x-2">
+            <Shield className="w-4 h-4" />
+            <span>Appeal a decision</span>
+          </Link>
         </div>
+        {/* No support desk is staffed against a target yet, so no SLA is
+            quoted here. It said "< 2 hours", which nothing backed. */}
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-4">
-          Average response time: &lt; 2 hours
+          We read every message and reply as soon as we can.
         </p>
       </div>
 

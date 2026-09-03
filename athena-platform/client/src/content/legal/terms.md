@@ -9,7 +9,7 @@
 ## 1. Introduction and Acceptance of Terms
 
 ### 1.1 Agreement Overview
-These Terms of Service ("Terms") constitute a legally binding agreement between you ("User", "you", or "your") and ATHENA Platform Pty Ltd ("ATHENA", "we", "us", or "our"), governing your access to and use of the ATHENA platform, including our website at athena.com, mobile applications, and all related services (collectively, the "Platform").
+These Terms of Service ("Terms") constitute a legally binding agreement between you ("User", "you", or "your") and {{org.legalName}} ("ATHENA", "we", "us", or "our"), governing your access to and use of the ATHENA platform, including our website at {{site.domain}}, mobile applications, and all related services (collectively, the "Platform").
 
 ### 1.2 Acceptance
 By accessing or using the Platform, you acknowledge that you have read, understood, and agree to be bound by these Terms. If you do not agree to these Terms, you must not access or use the Platform.
@@ -68,12 +68,12 @@ The following content is strictly prohibited on the Platform:
 We employ both automated systems and human review to moderate content. We may remove content that violates these Terms without prior notice. For UK users, we comply with the UK Online Safety Act 2023 requirements for content moderation.
 
 ### 3.4 Reporting Content
-If you encounter content that violates these Terms, please report it using our reporting tools or at athena.com/report. We prioritize reports of illegal content and aim to respond within:
+If you encounter content that violates these Terms, please report it using our reporting tools or at /report. We prioritize reports of illegal content and aim to respond within:
 - **24 hours** for priority illegal content (CSAM, terrorism)
 - **72 hours** for other reported content
 
 ### 3.5 Appeals
-If you believe your content was removed in error, you may submit an appeal at athena.com/help/appeal. Appeals are reviewed by a different moderator than the one who made the original decision.
+If you believe your content was removed in error, you may submit an appeal at /help/appeal. Appeals are reviewed by a different moderator than the one who made the original decision.
 
 ---
 
@@ -96,7 +96,7 @@ You represent and warrant that:
 The Platform and its original content (excluding User Content), features, and functionality are owned by ATHENA and are protected by copyright, trademark, and other intellectual property laws.
 
 ### 4.4 DMCA and Copyright
-We respect intellectual property rights. To report copyright infringement, contact our designated agent at copyright@athena.com with the required information under the DMCA.
+We respect intellectual property rights. To report copyright infringement, contact our designated agent at {{email.copyright}} with the required information under the DMCA.
 
 ---
 
@@ -148,7 +148,7 @@ Free trials convert to paid subscriptions automatically unless cancelled before 
 ## 7. Privacy and Data Protection
 
 ### 7.1 Privacy Policy
-Your use of the Platform is also governed by our Privacy Policy, available at athena.com/privacy. For UK users, our UK Privacy Policy at athena.com/privacy/uk provides additional information about UK GDPR compliance.
+Your use of the Platform is also governed by our Privacy Policy, available at /privacy. For UK users, our UK Privacy Policy at /privacy/uk provides additional information about UK GDPR compliance.
 
 ### 7.2 Data Processing
 We process personal data in accordance with applicable data protection laws, including:
@@ -165,7 +165,7 @@ Depending on your location, you may have rights including:
 - Right to object to processing
 - Right to withdraw consent
 
-To exercise these rights, visit athena.com/settings/privacy or contact privacy@athena.com.
+To exercise these rights, visit /settings/privacy or contact {{email.privacy}}.
 
 ---
 
@@ -213,7 +213,7 @@ You agree to indemnify and hold harmless ATHENA and its officers, directors, emp
 ## 11. Dispute Resolution
 
 ### 11.1 Informal Resolution
-Before filing a claim, you agree to contact us at disputes@athena.com to attempt informal resolution. Most disputes can be resolved within 30 days.
+Before filing a claim, you agree to contact us at {{email.legal}} to attempt informal resolution. Most disputes can be resolved within 30 days.
 
 ### 11.2 Governing Law
 For users outside the UK/EU:
@@ -243,11 +243,11 @@ For UK users, we are committed to complying with the UK Online Safety Act 2023. 
 - Protection of children and vulnerable users
 
 ### 12.2 Transparency Reports
-We intend to publish transparency reports detailing our content moderation activities. When available, they will be linked from athena.com/help/transparency-report.
+We intend to publish transparency reports detailing our content moderation activities. When available, they will be linked from /help/transparency-report.
 
 ### 12.3 Designated Contact
 Our UK designated contact for regulatory matters:
-- Email: uk-regulatory@athena.com
+- {{contact.legal}}
 - Address: A UK regulatory postal contact will be published here before any public UK launch that requires one.
 
 ### 12.4 Children's Safety
@@ -277,19 +277,19 @@ We shall not be liable for delays or failures resulting from circumstances beyon
 ## 14. Contact Information
 
 ### General Inquiries
-- Email: support@athena.com
-- Website: athena.com/help
+- {{contact.support}}
+- Website: /help
 
 ### Legal Matters
-- Email: legal@athena.com
-- Address: ATHENA Platform Pty Ltd, Australia. A registered office address for formal notices will be published here before public launch.
+- {{contact.legal}}
+- Address: {{org.legalName}}, Australia. A registered office address for formal notices will be published here before public launch.
 
 ### Privacy Matters
-- Email: privacy@athena.com
-- Data rights contact: dpo@athena.com
+- {{contact.privacy}}
+- Data rights contact: {{contact.dpo}}
 
 ### UK Users
-- Email: uk-support@athena.com
+- {{contact.support}}
 - UK representative details will be published here before any public UK launch that requires one.
 
 ---

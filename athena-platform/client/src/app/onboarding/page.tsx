@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ChevronRight,
@@ -10,7 +11,7 @@ import {
   GraduationCap,
   Target,
   CheckCircle,
-  Upload,
+  FileText,
   Plus,
   X,
 } from 'lucide-react';
@@ -356,19 +357,20 @@ export default function OnboardingPage() {
                 </div>
                 <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
                   <div className="flex items-center space-x-3">
-                    <Upload className="w-5 h-5 text-slate-400" />
+                    <FileText className="w-5 h-5 text-slate-400" />
                     <div>
                       <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                        Upload your resume
+                        Already have a resume?
                       </p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        We'll use AI to auto-fill your profile (optional)
+                        Paste it into the Resume Optimizer once you are set up and it will suggest what to
+                        put in these fields.
                       </p>
                     </div>
                   </div>
-                  <button className="mt-3 btn-outline px-4 py-2 text-sm">
-                    Choose File
-                  </button>
+                  <Link href="/dashboard/ai/resume" className="mt-3 inline-block btn-outline px-4 py-2 text-sm">
+                    Open Resume Optimizer
+                  </Link>
                 </div>
               </div>
             </div>

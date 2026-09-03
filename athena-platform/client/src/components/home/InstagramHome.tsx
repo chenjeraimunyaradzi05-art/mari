@@ -8,12 +8,15 @@ import {
   Briefcase,
   Calendar,
   Compass,
+  GraduationCap,
   Heart,
   Home,
   Loader2,
   MessageCircle,
   Search,
   Send,
+  Sparkles,
+  TrendingUp,
   Users,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -69,13 +72,19 @@ function initials(author: FeedAuthor): string {
   );
 }
 
+// The mobile bar takes the first five, so the order matters: those five are the
+// ones worth a permanent slot on a phone. The rest of the platform is named in
+// full by <PlatformDirectory /> in the middle column rather than crammed here.
 const NAV = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/explore', label: 'Reels', icon: Compass },
   { href: '/jobs', label: 'Jobs', icon: Briefcase },
   { href: '/mentors', label: 'Mentors', icon: Users },
-  { href: '/events', label: 'Events', icon: Calendar },
   { href: '/search', label: 'Search', icon: Search },
+  { href: '/learning', label: 'Learning', icon: GraduationCap },
+  { href: '/communities', label: 'Communities', icon: Sparkles },
+  { href: '/events', label: 'Events', icon: Calendar },
+  { href: '/salary-insights', label: 'Salary', icon: TrendingUp },
 ];
 
 function Avatar({ author, size = 32 }: { author: FeedAuthor; size?: number }) {

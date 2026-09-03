@@ -2,6 +2,7 @@
 
 import { Shield, ExternalLink, Mail, MapPin, Phone } from 'lucide-react';
 import Link from 'next/link';
+import { ORGANISATION, contactLink } from '@/lib/contact';
 
 export default function UKPrivacyAddendumPage() {
   return (
@@ -43,14 +44,14 @@ export default function UKPrivacyAddendumPage() {
             here before that launch.
           </p>
           <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4 mt-4">
-            <p className="font-semibold">ATHENA Platform Pty Ltd</p>
+            <p className="font-semibold">{ORGANISATION.legalName}</p>
             <p className="flex items-center gap-2 mt-2">
               <MapPin className="w-4 h-4 text-slate-400" />
               Australia-based privacy operations; UK service contact details will be published before launch
             </p>
             <p className="flex items-center gap-2 mt-1">
               <Mail className="w-4 h-4 text-slate-400" />
-              <a href="mailto:privacy@athena.com" className="text-purple-600">privacy@athena.com</a>
+              <a href={contactLink('privacy').href} className="text-purple-600">{contactLink('privacy').label}</a>
             </p>
             <p className="text-sm text-slate-500 mt-2">
               ICO registration and any UK representative details will be added before a regulated public UK launch.
@@ -138,7 +139,7 @@ export default function UKPrivacyAddendumPage() {
 
           <p className="mt-4">
             To exercise any of these rights, visit our <Link href="/privacy-center" className="text-purple-600 hover:underline">Privacy Center</Link> or 
-            contact us at <a href="mailto:privacy@athena.com" className="text-purple-600 hover:underline">privacy@athena.com</a>.
+            contact us at <a href={contactLink('privacy').href} className="text-purple-600 hover:underline">{contactLink('privacy').label}</a>.
           </p>
         </section>
 
@@ -170,7 +171,7 @@ export default function UKPrivacyAddendumPage() {
             <p className="font-semibold">ATHENA privacy team</p>
             <p className="flex items-center gap-2 mt-2">
               <Mail className="w-4 h-4 text-slate-400" />
-              <a href="mailto:privacy@athena.com" className="text-purple-600">privacy@athena.com</a>
+              <a href={contactLink('privacy').href} className="text-purple-600">{contactLink('privacy').label}</a>
             </p>
           </div>
         </section>
@@ -226,7 +227,7 @@ export default function UKPrivacyAddendumPage() {
           <p>For any questions about this UK Privacy Addendum or your privacy rights, please contact us:</p>
           <div className="flex flex-col sm:flex-row gap-4 mt-4">
             <a
-              href="mailto:privacy@athena.com"
+              href={contactLink('privacy').href}
               className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
             >
               <Mail className="w-5 h-5" />

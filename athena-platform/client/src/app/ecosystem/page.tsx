@@ -1,16 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { Globe, Users, Building, Briefcase, GraduationCap, Users2, ArrowRight, CheckCircle, Sparkles } from 'lucide-react';
+import { Globe, Users2, ArrowRight, CheckCircle, Sparkles } from 'lucide-react';
 
 export default function EcosystemPage() {
-  const partners = [
-    { name: 'Tech Partners', count: '200+', description: 'Leading technology companies', icon: Building },
-    { name: 'Universities', count: '50+', description: 'Top educational institutions', icon: GraduationCap },
-    { name: 'Investors', count: '100+', description: 'VCs and angel investors', icon: Briefcase },
-    { name: 'Mentors', count: '500+', description: 'Industry experts', icon: Users },
-  ];
-
   const benefits = [
     'Access to exclusive job opportunities',
     'Direct connections to hiring managers',
@@ -59,7 +52,7 @@ export default function EcosystemPage() {
               The Career Development Ecosystem
             </h1>
             <p className="text-xl text-purple-100 mb-8">
-              Join a thriving network of employers, educators, mentors, and service providers committed to transforming career development.
+              We are building ATHENA alongside employers, educators, mentors, and service providers. The partner program is open and we are onboarding our first cohort now.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Link
@@ -76,19 +69,6 @@ export default function EcosystemPage() {
               </Link>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* Partner Stats */}
-      <section className="container mx-auto px-4 -mt-8 relative z-20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {partners.map((partner) => (
-            <div key={partner.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
-              <partner.icon className="w-8 h-8 text-purple-600 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-slate-900 dark:text-white">{partner.count}</div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">{partner.name}</div>
-            </div>
-          ))}
         </div>
       </section>
 
@@ -144,18 +124,13 @@ export default function EcosystemPage() {
       <section className="container mx-auto px-4 py-16">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
-            Seamless Integration
+            Integrations
           </h2>
           <p className="text-slate-600 dark:text-slate-400 mb-8">
-            Connect your systems with our robust APIs and pre-built integrations.
+            Partners connect their own systems through the ATHENA API. We have no pre-built
+            connectors to announce yet; named integrations will be listed here once they ship,
+            and we will build against your stack if you tell us what you run.
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {['Workday', 'Greenhouse', 'Lever', 'SAP', 'Oracle', 'Salesforce', 'Slack', 'Teams'].map((tool) => (
-              <div key={tool} className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-                <span className="font-medium text-slate-900 dark:text-white">{tool}</span>
-              </div>
-            ))}
-          </div>
           <Link
             href="/developers"
             className="inline-flex items-center gap-2 mt-8 text-purple-600 hover:text-purple-700 font-medium"

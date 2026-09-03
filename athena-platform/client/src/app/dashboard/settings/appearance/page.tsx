@@ -110,6 +110,14 @@ export default function AppearanceSettingsPage() {
         <p className="text-slate-500 dark:text-slate-400 mt-1">
           Customize how ATHENA looks on your device
         </p>
+        {/* Every control here writes straight to the persisted UI store, which
+            the theme provider reads — so the change is already live and already
+            saved. Saying so is what replaces the Save button that used to sit
+            at the bottom of this page doing nothing. */}
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 flex items-center gap-1.5">
+          <Check className="w-4 h-4 text-primary-500 flex-shrink-0" />
+          Changes apply straight away and are saved on this device.
+        </p>
       </div>
 
       {/* Theme Selection */}
@@ -248,13 +256,17 @@ export default function AppearanceSettingsPage() {
             The quick brown fox jumps over the lazy dog. This is a preview of
             your selected appearance settings.
           </p>
-          <div className="flex items-center space-x-2">
-            <button className="btn-primary px-4 py-2 text-sm">
+          {/* Swatches, not controls. These exist so you can see the accent
+              colour and font size on real button styling before committing to
+              them, so they are rendered as spans — a real button element here
+              would be focusable and clickable while having nothing to do. */}
+          <div className="flex items-center space-x-2" role="presentation">
+            <span className="btn-primary px-4 py-2 text-sm pointer-events-none select-none">
               Primary Button
-            </button>
-            <button className="btn-outline px-4 py-2 text-sm">
+            </span>
+            <span className="btn-outline px-4 py-2 text-sm pointer-events-none select-none">
               Secondary Button
-            </button>
+            </span>
           </div>
         </div>
       </div>

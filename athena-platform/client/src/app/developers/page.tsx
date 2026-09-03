@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Code, Terminal, Book, Key, Zap, Shield, Globe, ArrowRight, Copy, Check, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
+import { apiOrigin } from '@/lib/contact';
 
 export default function DevelopersPage() {
   const [copied, setCopied] = useState<string | null>(null);
@@ -13,9 +14,15 @@ export default function DevelopersPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
+  // Quoted from configuration rather than hardcoded. These snippets named
+  // api.athena.com, a host ATHENA does not own, so the documentation was
+  // instructing developers to post their client secret to somebody else's
+  // server.
+  const apiBase = apiOrigin() || 'https://api.your-domain.example';
+
   const codeExamples = {
     auth: `// Authentication
-const response = await fetch('https://api.athena.com/v1/auth/token', {
+const response = await fetch('${apiBase}/v1/auth/token', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -26,13 +33,13 @@ const response = await fetch('https://api.athena.com/v1/auth/token', {
 });
 const { access_token } = await response.json();`,
     jobs: `// Search Jobs
-const jobs = await fetch('https://api.athena.com/v1/jobs?q=software+engineer&location=remote', {
+const jobs = await fetch('${apiBase}/v1/jobs?q=software+engineer&location=remote', {
   headers: { 'Authorization': \`Bearer \${access_token}\` }
 });
 const data = await jobs.json();
 console.log(data.results);`,
     ai: `// AI Resume Analysis
-const analysis = await fetch('https://api.athena.com/v1/ai/resume/analyze', {
+const analysis = await fetch('${apiBase}/v1/ai/resume/analyze', {
   method: 'POST',
   headers: {
     'Authorization': \`Bearer \${access_token}\`,

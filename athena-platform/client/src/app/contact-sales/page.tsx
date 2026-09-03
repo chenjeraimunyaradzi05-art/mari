@@ -1,3 +1,5 @@
+import { contactLink } from '@/lib/contact';
+
 type ContactSalesPageProps = {
   searchParams: Promise<{ intent?: string }>;
 };
@@ -19,6 +21,7 @@ const SALES_COPY = {
 };
 
 export default async function ContactSalesPage({ searchParams }: ContactSalesPageProps) {
+  const salesLink = contactLink('sales');
   const { intent } = await searchParams;
   const copy = intent === 'funding' ? FUNDING_COPY : SALES_COPY;
 
@@ -28,8 +31,8 @@ export default async function ContactSalesPage({ searchParams }: ContactSalesPag
       <p className="mt-4 text-muted-foreground">{copy.intro}</p>
       <div className="mt-8 rounded-2xl border border-border bg-card p-6 shadow-sm">
         <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{copy.contactLabel}</p>
-        <a className="mt-2 inline-block text-lg font-semibold text-primary hover:underline" href="mailto:sales@athena.com">
-          sales@athena.com
+        <a className="mt-2 inline-block text-lg font-semibold text-rose-600 hover:underline dark:text-rose-400" href={salesLink.href}>
+          {salesLink.label}
         </a>
         <p className="mt-3 text-sm text-muted-foreground">{copy.note}</p>
       </div>

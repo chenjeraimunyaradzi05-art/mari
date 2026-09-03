@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 
 const siteUrl =
   process.env.NEXT_PUBLIC_APP_URL ||
@@ -57,6 +58,7 @@ export default function RootLayout({
       <body className="min-h-screen antialiased" suppressHydrationWarning>
         <Providers>
           {children}
+          <SiteFooter />
           <Toaster
             position="top-right"
             toastOptions={{

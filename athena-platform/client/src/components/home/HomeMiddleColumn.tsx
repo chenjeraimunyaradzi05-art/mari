@@ -10,9 +10,9 @@ import {
 } from 'lucide-react';
 import { HomeReelsRail } from './HomeReelsRail';
 import { ReelTopicCircles } from './ReelTopicCircles';
-import { PartnerRail } from './PartnerRail';
 import { JobSpotlight } from './JobSpotlight';
 import { LearningRail, CommunityRail } from './HomeContentRails';
+import { PlatformDirectory } from './PlatformDirectory';
 
 /**
  * A paid placement. The advertiser pitch that used to live here has moved to
@@ -108,7 +108,10 @@ export function HomeMiddleColumn() {
       {/* Reels rail keeps short video in the marketing flow too. */}
       <HomeReelsRail compact />
 
-      <PartnerRail />
+      {/* The rest of the product. The rails above show a handful of live rows
+          from four surfaces; this names all of them, because a member cannot
+          use what she cannot find. */}
+      <PlatformDirectory />
 
       {/* Creator monetisation — the other half of the revenue story. */}
       <section className="surface p-6">
@@ -149,30 +152,12 @@ export function HomeMiddleColumn() {
         </p>
       </section>
 
-      {/* A human sign-off, and the business asks kept small and at the end where
-          they belong rather than interrupting the member's flow. */}
-      <footer className="px-1 pb-2 pt-2 text-center">
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          Built in Australia, for women everywhere. Glad you&rsquo;re here.
-        </p>
-        <p className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-400">
-          <Link href="/about" className="hover:text-rose-600 dark:hover:text-rose-400">
-            About
-          </Link>
-          <Link href="/help" className="hover:text-rose-600 dark:hover:text-rose-400">
-            Help
-          </Link>
-          <Link href="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400">
-            Privacy
-          </Link>
-          <Link href="/careers" className="hover:text-rose-600 dark:hover:text-rose-400">
-            Work with us
-          </Link>
-          <Link href="/contact-sales" className="hover:text-rose-600 dark:hover:text-rose-400">
-            Advertise
-          </Link>
-        </p>
-      </footer>
+      {/* A human sign-off. The link list that used to sit here has moved to the
+          site-wide footer in the root layout — it only ever rendered inside this
+          `hidden lg:block` column, so a phone got no footer links at all. */}
+      <p className="px-1 pb-2 pt-2 text-center text-sm text-slate-600 dark:text-slate-400">
+        Built in Australia, for women everywhere. Glad you&rsquo;re here.
+      </p>
     </div>
   );
 }

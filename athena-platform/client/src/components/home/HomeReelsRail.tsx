@@ -117,7 +117,7 @@ export function HomeReelsRail({ compact: isCompact = false }: { compact?: boolea
           )
         ) : (
           <div className={isCompact ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'}>
-            {reels.map((reel) => (
+            {(isCompact ? reels.slice(0, 3) : reels).map((reel) => (
               <Link
                 key={reel.id}
                 href={`/explore?video=${reel.id}`}
@@ -145,17 +145,18 @@ export function HomeReelsRail({ compact: isCompact = false }: { compact?: boolea
 
                 <div className="absolute inset-x-0 bottom-0 p-2.5">
                   <p className="line-clamp-2 text-[11px] font-medium leading-4 text-white">
-                    {reel.description || reel.title || 'Untitled'}
+                    {reel.title || reel.description || 'Untitled'}
                   </p>
-                  <div className="mt-1 flex items-center gap-2 text-[10px] text-white/70">
-                    <span className="inline-flex items-center gap-1">
-                      <Play className="h-2.5 w-2.5 fill-current" />
-                      {compact(reel.viewCount ?? 0)}
-                    </span>
-                    {reel.author?.displayName && (
-                      <span className="truncate">{reel.author.displayName}</span>
-                    )}
-                  </div>
+                  {/* A "0" play count reads worse than no count at all, the
+                      same reason the community rail hides "1 member". */}
+                  {(reel.viewCount ?? 0) > 0 && (
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-white/70">
+                      <span className="inline-flex items-center gap-1">
+                        <Play className="h-2.5 w-2.5 fill-current" />
+                        {compact(reel.viewCount ?? 0)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </Link>
             ))}

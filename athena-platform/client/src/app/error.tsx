@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, RefreshCw, Home, Bug } from 'lucide-react';
+import { contactLink } from '@/lib/contact';
 
 export default function Error({
   error,
@@ -70,8 +71,8 @@ export default function Error({
             If this problem persists, please let us know:
           </p>
           <a
-            href="mailto:support@athena.com?subject=Bug Report"
-            className="inline-flex items-center space-x-2 text-primary-500 hover:text-primary-600 text-sm"
+            href={contactLink('support', { subject: 'Bug report' }).href}
+            className="inline-flex items-center space-x-2 text-rose-600 hover:text-rose-700 text-sm dark:text-rose-400"
           >
             <Bug className="w-4 h-4" />
             <span>Report this issue</span>

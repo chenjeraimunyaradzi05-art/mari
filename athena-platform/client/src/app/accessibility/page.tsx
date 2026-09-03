@@ -1,4 +1,7 @@
+import { contactLink } from '@/lib/contact';
+
 export default function AccessibilityPage() {
+  const supportLink = contactLink('support');
   return (
     <div className="container mx-auto max-w-4xl px-4 py-12">
       <h1 className="text-3xl font-bold">Accessibility</h1>
@@ -14,7 +17,11 @@ export default function AccessibilityPage() {
           <li>Support for reduced motion and responsive layouts across desktop and mobile.</li>
         </ul>
         <p className="mt-4 text-sm text-muted-foreground">
-          If you hit an accessibility issue, report it to <a className="text-primary hover:underline" href="mailto:support@athena.com">support@athena.com</a> with the page, browser, and assistive technology you were using.
+          If you hit an accessibility issue, tell us through the{' '}
+          <a className="text-rose-600 hover:underline dark:text-rose-400" href={supportLink.href}>
+            {supportLink.isEmail ? supportLink.label : 'help centre'}
+          </a>{' '}
+          with the page, browser, and assistive technology you were using.
         </p>
       </div>
     </div>

@@ -16,8 +16,7 @@
     "test": "start-server-and-test \"npm run dev:e2e\" http://localhost:3000 \"playwright test\"",
     "test:unit": "jest",
     "test:unit:watch": "jest --watch",
-    "e2e": "playwright test",
-    "netlify:link-neon": "node ../../scripts/netlify-link-neon.mjs"
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@headlessui/react": "^1.7.17",

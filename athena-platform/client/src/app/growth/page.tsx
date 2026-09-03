@@ -11,7 +11,6 @@ export default function GrowthPage() {
       icon: Rocket,
       features: ['1:1 Executive Coaching', 'Leadership Training', 'Skill Gap Analysis', 'Career Roadmap'],
       duration: '12 weeks',
-      price: '$2,999',
     },
     {
       title: 'Leadership Development',
@@ -19,7 +18,6 @@ export default function GrowthPage() {
       icon: Users,
       features: ['Management Fundamentals', 'Strategic Thinking', 'Team Building', 'Executive Presence'],
       duration: '8 weeks',
-      price: '$1,999',
     },
     {
       title: 'Entrepreneurship Track',
@@ -27,21 +25,7 @@ export default function GrowthPage() {
       icon: Lightbulb,
       features: ['Business Planning', 'Funding Strategies', 'Product Development', 'Go-to-Market'],
       duration: '16 weeks',
-      price: '$3,499',
     },
-  ];
-
-  const stats = [
-    { value: '85%', label: 'Career Advancement Rate' },
-    { value: '$25K', label: 'Avg. Salary Increase' },
-    { value: '500+', label: 'Success Stories' },
-    { value: '4.9★', label: 'Program Rating' },
-  ];
-
-  const successStories = [
-    { name: 'Alex Chen', role: 'Senior Manager → VP', company: 'Tech Corp', increase: '+65% salary' },
-    { name: 'Sarah Johnson', role: 'IC → Team Lead', company: 'FinTech Inc', increase: '+40% salary' },
-    { name: 'Marcus Williams', role: 'Founded Startup', company: 'Series A Funded', increase: '$5M raised' },
   ];
 
   return (
@@ -72,22 +56,10 @@ export default function GrowthPage() {
                 href="/contact-sales"
                 className="px-6 py-3 bg-green-700 text-white font-semibold rounded-lg hover:bg-green-800 transition"
               >
-                Talk to an Advisor
+                Talk to Us
               </Link>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* Stats */}
-      <section className="container mx-auto px-4 -mt-8 relative z-20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
-              <div className="text-3xl font-bold text-green-600">{stat.value}</div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
-            </div>
-          ))}
         </div>
       </section>
 
@@ -113,13 +85,13 @@ export default function GrowthPage() {
                 ))}
               </ul>
               <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
-                <div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400">{program.duration}</div>
-                  <div className="text-xl font-bold text-slate-900 dark:text-white">{program.price}</div>
-                </div>
-                <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
-                  Enroll
-                </button>
+                <div className="text-sm text-slate-500 dark:text-slate-400">{program.duration}</div>
+                <Link
+                  href="/contact-sales"
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                >
+                  Register interest
+                </Link>
               </div>
             </div>
           ))}
@@ -154,27 +126,15 @@ export default function GrowthPage() {
         </div>
       </section>
 
-      {/* Success Stories */}
+      {/* Outcomes */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
-          Success Stories
-        </h2>
-        <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-          {successStories.map((story) => (
-            <div key={story.name} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
-              <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <Users className="w-8 h-8 text-white" />
-              </div>
-              <h3 className="font-semibold text-slate-900 dark:text-white text-center">{story.name}</h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400 text-center mb-2">{story.role}</p>
-              <p className="text-sm text-slate-500 dark:text-slate-500 text-center mb-3">{story.company}</p>
-              <div className="text-center">
-                <span className="inline-block px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium">
-                  {story.increase}
-                </span>
-              </div>
-            </div>
-          ))}
+        <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-800">
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Outcomes</h2>
+          <p className="mt-3 text-slate-600 dark:text-slate-400">
+            These programs are new, so we have no graduate outcomes to show yet. When we do,
+            they will be published as measured results with the participants&apos; permission,
+            not as illustrative examples.
+          </p>
         </div>
       </section>
 
@@ -183,7 +143,7 @@ export default function GrowthPage() {
         <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-3xl p-8 md:p-12 text-white text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to Grow?</h2>
           <p className="text-green-100 mb-8 max-w-2xl mx-auto">
-            Take the first step toward your career goals. Schedule a free consultation with our growth advisors.
+            Take the first step toward your career goals. Tell us where you want to get to and we will help you pick a program.
           </p>
           <Link
             href="/contact-sales"

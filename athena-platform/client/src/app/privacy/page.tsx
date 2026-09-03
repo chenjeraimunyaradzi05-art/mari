@@ -1,11 +1,12 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { markdownToSafeHtml } from '@/lib/markdown';
+import { renderLegalTokens } from '@/lib/contact';
 
 export default async function PrivacyPage() {
   const filePath = path.join(process.cwd(), 'src', 'content', 'legal', 'privacy.md');
   const markdown = await fs.readFile(filePath, 'utf8');
-  const html = markdownToSafeHtml(markdown);
+  const html = markdownToSafeHtml(renderLegalTokens(markdown));
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-12">

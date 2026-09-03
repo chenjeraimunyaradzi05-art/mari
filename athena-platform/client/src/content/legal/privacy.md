@@ -38,7 +38,7 @@ This summary provides key points from our privacy policy. You can find out more 
 
 ## 1. Introduction
 
-ATHENA Platform Pty Ltd ("ATHENA", "we", "us", "our") is committed to protecting the privacy of our users. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website at athena.com, use our mobile application, or interact with our services (collectively, the "Platform").
+{{org.legalName}} ("ATHENA", "we", "us", "our") is committed to protecting the privacy of our users. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website at {{site.domain}}, use our mobile application, or interact with our services (collectively, the "Platform").
 
 By using our Platform, you agree to the collection and use of information in accordance with this policy. If you do not agree with our policies and practices, please do not use our services.
 
@@ -47,14 +47,14 @@ By using our Platform, you agree to the collection and use of information in acc
 ## 2. Who We Are
 
 **Data Controller:**
-ATHENA Platform Pty Ltd
+{{org.legalName}}
 Australia
 
 **Primary privacy contact:**
-Email: privacy@athena.com
+{{contact.privacy}}
 
 **Data rights contact:**
-Email: dpo@athena.com
+{{contact.dpo}}
 
 **UK and EU representation:**
 ATHENA has not yet published separate UK or EU representative details for a public launch.
@@ -227,7 +227,7 @@ Under UK GDPR and EU GDPR, you have additional rights:
 - **Right to Object** (Article 21): Object to processing based on legitimate interests
 - **Rights Related to Automated Decision-Making** (Article 22): Not be subject to decisions based solely on automated processing
 
-To exercise these rights, visit our [Privacy Center](/privacy-center) or contact us at privacy@athena.com.
+To exercise these rights, visit our [Privacy Center](/privacy-center) or contact us at {{email.privacy}}.
 
 **Response Time:** We respond to all requests within 30 days. Complex requests may take up to 60 days (we will inform you).
 
@@ -277,16 +277,16 @@ The "Effective Date" at the top indicates when the policy was last revised. Cont
 If you have questions about this Privacy Policy or our data practices, please contact us:
 
 **General Privacy Inquiries:**
-Email: privacy@athena.com
+{{contact.privacy}}
 
 **Data rights contact:**
-Email: dpo@athena.com
+{{contact.dpo}}
 
 **UK and EU launch queries:**
-Email: privacy@athena.com
+{{contact.privacy}}
 
 **Postal Address:**
-ATHENA Platform Pty Ltd
+{{org.legalName}}
 Privacy Team
 Australia
 

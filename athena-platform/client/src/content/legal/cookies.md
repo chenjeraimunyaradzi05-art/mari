@@ -7,7 +7,7 @@
 
 ## 1. Introduction
 
-This Cookie Policy explains how ATHENA Platform Pty Ltd ("ATHENA", "we", "us", or "our") uses cookies and similar tracking technologies when you visit our website at athena.com and use our services (the "Platform").
+This Cookie Policy explains how {{org.legalName}} ("ATHENA", "we", "us", or "our") uses cookies and similar tracking technologies when you visit our website at {{site.domain}} and use our services (the "Platform").
 
 By using our Platform, you consent to the use of cookies in accordance with this policy. You can manage your cookie preferences at any time through our cookie consent tool or your browser settings.
 
@@ -85,8 +85,8 @@ When you first visit our Platform, you will see a cookie consent banner. You can
 
 You can change your preferences at any time by:
 - Clicking the cookie icon in the footer
-- Visiting athena.com/settings/cookies
-- Contacting us at privacy@athena.com
+- Visiting /privacy-center
+- Contacting us at {{email.privacy}}
 
 ### 4.2 Browser Settings
 
@@ -173,12 +173,12 @@ We may update this Cookie Policy from time to time. We will notify you of materi
 
 If you have questions about our use of cookies:
 
-**Email:** privacy@athena.com
+**Contact:** {{contact.privacy}}
 
-**Data rights contact:** dpo@athena.com
+**Data rights contact:** {{contact.dpo}}
 
 **Postal Address:**  
-ATHENA Platform Pty Ltd  
+{{org.legalName}}  
 Australia
 
 Registered office details will be published here before ATHENA accepts public legal or privacy notices through a live production launch.

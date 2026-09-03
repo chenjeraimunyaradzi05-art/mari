@@ -29,7 +29,7 @@ export default function ImpactPage() {
   return (
     <div className="container mx-auto max-w-4xl px-4 py-12">
       <h1 className="text-3xl font-bold">Impact</h1>
-      <p className="mt-4 max-w-2xl text-muted-foreground">
+      <p className="mt-4 max-w-2xl text-slate-600 dark:text-slate-400">
         ATHENA exists to widen access to economic opportunity for women. We are early in that
         mission: the platform is in staged rollout, and we hold ourselves to reporting only
         outcomes we can verify.
@@ -38,7 +38,7 @@ export default function ImpactPage() {
         {commitments.map((c) => (
           <div key={c.title} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
             <h2 className="text-lg font-semibold">{c.title}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{c.body}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{c.body}</p>
           </div>
         ))}
       </div>
