@@ -584,6 +584,9 @@ model User {
   twoFactorEnabled        Boolean   @default(false)
   twoFactorSecret         String?
   twoFactorEnabledAt      DateTime?
+  // Recovery codes live as hashes and leave the list the moment one is spent,
+  // so losing an authenticator is not a permanent lockout.
+  twoFactorRecoveryCodes  String[]
 
   // Timestamps
   createdAt   DateTime  @default(now())
@@ -1228,6 +1231,18 @@ model Job {
   viewCount        Int @default(0)
   applicationCount Int @default(0)
 
+  // Placement. The admin console has always written these two (admin.routes.ts
+  // "Make Sponsored" / "Feature") and filtered listings on isFeatured, but the
+  // columns did not exist, so every one of those actions threw a Prisma error
+  // instead of doing anything.
+  //
+  // isSponsored means the employer paid for the placement and it must be
+  // labelled as advertising wherever it is shown; isFeatured is editorial
+  // curation with no money attached. They are deliberately separate: conflating
+  // paid placement with an editorial pick is how a marketplace loses trust.
+  isSponsored Boolean @default(false)
+  isFeatured  Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1239,6 +1254,7 @@ model Job {
   @@index([type])
   @@index([organizationId])
   @@index([city, state, country])
+  @@index([isFeatured])
 }
 
 model JobSkill {

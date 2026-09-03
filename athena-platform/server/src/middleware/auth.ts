@@ -21,6 +21,13 @@ interface JwtPayload {
   persona: string;
 }
 
+/**
+ * Said to a suspended or banned principal on every surface, so the account
+ * state is never inferable from the wording and moderation detail never leaks.
+ */
+export const SUSPENDED_ACCOUNT_MESSAGE =
+  'This account has been suspended. Contact support if you believe this is a mistake.';
+
 async function resolveAuthenticatedUser(token: string) {
   const decoded = verifyToken(token) as JwtPayload;
   const session = await sessionService.findActiveSessionByAccessToken(token);
@@ -31,7 +38,13 @@ async function resolveAuthenticatedUser(token: string) {
 
   const user = await prisma.user.findUnique({
     where: { id: decoded.userId },
-    select: { id: true, email: true, role: true, persona: true },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      persona: true,
+      isSuspended: true,
+    },
   });
 
   if (!user) {
@@ -60,6 +73,10 @@ export const authenticate = async (
     }
 
     const user = await resolveAuthenticatedUser(token);
+
+    if (user.isSuspended) {
+      throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
+    }
 
     req.user = {
       id: user.id,
@@ -94,7 +111,9 @@ export const optionalAuth = async (
       if (token) {
         const user = await resolveAuthenticatedUser(token);
 
-        if (user) {
+        // A suspended account reads public surfaces as a stranger would rather
+        // than failing the request outright.
+        if (user && !user.isSuspended) {
           req.user = {
             id: user.id,
             email: user.email,

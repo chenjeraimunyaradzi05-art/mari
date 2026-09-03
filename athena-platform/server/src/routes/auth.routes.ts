@@ -10,7 +10,7 @@ import {
   verifyToken,
 } from '../utils/jwt';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, SUSPENDED_ACCOUNT_MESSAGE } from '../middleware/auth';
 import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from '../utils/email';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
@@ -37,6 +37,11 @@ const EXTERNAL_AUTH_TOKEN_MAX_LENGTH = 4096;
 const AUTH_CODE_PATTERN = /^[A-Za-z0-9-]+$/;
 const SECURE_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
 const TOTP_ISSUER = 'ATHENA';
+// The alphabet drops the glyphs people mistype off a printout (I/1, O/0).
+const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const RECOVERY_CODE_LENGTH = 10;
+const RECOVERY_CODE_GROUP_LENGTH = 5;
+const RECOVERY_CODE_COUNT = 10;
 const PERSONA_VALUES = [
   'EARLY_CAREER',
   'MID_CAREER',
@@ -119,6 +124,108 @@ function ensureSecureToken(token: unknown, label: string): string {
   }
 
   return token;
+}
+
+function generateRecoveryCode(): string {
+  const bytes = crypto.randomBytes(RECOVERY_CODE_LENGTH);
+
+  // 256 is a whole multiple of the 32-character alphabet, so the modulo is unbiased.
+  return Array.from(
+    bytes,
+    (byte) => RECOVERY_CODE_ALPHABET[byte % RECOVERY_CODE_ALPHABET.length]
+  ).join('');
+}
+
+function formatRecoveryCode(code: string): string {
+  const groups: string[] = [];
+
+  for (let index = 0; index < code.length; index += RECOVERY_CODE_GROUP_LENGTH) {
+    groups.push(code.slice(index, index + RECOVERY_CODE_GROUP_LENGTH));
+  }
+
+  return groups.join('-');
+}
+
+function normalizeRecoveryCode(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+
+  const normalized = raw.replace(/[\s-]/g, '').toUpperCase();
+  if (normalized.length !== RECOVERY_CODE_LENGTH) return null;
+
+  return [...normalized].every((char) => RECOVERY_CODE_ALPHABET.includes(char))
+    ? normalized
+    : null;
+}
+
+/**
+ * Issues a fresh set and retires whatever the account held before: a reissue
+ * has to invalidate the old printout, or a leaked code stays live forever.
+ * The plaintext returned here is the only copy the user will ever see.
+ */
+async function issueRecoveryCodes(userId: string): Promise<string[]> {
+  const codes = Array.from({ length: RECOVERY_CODE_COUNT }, () => generateRecoveryCode());
+  const hashes = await Promise.all(codes.map((code) => hashPassword(code)));
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { twoFactorRecoveryCodes: { set: hashes } },
+  });
+
+  return codes.map(formatRecoveryCode);
+}
+
+/**
+ * True only when the code matched *and* this call is the one that spent it.
+ * The `has` guard makes a second, simultaneous use of the same code lose the
+ * race instead of both being honoured.
+ */
+async function consumeRecoveryCode(
+  userId: string,
+  storedHashes: string[],
+  code: string
+): Promise<boolean> {
+  for (const hash of storedHashes) {
+    if (!(await comparePassword(code, hash))) continue;
+
+    const spent = await prisma.user.updateMany({
+      where: { id: userId, twoFactorRecoveryCodes: { has: hash } },
+      data: {
+        twoFactorRecoveryCodes: {
+          set: storedHashes.filter((storedHash) => storedHash !== hash),
+        },
+      },
+    });
+
+    if (spent.count === 0) return false;
+
+    logger.warn('Two-factor recovery code used', {
+      userId,
+      remaining: storedHashes.length - 1,
+    });
+
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Accepts either the authenticator code or one recovery code, so a lost
+ * authenticator is recoverable rather than terminal.
+ */
+async function verifySecondFactor(
+  user: { id: string; twoFactorSecret: string | null; twoFactorRecoveryCodes: string[] },
+  submitted: unknown
+): Promise<boolean> {
+  const totpCode = normalizeTotpCode(submitted);
+  if (totpCode && user.twoFactorSecret && verifyTotpCode(totpCode, user.twoFactorSecret)) {
+    return true;
+  }
+
+  const recoveryCode = normalizeRecoveryCode(submitted);
+  if (!recoveryCode) return false;
+
+  return consumeRecoveryCode(user.id, user.twoFactorRecoveryCodes, recoveryCode);
 }
 
 async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<globalThis.Response> {
@@ -605,7 +712,7 @@ router.post(
       .optional()
       .isString()
       .isLength({ min: 6, max: 32 })
-      .withMessage('Two-factor code must be 6 digits'),
+      .withMessage('Two-factor code must be a 6-digit code or a recovery code'),
   ],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -650,6 +757,7 @@ router.post(
           womanVerificationStatus: true,
           isPublic: true,
           allowMessages: true,
+          isSuspended: true,
           createdAt: true,
           updatedAt: true,
           lastLoginAt: true,
@@ -658,6 +766,7 @@ router.post(
           twoFactorEnabled: true,
           twoFactorSecret: true,
           twoFactorEnabledAt: true,
+          twoFactorRecoveryCodes: true,
         },
       });
 
@@ -681,13 +790,21 @@ router.post(
         throw new ApiError(403, 'Please verify your email before signing in.');
       }
 
+      // Only after the password checks out, so the account's standing is never
+      // disclosed to someone who is merely guessing at the address.
+      if (user.isSuspended) {
+        throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
+      }
+
       if (user.twoFactorEnabled) {
-        const twoFactorCode = normalizeTotpCode(req.body.twoFactorCode);
-        if (!twoFactorCode) {
+        const submittedCode =
+          typeof req.body.twoFactorCode === 'string' ? req.body.twoFactorCode.trim() : '';
+
+        if (!submittedCode) {
           throw new ApiError(401, 'Two-factor code required');
         }
 
-        if (!user.twoFactorSecret || !verifyTotpCode(twoFactorCode, user.twoFactorSecret)) {
+        if (!(await verifySecondFactor(user, submittedCode))) {
           await recordFailedLogin(email, ipAddress);
           throw new ApiError(401, 'Invalid two-factor code');
         }
@@ -724,10 +841,12 @@ router.post(
       const {
         passwordHash: _passwordHash,
         twoFactorSecret: _twoFactorSecret,
+        twoFactorRecoveryCodes: _twoFactorRecoveryCodes,
         ...userWithoutPassword
       } = user;
       void _passwordHash;
       void _twoFactorSecret;
+      void _twoFactorRecoveryCodes;
 
       res.json({
         success: true,
@@ -854,6 +973,7 @@ router.post(
         country: true,
         isPublic: true,
         allowMessages: true,
+        isSuspended: true,
         createdAt: true,
         updatedAt: true,
         lastLoginAt: true,
@@ -889,6 +1009,7 @@ router.post(
             country: string;
             isPublic: boolean;
             allowMessages: boolean;
+            isSuspended: boolean;
             createdAt: Date;
             updatedAt: Date;
             lastLoginAt: Date | null;
@@ -1000,6 +1121,10 @@ router.post(
 
       if (!user) {
         throw new ApiError(500, 'Google sign-in failed');
+      }
+
+      if (user.isSuspended) {
+        throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
       }
 
       if (!created && user.twoFactorEnabled) {
@@ -1159,6 +1284,7 @@ router.post(
         country: true,
         isPublic: true,
         allowMessages: true,
+        isSuspended: true,
         createdAt: true,
         updatedAt: true,
         lastLoginAt: true,
@@ -1191,6 +1317,7 @@ router.post(
             country: string;
             isPublic: boolean;
             allowMessages: boolean;
+            isSuspended: boolean;
             createdAt: Date;
             updatedAt: Date;
             lastLoginAt: Date | null;
@@ -1297,6 +1424,10 @@ router.post(
         throw new ApiError(500, 'Facebook sign-in failed');
       }
 
+      if (fbUser.isSuspended) {
+        throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
+      }
+
       if (!fbCreated && fbUser.twoFactorEnabled) {
         throw new ApiError(401, 'Two-factor code required. Please sign in with email and password.');
       }
@@ -1369,11 +1500,18 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     // Get user
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, persona: true },
+      select: { id: true, email: true, role: true, persona: true, isSuspended: true },
     });
 
     if (!user) {
       throw new ApiError(401, 'User not found');
+    }
+
+    // A suspension must end the session rather than be renewed through it.
+    if (user.isSuspended) {
+      await sessionService.revokeAllUserSessions(user.id);
+      res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
+      throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
     }
 
     // Generate new tokens
@@ -1542,6 +1680,7 @@ router.get('/2fa/status', authenticate, async (req: AuthRequest, res: Response, 
         twoFactorEnabled: true,
         twoFactorEnabledAt: true,
         twoFactorSecret: true,
+        twoFactorRecoveryCodes: true,
       },
     });
 
@@ -1555,6 +1694,7 @@ router.get('/2fa/status', authenticate, async (req: AuthRequest, res: Response, 
         enabled: user.twoFactorEnabled,
         enabledAt: user.twoFactorEnabledAt,
         setupPending: Boolean(user.twoFactorSecret && !user.twoFactorEnabled),
+        recoveryCodesRemaining: user.twoFactorRecoveryCodes.length,
       },
     });
   } catch (error) {
@@ -1655,12 +1795,17 @@ router.post(
         },
       });
 
+      // The one and only time the plaintext codes exist outside the user's
+      // hands; from here the account holds hashes alone.
+      const recoveryCodes = await issueRecoveryCodes(user.id);
+
       res.json({
         success: true,
         message: 'Two-factor authentication enabled',
         data: {
           enabled: true,
           enabledAt,
+          recoveryCodes,
         },
       });
     } catch (error) {
@@ -1690,6 +1835,7 @@ router.post(
           passwordHash: true,
           twoFactorEnabled: true,
           twoFactorSecret: true,
+          twoFactorRecoveryCodes: true,
         },
       });
 
@@ -1709,11 +1855,8 @@ router.post(
         }
       }
 
-      if (user.twoFactorEnabled) {
-        const code = normalizeTotpCode(req.body.code);
-        if (!code || !user.twoFactorSecret || !verifyTotpCode(code, user.twoFactorSecret)) {
-          throw new ApiError(400, 'Invalid two-factor code');
-        }
+      if (user.twoFactorEnabled && !(await verifySecondFactor(user, req.body.code))) {
+        throw new ApiError(400, 'Invalid two-factor code');
       }
 
       await prisma.user.update({
@@ -1722,6 +1865,7 @@ router.post(
           twoFactorEnabled: false,
           twoFactorSecret: null,
           twoFactorEnabledAt: null,
+          twoFactorRecoveryCodes: { set: [] },
         },
       });
 
@@ -1732,6 +1876,76 @@ router.post(
           enabled: false,
           enabledAt: null,
           setupPending: false,
+          recoveryCodesRemaining: 0,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * Codes are single-use, so an account that has spent its set needs a way to
+ * mint another without turning two-factor off and on again.
+ */
+router.post(
+  '/2fa/recovery-codes',
+  authenticate,
+  [
+    body('currentPassword').optional().isString().isLength({ min: 1, max: PASSWORD_MAX_LENGTH }),
+    body('code').optional().isString().isLength({ min: 6, max: 32 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: {
+          id: true,
+          passwordHash: true,
+          twoFactorEnabled: true,
+          twoFactorSecret: true,
+          twoFactorRecoveryCodes: true,
+        },
+      });
+
+      if (!user) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      if (!user.twoFactorEnabled) {
+        throw new ApiError(400, 'Enable two-factor authentication first');
+      }
+
+      if (user.passwordHash) {
+        const currentPassword = String(req.body.currentPassword ?? '');
+        if (!currentPassword) {
+          throw new ApiError(400, 'Current password is required');
+        }
+
+        const isCurrentPasswordValid = await comparePassword(currentPassword, user.passwordHash);
+        if (!isCurrentPasswordValid) {
+          throw new ApiError(401, 'Current password is incorrect');
+        }
+      }
+
+      if (!(await verifySecondFactor(user, req.body.code))) {
+        throw new ApiError(400, 'Invalid two-factor code');
+      }
+
+      const recoveryCodes = await issueRecoveryCodes(user.id);
+
+      res.json({
+        success: true,
+        message: 'New recovery codes issued. The previous codes no longer work.',
+        data: {
+          recoveryCodes,
+          recoveryCodesRemaining: recoveryCodes.length,
         },
       });
     } catch (error) {
