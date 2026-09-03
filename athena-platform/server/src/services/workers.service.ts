@@ -9,6 +9,7 @@ import Redis from 'ioredis';
 import { logger } from '../utils/logger';
 import {
   QUEUE_NAMES,
+  SCHEDULED_TASKS,
   VideoProcessingJob,
   EmailJob,
   PushNotificationJob,
@@ -16,7 +17,10 @@ import {
   MLInferenceJob,
   DataExportJob,
   AnalyticsJob,
+  ScheduledTaskJob,
+  registerRecurringJobs,
 } from '../utils/queue';
+import { dataRetentionService } from '../scripts/data-retention';
 import { indexDocument, deleteDocument, isOpenSearchEnabled } from '../utils/opensearch';
 import { mlService } from './ml.service';
 import { sendEmail } from '../utils/email';
@@ -30,6 +34,11 @@ const VIDEO_PROCESSOR_URL = process.env.VIDEO_PROCESSOR_URL;
 const PUSH_NOTIFICATION_PROVIDER_URL = process.env.PUSH_NOTIFICATION_PROVIDER_URL;
 const DATA_EXPORT_PROCESSOR_URL = process.env.DATA_EXPORT_PROCESSOR_URL;
 const WORKER_STARTUP_TIMEOUT_MS = parseInt(process.env.WORKER_STARTUP_TIMEOUT_MS || '10000', 10);
+// A full retention sweep walks every table with a cutoff and can hard-delete
+// users one transaction at a time, so it comfortably outlives BullMQ's 30s
+// default lock. Without a longer lock the job is declared stalled mid-sweep and
+// redelivered on top of the run that is still going.
+const SCHEDULED_TASK_LOCK_MS = parseInt(process.env.SCHEDULED_TASK_LOCK_MS || '1800000', 10);
 
 function canSimulateWorker(feature: string): boolean {
   if (!isProductionRuntime) return true;
@@ -405,6 +414,52 @@ export const analyticsWorker = new Worker<AnalyticsJob>(
 );
 
 // ===========================================
+// SCHEDULED TASKS WORKER
+// ===========================================
+
+export const scheduledTasksWorker = new Worker<ScheduledTaskJob>(
+  QUEUE_NAMES.SCHEDULED_TASKS,
+  async (job: Job<ScheduledTaskJob>) => {
+    const { task } = job.data;
+    logger.info('Scheduled task starting', { jobId: job.id, task });
+
+    switch (task) {
+      case SCHEDULED_TASKS.DATA_RETENTION_PURGE: {
+        const summary = await dataRetentionService.runAllPurgeJobs();
+
+        // The per-type breakdown is the operational record that the retention
+        // promises in the privacy policy were actually kept, so it is logged at
+        // info even when nothing was purged.
+        logger.info('Data retention purge finished', {
+          jobId: job.id,
+          totalPurged: summary.totalPurged,
+          skipped: summary.skipped,
+          durationMs: summary.completedAt.getTime() - summary.startedAt.getTime(),
+          purgedByType: summary.results.reduce<Record<string, number>>((acc, result) => {
+            acc[result.dataType] = result.recordsPurged;
+            return acc;
+          }, {}),
+          errors: summary.errors,
+        });
+
+        return { success: summary.errors.length === 0, totalPurged: summary.totalPurged };
+      }
+      default:
+        // Unreachable while ScheduledTaskName is exhaustive, but a job left in
+        // Redis by an older deploy can carry a task this build never knew.
+        throw new Error(`Unknown scheduled task: ${task}`);
+    }
+  },
+  {
+    ...workerOptions,
+    // Retention work is serialised: two overlapping sweeps would race on the
+    // same hard-delete transactions for no throughput gain.
+    concurrency: 1,
+    lockDuration: SCHEDULED_TASK_LOCK_MS,
+  }
+);
+
+// ===========================================
 // WORKER EVENT HANDLERS
 // ===========================================
 
@@ -416,6 +471,7 @@ const workers = [
   mlInferenceWorker,
   dataExportWorker,
   analyticsWorker,
+  scheduledTasksWorker,
 ];
 
 workers.forEach((worker) => {
@@ -459,7 +515,12 @@ export async function startAllWorkers(): Promise<void> {
   workers.forEach((worker) => {
     logger.info(`Worker started: ${worker.name}`);
   });
-  
+
+  // Registered only after the workers are ready, so a schedule is never armed
+  // in a process that cannot consume it. The upsert is idempotent across
+  // replicas, so every instance calling this still yields one schedule.
+  await registerRecurringJobs();
+
   logger.info(`All ${workers.length} workers started successfully`);
 }
 

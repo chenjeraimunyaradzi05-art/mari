@@ -4,7 +4,7 @@
  * Phase 4: GDPR Compliance - Automated Purge Jobs
  */
 
-import { DataCategory, LegalBasis } from '@prisma/client';
+import { DataCategory, LegalBasis, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { queueAnalyticsEvent } from '../utils/queue';
 import { logger } from '../utils/logger';
@@ -36,84 +36,196 @@ interface PurgeJobSummary {
   results: PurgeResult[];
   totalPurged: number;
   errors: string[];
+  /** True when a run was already in flight and this call did nothing. */
+  skipped: boolean;
+}
+
+/**
+ * The scope a set of active legal holds carves out of the purge.
+ *
+ * Holds are authored by humans, so `affectedDataTypes` arrives as free text.
+ * Failing to match a hold means destroying evidence someone is legally required
+ * to keep, so matching is deliberately generous: types are normalised and every
+ * plausible spelling an admin might type is treated as the same hold.
+ */
+interface LegalHoldScope {
+  userIds: Set<string>;
+  dataTypes: Set<string>;
+  /** A hold scoped to "*"/"all" freezes every automated purge. */
+  holdsEverything: boolean;
+}
+
+const EMPTY_HOLD_SCOPE: LegalHoldScope = {
+  userIds: new Set(),
+  dataTypes: new Set(),
+  holdsEverything: false,
+};
+
+function normalizeDataType(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function isHeld(scope: LegalHoldScope, ...aliases: string[]): boolean {
+  if (scope.holdsEverything) return true;
+  return aliases.some((alias) => scope.dataTypes.has(normalizeDataType(alias)));
+}
+
+function heldResult(dataType: string): PurgeResult {
+  return {
+    dataType,
+    recordsPurged: 0,
+    errors: ['Skipped: Legal hold active'],
+    executedAt: new Date(),
+  };
 }
 
 export class DataRetentionService {
   /**
-   * Run all scheduled purge jobs
+   * Guards against a manual/admin trigger overlapping the scheduled run inside
+   * the same process. Cross-process overlap is prevented upstream: BullMQ hands
+   * each scheduled occurrence to exactly one worker, and the scheduled-tasks
+   * worker holds a lock long enough that a slow sweep is not declared stalled
+   * and redelivered. Every purge below is written to be safe even so.
+   */
+  private running = false;
+
+  /**
+   * Run all scheduled purge jobs.
+   *
+   * Idempotent by construction: every job derives its cutoff from the clock and
+   * filters on state it then changes, so a repeat run finds nothing left to do
+   * rather than double-deleting or re-stamping rows.
    */
   async runAllPurgeJobs(): Promise<PurgeJobSummary> {
+    if (this.running) {
+      const now = new Date();
+      logger.warn('[DataRetention] Purge already in progress; skipping this trigger');
+      return { startedAt: now, completedAt: now, results: [], totalPurged: 0, errors: [], skipped: true };
+    }
+
+    this.running = true;
     const startedAt = new Date();
     const results: PurgeResult[] = [];
     const errors: string[] = [];
 
     logger.info('[DataRetention] Starting purge jobs...');
 
-    // Check for legal holds first
+    try {
+      const holds = await this.loadActiveHolds();
+
+      // Hard-deleting users sits before the per-table sweeps so those sweeps
+      // have fewer rows to scan; otherwise the order is independent and one
+      // job throwing does not stop the rest.
+      const jobs = [
+        () => this.purgeExpiredVerificationTokens(holds),
+        () => this.purgeExpiredSessions(holds),
+        () => this.purgeOldMessages(holds),
+        () => this.purgeOldAnalyticsEvents(holds),
+        () => this.purgeSoftDeletedUsers(holds),
+        () => this.purgeExpiredDSARExports(holds),
+        () => this.purgeOldNotifications(holds),
+        () => this.anonymizeOldAuditLogs(holds),
+      ];
+
+      for (const job of jobs) {
+        try {
+          const result = await job();
+          results.push(result);
+        } catch (error: any) {
+          errors.push(error.message);
+          logger.error('[DataRetention] Job failed', { error });
+        }
+      }
+
+      const completedAt = new Date();
+      const totalPurged = results.reduce((sum, r) => sum + r.recordsPurged, 0);
+      const summary: PurgeJobSummary = {
+        startedAt,
+        completedAt,
+        results,
+        totalPurged,
+        errors,
+        skipped: false,
+      };
+
+      // Written before the info log so a crash between the two still leaves the
+      // compliance record of what was destroyed.
+      await this.logPurgeSummary(summary);
+
+      // Named counts, not just a total: proving a retention promise was kept
+      // means being able to say which category was purged and which was held.
+      logger.info('[DataRetention] Completed', {
+        totalPurged,
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        purgedByType: results.reduce<Record<string, number>>((acc, result) => {
+          acc[result.dataType] = result.recordsPurged;
+          return acc;
+        }, {}),
+        heldDataTypes: results.filter((r) => r.errors.includes('Skipped: Legal hold active')).map((r) => r.dataType),
+        errors,
+      });
+
+      return summary;
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /**
+   * Collapse every active hold into one scope the purge jobs can consult.
+   */
+  private async loadActiveHolds(): Promise<LegalHoldScope> {
+    const now = new Date();
     const activeHolds = await prisma.legalHold.findMany({
-      where: { isActive: true },
+      // A hold with a past endDate has lapsed even if nobody flipped isActive,
+      // and one with no endDate runs until it is released.
+      where: {
+        isActive: true,
+        OR: [{ endDate: null }, { endDate: { gt: now } }],
+      },
     });
 
-    const heldUserIds = new Set<string>();
-    const heldDataTypes = new Set<string>();
-    
+    const scope: LegalHoldScope = {
+      userIds: new Set<string>(),
+      dataTypes: new Set<string>(),
+      holdsEverything: false,
+    };
+
     for (const hold of activeHolds) {
-      hold.affectedUserIds.forEach(id => heldUserIds.add(id));
-      hold.affectedDataTypes.forEach(type => heldDataTypes.add(type));
-    }
-
-    // Run each purge job
-    const jobs = [
-      () => this.purgeExpiredVerificationTokens(),
-      () => this.purgeExpiredSessions(),
-      () => this.purgeOldMessages(heldUserIds, heldDataTypes.has('messages')),
-      () => this.purgeOldAnalyticsEvents(heldDataTypes.has('analytics')),
-      () => this.purgeSoftDeletedUsers(heldUserIds),
-      () => this.purgeExpiredDSARExports(),
-      () => this.purgeOldNotifications(),
-      () => this.anonymizeOldAuditLogs(),
-    ];
-
-    for (const job of jobs) {
-      try {
-        const result = await job();
-        results.push(result);
-      } catch (error: any) {
-        errors.push(error.message);
-        logger.error('[DataRetention] Job failed', { error });
+      hold.affectedUserIds.forEach((id) => scope.userIds.add(id));
+      for (const type of hold.affectedDataTypes) {
+        const normalized = normalizeDataType(type);
+        if (normalized === '*' || normalized === 'all') {
+          scope.holdsEverything = true;
+        }
+        scope.dataTypes.add(normalized);
       }
     }
 
-    const completedAt = new Date();
-    const totalPurged = results.reduce((sum, r) => sum + r.recordsPurged, 0);
+    if (activeHolds.length > 0) {
+      logger.info('[DataRetention] Active legal holds applied', {
+        holdCount: activeHolds.length,
+        heldUserCount: scope.userIds.size,
+        heldDataTypes: Array.from(scope.dataTypes),
+        holdsEverything: scope.holdsEverything,
+      });
+    }
 
-    // Log the purge summary
-    await this.logPurgeSummary({
-      startedAt,
-      completedAt,
-      results,
-      totalPurged,
-      errors,
-    });
-
-    logger.info(`[DataRetention] Completed. Purged ${totalPurged} records.`);
-
-    return {
-      startedAt,
-      completedAt,
-      results,
-      totalPurged,
-      errors,
-    };
+    return scope;
   }
 
   /**
    * Purge expired verification tokens
    */
-  async purgeExpiredVerificationTokens(): Promise<PurgeResult> {
+  async purgeExpiredVerificationTokens(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'verification_tokens', 'credentials')) {
+      return heldResult('verification_tokens');
+    }
+
     const result = await prisma.verificationToken.deleteMany({
       where: {
         expiresAt: { lt: new Date() },
+        ...this.excludeHeldUsers(holds),
       },
     });
 
@@ -126,12 +238,28 @@ export class DataRetentionService {
   }
 
   /**
+   * Prisma clause excluding users under hold from a per-user delete.
+   *
+   * `notIn: []` is a no-op in Prisma but still costs a clause, so an empty hold
+   * set returns nothing at all and leaves the query as it was.
+   */
+  private excludeHeldUsers(holds: LegalHoldScope, field: string = 'userId'): Record<string, any> {
+    if (holds.userIds.size === 0) return {};
+    return { [field]: { notIn: Array.from(holds.userIds) } };
+  }
+
+  /**
    * Purge expired sessions
    */
-  async purgeExpiredSessions(): Promise<PurgeResult> {
+  async purgeExpiredSessions(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'sessions', 'session_data')) {
+      return heldResult('sessions');
+    }
+
     const result = await prisma.session.deleteMany({
       where: {
         expiresAt: { lt: new Date() },
+        ...this.excludeHeldUsers(holds),
       },
     });
 
@@ -146,17 +274,9 @@ export class DataRetentionService {
   /**
    * Purge old messages beyond retention period
    */
-  async purgeOldMessages(
-    excludeUserIds: Set<string>,
-    isHeld: boolean
-  ): Promise<PurgeResult> {
-    if (isHeld) {
-      return {
-        dataType: 'messages',
-        recordsPurged: 0,
-        errors: ['Skipped: Legal hold active'],
-        executedAt: new Date(),
-      };
+  async purgeOldMessages(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'messages', 'user_messages', 'direct_messages')) {
+      return heldResult('messages');
     }
 
     const cutoffDate = new Date();
@@ -166,10 +286,13 @@ export class DataRetentionService {
       createdAt: { lt: cutoffDate },
     };
 
-    if (excludeUserIds.size > 0) {
+    // Both sides of the thread are checked: a held user's messages are evidence
+    // whether they sent or received them.
+    if (holds.userIds.size > 0) {
+      const heldIds = Array.from(holds.userIds);
       whereClause.AND = [
-        { senderId: { notIn: Array.from(excludeUserIds) } },
-        { receiverId: { notIn: Array.from(excludeUserIds) } },
+        { senderId: { notIn: heldIds } },
+        { receiverId: { notIn: heldIds } },
       ];
     }
 
@@ -186,14 +309,9 @@ export class DataRetentionService {
   /**
    * Purge old analytics events
    */
-  async purgeOldAnalyticsEvents(isHeld: boolean): Promise<PurgeResult> {
-    if (isHeld) {
-      return {
-        dataType: 'analytics_events',
-        recordsPurged: 0,
-        errors: ['Skipped: Legal hold active'],
-        executedAt: new Date(),
-      };
+  async purgeOldAnalyticsEvents(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'analytics', 'analytics_events')) {
+      return heldResult('analytics_events');
     }
 
     const cutoffDate = new Date();
@@ -228,7 +346,11 @@ export class DataRetentionService {
   /**
    * Permanently delete users who requested deletion 30+ days ago
    */
-  async purgeSoftDeletedUsers(excludeUserIds: Set<string>): Promise<PurgeResult> {
+  async purgeSoftDeletedUsers(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'users', 'accounts')) {
+      return heldResult('soft_deleted_users');
+    }
+
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - DEFAULT_RETENTION_PERIODS.soft_deleted_users);
 
@@ -238,21 +360,26 @@ export class DataRetentionService {
         type: 'DELETION',
         status: 'COMPLETED',
         completedAt: { lt: cutoffDate },
-        userId: { notIn: Array.from(excludeUserIds) },
+        ...this.excludeHeldUsers(holds),
       },
       select: { userId: true },
     });
 
+    // A user who filed more than one deletion request appears once per request.
+    // Without the dedupe the second pass hard-deletes an already-deleted user
+    // and reports a spurious failure.
+    const userIds = Array.from(new Set(pendingDeletions.map((deletion) => deletion.userId)));
+
     let purgedCount = 0;
     const errors: string[] = [];
 
-    for (const deletion of pendingDeletions) {
+    for (const userId of userIds) {
       try {
         // Hard delete user and all related data
-        await this.hardDeleteUser(deletion.userId);
+        await this.hardDeleteUser(userId);
         purgedCount++;
       } catch (error: any) {
-        errors.push(`Failed to delete user ${deletion.userId}: ${error.message}`);
+        errors.push(`Failed to delete user ${userId}: ${error.message}`);
       }
     }
 
@@ -298,13 +425,21 @@ export class DataRetentionService {
   /**
    * Purge expired DSAR export files
    */
-  async purgeExpiredDSARExports(): Promise<PurgeResult> {
+  async purgeExpiredDSARExports(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'dsar_exports', 'dsar')) {
+      return heldResult('dsar_exports');
+    }
+
     const result = await prisma.dSARRequest.updateMany({
+      // `exportUrl: { not: null }` is what makes this idempotent: once blanked a
+      // row can never match again, so a repeat run reports zero rather than
+      // re-counting every historic export.
       where: {
         type: 'EXPORT',
         status: 'COMPLETED',
         exportExpiresAt: { lt: new Date() },
         exportUrl: { not: null },
+        ...this.excludeHeldUsers(holds),
       },
       data: {
         exportUrl: null,
@@ -324,7 +459,11 @@ export class DataRetentionService {
   /**
    * Purge old notifications
    */
-  async purgeOldNotifications(): Promise<PurgeResult> {
+  async purgeOldNotifications(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'notifications')) {
+      return heldResult('notifications');
+    }
+
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 90); // 90 days
 
@@ -332,6 +471,7 @@ export class DataRetentionService {
       where: {
         createdAt: { lt: cutoffDate },
         isRead: true,
+        ...this.excludeHeldUsers(holds),
       },
     });
 
@@ -345,27 +485,51 @@ export class DataRetentionService {
 
   /**
    * Anonymize audit logs older than active retention (keep for compliance but remove PII)
+   *
+   * Raw SQL rather than `updateMany`, because the "not already anonymized"
+   * condition cannot be expressed in Prisma's JSON filter: `path` + `equals`
+   * compares the value at a key, and for rows where the key is absent the
+   * comparison is SQL NULL, so neither the positive nor the negated form
+   * selects them. The previous `equals: undefined` was silently dropped from
+   * the query altogether, which made this the one non-idempotent job in the
+   * sweep - it re-stamped every log older than a year on every single run and
+   * reported the whole table as freshly anonymized each night. `IS DISTINCT
+   * FROM` treats the absent key as "not anonymized" and the marker converges
+   * after one pass.
    */
-  async anonymizeOldAuditLogs(): Promise<PurgeResult> {
+  async anonymizeOldAuditLogs(holds: LegalHoldScope = EMPTY_HOLD_SCOPE): Promise<PurgeResult> {
+    if (isHeld(holds, 'audit_logs', 'audit')) {
+      return heldResult('audit_logs_anonymized');
+    }
+
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 365); // Anonymize after 1 year, keep 7 years total
 
-    const result = await prisma.auditLog.updateMany({
-      where: {
-        createdAt: { lt: cutoffDate },
-        metadata: {
-          path: ['anonymized'],
-          equals: undefined,
-        },
-      },
-      data: {
-        metadata: { anonymized: true, anonymizedAt: new Date().toISOString() },
-      },
-    });
+    const marker = JSON.stringify({ anonymized: true, anonymizedAt: new Date().toISOString() });
+
+    // An audit log under hold keeps its actor, IP and user agent - that is the
+    // part a regulator or court would actually ask for.
+    const heldIds = Array.from(holds.userIds);
+    const heldUserFilter = heldIds.length
+      ? Prisma.sql`AND ("actorUserId" IS NULL OR "actorUserId" NOT IN (${Prisma.join(heldIds)}))
+                   AND ("targetUserId" IS NULL OR "targetUserId" NOT IN (${Prisma.join(heldIds)}))`
+      : Prisma.empty;
+
+    // ipAddress and userAgent are cleared alongside metadata: an "anonymized"
+    // record that still carries the actor's IP is not anonymized.
+    const count = await prisma.$executeRaw`
+      UPDATE "AuditLog"
+      SET "metadata" = ${marker}::jsonb,
+          "ipAddress" = NULL,
+          "userAgent" = NULL
+      WHERE "createdAt" < ${cutoffDate}
+        AND ("metadata" -> 'anonymized') IS DISTINCT FROM 'true'::jsonb
+        ${heldUserFilter}
+    `;
 
     return {
       dataType: 'audit_logs_anonymized',
-      recordsPurged: result.count,
+      recordsPurged: count,
       errors: [],
       executedAt: new Date(),
     };
@@ -383,6 +547,7 @@ export class DataRetentionService {
         details: JSON.parse(JSON.stringify({
           startedAt: summary.startedAt,
           completedAt: summary.completedAt,
+          durationMs: summary.completedAt.getTime() - summary.startedAt.getTime(),
           totalPurged: summary.totalPurged,
           results: summary.results,
           errors: summary.errors,
@@ -468,7 +633,9 @@ export class DataRetentionService {
 
 export const dataRetentionService = new DataRetentionService();
 
-// CLI entry point for cron job
+// CLI entry point for one-off/manual runs. The scheduled run does not go
+// through here - it is a BullMQ job on the scheduled-tasks queue, registered by
+// registerRecurringJobs() and executed by the scheduled-tasks worker.
 if (require.main === module) {
   dataRetentionService.runAllPurgeJobs()
     .then((summary) => {

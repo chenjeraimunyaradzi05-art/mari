@@ -6,6 +6,11 @@
  * Standalone entry point for running background workers
  * in a dedicated container. This allows scaling workers
  * independently from the main API server.
+ *
+ * This process also owns the recurring schedule: startAllWorkers() upserts the
+ * BullMQ job schedulers (see registerRecurringJobs in utils/queue), so the
+ * nightly data-retention purge runs wherever this container runs. The upsert is
+ * keyed, so scaling this container to N replicas still yields one schedule.
  */
 
 import dotenv from 'dotenv';

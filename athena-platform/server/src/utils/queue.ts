@@ -146,6 +146,21 @@ export interface AnalyticsJob {
   timestamp: Date;
 }
 
+export const SCHEDULED_TASKS = {
+  DATA_RETENTION_PURGE: 'data-retention-purge',
+} as const;
+
+export type ScheduledTaskName = (typeof SCHEDULED_TASKS)[keyof typeof SCHEDULED_TASKS];
+
+/**
+ * Recurring maintenance work. `task` is the discriminator the scheduled-tasks
+ * worker switches on, so a task added here is a compile error until the worker
+ * handles it.
+ */
+export interface ScheduledTaskJob {
+  task: ScheduledTaskName;
+}
+
 // ===========================================
 // JOB PRODUCERS (Add jobs to queues)
 // ===========================================
@@ -188,6 +203,56 @@ export async function queueDataExport(job: DataExportJob) {
   return dataExportQueue.add('export-data', job, {
     jobId: `export-${job.userId}-${job.exportType}`,
     attempts: 1, // Don't retry exports
+  });
+}
+
+// ===========================================
+// RECURRING JOBS
+// ===========================================
+
+// Overnight in the venture's home timezone: the purge takes write locks on hot
+// tables (messages, notifications), so it runs when traffic is lowest.
+const DATA_RETENTION_CRON = process.env.DATA_RETENTION_CRON || '0 3 * * *';
+const SCHEDULER_TIMEZONE = process.env.SCHEDULER_TIMEZONE || 'Australia/Brisbane';
+
+// Deliberately absent: an auto-save job for SavingsGoal.autoSaveEnabled /
+// autoSaveAmount. Savings contributions are a self-reported ledger and the
+// platform holds no stored mandate or payment method to debit off-session
+// (payments-orchestration's getStripeCustomerId returns null and every charge
+// path needs a paymentMethodId supplied by the request). A scheduled job here
+// could only write SavingsContribution rows for money that never moved, which
+// would be fabricated financial data. The toggle needs disabling at the API,
+// not a job pretending to honour it.
+
+/**
+ * Register every recurring job on the scheduled-tasks queue.
+ *
+ * `upsertJobScheduler` is keyed by the scheduler id, so this is safe to call on
+ * every boot and from every replica: a redeploy re-points the existing schedule
+ * (picking up a changed cron) instead of stacking a second one, and BullMQ still
+ * produces exactly one job per interval however many callers upserted it.
+ */
+export async function registerRecurringJobs(): Promise<void> {
+  await scheduledTasksQueue.upsertJobScheduler(
+    SCHEDULED_TASKS.DATA_RETENTION_PURGE,
+    { pattern: DATA_RETENTION_CRON, tz: SCHEDULER_TIMEZONE },
+    {
+      name: SCHEDULED_TASKS.DATA_RETENTION_PURGE,
+      data: { task: SCHEDULED_TASKS.DATA_RETENTION_PURGE } as ScheduledTaskJob,
+      opts: {
+        // A failed sweep waits for the next night rather than retrying with
+        // backoff, which would land it in morning traffic. Nothing is lost:
+        // every purge re-derives its cutoffs from the clock, so the next run
+        // picks up whatever this one missed.
+        attempts: 1,
+        removeOnComplete: { count: 60 },
+        removeOnFail: { count: 60 },
+      },
+    }
+  );
+
+  logger.info('Recurring jobs registered', {
+    dataRetentionPurge: { pattern: DATA_RETENTION_CRON, timezone: SCHEDULER_TIMEZONE },
   });
 }
 
@@ -243,6 +308,10 @@ function getQueue(name: string): Queue | null {
       return dataExportQueue;
     case QUEUE_NAMES.ANALYTICS:
       return analyticsQueue;
+    // Omitting this case made getAllQueueStats report null for scheduled tasks,
+    // which is exactly where a stalled retention purge would show up.
+    case QUEUE_NAMES.SCHEDULED_TASKS:
+      return scheduledTasksQueue;
     default:
       return null;
   }

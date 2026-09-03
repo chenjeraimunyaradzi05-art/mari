@@ -5,7 +5,9 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../utils/prisma';
+import { AuditAction, ConsentType } from '@prisma/client';
+import { logAudit } from '../utils/audit';
+import { consentService } from '../services/consent.service';
 import { logger } from '../utils/logger';
 
 // EU/EEA country codes
@@ -89,9 +91,10 @@ export function gdprRegionMiddleware(req: GDPRRequest, res: Response, next: Next
 /**
  * Middleware to require explicit consent for specific endpoints
  */
-export function requireConsent(consentType: string) {
+export function requireConsent(consentType: ConsentType) {
   return async (req: GDPRRequest, res: Response, next: NextFunction) => {
-    // Skip consent check for non-GDPR regions
+    // Outside the GDPR/EEA/UK footprint consent is not the basis this
+    // processing runs on, so there is nothing for the gate to enforce.
     if (!req.gdpr?.isGDPRRegion) {
       return next();
     }
@@ -106,32 +109,28 @@ export function requireConsent(consentType: string) {
     }
 
     try {
-      const consent = await prisma.consentRecord.findFirst({
-        where: {
-          userId,
-          consentType: consentType as any,
-          status: 'GRANTED',
-          OR: [
-            { expiresAt: null },
-            { expiresAt: { gt: new Date() } },
-          ],
-        },
-      });
-
-      if (!consent) {
-        return res.status(403).json({
-          success: false,
-          error: `Consent required for ${consentType}`,
-          code: 'CONSENT_REQUIRED',
-          consentType,
-        });
+      // consentService.hasConsent is the one reader: it applies the record's own
+      // expiry and any Article 18 restriction standing over it, so this gate and
+      // the rest of the platform can never disagree about what was agreed to.
+      if (await consentService.hasConsent(userId, consentType)) {
+        return next();
       }
 
-      next();
+      return res.status(403).json({
+        success: false,
+        error: `Consent required for ${consentType}`,
+        code: 'CONSENT_REQUIRED',
+        consentType,
+      });
     } catch (error) {
-      logger.error('Consent check error', { error });
-      // Allow request to proceed on error (fail open for better UX)
-      next();
+      // A gate that opens when its own lookup fails is not a gate. Processing we
+      // cannot show was agreed to does not happen.
+      logger.error('Consent check error', { error, consentType });
+      return res.status(503).json({
+        success: false,
+        error: 'Unable to verify consent right now. Please try again.',
+        code: 'CONSENT_CHECK_UNAVAILABLE',
+      });
     }
   };
 }
@@ -161,34 +160,44 @@ export function gdprResponseHeaders(req: Request, res: Response, next: NextFunct
 export function auditDataAccess(dataCategory: string) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const userId = (req as any).user?.id;
-    
+
     // Log after response is sent
-    res.on('finish', async () => {
+    res.on('finish', () => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        try {
-          await prisma.auditLog.create({
-            data: {
-              actorUserId: userId || null,
-              action: 'DATA_ACCESS',
-              ipAddress: req.ip,
-              userAgent: req.headers['user-agent'],
-              metadata: {
-                resourceType: dataCategory,
-                resourceId: req.params.id || 'list',
-                method: req.method,
-                path: req.path,
-                timestamp: new Date().toISOString(),
-              },
-            },
-          });
-        } catch (error) {
-          logger.error('Audit log error', { error });
-        }
+        // The audit row is evidence, not part of the answer, so a failure to
+        // write it must never reach the caller who has already been served.
+        logAudit({
+          actorUserId: userId || null,
+          targetUserId: userId || null,
+          action: AuditAction.DATA_ACCESS,
+          // Truncated by anonymizeIP inside the GDPR footprint; the raw address
+          // elsewhere. An accountability record does not need a full address to
+          // place a request.
+          ipAddress: auditIpAddress(req),
+          userAgent: req.headers['user-agent'] || null,
+          metadata: {
+            resourceType: dataCategory,
+            resourceId: req.params.id || req.params.requestId || 'list',
+            method: req.method,
+            // req.path is relative to the router's mount point, so on its own it
+            // would not say which endpoint was read.
+            path: `${req.baseUrl}${req.path}`,
+            timestamp: new Date().toISOString(),
+          },
+        }).catch((error) => logger.error('Audit log error', { error }));
       }
     });
 
     next();
   };
+}
+
+/**
+ * The address to file against an audit row: the truncated one where
+ * `anonymizeIP` produced it, otherwise whatever Express reports.
+ */
+export function auditIpAddress(req: Request): string | null {
+  return (req as any).anonymizedIP || req.ip || null;
 }
 
 /**
@@ -263,7 +272,15 @@ export function anonymizeIP(req: Request, res: Response, next: NextFunction) {
  */
 const dsarRateLimits = new Map<string, { count: number; resetAt: number }>();
 
-export function dsarRateLimit(maxRequests: number = 5, windowMs: number = 3600000) {
+export function dsarRateLimit(
+  maxRequests: number = 5,
+  windowMs: number = 3600000,
+  // Article 12(5) lets us refuse a manifestly excessive request, not a different
+  // right the same member happens to exercise afterwards. Separate buckets keep
+  // somebody correcting a typo in their surname from locking themselves out of
+  // downloading their data.
+  bucket: string = 'dsar'
+) {
   return (req: Request, res: Response, next: NextFunction) => {
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -273,8 +290,9 @@ export function dsarRateLimit(maxRequests: number = 5, windowMs: number = 360000
       });
     }
 
+    const key = `${bucket}:${userId}`;
     const now = Date.now();
-    const userLimit = dsarRateLimits.get(userId);
+    const userLimit = dsarRateLimits.get(key);
 
     if (userLimit && now < userLimit.resetAt) {
       if (userLimit.count >= maxRequests) {
@@ -286,14 +304,14 @@ export function dsarRateLimit(maxRequests: number = 5, windowMs: number = 360000
       }
       userLimit.count++;
     } else {
-      dsarRateLimits.set(userId, { count: 1, resetAt: now + windowMs });
+      dsarRateLimits.set(key, { count: 1, resetAt: now + windowMs });
     }
 
     // Clean up old entries periodically
     if (Math.random() < 0.01) {
-      for (const [key, value] of dsarRateLimits.entries()) {
+      for (const [entryKey, value] of dsarRateLimits.entries()) {
         if (now > value.resetAt) {
-          dsarRateLimits.delete(key);
+          dsarRateLimits.delete(entryKey);
         }
       }
     }
@@ -307,6 +325,7 @@ export default {
   requireConsent,
   gdprResponseHeaders,
   auditDataAccess,
+  auditIpAddress,
   dataMinimization,
   anonymizeIP,
   dsarRateLimit,
