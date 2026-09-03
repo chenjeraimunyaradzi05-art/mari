@@ -6,10 +6,59 @@ import { evaluateSafetyScore } from '../services/moderation.service';
 import { handleUserBlock, handleUserReport } from '../services/safety-score.service';
 import { recordSafetyReport, recordUserBlock } from '../services/trust.service';
 import { prisma } from '../utils/prisma';
-import { readSafetyStore, writeSafetyStore } from '../utils/safety-store';
-import { randomUUID } from 'crypto';
+import { blockUser, listBlockedUsers, unblockUser } from '../utils/safety-store';
 
 const router = Router();
+
+type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel' | 'other';
+
+// ContentReport speaks the moderation queue's vocabulary; the Safety Center
+// speaks the reporter's. Translate on the way out so a reporter still sees
+// whether their case is open or finished.
+const REPORT_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'SUBMITTED',
+  REVIEWING: 'UNDER_REVIEW',
+  RESOLVED: 'ACTION_TAKEN',
+  DISMISSED: 'CLOSED',
+};
+
+/**
+ * Every report has to name the account it is about, because that is what a
+ * moderator acts on. Returns null when the target cannot be traced to a user.
+ */
+async function resolveReportedUserId(
+  targetType: ReportTargetType,
+  targetId?: string
+): Promise<string | null> {
+  if (!targetId) {
+    return null;
+  }
+
+  switch (targetType) {
+    case 'user': {
+      const user = await prisma.user.findUnique({ where: { id: targetId }, select: { id: true } });
+      return user?.id ?? null;
+    }
+    case 'post': {
+      const post = await prisma.post.findUnique({ where: { id: targetId }, select: { authorId: true } });
+      return post?.authorId ?? null;
+    }
+    case 'video': {
+      const video = await prisma.video.findUnique({ where: { id: targetId }, select: { authorId: true } });
+      return video?.authorId ?? null;
+    }
+    case 'message': {
+      const message = await prisma.message.findUnique({ where: { id: targetId }, select: { senderId: true } });
+      return message?.senderId ?? null;
+    }
+    case 'channel': {
+      const channel = await prisma.channel.findUnique({ where: { id: targetId }, select: { ownerId: true } });
+      return channel?.ownerId ?? null;
+    }
+    default:
+      return null;
+  }
+}
 
 // ===========================================
 // SAFETY SCORE (Full Launch)
@@ -38,9 +87,26 @@ router.post('/', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 router.get('/reports', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const store = await readSafetyStore();
-    const reports = store.reports.filter((report) => report.userId === req.user!.id);
-    res.json({ success: true, data: reports });
+    const reports = await prisma.contentReport.findMany({
+      where: { reporterId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    res.json({
+      success: true,
+      data: reports.map((report) => ({
+        id: report.id,
+        userId: report.reporterId,
+        targetType: report.contentType.toLowerCase(),
+        targetId: report.contentId,
+        reason: report.reason,
+        details: report.description ?? undefined,
+        status: REPORT_STATUS_LABELS[report.status] ?? report.status,
+        createdAt: report.createdAt.toISOString(),
+        updatedAt: report.updatedAt.toISOString(),
+      })),
+    });
   } catch (error) {
     next(error);
   }
@@ -62,34 +128,20 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { targetType, targetId, reason, details } = req.body;
-      const now = new Date().toISOString();
-
-      const report: {
-        id: `${string}-${string}-${string}-${string}-${string}`;
-        userId: string;
-        targetType: 'post' | 'video' | 'user' | 'message' | 'channel' | 'other';
-        targetId: string | undefined;
+      const { targetType, targetId, reason, details } = req.body as {
+        targetType: ReportTargetType;
+        targetId?: string;
         reason: string;
-        details: string | undefined;
-        status: 'SUBMITTED' | 'UNDER_REVIEW' | 'ACTION_TAKEN' | 'CLOSED';
-        createdAt: string;
-        updatedAt: string;
-      } = {
-        id: randomUUID(),
-        userId: req.user!.id,
-        targetType,
-        targetId,
-        reason,
-        details,
-        status: 'SUBMITTED' as const,
-        createdAt: now,
-        updatedAt: now,
+        details?: string;
       };
 
-      const store = await readSafetyStore();
-      store.reports.unshift(report);
-      await writeSafetyStore(store);
+      const reportedUserId = await resolveReportedUserId(targetType, targetId);
+
+      // A report the moderation queue cannot route is worse than no report, so
+      // say so instead of accepting it into a void.
+      if (!reportedUserId) {
+        throw new ApiError(400, 'We could not find the content you reported');
+      }
 
       if (targetType === 'post' && targetId) {
         await prisma.post.update({
@@ -105,32 +157,35 @@ router.post(
         });
       }
 
-      const reportedUserId =
-        targetType === 'user' && targetId
-          ? targetId
-          : targetType === 'post' && targetId
-            ? (await prisma.post.findUnique({ where: { id: targetId }, select: { authorId: true } }))?.authorId
-            : targetType === 'video' && targetId
-              ? ((await prisma.video.findUnique({ where: { id: targetId }, select: { authorId: true } })) as any)?.authorId
-              : null;
+      const report = await prisma.contentReport.create({
+        data: {
+          reporterId: req.user!.id,
+          contentType: targetType.toUpperCase(),
+          contentId: targetId!,
+          reportedUserId,
+          reason,
+          description: details,
+          status: 'PENDING',
+        },
+      });
 
-      if (reportedUserId) {
-        await recordSafetyReport(req.user!.id, reportedUserId);
-        await handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType);
-        await prisma.contentReport.create({
-          data: {
-            reporterId: req.user!.id,
-            contentType: targetType.toUpperCase(),
-            contentId: targetId || 'unknown',
-            reportedUserId,
-            reason,
-            description: details,
-            status: 'PENDING',
-          },
-        });
-      }
+      await recordSafetyReport(req.user!.id, reportedUserId);
+      await handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType);
 
-      res.status(201).json({ success: true, data: report });
+      res.status(201).json({
+        success: true,
+        data: {
+          id: report.id,
+          userId: report.reporterId,
+          targetType,
+          targetId,
+          reason,
+          details,
+          status: REPORT_STATUS_LABELS[report.status] ?? report.status,
+          createdAt: report.createdAt.toISOString(),
+          updatedAt: report.updatedAt.toISOString(),
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -142,8 +197,7 @@ router.post(
 // ===========================================
 router.get('/blocks', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const store = await readSafetyStore();
-    const blocks = store.blocks.filter((block) => block.userId === req.user!.id);
+    const blocks = await listBlockedUsers(req.user!.id);
 
     const users = await prisma.user.findMany({
       where: { id: { in: blocks.map((block) => block.blockedUserId) } },
@@ -172,32 +226,33 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { blockedUserId, reason } = req.body;
-      const store = await readSafetyStore();
+      const { blockedUserId } = req.body;
 
-      const exists = store.blocks.find(
-        (block) => block.userId === req.user!.id && block.blockedUserId === blockedUserId
-      );
-
-      if (exists) {
-        return res.json({ success: true, data: exists });
+      if (blockedUserId === req.user!.id) {
+        throw new ApiError(400, 'You cannot block yourself');
       }
 
-      const block = {
-        id: randomUUID(),
-        userId: req.user!.id,
-        blockedUserId,
-        reason,
-        createdAt: new Date().toISOString(),
-      };
+      const target = await prisma.user.findUnique({
+        where: { id: blockedUserId },
+        select: { id: true },
+      });
 
-      store.blocks.unshift(block);
-      await writeSafetyStore(store);
+      if (!target) {
+        throw new ApiError(404, 'User not found');
+      }
 
-      await recordUserBlock(blockedUserId);
-      await handleUserBlock(blockedUserId, req.user!.id);
+      const { created } = await blockUser(req.user!.id, blockedUserId);
 
-      res.status(201).json({ success: true, data: block });
+      if (created) {
+        await recordUserBlock(blockedUserId);
+        await handleUserBlock(blockedUserId, req.user!.id);
+      }
+
+      const [block] = (await listBlockedUsers(req.user!.id)).filter(
+        (entry) => entry.blockedUserId === blockedUserId
+      );
+
+      res.status(created ? 201 : 200).json({ success: true, data: block });
     } catch (error) {
       next(error);
     }
@@ -207,11 +262,7 @@ router.post(
 router.delete('/blocks/:blockedUserId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { blockedUserId } = req.params;
-    const store = await readSafetyStore();
-    store.blocks = store.blocks.filter(
-      (block) => !(block.userId === req.user!.id && block.blockedUserId === blockedUserId)
-    );
-    await writeSafetyStore(store);
+    await unblockUser(req.user!.id, blockedUserId);
 
     res.json({ success: true });
   } catch (error) {

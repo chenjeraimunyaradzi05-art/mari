@@ -3,6 +3,7 @@ import { body, query, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { reverseEnforcement } from '../services/content-report.service';
 import { logAudit } from '../utils/audit';
 
 const router = Router();
@@ -139,18 +140,40 @@ router.patch(
         },
       });
 
+      // Upholding an appeal has to undo what was done to the account, otherwise
+      // the decision is only ever paperwork. Only the two enforcement types are
+      // reversible here; the others were never an enforcement to begin with.
+      const reversible = appeal.type === 'CONTENT_MODERATION' || appeal.type === 'ACCOUNT_SUSPENSION';
+
+      let reversal: Awaited<ReturnType<typeof reverseEnforcement>> | null = null;
+      if (status === 'APPROVED' && reversible) {
+        const metadata = (appeal.metadata ?? null) as {
+          reportId?: string;
+          contentType?: string;
+          contentId?: string;
+        } | null;
+
+        reversal = await reverseEnforcement({
+          userId: appeal.userId,
+          reportId: metadata?.reportId ?? null,
+          contentType: metadata?.contentType ?? null,
+          contentId: metadata?.contentId ?? null,
+        });
+      }
+
       await logAudit({
         action: 'ADMIN_APPEAL_DECISION',
         actorUserId: req.user?.id ?? null,
         targetUserId: appeal.userId,
         ipAddress: req.ip,
         userAgent: req.get('user-agent') || undefined,
-        metadata: { appealId: appeal.id, status, decisionNote },
+        metadata: { appealId: appeal.id, status, decisionNote, reversal },
       });
 
       res.json({
         success: true,
         data: appeal,
+        reversal,
       });
     } catch (error) {
       next(error);

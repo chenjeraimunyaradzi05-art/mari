@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
+import { ModerationAction, processReportById } from '../services/content-report.service';
 import { logAudit } from '../utils/audit';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
@@ -612,6 +613,239 @@ router.delete('/content/comments/:id', async (req: AuthRequest, res: Response, n
     });
 
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// MODERATION QUEUE
+// ============================================================================
+
+const REPORT_STATUSES = ['PENDING', 'REVIEWING', 'RESOLVED', 'DISMISSED'];
+const MODERATION_ACTIONS: ModerationAction[] = ['dismiss', 'warn', 'remove', 'suspend', 'ban', 'escalate'];
+
+// AuditAction has no moderation verbs of its own, so each outcome is logged
+// under the closest existing action and the report details ride in metadata.
+const REPORT_AUDIT_ACTIONS = {
+  dismiss: 'ADMIN_POST_CLEAR_REPORTS',
+  warn: 'ADMIN_USER_UPDATE',
+  remove: 'ADMIN_POST_HIDE',
+  suspend: 'ADMIN_USER_UPDATE',
+  ban: 'ADMIN_USER_UPDATE',
+  escalate: 'ADMIN_USER_UPDATE',
+} as const;
+
+const reportQueueSelect = {
+  id: true,
+  contentType: true,
+  contentId: true,
+  reason: true,
+  description: true,
+  status: true,
+  action: true,
+  reviewerId: true,
+  reviewNotes: true,
+  actionTakenAt: true,
+  createdAt: true,
+  updatedAt: true,
+  reporter: {
+    select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
+  },
+  reportedUser: {
+    select: { id: true, firstName: true, lastName: true, displayName: true, email: true, isSuspended: true },
+  },
+};
+
+/**
+ * GET /admin/moderation/reports
+ * Work queue of user reports, newest first
+ */
+router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const {
+      page = '1',
+      limit = '20',
+      status,
+      contentType,
+      reason,
+      assigned,
+    } = req.query;
+
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const where: any = {};
+
+    if (status && REPORT_STATUSES.includes(String(status).toUpperCase())) {
+      where.status = String(status).toUpperCase();
+    }
+    if (contentType) {
+      where.contentType = String(contentType).toUpperCase();
+    }
+    // Reasons arrive both as codes and as free text depending on where the
+    // report was filed, so match loosely rather than on an exact value.
+    if (reason) {
+      where.reason = { contains: String(reason), mode: 'insensitive' };
+    }
+    if (assigned === 'me') {
+      where.reviewerId = req.user?.id;
+    } else if (assigned === 'unclaimed') {
+      where.reviewerId = null;
+    }
+
+    const [reports, total, openCount] = await Promise.all([
+      prisma.contentReport.findMany({
+        where,
+        select: reportQueueSelect,
+        skip,
+        take: limitNum,
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.contentReport.count({ where }),
+      prisma.contentReport.count({ where: { status: { in: ['PENDING', 'REVIEWING'] } } }),
+    ]);
+
+    res.json({
+      reports,
+      openCount,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/moderation/reports/:id
+ * Single report with every other open report against the same account
+ */
+router.get('/moderation/reports/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const report = await prisma.contentReport.findUnique({
+      where: { id },
+      select: reportQueueSelect,
+    });
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const relatedReports = await prisma.contentReport.findMany({
+      where: {
+        reportedUserId: report.reportedUser.id,
+        id: { not: report.id },
+      },
+      select: { id: true, reason: true, status: true, action: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    res.json({ report, relatedReports });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/moderation/reports/:id/claim
+ * Take ownership of a report so two moderators do not work the same case
+ */
+router.post('/moderation/reports/:id/claim', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { release = false } = req.body ?? {};
+
+    const report = await prisma.contentReport.findUnique({
+      where: { id },
+      select: { id: true, status: true, reviewerId: true },
+    });
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    if (report.status === 'RESOLVED' || report.status === 'DISMISSED') {
+      return res.status(409).json({ error: 'Report has already been actioned' });
+    }
+
+    if (report.reviewerId && report.reviewerId !== req.user?.id) {
+      return res.status(409).json({ error: 'Report is claimed by another moderator' });
+    }
+
+    const claimed = await prisma.contentReport.update({
+      where: { id },
+      data: release
+        ? { status: 'PENDING', reviewerId: null }
+        : { status: 'REVIEWING', reviewerId: req.user?.id ?? null },
+      select: reportQueueSelect,
+    });
+
+    res.json(claimed);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/moderation/reports/:id/action
+ * Decide a report and enforce the decision
+ */
+router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { action, notes } = req.body ?? {};
+
+    if (!MODERATION_ACTIONS.includes(action)) {
+      return res.status(400).json({ error: 'Invalid action' });
+    }
+
+    const existing = await prisma.contentReport.findUnique({
+      where: { id },
+      select: { id: true, reviewerId: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    if (existing.reviewerId && existing.reviewerId !== req.user?.id) {
+      return res.status(409).json({ error: 'Report is claimed by another moderator' });
+    }
+
+    const outcome = await processReportById(id, action, req.user!.id, notes);
+
+    await logAudit({
+      action: REPORT_AUDIT_ACTIONS[action as ModerationAction],
+      actorUserId: req.user?.id ?? null,
+      targetUserId: outcome.reportedUserId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: {
+        reportId: outcome.reportId,
+        ticketId: outcome.ticketId,
+        moderationAction: outcome.action,
+        contentType: outcome.contentType,
+        contentId: outcome.contentId,
+        notes: notes ?? null,
+      },
+    });
+
+    logger.info('Report actioned', {
+      reportId: outcome.reportId,
+      action: outcome.action,
+      adminId: req.user?.id,
+    });
+
+    res.json(outcome);
   } catch (error) {
     next(error);
   }

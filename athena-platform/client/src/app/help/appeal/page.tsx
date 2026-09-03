@@ -9,6 +9,8 @@
 import { useState } from 'react';
 import { Scale, Send, CheckCircle, ArrowLeft, AlertCircle, FileText } from 'lucide-react';
 import Link from 'next/link';
+import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/hooks';
 
 interface AppealFormData {
   appealType: 'content_removal' | 'account_suspension' | 'account_ban' | 'warning' | 'other';
@@ -27,6 +29,18 @@ const APPEAL_TYPES = [
   { value: 'other', label: 'Other', description: 'Other enforcement action' },
 ];
 
+// The appeals API records a coarser category than the form offers, so the exact
+// action being appealed is kept alongside it in metadata.
+const APPEAL_API_TYPES: Record<AppealFormData['appealType'], 'CONTENT_MODERATION' | 'ACCOUNT_SUSPENSION' | 'OTHER'> = {
+  content_removal: 'CONTENT_MODERATION',
+  account_suspension: 'ACCOUNT_SUSPENSION',
+  account_ban: 'ACCOUNT_SUSPENSION',
+  warning: 'CONTENT_MODERATION',
+  other: 'OTHER',
+};
+
+const REASON_MAX_LENGTH = 5000;
+
 export default function AppealPage() {
   const [formData, setFormData] = useState<AppealFormData>({
     appealType: 'content_removal',
@@ -37,10 +51,12 @@ export default function AppealPage() {
     agreeToTerms: false,
   });
 
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,17 +68,42 @@ export default function AppealPage() {
 
     setSubmitting(true);
     setError(null);
+    setNeedsSignIn(false);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // People appealing an enforcement action are often locked out, and the
+      // shared client sends an unrecoverable 401 to the login page, which would
+      // discard everything typed here. The status is read instead.
+      const response = await api.post(
+        '/appeals',
+        {
+          type: APPEAL_API_TYPES[formData.appealType],
+          reason: formData.reason.trim(),
+          metadata: {
+            appealType: formData.appealType,
+            referenceId: formData.referenceId.trim() || undefined,
+            additionalInfo: formData.additionalInfo.trim() || undefined,
+            contactEmail: formData.contactEmail.trim() || undefined,
+          },
+        },
+        { validateStatus: () => true }
+      );
 
-      // Generate ticket ID
-      const ticket = `APL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
-      setTicketId(ticket);
+      if (response.status === 401) {
+        setNeedsSignIn(true);
+        throw new Error('An appeal is attached to your account, so you need to be signed in to submit one.');
+      }
+
+      if (response.status >= 400) {
+        throw new Error(
+          response.data?.message || response.data?.error || 'Failed to submit appeal. Please try again.'
+        );
+      }
+
+      setTicketId(response.data?.data?.id || null);
       setSubmitted(true);
-    } catch {
-      setError('Failed to submit appeal. Please try again.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit appeal. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -95,7 +136,7 @@ export default function AppealPage() {
               <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-2">
                 <li>• Your appeal will be reviewed by a different moderator than the one who made the original decision</li>
                 <li>• We aim to complete appeal reviews within 5 business days</li>
-                <li>• You&apos;ll receive an email notification with our decision</li>
+                <li>• Quote your appeal reference if you need to follow up with our Trust &amp; Safety team</li>
                 <li>• If your appeal is successful, your content or account will be restored</li>
               </ul>
             </div>
@@ -159,6 +200,29 @@ export default function AppealPage() {
           </div>
         </div>
 
+        {!isAuthLoading && !isAuthenticated && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-8">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <h3 className="font-semibold text-amber-900 dark:text-amber-100">Sign in to appeal</h3>
+                <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                  An appeal is attached to the account the decision was made against, so you need to be signed in
+                  to submit one.{' '}
+                  <Link href="/login?redirect=%2Fhelp%2Fappeal" className="underline font-medium">
+                    Sign in and return here
+                  </Link>
+                  . If you cannot get into your account at all, use the{' '}
+                  <Link href="/report?type=other" className="underline font-medium">
+                    report form
+                  </Link>{' '}
+                  to reach Trust &amp; Safety with your email address.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Appeal Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Appeal Type */}
@@ -219,6 +283,7 @@ export default function AppealPage() {
               value={formData.reason}
               onChange={(e) => setFormData(prev => ({ ...prev, reason: e.target.value }))}
               rows={4}
+              maxLength={REASON_MAX_LENGTH}
               placeholder="Explain why you believe the content did not violate our guidelines, or why the action taken was disproportionate..."
               className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
               required
@@ -277,6 +342,14 @@ export default function AppealPage() {
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
               <p className="text-red-700 dark:text-red-300">{error}</p>
+              {needsSignIn && (
+                <Link
+                  href="/login?redirect=%2Fhelp%2Fappeal"
+                  className="mt-2 inline-block text-sm font-medium text-red-800 dark:text-red-200 underline"
+                >
+                  Sign in and return to this form
+                </Link>
+              )}
             </div>
           )}
 

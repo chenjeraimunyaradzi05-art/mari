@@ -7,6 +7,9 @@ jest.mock('../../utils/prisma', () => ({
     postSave: { findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
     like: { findMany: jest.fn() },
     follow: { findMany: jest.fn() },
+    // Blocking is symmetric and lives on the safety settings row, so the feed
+    // reads it on every authenticated request to filter both directions.
+    userSafetySettings: { findUnique: jest.fn(), findMany: jest.fn() },
   },
 }));
 
@@ -117,6 +120,8 @@ describe('Post saves', () => {
 describe('Feed save state', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValue(null);
+    (prisma.userSafetySettings.findMany as any).mockResolvedValue([]);
   });
 
   it('marks which posts the viewer has saved on the following tab', async () => {

@@ -6,6 +6,7 @@ import { Shield, Download, Trash2, Eye, Bell, Lock, Cookie, ChevronRight, AlertT
 import Link from 'next/link';
 import complianceService from '@/lib/services/compliance.service';
 import type { LegalDocument, LegalAgreementRecord } from '@/lib/services/compliance.service';
+import { contactLink } from '@/lib/contact';
 
 interface ConsentState {
   MARKETING_EMAIL: boolean;
@@ -591,8 +592,8 @@ export default function PrivacyCenterPage() {
           <p className="text-slate-600 dark:text-slate-400 mb-4">
             Contact our privacy team for any privacy-related inquiries or to exercise your rights.
           </p>
-          <a href="mailto:privacy@athena.com" className="inline-flex items-center gap-2 text-purple-600 hover:text-purple-700 font-medium">
-            privacy@athena.com
+          <a href={contactLink('privacy').href} className="inline-flex items-center gap-2 text-purple-600 hover:text-purple-700 font-medium">
+            {contactLink('privacy').label}
           </a>
         </section>
       </div>

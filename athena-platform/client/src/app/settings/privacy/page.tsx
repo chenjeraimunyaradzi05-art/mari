@@ -2,10 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Shield, Eye, Users, Globe, Lock, UserX, Download, Trash2 } from 'lucide-react';
-import { safetyApi } from '@/lib/api';
+import { AlertTriangle, ArrowLeft, Shield, Eye, Users, Globe, Lock, UserX, Download, Trash2 } from 'lucide-react';
+import { api, safetyApi } from '@/lib/api';
 
 type SaveState = { kind: 'idle' | 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
+
+type DeleteState =
+  | { kind: 'idle' | 'submitting' }
+  | { kind: 'requested'; dueDate: string | null }
+  | { kind: 'error'; message: string };
+
+// The erasure endpoint rejects anything else, and typing it out is what keeps
+// this from being a one-click action.
+const DELETE_CONFIRMATION = 'DELETE_MY_ACCOUNT';
 
 export default function PrivacySettingsPage() {
   // Every control here maps to a column the API actually persists. Toggles
@@ -18,6 +27,9 @@ export default function PrivacySettingsPage() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deleteState, setDeleteState] = useState<DeleteState>({ kind: 'idle' });
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +76,33 @@ export default function PrivacySettingsPage() {
             : 'Your privacy settings could not be saved. Try again.',
       });
     }
+  };
+
+  const handleRequestDeletion = async () => {
+    if (deleteInput !== DELETE_CONFIRMATION) return;
+
+    setDeleteState({ kind: 'submitting' });
+    try {
+      const response = await api.post('/gdpr/dsar/delete', { confirmation: DELETE_CONFIRMATION });
+      setDeleteState({ kind: 'requested', dueDate: response.data?.data?.dueDate ?? null });
+      setIsDeleteOpen(false);
+      setDeleteInput('');
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      setDeleteState({
+        kind: 'error',
+        message:
+          status === 401 || status === 403
+            ? 'Sign in again to request account deletion.'
+            : 'Your deletion request could not be submitted. Try again.',
+      });
+    }
+  };
+
+  const closeDeleteDialog = () => {
+    setIsDeleteOpen(false);
+    setDeleteInput('');
+    if (deleteState.kind === 'error') setDeleteState({ kind: 'idle' });
   };
 
   return (
@@ -188,7 +227,11 @@ export default function PrivacySettingsPage() {
               </div>
               <span className="text-primary-600">→</span>
             </Link>
-            <button className="flex items-center justify-between w-full p-4 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition text-left">
+            <button
+              onClick={() => setIsDeleteOpen(true)}
+              disabled={deleteState.kind === 'requested'}
+              className="flex items-center justify-between w-full p-4 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition text-left disabled:opacity-60"
+            >
               <div className="flex items-center gap-3">
                 <Trash2 className="w-5 h-5 text-red-600" />
                 <div>
@@ -198,6 +241,24 @@ export default function PrivacySettingsPage() {
               </div>
               <span className="text-red-600">→</span>
             </button>
+            <p aria-live="polite" className="text-sm">
+              {deleteState.kind === 'requested' && (
+                <span className="text-slate-600 dark:text-slate-400">
+                  Deletion requested. Your account and data will be erased
+                  {deleteState.dueDate
+                    ? ` by ${new Date(deleteState.dueDate).toLocaleDateString()}`
+                    : ' within 30 days'}
+                  . Reach us through the{' '}
+                  <Link href="/help" className="underline">
+                    Help Center
+                  </Link>{' '}
+                  before then if you change your mind.
+                </span>
+              )}
+              {deleteState.kind === 'error' && (
+                <span className="text-red-600 dark:text-red-400">{deleteState.message}</span>
+              )}
+            </p>
           </div>
         </section>
 
@@ -229,6 +290,56 @@ export default function PrivacySettingsPage() {
           </button>
         </div>
       </div>
+
+      {isDeleteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Delete account</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">This cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-slate-600 dark:text-slate-400 mb-4">
+              We record an erasure request and delete your account within 30 days. That removes your profile,
+              posts, messages, job applications and saved items, and it cannot be reversed once it has been
+              processed.
+            </p>
+            <label htmlFor="delete-confirmation" className="block text-sm text-slate-600 dark:text-slate-400 mb-2">
+              Type <strong>{DELETE_CONFIRMATION}</strong> to confirm:
+            </label>
+            <input
+              id="delete-confirmation"
+              type="text"
+              value={deleteInput}
+              onChange={(event) => setDeleteInput(event.target.value)}
+              placeholder={DELETE_CONFIRMATION}
+              className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg mb-4 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+            />
+            {deleteState.kind === 'error' && (
+              <p className="text-sm text-red-600 dark:text-red-400 mb-4">{deleteState.message}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={closeDeleteDialog}
+                className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRequestDeletion}
+                disabled={deleteInput !== DELETE_CONFIRMATION || deleteState.kind === 'submitting'}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteState.kind === 'submitting' ? 'Requesting...' : 'Request deletion'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

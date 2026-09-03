@@ -6,8 +6,10 @@ import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { aiService } from '../services/ai.service'; // Added import
 import { generateFeed, getVideoFeed, recordPostView } from '../services/feed.service';
+import { assertContentAllowed } from '../services/moderation.service';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
+import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
 import {
   CONTENT_LIMITS,
   normalizeMediaUrls,
@@ -31,12 +33,19 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const typeParam = typeof req.query.type === 'string' ? req.query.type : 'all';
     const algorithmParam = typeof req.query.algorithm === 'string' ? req.query.algorithm : undefined;
 
+    // Blocking is symmetric, so the same list keeps both parties out of each
+    // other's feed no matter who pressed block.
+    const blockedIds = req.user ? await getBlockedRelationshipIds(req.user.id) : [];
+
     if (tab === 'following' && req.user) {
       const following = await prisma.follow.findMany({
         where: { followerId: req.user.id },
         select: { followingId: true },
       });
-      const followingIds = following.map((f) => f.followingId);
+      const blocked = new Set(blockedIds);
+      const followingIds = following
+        .map((f) => f.followingId)
+        .filter((followingId) => !blocked.has(followingId));
       followingIds.push(req.user.id);
 
       const where: any = {
@@ -126,16 +135,19 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       algorithm: normalizedAlgorithm,
     });
 
-    // generateFeed does not know about saves, so decorate here rather than
-    // leaving every card's save button showing the wrong state.
-    let posts: unknown[] = result.posts;
+    // generateFeed ranks without knowing about blocks or saves, so drop blocked
+    // authors and decorate the rest here.
+    const blocked = new Set(blockedIds);
+    const visiblePosts = result.posts.filter((post) => !blocked.has(post.authorId));
+
+    let posts: unknown[] = visiblePosts;
     if (req.user) {
       const saves = await prisma.postSave.findMany({
-        where: { userId: req.user.id, postId: { in: result.posts.map((p) => p.id) } },
+        where: { userId: req.user.id, postId: { in: visiblePosts.map((p) => p.id) } },
         select: { postId: true },
       });
       const savedPostIds = new Set(saves.map((s) => s.postId));
-      posts = result.posts.map((post) => ({ ...post, isSaved: savedPostIds.has(post.id) }));
+      posts = visiblePosts.map((post) => ({ ...post, isSaved: savedPostIds.has(post.id) }));
     }
 
     res.json({
@@ -164,9 +176,11 @@ router.get('/video-feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
     const result = await getVideoFeed(req.user?.id, cursor, limit);
 
+    const blocked = new Set(req.user ? await getBlockedRelationshipIds(req.user.id) : []);
+
     res.json({
       success: true,
-      data: result.videos,
+      data: result.videos.filter((video) => !blocked.has(video.authorId)),
       nextCursor: result.nextCursor,
     });
   } catch (error) {
@@ -268,6 +282,14 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Post not found');
     }
 
+    const blockedAuthorIds = new Set(
+      req.user && !isAdmin ? await getBlockedRelationshipIds(req.user.id) : []
+    );
+
+    if (blockedAuthorIds.has(post.authorId)) {
+      throw new ApiError(404, 'Post not found');
+    }
+
     // Check if private
     if (!post.isPublic && req.user?.id !== post.authorId) {
       throw new ApiError(403, 'This post is private');
@@ -290,10 +312,18 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       isLiked = !!like;
     }
 
+    const comments = post.comments
+      .filter((comment) => !blockedAuthorIds.has(comment.authorId))
+      .map((comment) => ({
+        ...comment,
+        replies: comment.replies.filter((reply) => !blockedAuthorIds.has(reply.authorId)),
+      }));
+
     res.json({
       success: true,
       data: {
         ...post,
+        comments,
         isLiked,
       },
     });
@@ -328,6 +358,8 @@ router.post(
       const mediaUrls = normalizeMediaUrls(req.body.mediaUrls);
       const type = req.body.type || 'TEXT';
       const isPublic = req.body.isPublic ?? true;
+
+      await assertContentAllowed(content, { kind: 'post', userId: req.user!.id });
 
       // AI Content Enrichment
       let enrichedData = { qualityScore: 0, tags: [], sentiment: 'neutral', isSafe: true };
@@ -444,6 +476,8 @@ router.post(
         ? 'COURSE_SHARE'
         : 'TEXT';
 
+      await assertContentAllowed(content, { kind: 'post', userId: req.user!.id });
+
       const post = await prisma.post.create({
         data: {
           authorId: req.user!.id,
@@ -544,6 +578,10 @@ router.patch(
 
     if (Object.keys(data).length === 0) {
       throw new ApiError(400, 'No valid post updates provided');
+    }
+
+    if (data.content) {
+      await assertContentAllowed(data.content, { kind: 'post', userId: req.user!.id });
     }
 
     const post = await prisma.post.update({
@@ -726,6 +764,12 @@ router.post(
         throw new ApiError(404, 'Post not found');
       }
 
+      if (await isBlockedRelationship(req.user!.id, post.authorId)) {
+        throw new ApiError(404, 'Post not found');
+      }
+
+      await assertContentAllowed(content, { kind: 'comment', userId: req.user!.id });
+
       if (parentId) {
         const parent = await prisma.comment.findUnique({
           where: { id: parentId },
@@ -832,6 +876,10 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
 
     const where: any = { authorId: userId };
     const isAdmin = String(req.user?.role || '').toUpperCase() === 'ADMIN';
+
+    if (req.user && !isAdmin && (await isBlockedRelationship(req.user.id, userId))) {
+      throw new ApiError(404, 'User not found');
+    }
 
     // Only show public posts unless viewing own profile
     if (req.user?.id !== userId) {

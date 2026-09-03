@@ -10,6 +10,7 @@ import { Suspense, useState } from 'react';
 import { AlertTriangle, Send, CheckCircle, ArrowLeft, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { api } from '@/lib/api';
 
 interface ReportFormData {
   contentType: 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
@@ -71,33 +72,50 @@ function ReportContent() {
   const [submitted, setSubmitted] = useState(false);
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
 
   // Get expected response time based on reason priority
   const selectedReason = REPORT_REASONS.find(r => r.value === formData.reason);
-  const expectedResponse = selectedReason?.priority === 'critical' ? '1 hour' : 
+  const expectedResponse = selectedReason?.priority === 'critical' ? '1 hour' :
                           selectedReason?.priority === 'high' ? '24 hours' : '72 hours';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    setNeedsSignIn(false);
 
     try {
-      const response = await fetch('/api/compliance/report-content', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      // Reporters are often signed out, and the shared client bounces an
+      // unrecoverable 401 to the login page, which would discard the report.
+      // Reading the status here keeps the reporter on the form.
+      const response = await api.post(
+        '/compliance/report-content',
+        {
+          contentType: formData.contentType,
+          contentId: formData.contentId.trim(),
+          reason: formData.reason,
+          details: formData.description.trim(),
+          evidenceUrls: formData.evidenceUrls,
+          contactEmail: formData.contactEmail.trim() || undefined,
+          isUrgent: formData.isUrgent,
         },
-        body: JSON.stringify(formData),
-      });
+        { validateStatus: () => true }
+      );
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to submit report');
+      if (response.status === 401) {
+        setNeedsSignIn(true);
+        throw new Error('Reports can only be submitted from a signed-in account right now.');
       }
 
-      const data = await response.json();
-      setTicketId(data.data.ticketId);
+      if (response.status >= 400) {
+        throw new Error(
+          response.data?.error || response.data?.message || 'Failed to submit report'
+        );
+      }
+
+      const report = response.data?.data;
+      setTicketId(report?.reportId || report?.id || null);
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit report');
@@ -151,7 +169,7 @@ function ReportContent() {
                 <li>• Our Trust &amp; Safety team will review your report within 24-72 hours</li>
                 <li>• For critical reports (illegal content, CSAM, terrorism), we aim to respond within 24 hours</li>
                 <li>• If we need more information, we&apos;ll contact you at the email provided</li>
-                <li>• You can track your report status using the reference number above</li>
+                <li>• Keep your reference number so you can quote it if you contact us about this report</li>
               </ul>
             </div>
 
@@ -166,6 +184,9 @@ function ReportContent() {
               <button
                 onClick={() => {
                   setSubmitted(false);
+                  setTicketId(null);
+                  setError(null);
+                  setNeedsSignIn(false);
                   setFormData({
                     contentType: 'post',
                     contentId: '',
@@ -390,6 +411,14 @@ function ReportContent() {
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
               <p className="text-red-700 dark:text-red-300">{error}</p>
+              {needsSignIn && (
+                <Link
+                  href="/login?redirect=%2Freport"
+                  className="mt-2 inline-block text-sm font-medium text-red-800 dark:text-red-200 underline"
+                >
+                  Sign in and return to this form
+                </Link>
+              )}
             </div>
           )}
 

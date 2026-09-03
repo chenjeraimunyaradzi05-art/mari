@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ChevronLeft, Settings, Globe, Bell, Shield, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { contactEmail } from '@/lib/contact';
 
 export default function AdminSettingsPage() {
   const settingSections = [
@@ -12,7 +13,7 @@ export default function AdminSettingsPage() {
       description: 'General platform configuration',
       items: [
         { label: 'Platform Name', value: 'ATHENA' },
-        { label: 'Support Email', value: 'support@athena.com' },
+        { label: 'Support contact', value: contactEmail('support') ?? 'In-product help centre (no domain configured)' },
         { label: 'Maintenance Mode', value: 'Disabled' },
       ],
     },

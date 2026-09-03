@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Cookie, Shield, Settings, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
+import { contactLink } from '@/lib/contact';
 
 interface CookieInfo {
   name: string;
@@ -71,6 +72,7 @@ const COOKIE_CATEGORIES: CookieCategory[] = [
 ];
 
 export default function CookiesPage() {
+  const privacyLink = contactLink('privacy');
   const [expandedCategory, setExpandedCategory] = useState<string | null>('essential');
 
   return (
@@ -238,10 +240,10 @@ export default function CookiesPage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <a
-              href="mailto:privacy@athena.com"
+              href={privacyLink.href}
               className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
             >
-              Email Us
+              {privacyLink.isEmail ? 'Email us' : privacyLink.label}
             </a>
             <Link
               href="/privacy-center"

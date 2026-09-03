@@ -4,6 +4,7 @@
  * Phase 4: UK/EU Market Launch
  */
 
+import type { ContentReport } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
@@ -12,6 +13,52 @@ export type ContentType = 'post' | 'message' | 'profile' | 'comment' | 'job' | '
 export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';
 export type ReportPriority = 'low' | 'medium' | 'high' | 'critical';
 export type ReportStatus = 'PENDING' | 'REVIEWING' | 'RESOLVED' | 'DISMISSED';
+export type ModerationAction = 'dismiss' | 'warn' | 'remove' | 'suspend' | 'ban' | 'escalate';
+export type EscalationStatus = 'reported' | 'acknowledged' | 'resolved';
+
+export interface ModerationOutcome {
+  reportId: string;
+  ticketId: string | null;
+  status: ReportStatus;
+  action: ModerationAction;
+  contentType: string;
+  contentId: string;
+  reportedUserId: string;
+}
+
+// The value stored on ContentReport.action, which is the column the queue and
+// the appeal flow both read back.
+const ACTION_OUTCOMES: Record<ModerationAction, string> = {
+  dismiss: 'NO_ACTION',
+  warn: 'WARNING',
+  remove: 'CONTENT_REMOVED',
+  suspend: 'SUSPENSION',
+  ban: 'BAN',
+  escalate: 'ESCALATED',
+};
+
+// Reports we are obliged to refer on to an outside body rather than simply
+// action ourselves, and who each one goes to.
+export const AUTHORITY_REPORTABLE_REASONS: ReportReason[] = ['csam', 'terrorism'];
+
+const DEFAULT_AUTHORITY = 'Counter Terrorism Internet Referral Unit';
+
+const AUTHORITY_FOR_REASON: Partial<Record<ReportReason, string>> = {
+  csam: 'IWF',
+  terrorism: DEFAULT_AUTHORITY,
+};
+
+// An escalation is filed by hand, so its lifecycle is: we recorded it
+// ("reported"), the authority confirmed receipt ("acknowledged"), the authority
+// closed it out ("resolved"). Nothing moves backwards — a referral that was
+// wrongly filed is still a referral that happened.
+export const ESCALATION_STATUSES: EscalationStatus[] = ['reported', 'acknowledged', 'resolved'];
+
+const ESCALATION_TRANSITIONS: Record<EscalationStatus, EscalationStatus[]> = {
+  reported: ['acknowledged', 'resolved'],
+  acknowledged: ['resolved'],
+  resolved: [],
+};
 
 interface ContentReportInput {
   contentType: ContentType;
@@ -97,8 +144,10 @@ export async function submitContentReport(report: ContentReportInput): Promise<R
       await alertTrustAndSafety(ticketId, priority, report);
     }
 
-    // For CSAM reports, also notify authorities
-    if (report.reason === 'csam') {
+    // CSAM and terrorism are the two categories we are obliged to refer on
+    // rather than merely moderate. escalateToAuthorities already picked the
+    // right body for each, but only CSAM ever reached it.
+    if (AUTHORITY_REPORTABLE_REASONS.includes(report.reason)) {
       await escalateToAuthorities(ticketId, report);
     }
 
@@ -153,7 +202,7 @@ export async function getReportStatus(ticketId: string): Promise<{
  */
 export async function processContentReport(
   ticketId: string,
-  action: 'dismiss' | 'warn' | 'remove' | 'suspend' | 'ban' | 'escalate',
+  action: ModerationAction,
   moderatorId: string,
   notes?: string
 ): Promise<void> {
@@ -173,44 +222,71 @@ export async function processContentReport(
     throw new Error('Report not found');
   }
 
-  // Update report status
-  let status: ReportStatus = 'RESOLVED';
-  if (action === 'dismiss') status = 'DISMISSED';
+  await applyReportDecision(report, action, moderatorId, notes);
+}
+
+/**
+ * Process a report straight from the moderation queue, where the row id is what
+ * a moderator is holding rather than an emailed ticket reference.
+ */
+export async function processReportById(
+  reportId: string,
+  action: ModerationAction,
+  moderatorId: string,
+  notes?: string
+): Promise<ModerationOutcome> {
+  const report = await prisma.contentReport.findUnique({ where: { id: reportId } });
+  if (!report) {
+    throw new Error('Report not found');
+  }
+
+  return applyReportDecision(report, action, moderatorId, notes);
+}
+
+async function applyReportDecision(
+  report: ContentReport,
+  action: ModerationAction,
+  moderatorId: string,
+  notes?: string
+): Promise<ModerationOutcome> {
+  const evidence = (report.evidence ?? null) as { ticketId?: string; contactEmail?: string } | null;
+  const ticketId = evidence?.ticketId || null;
+
+  const status: ReportStatus =
+    action === 'dismiss' ? 'DISMISSED' : action === 'escalate' ? 'REVIEWING' : 'RESOLVED';
 
   await prisma.contentReport.update({
     where: { id: report.id },
     data: {
       status,
       reviewerId: moderatorId,
-      action: action.toUpperCase(),
+      action: ACTION_OUTCOMES[action],
       actionTakenAt: new Date(),
       reviewNotes: notes,
     },
   });
 
-  // Take action based on decision
+  // The reported account is recorded on the report itself, so enforcement never
+  // has to guess an owner back out of the content it points at.
   switch (action) {
     case 'remove':
       await removeContent(report.contentType, report.contentId);
       break;
     case 'warn':
-      await warnUser(report.contentId, report.contentType);
+      await warnUser(report.reportedUserId, report.contentType, report.contentId);
       break;
     case 'suspend':
-      await suspendUser(report.contentId, report.contentType);
-      break;
     case 'ban':
-      await banUser(report.contentId, report.contentType);
+      await suspendUser(report.reportedUserId);
       break;
     case 'escalate':
       await escalateReport(ticketId, report);
       break;
   }
 
-  // Log moderation action
   await prisma.moderationLog.create({
     data: {
-      ticketId,
+      ticketId: ticketId || report.id,
       action,
       moderatorId,
       notes,
@@ -219,10 +295,71 @@ export async function processContentReport(
   });
 
   // Notify reporter of outcome
-  const evidence = report.evidence as any;
-  if (evidence?.contactEmail) {
+  if (ticketId && evidence?.contactEmail) {
     await sendReportOutcome(evidence.contactEmail, ticketId, action);
   }
+
+  return {
+    reportId: report.id,
+    ticketId,
+    status,
+    action,
+    contentType: report.contentType,
+    contentId: report.contentId,
+    reportedUserId: report.reportedUserId,
+  };
+}
+
+/**
+ * Undo the enforcement a moderator applied, used when an appeal succeeds.
+ * Returns what was actually reversed so the caller can record it.
+ */
+export async function reverseEnforcement(input: {
+  userId: string;
+  reportId?: string | null;
+  contentType?: string | null;
+  contentId?: string | null;
+}): Promise<{ suspensionLifted: boolean; contentRestored: boolean; reportCleared: boolean }> {
+  const report = input.reportId
+    ? await prisma.contentReport.findUnique({ where: { id: input.reportId } })
+    : null;
+
+  const contentType = input.contentType || report?.contentType || null;
+  const contentId = input.contentId || report?.contentId || null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { isSuspended: true },
+  });
+
+  let suspensionLifted = false;
+  if (user?.isSuspended) {
+    await prisma.user.update({
+      where: { id: input.userId },
+      data: { isSuspended: false },
+    });
+    suspensionLifted = true;
+  }
+
+  let contentRestored = false;
+  if (contentType && contentId) {
+    contentRestored = await restoreContent(contentType, contentId);
+  }
+
+  let reportCleared = false;
+  if (report) {
+    await prisma.contentReport.update({
+      where: { id: report.id },
+      data: {
+        status: 'DISMISSED',
+        action: ACTION_OUTCOMES.dismiss,
+        reviewNotes: 'Enforcement reversed on appeal',
+      },
+    });
+    reportCleared = true;
+  }
+
+  return { suspensionLifted, contentRestored, reportCleared };
 }
 
 /**
@@ -318,12 +455,18 @@ async function alertTrustAndSafety(
 
 /**
  * Escalate to authorities (for CSAM, terrorism)
+ *
+ * The row this writes is the queue item: nothing is transmitted to IWF or CTIRU
+ * automatically, so the escalation stays at "reported" until a named operator
+ * files it and records the authority's reference number. The alert below is what
+ * tells that operator the queue has something in it.
  */
 async function escalateToAuthorities(
   ticketId: string,
   report: ContentReportInput
 ): Promise<void> {
-  // Log for audit purposes
+  const reportedTo = AUTHORITY_FOR_REASON[report.reason] || DEFAULT_AUTHORITY;
+
   await prisma.authorityEscalation.create({
     data: {
       ticketId,
@@ -331,22 +474,59 @@ async function escalateToAuthorities(
       contentType: report.contentType,
       contentId: report.contentId,
       escalatedAt: new Date(),
-      // In production, this would include the actual reporting to NCMEC, IWF, etc.
-      reportedTo: report.reason === 'csam' ? 'IWF' : 'Counter Terrorism Internet Referral Unit',
+      reportedTo,
+      status: 'reported',
     },
   });
 
+  await notifyEscalationQueue(ticketId, reportedTo, report);
+
   logger.info(`[CRITICAL] Report ${ticketId} escalated to authorities for ${report.reason}`);
+}
+
+/**
+ * Tell whoever holds the authority-reporting duty that a referral is waiting.
+ * Sent separately from the Trust & Safety alert because the recipient is not the
+ * same person: this is a legal filing obligation, not a moderation decision.
+ */
+async function notifyEscalationQueue(
+  ticketId: string,
+  reportedTo: string,
+  report: ContentReportInput
+): Promise<void> {
+  await sendEmail({
+    to:
+      process.env.AUTHORITY_ESCALATION_EMAIL ||
+      process.env.TRUST_SAFETY_EMAIL ||
+      'trust-safety@athena.com',
+    subject: `[AUTHORITY REFERRAL REQUIRED] ${ticketId} - ${report.reason}`,
+    html: `
+      <h2>Authority Referral Required</h2>
+      <p>A report is queued for referral to <strong>${reportedTo}</strong>. Nothing has been transmitted to them automatically.</p>
+      <p><strong>Ticket ID:</strong> ${ticketId}</p>
+      <p><strong>Reason:</strong> ${report.reason}</p>
+      <p><strong>Content Type:</strong> ${report.contentType}</p>
+      <p><strong>Content ID:</strong> ${report.contentId}</p>
+      <br>
+      <p>File the referral, then record the authority's reference number against this escalation in the admin console so the queue can be closed.</p>
+    `,
+  });
 }
 
 // Content moderation action functions
 async function removeContent(contentType: string, contentId: string): Promise<void> {
   logger.info(`Removing ${contentType} with ID ${contentId}`);
-  
+
   // Remove content based on type - use isHidden flag for soft delete
   switch (contentType.toLowerCase()) {
     case 'post':
       await prisma.post.update({
+        where: { id: contentId },
+        data: { isHidden: true },
+      });
+      break;
+    case 'video':
+      await prisma.video.update({
         where: { id: contentId },
         data: { isHidden: true },
       });
@@ -372,14 +552,30 @@ async function removeContent(contentType: string, contentId: string): Promise<vo
   }
 }
 
-async function warnUser(contentId: string, contentType: string): Promise<void> {
-  logger.info(`Warning user for ${contentType} ${contentId}`);
-  
-  // Get user ID from content
-  const userId = await getUserIdFromContent(contentType, contentId);
-  if (!userId) return;
-  
-  // Create a warning notification
+/**
+ * Put back content that was hidden by a moderator. Deleted messages cannot be
+ * restored, so the caller is told nothing came back.
+ */
+async function restoreContent(contentType: string, contentId: string): Promise<boolean> {
+  switch (contentType.toLowerCase()) {
+    case 'post':
+      await prisma.post.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    case 'video':
+      await prisma.video.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    case 'comment':
+      await prisma.comment.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    default:
+      logger.warn(`Unknown content type for restore: ${contentType}`);
+      return false;
+  }
+}
+
+async function warnUser(userId: string, contentType: string, contentId: string): Promise<void> {
+  logger.info(`Warning user ${userId} for ${contentType} ${contentId}`);
+
   await prisma.notification.create({
     data: {
       userId,
@@ -391,71 +587,210 @@ async function warnUser(contentId: string, contentType: string): Promise<void> {
   });
 }
 
-async function suspendUser(contentId: string, contentType: string): Promise<void> {
-  const userId = await getUserIdFromContent(contentType, contentId);
-  if (!userId) return;
-  
-  logger.info(`Suspending user ${userId} for ${contentType} ${contentId}`);
-  
-  // Apply suspension using isSuspended boolean
+async function suspendUser(userId: string): Promise<void> {
+  logger.info(`Suspending user ${userId}`);
+
   await prisma.user.update({
     where: { id: userId },
     data: { isSuspended: true },
   });
 }
 
-async function banUser(contentId: string, contentType: string): Promise<void> {
-  const userId = await getUserIdFromContent(contentType, contentId);
-  if (!userId) return;
-  
-  logger.info(`Banning user ${userId} for ${contentType} ${contentId}`);
-  
-  // Apply permanent ban using isSuspended (permanent)
-  await prisma.user.update({
-    where: { id: userId },
-    data: { isSuspended: true },
-  });
-}
+async function escalateReport(ticketId: string | null, report: ContentReport): Promise<void> {
+  logger.info(`Escalating report ${ticketId || report.id} to senior moderation`);
 
-async function escalateReport(ticketId: string, report: any): Promise<void> {
-  logger.info(`Escalating report ${ticketId} to senior moderation`);
-  
-  // Update report status to REVIEWING (escalated)
-  await prisma.contentReport.updateMany({
-    where: { evidence: { path: ['ticketId'], equals: ticketId } },
-    data: { status: 'REVIEWING' },
-  });
-  
   // Notify senior moderators (would integrate with internal ticketing system)
-  await alertTrustAndSafety(ticketId, 'critical', report);
+  await alertTrustAndSafety(ticketId || report.id, 'critical', {
+    contentType: report.contentType.toLowerCase() as ContentType,
+    contentId: report.contentId,
+    reason: report.reason.toLowerCase() as ReportReason,
+    description: report.description || undefined,
+  });
 }
 
-// Helper: Get user ID from content
-async function getUserIdFromContent(contentType: string, contentId: string): Promise<string | null> {
-  switch (contentType.toLowerCase()) {
-    case 'post': {
-      const post = await prisma.post.findUnique({ where: { id: contentId }, select: { authorId: true } });
-      return post?.authorId || null;
-    }
-    case 'comment': {
-      const comment = await prisma.comment.findUnique({ where: { id: contentId }, select: { authorId: true } });
-      return comment?.authorId || null;
-    }
-    case 'message': {
-      const message = await prisma.message.findUnique({ where: { id: contentId }, select: { senderId: true } });
-      return message?.senderId || null;
-    }
-    case 'job': {
-      const job = await prisma.job.findUnique({ where: { id: contentId }, select: { postedById: true } });
-      return job?.postedById || null;
-    }
-    default:
-      return null;
+/**
+ * Authority escalation queue.
+ *
+ * Escalations are filed with an outside body by a human, so this is the only
+ * view anyone has of what has been referred, what is still sitting unfiled, and
+ * how long it has been sitting. Each row carries the report it came from where
+ * one can still be found, so a moderator can see the content without going
+ * hunting for the ticket.
+ */
+export async function listAuthorityEscalations(filters: {
+  status?: EscalationStatus;
+  reportedTo?: string;
+  reason?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{
+  escalations: Array<Record<string, unknown>>;
+  summary: { total: number; reported: number; acknowledged: number; resolved: number };
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}> {
+  const page = Math.max(1, filters.page || 1);
+  const limit = Math.min(100, Math.max(1, filters.limit || 25));
+
+  const where: Record<string, unknown> = {};
+  if (filters.status) where.status = filters.status;
+  if (filters.reportedTo) where.reportedTo = filters.reportedTo;
+  if (filters.reason) where.reason = filters.reason.toLowerCase();
+
+  const [rows, total, reported, acknowledged, resolved] = await Promise.all([
+    prisma.authorityEscalation.findMany({
+      where,
+      orderBy: { escalatedAt: 'asc' }, // oldest unfiled referral first — it is the most overdue
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.authorityEscalation.count({ where }),
+    prisma.authorityEscalation.count({ where: { status: 'reported' } }),
+    prisma.authorityEscalation.count({ where: { status: 'acknowledged' } }),
+    prisma.authorityEscalation.count({ where: { status: 'resolved' } }),
+  ]);
+
+  const reportsByTicket = await findReportsForTickets(rows.map((row) => row.ticketId));
+  const now = Date.now();
+
+  return {
+    escalations: rows.map((row) => {
+      const linked = reportsByTicket.get(row.ticketId) || null;
+      return {
+        ...row,
+        ageHours: Math.round((now - new Date(row.escalatedAt).getTime()) / (1000 * 60 * 60)),
+        report: linked
+          ? {
+              id: linked.id,
+              status: linked.status,
+              action: linked.action,
+              reviewerId: linked.reviewerId,
+              reportedUserId: linked.reportedUserId,
+              description: linked.description,
+            }
+          : null,
+      };
+    }),
+    summary: { total, reported, acknowledged, resolved },
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  };
+}
+
+/**
+ * The ticket reference lives inside the report's evidence JSON rather than a
+ * column, so the whole page is looked up in one OR'd query instead of one query
+ * per escalation.
+ */
+async function findReportsForTickets(ticketIds: string[]) {
+  const unique = Array.from(new Set(ticketIds.filter(Boolean)));
+  if (unique.length === 0) return new Map<string, ContentReport>();
+
+  const reports = await prisma.contentReport.findMany({
+    where: {
+      OR: unique.map((ticketId) => ({
+        evidence: { path: ['ticketId'], equals: ticketId },
+      })),
+    },
+  });
+
+  const byTicket = new Map<string, ContentReport>();
+  for (const report of reports) {
+    const ticketId = (report.evidence as { ticketId?: string } | null)?.ticketId;
+    if (ticketId) byTicket.set(ticketId, report);
   }
+  return byTicket;
+}
+
+export async function getAuthorityEscalation(id: string) {
+  const escalation = await prisma.authorityEscalation.findUnique({ where: { id } });
+  if (!escalation) return null;
+
+  const reportsByTicket = await findReportsForTickets([escalation.ticketId]);
+  const history = await prisma.moderationLog.findMany({
+    where: { ticketId: escalation.ticketId },
+    orderBy: { timestamp: 'asc' },
+  });
+
+  return {
+    ...escalation,
+    report: reportsByTicket.get(escalation.ticketId) || null,
+    history,
+  };
+}
+
+/**
+ * Move an escalation along its lifecycle.
+ *
+ * Marking one "acknowledged" or "resolved" is an assertion about what an outside
+ * authority did, so it is recorded against the moderator who made it and, once a
+ * reference number exists, that number is never silently overwritten.
+ */
+export async function updateAuthorityEscalationStatus(
+  id: string,
+  input: {
+    status?: EscalationStatus;
+    referenceNumber?: string;
+    notes?: string;
+    moderatorId: string;
+  }
+): Promise<{ escalation: Record<string, unknown>; previousStatus: EscalationStatus }> {
+  const existing = await prisma.authorityEscalation.findUnique({ where: { id } });
+  if (!existing) {
+    throw new Error('Escalation not found');
+  }
+
+  const previousStatus = existing.status as EscalationStatus;
+  const nextStatus = input.status;
+
+  if (nextStatus && nextStatus !== previousStatus) {
+    const allowed = ESCALATION_TRANSITIONS[previousStatus] || [];
+    if (!allowed.includes(nextStatus)) {
+      throw new Error(`Cannot move escalation from ${previousStatus} to ${nextStatus}`);
+    }
+  }
+
+  // "Acknowledged" means the authority has the referral, which is only credible
+  // if we can say what they filed it as.
+  if (nextStatus === 'acknowledged' && !input.referenceNumber && !existing.referenceNumber) {
+    throw new Error('An authority reference number is required to acknowledge an escalation');
+  }
+
+  const escalation = await prisma.authorityEscalation.update({
+    where: { id },
+    data: {
+      status: nextStatus ?? previousStatus,
+      referenceNumber: input.referenceNumber ?? existing.referenceNumber,
+    },
+  });
+
+  // ModerationLog is the transparency-report source, so the referral's progress
+  // is written where the quarterly numbers are already read from.
+  await prisma.moderationLog.create({
+    data: {
+      ticketId: existing.ticketId,
+      action: `escalation_${nextStatus ?? previousStatus}`,
+      moderatorId: input.moderatorId,
+      notes: input.notes,
+      timestamp: new Date(),
+    },
+  });
+
+  logger.info('Authority escalation updated', {
+    escalationId: id,
+    ticketId: existing.ticketId,
+    from: previousStatus,
+    to: escalation.status,
+  });
+
+  return { escalation, previousStatus };
 }
 
 export default {
   submitContentReport,
   getReportStatus,
   processContentReport,
+  processReportById,
+  reverseEnforcement,
+  listAuthorityEscalations,
+  getAuthorityEscalation,
+  updateAuthorityEscalationStatus,
 };

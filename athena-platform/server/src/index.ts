@@ -37,6 +37,7 @@ import notificationRoutes from './routes/notification.routes';
 import messageRoutes from './routes/message.routes';
 import adminRoutes from './routes/admin.routes';
 import adminSeedRoutes from './routes/admin-seed.routes';
+import adminOperationsRoutes from './routes/admin-operations.routes';
 import referralRoutes from './routes/referral.routes';
 import employerRoutes from './routes/employer.routes';
 import educationRoutes from './routes/education.routes';
@@ -96,6 +97,7 @@ import { createRateLimiter } from './middleware/rateLimiter';
 import { logger } from './utils/logger';
 import { register } from './utils/metrics';
 import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
+import { getMaintenanceState } from './services/feature-flags.service';
 
 // Import services
 import { initializeSocketHandlers } from './services/socket.service';
@@ -462,6 +464,60 @@ app.get('/metrics', async (req: Request, res: Response) => {
   }
 });
 
+// Public maintenance state. The client's /maintenance page and its API client
+// both need to read this while the gate below is answering 503 to everything
+// else, so it is declared ahead of the gate and left unauthenticated.
+app.get('/api/maintenance', async (_req: Request, res: Response) => {
+  res.status(200).json(await getMaintenanceState());
+});
+
+// Paths that stay open while the platform is closed. Operators have to be able
+// to sign in and turn maintenance back off, and the client has to be able to
+// find out why it is being refused; everything else waits.
+const MAINTENANCE_OPEN_PATHS = [
+  '/admin',
+  '/auth/login',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/me',
+  '/feature-flags/active',
+  '/maintenance',
+];
+
+// Mounted on /api only, and after the webhook router: Stripe retries a rejected
+// webhook for days, so dropping payment events during a ten-minute deploy would
+// cost more than it saves.
+app.use('/api', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const state = await getMaintenanceState();
+    if (!state.enabled) return next();
+
+    if (MAINTENANCE_OPEN_PATHS.some((open) => req.path === open || req.path.startsWith(open + '/'))) {
+      return next();
+    }
+
+    // Retry-After is in seconds and has to be an integer; without an announced
+    // end time, ask clients back in a minute rather than in a tight loop.
+    const retryAfterSeconds = state.endsAt
+      ? Math.max(30, Math.ceil((new Date(state.endsAt).getTime() - Date.now()) / 1000))
+      : 60;
+
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    return res.status(503).json({
+      success: false,
+      message: state.message,
+      maintenance: {
+        enabled: true,
+        message: state.message,
+        startedAt: state.startedAt,
+        endsAt: state.endsAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -479,6 +535,10 @@ app.use('/api/messages', messageRoutes);
 // beneath /api/admin, which would reject seed requests before they are reached.
 // The seed router gates itself (non-production + ALLOW_DB_SEEDING + token).
 app.use('/api/admin/seed', adminSeedRoutes);
+// Mounted ahead of adminRoutes. It guards each route individually rather than
+// with router.use, so the /api/admin paths it does not own fall straight
+// through to adminRoutes without being authenticated twice.
+app.use('/api/admin', adminOperationsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/referrals', referralRoutes);
 app.use('/api/employer', employerRoutes);

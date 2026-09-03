@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ShieldCheck,
   AlertTriangle,
@@ -8,7 +9,6 @@ import {
   UserX,
   CheckCircle2,
   Clock,
-  Phone,
   BookOpen,
   LifeBuoy,
   ArrowUpRight,
@@ -27,7 +27,9 @@ interface ReportRecord {
   targetType: string;
   status: string;
   createdAt: string;
+  updatedAt?: string;
   reason: string;
+  details?: string;
   targetId?: string;
 }
 
@@ -55,29 +57,34 @@ type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel' | 'oth
 const resources = [
   {
     id: 'res-1',
-    title: '24/7 Safety Support Line',
-    description: 'Immediate assistance for urgent safety concerns.',
-    action: 'Call Support',
-    icon: Phone,
-  },
-  {
-    id: 'res-2',
     title: 'Community Guidelines',
     description: 'Understand our expectations for respectful behavior.',
     action: 'Read Guidelines',
+    href: '/help/community-guidelines',
     icon: BookOpen,
   },
   {
-    id: 'res-3',
+    id: 'res-2',
     title: 'Report Center',
-    description: 'Submit a new report or follow up on an existing case.',
+    description: 'Submit a report about content or conduct anywhere on ATHENA.',
     action: 'Open Report Center',
+    href: '/report',
     icon: LifeBuoy,
+  },
+  {
+    id: 'res-3',
+    title: 'Appeal a Decision',
+    description: 'Ask for a review of a moderation action taken on your account.',
+    action: 'Start an Appeal',
+    href: '/help/appeal',
+    icon: ShieldCheck,
   },
 ];
 
 export default function SafetyCenterPage() {
+  const router = useRouter();
   const [tab, setTab] = useState('reports');
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<BlockRecord[]>([]);
   const [settings, setSettings] = useState<SafetySettings | null>(null);
@@ -225,8 +232,8 @@ export default function SafetyCenterPage() {
               Report Content
             </Button>
             <Button onClick={() => setTab('resources')}>
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Emergency Support
+              <LifeBuoy className="w-4 h-4 mr-2" />
+              Safety Resources
             </Button>
           </div>
         </div>
@@ -275,32 +282,63 @@ export default function SafetyCenterPage() {
                     <p className="text-sm text-slate-500">No reports submitted yet.</p>
                   )}
                   {reports.map((report) => (
-                    <div
-                      key={report.id}
-                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border border-slate-100 rounded-xl"
-                    >
-                      <div>
-                        <p className="text-sm text-slate-500">{report.targetType.toUpperCase()}</p>
-                        <h3 className="text-lg font-semibold text-slate-900">{report.reason}</h3>
-                        <p className="text-sm text-slate-500">Reported on {new Date(report.createdAt).toLocaleDateString()}</p>
+                    <div key={report.id} className="p-4 border border-slate-100 rounded-xl">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                          <p className="text-sm text-slate-500">{report.targetType.toUpperCase()}</p>
+                          <h3 className="text-lg font-semibold text-slate-900">{report.reason}</h3>
+                          <p className="text-sm text-slate-500">Reported on {new Date(report.createdAt).toLocaleDateString()}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge
+                            variant="secondary"
+                            className={
+                              report.status === 'ACTION_TAKEN'
+                                ? 'bg-green-100 text-green-700'
+                                : report.status === 'CLOSED'
+                                ? 'bg-slate-100 text-slate-700'
+                                : 'bg-yellow-100 text-yellow-700'
+                            }
+                          >
+                            {report.status.replace('_', ' ')}
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-expanded={expandedReportId === report.id}
+                            onClick={() =>
+                              setExpandedReportId((current) => (current === report.id ? null : report.id))
+                            }
+                          >
+                            {expandedReportId === report.id ? 'Hide Details' : 'View Details'}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <Badge
-                          variant="secondary"
-                          className={
-                            report.status === 'ACTION_TAKEN'
-                              ? 'bg-green-100 text-green-700'
-                              : report.status === 'CLOSED'
-                              ? 'bg-slate-100 text-slate-700'
-                              : 'bg-yellow-100 text-yellow-700'
-                          }
-                        >
-                          {report.status.replace('_', ' ')}
-                        </Badge>
-                        <Button variant="outline" size="sm">
-                          View Details
-                        </Button>
-                      </div>
+
+                      {expandedReportId === report.id && (
+                        <dl className="mt-4 pt-4 border-t border-slate-100 grid gap-3 text-sm sm:grid-cols-2">
+                          <div>
+                            <dt className="text-slate-500">Reference</dt>
+                            <dd className="font-mono text-slate-900 break-all">{report.id}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-500">Reported item</dt>
+                            <dd className="text-slate-900 break-all">{report.targetId || 'Not specified'}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-500">Last updated</dt>
+                            <dd className="text-slate-900">
+                              {new Date(report.updatedAt || report.createdAt).toLocaleString()}
+                            </dd>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <dt className="text-slate-500">What you told us</dt>
+                            <dd className="text-slate-900 whitespace-pre-line">
+                              {report.details || 'No extra detail was provided.'}
+                            </dd>
+                          </div>
+                        </dl>
+                      )}
                     </div>
                   ))}
                 </CardContent>
@@ -309,7 +347,7 @@ export default function SafetyCenterPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Active Cases</CardTitle>
-                  <CardDescription>Average response time: 24 hours</CardDescription>
+                  <CardDescription>A count of the reports you have with our safety team.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center gap-3">
@@ -330,7 +368,7 @@ export default function SafetyCenterPage() {
                       </p>
                     </div>
                   </div>
-                  <Button variant="outline" className="w-full">
+                  <Button variant="outline" className="w-full" onClick={() => router.push('/report')}>
                     Visit Report Center
                   </Button>
                 </CardContent>
@@ -366,7 +404,12 @@ export default function SafetyCenterPage() {
                         <Button variant="outline" size="sm" onClick={() => handleUnblock(user.blockedUserId)}>
                           Unblock
                         </Button>
-                        <Button size="sm">View Profile</Button>
+                        <Button
+                          size="sm"
+                          onClick={() => router.push(`/dashboard/profile/${user.blockedUserId}`)}
+                        >
+                          View Profile
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -429,20 +472,23 @@ export default function SafetyCenterPage() {
                 {
                   id: 'tool-1',
                   title: 'Profile Visibility',
-                  description: 'Limit profile discovery to verified employers and approved mentors.',
+                  description: 'Choose who can see your profile and whether it appears in search.',
                   status: settings?.hideFromSearch ? 'Limited' : 'Open',
+                  onManage: () => router.push('/settings/privacy'),
                 },
                 {
                   id: 'tool-2',
                   title: 'DM Requests',
-                  description: 'Require message requests from new contacts.',
+                  description: 'Control whether people can start a conversation with you.',
                   status: settings?.allowMessages ? 'Enabled' : 'Restricted',
+                  onManage: () => setTab('blocked'),
                 },
                 {
                   id: 'tool-3',
                   title: 'Safety Mode',
                   description: 'Enable higher safety protections across the platform.',
                   status: settings?.isSafeMode ? 'On' : 'Off',
+                  onManage: () => setTab('blocked'),
                 },
               ].map((tool) => (
                 <Card key={tool.id}>
@@ -452,7 +498,7 @@ export default function SafetyCenterPage() {
                   </CardHeader>
                   <CardContent className="flex items-center justify-between">
                     <Badge className="bg-indigo-100 text-indigo-700">{tool.status}</Badge>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={tool.onManage}>
                       Manage
                     </Button>
                   </CardContent>
@@ -473,7 +519,7 @@ export default function SafetyCenterPage() {
                     <CardDescription>{resource.description}</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <Button className="w-full" variant="outline">
+                    <Button className="w-full" variant="outline" onClick={() => router.push(resource.href)}>
                       {resource.action}
                       <ArrowUpRight className="w-4 h-4 ml-2" />
                     </Button>

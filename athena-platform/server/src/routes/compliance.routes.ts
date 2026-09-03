@@ -5,10 +5,11 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { ConsentType } from '@prisma/client';
 import { gdprService } from '../services/gdpr.service';
+import { consentService } from '../services/consent.service';
 import { prisma } from '../utils/prisma';
 import { 
   REGION_CONFIGS, 
@@ -104,6 +105,56 @@ const LEGAL_DOCUMENTS: LegalDocumentEntry[] = [
     regions: ['UK'],
   },
 ];
+
+/**
+ * How to find the member behind a piece of reported content. A report has to
+ * name somebody for a moderator to be able to act on it, so a content type that
+ * is not listed here cannot be reported through this route.
+ */
+const REPORT_CONTENT_OWNERS: Record<string, (contentId: string) => Promise<string | null>> = {
+  POST: async (id) =>
+    (await prisma.post.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
+  COMMENT: async (id) =>
+    (await prisma.comment.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
+  VIDEO: async (id) =>
+    (await prisma.video.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
+  VIDEO_COMMENT: async (id) =>
+    (await prisma.videoComment.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
+  STATUS: async (id) =>
+    (await prisma.status.findUnique({ where: { id }, select: { userId: true } }))?.userId ?? null,
+  MESSAGE: async (id) =>
+    (await prisma.message.findUnique({ where: { id }, select: { senderId: true } }))?.senderId ?? null,
+  CHANNEL_MESSAGE: async (id) =>
+    (await prisma.channelMessage.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
+  GROUP_POST: async (id) =>
+    (await prisma.groupPost.findUnique({ where: { id }, select: { authorId: true } }))?.authorId ?? null,
+  JOB: async (id) =>
+    (await prisma.job.findUnique({ where: { id }, select: { postedById: true } }))?.postedById ?? null,
+  PROFILE: async (id) =>
+    (await prisma.user.findUnique({ where: { id }, select: { id: true } }))?.id ?? null,
+};
+
+// Reasons that put a report at the front of the queue rather than the back.
+const URGENT_REPORT_REASONS = new Set(['CSAM', 'TERRORISM', 'ILLEGAL', 'SELF_HARM']);
+const HIGH_HARM_REPORT_REASONS = new Set(['HARASSMENT', 'HATE_SPEECH', 'FRAUD', 'HARMFUL']);
+
+type SubprocessorDpaStatus = 'SIGNED' | 'EXPIRED' | 'NOT_RECORDED';
+
+/**
+ * Never assert a contract we cannot see. A subprocessor with no recorded
+ * signature is published as unrecorded rather than as signed.
+ */
+function resolveDpaStatus(signedAt: Date | null, expiresAt: Date | null): SubprocessorDpaStatus {
+  if (!signedAt) return 'NOT_RECORDED';
+  if (expiresAt && expiresAt.getTime() <= Date.now()) return 'EXPIRED';
+  return 'SIGNED';
+}
+
+function reportSeverity(reason: string): 'CRITICAL' | 'HIGH' | 'MEDIUM' {
+  if (URGENT_REPORT_REASONS.has(reason)) return 'CRITICAL';
+  if (HIGH_HARM_REPORT_REASONS.has(reason)) return 'HIGH';
+  return 'MEDIUM';
+}
 
 function normalizeRegionCode(code?: string): string {
   if (!code) return 'ROW';
@@ -309,54 +360,44 @@ router.get('/transparency-report', async (req: Request, res: Response, next: Nex
  * GET /api/compliance/subprocessors
  * Get list of subprocessors (data processors) - GDPR requirement
  */
-router.get('/subprocessors', async (_req: Request, res: Response) => {
-  // In production, this would come from the database
-  const subprocessors = [
-    {
-      name: 'Amazon Web Services (AWS)',
-      purpose: 'Cloud infrastructure and data storage',
-      location: 'EU (Frankfurt), UK (London)',
-      dataCategories: ['All platform data'],
-      dpaStatus: 'Signed',
-    },
-    {
-      name: 'Stripe',
-      purpose: 'Payment processing',
-      location: 'US (with EU data residency)',
-      dataCategories: ['Payment information', 'Billing details'],
-      dpaStatus: 'Signed',
-    },
-    {
-      name: 'SendGrid (Twilio)',
-      purpose: 'Email delivery',
-      location: 'US (with SCCs)',
-      dataCategories: ['Email addresses', 'Email content'],
-      dpaStatus: 'Signed',
-    },
-    {
-      name: 'Cloudflare',
-      purpose: 'CDN and security',
-      location: 'Global (with EU processing)',
-      dataCategories: ['IP addresses', 'Request logs'],
-      dpaStatus: 'Signed',
-    },
-    {
-      name: 'Google Analytics',
-      purpose: 'Usage analytics',
-      location: 'EU',
-      dataCategories: ['Anonymized usage data'],
-      dpaStatus: 'Signed',
-    },
-  ];
+router.get('/subprocessors', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const records = await prisma.subprocessor.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+    });
 
-  res.json({
-    success: true,
-    data: {
-      subprocessors,
-      lastUpdated: '2026-01-15',
-      changeNotificationDays: 30,
-    },
-  });
+    const subprocessors = records.map((record) => ({
+      name: record.name,
+      purpose: record.description || (record.services.length ? record.services.join(', ') : null),
+      location: record.country,
+      isEUAdequate: record.isEUAdequate,
+      transferMechanism: record.transferMechanism,
+      dataCategories: record.dataCategories,
+      securityCertifications: record.securityCertifications,
+      dpaStatus: resolveDpaStatus(record.dpaSignedAt, record.dpaExpiresAt),
+      dpaSignedAt: record.dpaSignedAt,
+    }));
+
+    const lastUpdated = records.reduce<Date | null>(
+      (latest, record) => (!latest || record.updatedAt > latest ? record.updatedAt : latest),
+      null
+    );
+
+    res.json({
+      success: true,
+      data: {
+        subprocessors,
+        lastUpdated,
+        changeNotificationDays: 30,
+      },
+      meta: {
+        status: records.length > 0 ? 'published' : 'not_published',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 /**
@@ -397,6 +438,118 @@ router.get('/legal-documents', (req: Request, res: Response) => {
   });
 });
 
+/**
+ * POST /api/compliance/report-content
+ * Report illegal or harmful content (UK Online Safety requirement)
+ *
+ * Deliberately open to people without an account: somebody who has just been
+ * targeted may have no way to sign in, and the Act does not let us insist.
+ */
+router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { contentType, contentId, reason, details } = req.body;
+
+    if (!contentType || !contentId || !reason) {
+      return res.status(400).json({
+        success: false,
+        error: 'contentType, contentId, and reason are required',
+      });
+    }
+
+    const normalizedType = String(contentType).toUpperCase();
+    const normalizedReason = String(reason).toUpperCase();
+    const resolveOwner = REPORT_CONTENT_OWNERS[normalizedType];
+
+    if (!resolveOwner) {
+      return res.status(400).json({
+        success: false,
+        error: `contentType must be one of: ${Object.keys(REPORT_CONTENT_OWNERS).join(', ')}`,
+      });
+    }
+
+    const reportedUserId = await resolveOwner(String(contentId));
+
+    if (!reportedUserId) {
+      return res.status(404).json({
+        success: false,
+        error: 'We could not find the content you reported. It may already have been removed.',
+      });
+    }
+
+    const reviewDeadline = new Date(
+      Date.now() + UK_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours * 60 * 60 * 1000
+    );
+    const reporterId = req.user?.id;
+    const description = typeof details === 'string' ? details : undefined;
+
+    if (reporterId) {
+      const report = await prisma.contentReport.create({
+        data: {
+          reporterId,
+          reportedUserId,
+          contentType: normalizedType,
+          contentId: String(contentId),
+          reason: normalizedReason,
+          description,
+          evidence: { reviewDeadline: reviewDeadline.toISOString(), source: 'ONLINE_SAFETY_REPORT' },
+          status: 'PENDING',
+        },
+      });
+
+      logger.info('Content report filed', { reportId: report.id, reason: normalizedReason });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Report submitted. We will review it within 48 hours.',
+        data: {
+          reportId: report.id,
+          queue: 'CONTENT_REPORT',
+          status: report.status,
+          reviewDeadline,
+        },
+      });
+    }
+
+    // A content report row names a member on both sides, so an anonymous report
+    // is filed as a safety incident instead. Same moderators, same queue tools,
+    // no invented reporter.
+    const incident = await prisma.safetyIncident.create({
+      data: {
+        userId: reportedUserId,
+        type: 'USER_REPORT',
+        severity: reportSeverity(normalizedReason),
+        reason: normalizedReason,
+        contentType: normalizedType,
+        contentId: String(contentId),
+        metadata: {
+          description: description ?? null,
+          reviewDeadline: reviewDeadline.toISOString(),
+          source: 'ONLINE_SAFETY_REPORT',
+          anonymous: true,
+        },
+      },
+    });
+
+    logger.info('Anonymous content report filed', {
+      incidentId: incident.id,
+      reason: normalizedReason,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Report submitted. We will review it within 48 hours.',
+      data: {
+        reportId: incident.id,
+        queue: 'SAFETY_INCIDENT',
+        status: 'PENDING',
+        reviewDeadline,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ============================================
 // Protected Compliance Endpoints
 // ============================================
@@ -429,11 +582,10 @@ router.get('/status', async (req: AuthRequest, res: Response, next: NextFunction
       });
     }
 
-    const consents = await gdprService.getUserConsents(userId);
-    const dataProcessingConsent = consents.find(
-      (consent) => consent.consentType === ConsentType.DATA_PROCESSING
+    const hasDataProcessingConsent = await consentService.hasConsent(
+      userId,
+      ConsentType.DATA_PROCESSING
     );
-    const hasDataProcessingConsent = dataProcessingConsent?.status === 'GRANTED';
 
     res.json({
       success: true,
@@ -445,49 +597,6 @@ router.get('/status', async (req: AuthRequest, res: Response, next: NextFunction
         requirements: {
           dataProcessingConsent: hasDataProcessingConsent,
         },
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /api/compliance/report-content
- * Report illegal or harmful content (UK Online Safety requirement)
- */
-router.post('/report-content', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { contentType, contentId, reason, details } = req.body;
-    const userId = req.user!.id;
-
-    if (!contentType || !contentId || !reason) {
-      return res.status(400).json({
-        success: false,
-        error: 'contentType, contentId, and reason are required',
-      });
-    }
-
-    // In production, this would create a moderation ticket
-    const report = {
-      id: `report_${Date.now()}`,
-      reporterId: userId,
-      contentType,
-      contentId,
-      reason,
-      details,
-      status: 'PENDING',
-      createdAt: new Date(),
-      reviewDeadline: new Date(Date.now() + UK_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours * 60 * 60 * 1000),
-    };
-
-    res.json({
-      success: true,
-      message: 'Report submitted successfully. We will review it within 48 hours.',
-      data: {
-        reportId: report.id,
-        status: report.status,
-        reviewDeadline: report.reviewDeadline,
       },
     });
   } catch (error) {
@@ -615,11 +724,12 @@ router.post('/agreements', async (req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    await gdprService.recordConsent(userId, ConsentType.DATA_PROCESSING, true, {
-      ipAddress: req.ip,
-      userAgent,
-      region: requestRegion,
-    });
+    const consentContext = { ipAddress: req.ip, userAgent, region: requestRegion };
+
+    // Accepting the terms is where the baseline consents a member cannot use
+    // the service without get their first record.
+    await consentService.initializeUserConsents(userId, consentContext);
+    await gdprService.recordConsent(userId, ConsentType.DATA_PROCESSING, true, consentContext);
 
     const agreementAudit = await prisma.privacyAuditLog.create({
       data: {

@@ -5,6 +5,7 @@
 
 import OpenAI from 'openai';
 import { RekognitionClient, DetectModerationLabelsCommand } from "@aws-sdk/client-rekognition";
+import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { cacheGet, cacheSet } from '../utils/cache';
 
@@ -223,6 +224,48 @@ export async function moderateMessage(content: string): Promise<{
   }
 
   return { allowed: true };
+}
+
+/**
+ * Gate for user generated text on the write paths.
+ *
+ * Moderation is optional infrastructure: with no provider configured, or with
+ * the provider down, the write goes through and leaves a warning behind rather
+ * than rejecting everything the deployment tries to publish. When a provider IS
+ * configured and blocks the content, the caller gets a 400 and the write never
+ * happens.
+ */
+export async function assertContentAllowed(
+  content: string,
+  context: { kind: 'post' | 'comment' | 'message'; userId?: string }
+): Promise<void> {
+  if (!openai) {
+    logger.warn('Text moderation provider not configured, allowing content', { kind: context.kind });
+    return;
+  }
+
+  try {
+    const verdict =
+      context.kind === 'message' ? await moderateMessage(content) : await moderatePost(content);
+
+    if (!verdict.allowed) {
+      throw new ApiError(400, verdict.reason || 'This content violates our community guidelines');
+    }
+
+    if ('needsReview' in verdict && verdict.needsReview) {
+      logger.warn('Content published pending review', {
+        kind: context.kind,
+        userId: context.userId,
+        reason: verdict.reason,
+      });
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    logger.warn('Text moderation unavailable, allowing content', { kind: context.kind, error });
+  }
 }
 
 /**

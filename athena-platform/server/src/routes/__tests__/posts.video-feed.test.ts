@@ -11,6 +11,13 @@ jest.mock('../../utils/prisma', () => ({
     like: {
       findMany: jest.fn(),
     },
+    // The feed drops blocked authors, and a block is stored on the blocker's
+    // safety settings row rather than in a join table, so every authenticated
+    // feed read touches this model.
+    userSafetySettings: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+    },
   },
 }));
 
@@ -44,6 +51,8 @@ import { prisma } from '../../utils/prisma';
 describe('Posts video feed', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValue(null);
+    (prisma.userSafetySettings.findMany as any).mockResolvedValue([]);
   });
 
   it('GET /api/posts/video-feed returns videos + nextCursor', async () => {
