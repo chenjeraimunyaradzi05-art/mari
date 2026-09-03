@@ -1,203 +1,170 @@
-/**
- * Integration test for course enrollment endpoints
- * - Tests auth requirement on /courses/me and /courses/:id/enroll
- * - Tests successful enrollment flow
- *
- * Run with: npx ts-node tests/course-enrollment.test.ts
- */
-import { PrismaClient } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
-import * as jwt from 'jsonwebtoken';
+import request from 'supertest';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
-const prisma = new PrismaClient();
-const API_BASE = process.env.API_BASE_URL || 'http://localhost:5000/api';
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-change-me';
+// Enrolment is the learner's entry point into everything under /dashboard/learn,
+// so this covers who may enrol, that enrolling twice is safe, and that the
+// learner's own list comes back in the shape the client reads.
+//
+// It replaces a hand-run ts-node script that needed a live database and an API
+// listening on port 5000, so it never ran in CI. Jest collected it, found no
+// `it()` and reported the suite as failing.
 
-interface TestContext {
-  userId: string;
-  courseId: string;
-  token: string;
-}
+jest.mock('../src/utils/prisma', () => ({
+  prisma: {
+    course: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
+    courseEnrollment: { upsert: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
+  },
+}));
 
-async function setupTestData(): Promise<TestContext> {
-  console.log('Setting up test data...');
-  // Create test user
-  const email = `test-${Date.now()}@example.com`;
-  const passwordHash = await bcrypt.hash('TestPass123!', 10);
-
-  const user = await prisma.user.create({
-    data: {
-      email,
-      passwordHash,
-      firstName: 'Test',
-      lastName: 'User',
-      emailVerified: true,
-    },
-  });
-
-  // Create test course
-  const course = await prisma.course.create({
-    data: {
-      title: `Test Course ${Date.now()}`,
-      slug: `test-course-${Date.now()}`,
-      description: 'A test course for enrollment testing',
-      isActive: true,
-    },
-  });
-
-  // Generate auth token
-  const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-    expiresIn: '1h',
-  });
-
-  return {
-    userId: user.id,
-    courseId: course.id,
-    token,
-  };
-}
-
-async function cleanupTestData(ctx: TestContext) {
-  await prisma.courseEnrollment.deleteMany({ where: { userId: ctx.userId } });
-  await prisma.course.deleteMany({ where: { id: ctx.courseId } });
-  await prisma.user.deleteMany({ where: { id: ctx.userId } });
-}
-
-async function testAuthRequired() {
-  console.log('\n🔒 Test: Auth required on /courses/me');
-
-  const res = await fetch(`${API_BASE}/courses/me`);
-  if (res.status === 401) {
-    console.log('   ✅ Returned 401 Unauthorized as expected');
-  } else {
-    console.log(`   ❌ Expected 401, got ${res.status}`);
-    process.exitCode = 1;
-  }
-}
-
-async function testEnrollAuthRequired(courseId: string) {
-  console.log('\n🔒 Test: Auth required on POST /courses/:id/enroll');
-
-  const res = await fetch(`${API_BASE}/courses/${courseId}/enroll`, {
-    method: 'POST',
-  });
-  if (res.status === 401) {
-    console.log('   ✅ Returned 401 Unauthorized as expected');
-  } else {
-    console.log(`   ❌ Expected 401, got ${res.status}`);
-    process.exitCode = 1;
-  }
-}
-
-async function testEnrollSuccess(ctx: TestContext) {
-  console.log('\n📚 Test: Successful enrollment');
-
-  const res = await fetch(`${API_BASE}/courses/${ctx.courseId}/enroll`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (res.status === 201) {
-    const body = (await res.json()) as any;
-    if (body.success && body.data?.courseId === ctx.courseId) {
-      console.log('   ✅ Enrollment created successfully');
-    } else {
-      console.log('   ❌ Unexpected response body:', JSON.stringify(body));
-      process.exitCode = 1;
+// Unauthenticated requests still have to be rejected, so this mock honours the
+// header rather than signing everybody in.
+jest.mock('../src/middleware/auth', () => ({
+  authenticate: (req: any, res: any, next: any) => {
+    const id = req.headers['x-test-user'];
+    if (!id) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
-  } else {
-    console.log(`   ❌ Expected 201, got ${res.status}`);
-    const text = await res.text();
-    console.log('   Response:', text);
-    process.exitCode = 1;
-  }
-}
+    req.user = { id, role: req.headers['x-test-role'] || 'USER', email: 'u@athena.com' };
+    next();
+  },
+  optionalAuth: (req: any, _res: any, next: any) => {
+    if (req.headers['x-test-user']) {
+      req.user = {
+        id: req.headers['x-test-user'],
+        role: req.headers['x-test-role'] || 'USER',
+        email: 'u@athena.com',
+      };
+    }
+    next();
+  },
+  requireRole: (..._roles: string[]) => (_req: any, _res: any, next: any) => next(),
+  requirePremium: (_req: any, _res: any, next: any) => next(),
+}));
 
-async function testGetMyCourses(ctx: TestContext) {
-  console.log('\n📖 Test: GET /courses/me returns enrolled course');
+jest.mock('../src/utils/logger', () => ({
+  logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
 
-  const res = await fetch(`${API_BASE}/courses/me`, {
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-    },
+import { app } from '../src/index';
+import { prisma as prismaTyped } from '../src/utils/prisma';
+
+const prisma: any = prismaTyped;
+
+const LEARNER = 'learner-1';
+const COURSE = 'course-1';
+
+const as = (userId: string, role = 'USER') => ({ 'x-test-user': userId, 'x-test-role': role });
+
+describe('Enrolling in a course', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (prisma.course.findUnique as any).mockResolvedValue({ id: COURSE, isActive: true });
+    (prisma.courseEnrollment.upsert as any).mockImplementation(async (args: any) => ({
+      id: 'enr-1',
+      userId: LEARNER,
+      courseId: COURSE,
+      progress: 0,
+      ...args.create,
+    }));
   });
 
-  if (res.status === 200) {
-    const body = (await res.json()) as any;
-    const courses = body.data || [];
-    const found = courses.find((c: any) => c.id === ctx.courseId);
-    if (found) {
-      console.log('   ✅ Enrolled course returned in /courses/me');
-    } else {
-      console.log('   ❌ Course not found in response');
-      console.log('   Courses:', JSON.stringify(courses.map((c: any) => c.id)));
-      process.exitCode = 1;
-    }
-  } else {
-    console.log(`   ❌ Expected 200, got ${res.status}`);
-    process.exitCode = 1;
-  }
-}
+  it('requires authentication', async () => {
+    await request(app).post(`/api/courses/${COURSE}/enroll`).expect(401);
 
-async function testIdempotentEnroll(ctx: TestContext) {
-  console.log('\n🔄 Test: Idempotent re-enrollment');
-
-  const res = await fetch(`${API_BASE}/courses/${ctx.courseId}/enroll`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-      'Content-Type': 'application/json',
-    },
+    expect(prisma.courseEnrollment.upsert).not.toHaveBeenCalled();
   });
 
-  // Should still return 201 or 200 (upsert is safe)
-  if (res.status === 200 || res.status === 201) {
-    console.log('   ✅ Re-enrollment handled gracefully');
-  } else {
-    console.log(`   ❌ Unexpected status ${res.status}`);
-    process.exitCode = 1;
-  }
-}
+  it('creates the enrolment for the signed-in learner', async () => {
+    const res = await request(app)
+      .post(`/api/courses/${COURSE}/enroll`)
+      .set(as(LEARNER))
+      .expect(201);
 
-async function main() {
-  console.log('========================================');
-  console.log('  Course Enrollment Integration Tests  ');
-  console.log('========================================');
-  console.log(`API Base: ${API_BASE}`);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.courseId).toBe(COURSE);
 
-  let ctx: TestContext | null = null;
+    expect((prisma.courseEnrollment.upsert as any).mock.calls[0][0]).toMatchObject({
+      where: { userId_courseId: { userId: LEARNER, courseId: COURSE } },
+      create: { userId: LEARNER, courseId: COURSE },
+    });
+  });
 
-  try {
-    ctx = await setupTestData();
-    console.log(`Created test user: ${ctx.userId}`);
-    console.log(`Created test course: ${ctx.courseId}`);
+  it('is idempotent — re-enrolling touches the row instead of failing', async () => {
+    await request(app).post(`/api/courses/${COURSE}/enroll`).set(as(LEARNER)).expect(201);
+    await request(app).post(`/api/courses/${COURSE}/enroll`).set(as(LEARNER)).expect(201);
 
-    await testAuthRequired();
-    await testEnrollAuthRequired(ctx.courseId);
-    await testEnrollSuccess(ctx);
-    await testGetMyCourses(ctx);
-    await testIdempotentEnroll(ctx);
+    // An upsert, not a create, is what makes the second click safe: the unique
+    // (userId, courseId) constraint would otherwise throw.
+    expect(prisma.courseEnrollment.upsert).toHaveBeenCalledTimes(2);
+    const second = (prisma.courseEnrollment.upsert as any).mock.calls[1][0];
+    expect(second.update.updatedAt).toBeInstanceOf(Date);
+  });
 
-    console.log('\n========================================');
-    if (process.exitCode === 1) {
-      console.log('  ❌ Some tests failed');
-    } else {
-      console.log('  ✅ All tests passed!');
-    }
-    console.log('========================================\n');
-  } catch (err) {
-    console.error('Test error:', err);
-    process.exitCode = 1;
-  } finally {
-    if (ctx) {
-      await cleanupTestData(ctx);
-      console.log('Cleaned up test data.');
-    }
-    await prisma.$disconnect();
-  }
-}
+  it('404s for a course that does not exist', async () => {
+    (prisma.course.findUnique as any).mockResolvedValue(null);
 
-main();
+    await request(app).post(`/api/courses/${COURSE}/enroll`).set(as(LEARNER)).expect(404);
+
+    expect(prisma.courseEnrollment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('404s for a retired course rather than enrolling into it', async () => {
+    (prisma.course.findUnique as any).mockResolvedValue({ id: COURSE, isActive: false });
+
+    await request(app).post(`/api/courses/${COURSE}/enroll`).set(as(LEARNER)).expect(404);
+
+    expect(prisma.courseEnrollment.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('The learner’s own courses', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('requires authentication', async () => {
+    await request(app).get('/api/courses/me').expect(401);
+  });
+
+  it('is not read as a course slug', async () => {
+    (prisma.courseEnrollment.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/courses/me').set(as(LEARNER)).expect(200);
+
+    // `/:slug` is declared after `/me`; if that order ever flips this fails.
+    expect(prisma.courseEnrollment.findMany).toHaveBeenCalled();
+    expect(prisma.course.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns the courses themselves with progress attached, not the join rows', async () => {
+    (prisma.courseEnrollment.findMany as any).mockResolvedValue([
+      {
+        id: 'enr-1',
+        progress: 40,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        course: { id: COURSE, title: 'Intro to Trades', organization: { id: 'org-1' } },
+      },
+    ]);
+
+    const res = await request(app).get('/api/courses/me').set(as(LEARNER)).expect(200);
+
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0]).toMatchObject({
+      id: COURSE,
+      title: 'Intro to Trades',
+      enrollment: { id: 'enr-1', progress: 40 },
+    });
+  });
+
+  it('lists most recently touched first and only for the caller', async () => {
+    (prisma.courseEnrollment.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/courses/me').set(as(LEARNER)).expect(200);
+
+    expect((prisma.courseEnrollment.findMany as any).mock.calls[0][0]).toMatchObject({
+      where: { userId: LEARNER },
+      orderBy: { updatedAt: 'desc' },
+    });
+  });
+});

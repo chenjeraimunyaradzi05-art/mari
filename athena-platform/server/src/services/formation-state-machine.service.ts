@@ -268,6 +268,20 @@ async function handleTransitionSideEffects(
   event: FormationEvent
 ): Promise<void> {
   switch (toState) {
+    case 'PAYMENT_COMPLETE':
+      // Payment is the point where the applicant has parted with money, so it
+      // gets its own receipt-style notification rather than being folded into
+      // the submission notice that follows it.
+      await notificationService.notify({
+        userId,
+        type: 'SYSTEM',
+        title: 'Formation Payment Received',
+        message: 'We have received your formation fee. Your registration is moving to review.',
+        link: `/dashboard/formation/${registrationId}`,
+        channels: ['in-app', 'email'],
+      });
+      break;
+
     case 'SUBMITTED':
       await notificationService.notify({
         userId,

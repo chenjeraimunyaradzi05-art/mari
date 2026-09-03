@@ -582,6 +582,213 @@ export function getRegionalPricing(region: string): {
   return pricing[region] || pricing['AU'];
 }
 
+// ==========================================
+// ACCELERATOR ENROLLMENT PAYMENTS
+// ==========================================
+
+// The discriminator the Stripe webhook switches on for accelerator payments.
+export const ACCELERATOR_PAYMENT_TYPE = 'accelerator_enrollment';
+
+export interface AcceleratorPaymentIntent {
+  free: boolean;
+  amountCents: number;
+  currency: Currency;
+  clientSecret?: string | null;
+  paymentIntentId?: string;
+  status: PaymentResult['status'];
+  error?: string;
+}
+
+export type AcceleratorPaymentOutcome =
+  | { status: 'confirmed'; enrollmentId: string }
+  | { status: 'already_processed'; enrollmentId: string }
+  | { status: 'amount_mismatch'; enrollmentId: string }
+  | { status: 'unknown_enrollment'; enrollmentId: string | null };
+
+/**
+ * Cohort prices are Decimal dollars; Stripe works in minor units. Anything that
+ * is not a finite number is treated as zero rather than NaN, which would sail
+ * through a comparison and let an unpaid enrollment look settled.
+ */
+function toCents(value: unknown): number {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+}
+
+/**
+ * Start payment for an accelerator enrollment.
+ *
+ * The caller is responsible for authorising the enrollment; this function owns
+ * the money: it prices the cohort, records the intent id against the enrollment
+ * so the webhook can be cross-checked, and never activates a spot it has not
+ * been paid for.
+ */
+export async function createAcceleratorEnrollmentPayment(params: {
+  enrollmentId: string;
+  userId: string;
+  cohortId: string;
+  cohortName: string;
+  priceAud: unknown;
+}): Promise<AcceleratorPaymentIntent> {
+  const amountCents = toCents(params.priceAud);
+
+  if (amountCents <= 0) {
+    // A cohort priced at zero is genuinely paid in full, so the enrollment is
+    // activated without a Stripe round trip rather than being left in limbo.
+    await prisma.acceleratorEnrollment.update({
+      where: { id: params.enrollmentId },
+      data: { paymentStatus: 'PAID', status: 'ACTIVE' },
+    });
+
+    logger.info('Accelerator enrollment activated without payment (cohort is free)', {
+      enrollmentId: params.enrollmentId,
+      cohortId: params.cohortId,
+    });
+
+    return { free: true, amountCents: 0, currency: 'AUD', status: 'completed' };
+  }
+
+  const result = await processPayment({
+    userId: params.userId,
+    amount: amountCents / 100,
+    currency: 'AUD',
+    description: `Accelerator cohort: ${params.cohortName}`,
+    metadata: {
+      type: ACCELERATOR_PAYMENT_TYPE,
+      enrollmentId: params.enrollmentId,
+      cohortId: params.cohortId,
+      userId: params.userId,
+      // Stripe signs this back to us on the webhook, so it is the price the
+      // applicant actually agreed to even if the cohort is repriced later.
+      amountCents: String(amountCents),
+    },
+  });
+
+  if (!result.transactionId) {
+    return {
+      free: false,
+      amountCents,
+      currency: 'AUD',
+      status: result.status,
+      error: result.error,
+    };
+  }
+
+  await prisma.acceleratorEnrollment.update({
+    where: { id: params.enrollmentId },
+    data: { paymentId: result.transactionId },
+  });
+
+  return {
+    free: false,
+    amountCents,
+    currency: 'AUD',
+    clientSecret: result.clientSecret || null,
+    paymentIntentId: result.transactionId,
+    status: result.status,
+  };
+}
+
+/**
+ * Confirm an accelerator payment from a verified Stripe webhook event.
+ *
+ * Returns an outcome rather than throwing: a mismatch is deterministic, and
+ * making Stripe retry it forever would not fix anything.
+ */
+export async function confirmAcceleratorEnrollmentPayment(
+  paymentIntent: Stripe.PaymentIntent
+): Promise<AcceleratorPaymentOutcome> {
+  const metadata = (paymentIntent.metadata as any) || {};
+  const enrollmentId = typeof metadata.enrollmentId === 'string' ? metadata.enrollmentId : null;
+
+  if (!enrollmentId) {
+    logger.error('Accelerator payment intent carries no enrollmentId', {
+      paymentIntentId: paymentIntent.id,
+    });
+    return { status: 'unknown_enrollment', enrollmentId: null };
+  }
+
+  const enrollment = await prisma.acceleratorEnrollment.findUnique({
+    where: { id: enrollmentId },
+    include: { cohort: true },
+  });
+
+  if (!enrollment) {
+    logger.error('Accelerator payment intent references an unknown enrollment', {
+      paymentIntentId: paymentIntent.id,
+      enrollmentId,
+    });
+    return { status: 'unknown_enrollment', enrollmentId };
+  }
+
+  if (enrollment.paymentStatus === 'PAID') {
+    return { status: 'already_processed', enrollmentId };
+  }
+
+  const quoted = Number(metadata.amountCents);
+  const quotedCents = Number.isFinite(quoted) && quoted > 0 ? Math.round(quoted) : 0;
+  const expectedCents = quotedCents || toCents(enrollment.cohort.priceAud);
+  const receivedCents = paymentIntent.amount_received || paymentIntent.amount;
+
+  if (receivedCents !== expectedCents || paymentIntent.currency.toLowerCase() !== 'aud') {
+    logger.error('Accelerator payment amount does not match the cohort price', {
+      enrollmentId,
+      paymentIntentId: paymentIntent.id,
+      expectedCents,
+      receivedCents,
+      currency: paymentIntent.currency,
+    });
+    return { status: 'amount_mismatch', enrollmentId };
+  }
+
+  await prisma.acceleratorEnrollment.update({
+    where: { id: enrollmentId },
+    data: {
+      paymentStatus: 'PAID',
+      paymentId: paymentIntent.id,
+      // A participant who dropped out and whose card settled late keeps the
+      // status they chose; only a pending spot is activated by payment.
+      ...(enrollment.status === 'PENDING' ? { status: 'ACTIVE' as const } : {}),
+    },
+  });
+
+  logger.info('Accelerator enrollment payment confirmed', {
+    enrollmentId,
+    paymentIntentId: paymentIntent.id,
+    amountCents: receivedCents,
+  });
+
+  return { status: 'confirmed', enrollmentId };
+}
+
+/**
+ * Record a failed or canceled accelerator payment so the applicant is told to
+ * try again instead of waiting on a spot that was never paid for.
+ */
+export async function recordAcceleratorPaymentFailure(
+  paymentIntent: Stripe.PaymentIntent
+): Promise<void> {
+  const enrollmentId = (paymentIntent.metadata as any)?.enrollmentId;
+  if (typeof enrollmentId !== 'string' || enrollmentId.length === 0) return;
+
+  const enrollment = await prisma.acceleratorEnrollment.findUnique({
+    where: { id: enrollmentId },
+  });
+
+  // Never move a settled enrollment backwards on a late failure event.
+  if (!enrollment || enrollment.paymentStatus !== 'PENDING') return;
+
+  await prisma.acceleratorEnrollment.update({
+    where: { id: enrollmentId },
+    data: { paymentStatus: 'FAILED', paymentId: paymentIntent.id },
+  });
+
+  logger.warn('Accelerator enrollment payment did not complete', {
+    enrollmentId,
+    paymentIntentId: paymentIntent.id,
+  });
+}
+
 // Helper functions
 
 async function getStripeCustomerId(userId: string): Promise<string | null> {

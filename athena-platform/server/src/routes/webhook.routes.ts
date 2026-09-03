@@ -4,6 +4,16 @@ import Stripe from 'stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { confirmGiftPurchaseFromPaymentIntent } from '../services/creator.service';
+import {
+  FORMATION_PAYMENT_TYPE,
+  confirmFormationPaymentFromWebhook,
+  recordFormationPaymentFailure,
+} from '../services/formation.service';
+import {
+  ACCELERATOR_PAYMENT_TYPE,
+  confirmAcceleratorEnrollmentPayment,
+  recordAcceleratorPaymentFailure,
+} from '../services/payments-orchestration.service';
 import { prisma } from '../utils/prisma';
 
 const router = Router();
@@ -82,164 +92,196 @@ router.post(
       }
 
       // Handle the event
-      switch (event.type) {
-        case 'payment_intent.amount_capturable_updated': {
-          const paymentIntent = event.data.object as Stripe.PaymentIntent;
-          const type = (paymentIntent.metadata as any)?.type;
-          const sessionId = (paymentIntent.metadata as any)?.sessionId;
+      try {
+        switch (event.type) {
+          case 'payment_intent.amount_capturable_updated': {
+            const paymentIntent = event.data.object as Stripe.PaymentIntent;
+            const type = (paymentIntent.metadata as any)?.type;
+            const sessionId = (paymentIntent.metadata as any)?.sessionId;
 
-          if (type === 'mentor_session' && typeof sessionId === 'string') {
-            await prisma.mentorSession.update({
-              where: { id: sessionId },
-              data: {
-                stripePaymentIntentId: paymentIntent.id,
-                paymentStatus: 'AUTHORIZED',
-                paymentAuthorizedAt: new Date(),
+            if (type === 'mentor_session' && typeof sessionId === 'string') {
+              await prisma.mentorSession.update({
+                where: { id: sessionId },
+                data: {
+                  stripePaymentIntentId: paymentIntent.id,
+                  paymentStatus: 'AUTHORIZED',
+                  paymentAuthorizedAt: new Date(),
+                },
+              });
+            }
+            break;
+          }
+          case 'payment_intent.succeeded': {
+            const paymentIntent = event.data.object as Stripe.PaymentIntent;
+            const type = (paymentIntent.metadata as any)?.type;
+            const userId = (paymentIntent.metadata as any)?.userId;
+            const sessionId = (paymentIntent.metadata as any)?.sessionId;
+
+            if (type === 'gift_balance_purchase' && typeof userId === 'string' && userId.length > 0) {
+              await confirmGiftPurchaseFromPaymentIntent(userId, paymentIntent);
+            }
+
+            if (type === 'mentor_session' && typeof sessionId === 'string') {
+              await prisma.mentorSession.update({
+                where: { id: sessionId },
+                data: {
+                  stripePaymentIntentId: paymentIntent.id,
+                  paymentStatus: 'CAPTURED',
+                  paymentCapturedAt: new Date(),
+                },
+              });
+            }
+
+            if (type === FORMATION_PAYMENT_TYPE) {
+              await confirmFormationPaymentFromWebhook(paymentIntent);
+            }
+
+            if (type === ACCELERATOR_PAYMENT_TYPE) {
+              await confirmAcceleratorEnrollmentPayment(paymentIntent);
+            }
+            break;
+          }
+
+          case 'payment_intent.payment_failed':
+          case 'payment_intent.canceled': {
+            const paymentIntent = event.data.object as Stripe.PaymentIntent;
+            const type = (paymentIntent.metadata as any)?.type;
+            const sessionId = (paymentIntent.metadata as any)?.sessionId;
+
+            if (type === 'mentor_session' && typeof sessionId === 'string') {
+              await prisma.mentorSession.update({
+                where: { id: sessionId },
+                data: {
+                  stripePaymentIntentId: paymentIntent.id,
+                  paymentStatus: event.type === 'payment_intent.canceled' ? 'CANCELED' : 'FAILED',
+                  paymentCanceledAt: event.type === 'payment_intent.canceled' ? new Date() : undefined,
+                  paymentFailedAt: event.type === 'payment_intent.payment_failed' ? new Date() : undefined,
+                },
+              });
+            }
+
+            if (type === FORMATION_PAYMENT_TYPE) {
+              await recordFormationPaymentFailure(
+                paymentIntent,
+                event.type === 'payment_intent.canceled' ? 'canceled' : 'failed'
+              );
+            }
+
+            if (type === ACCELERATOR_PAYMENT_TYPE) {
+              await recordAcceleratorPaymentFailure(paymentIntent);
+            }
+            break;
+          }
+
+          case 'checkout.session.completed': {
+            const session = event.data.object as Stripe.Checkout.Session;
+            if (session.mode !== 'subscription') break;
+
+            const userId = session.metadata?.userId;
+            const tier = session.metadata?.tier;
+            const currency = session.metadata?.currency || null;
+            const customerId = typeof session.customer === 'string' ? session.customer : null;
+            const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
+
+            if (!userId || !tier) break;
+
+            await (prisma as any).subscription.upsert({
+              where: { userId },
+              create: {
+                user: { connect: { id: userId } },
+                tier,
+                status: 'ACTIVE',
+                stripeCustomerId: customerId,
+                stripeSubscriptionId,
+                stripePriceId: (PRICE_IDS as any)[tier] || null,
+                currency: currency || undefined,
               },
-            });
-          }
-          break;
-        }
-        case 'payment_intent.succeeded': {
-          const paymentIntent = event.data.object as Stripe.PaymentIntent;
-          const type = (paymentIntent.metadata as any)?.type;
-          const userId = (paymentIntent.metadata as any)?.userId;
-          const sessionId = (paymentIntent.metadata as any)?.sessionId;
-
-          if (type === 'gift_balance_purchase' && typeof userId === 'string' && userId.length > 0) {
-            await confirmGiftPurchaseFromPaymentIntent(userId, paymentIntent);
-          }
-
-          if (type === 'mentor_session' && typeof sessionId === 'string') {
-            await prisma.mentorSession.update({
-              where: { id: sessionId },
-              data: {
-                stripePaymentIntentId: paymentIntent.id,
-                paymentStatus: 'CAPTURED',
-                paymentCapturedAt: new Date(),
-              },
-            });
-          }
-          break;
-        }
-
-        case 'payment_intent.payment_failed':
-        case 'payment_intent.canceled': {
-          const paymentIntent = event.data.object as Stripe.PaymentIntent;
-          const type = (paymentIntent.metadata as any)?.type;
-          const sessionId = (paymentIntent.metadata as any)?.sessionId;
-
-          if (type === 'mentor_session' && typeof sessionId === 'string') {
-            await prisma.mentorSession.update({
-              where: { id: sessionId },
-              data: {
-                stripePaymentIntentId: paymentIntent.id,
-                paymentStatus: event.type === 'payment_intent.canceled' ? 'CANCELED' : 'FAILED',
-                paymentCanceledAt: event.type === 'payment_intent.canceled' ? new Date() : undefined,
-                paymentFailedAt: event.type === 'payment_intent.payment_failed' ? new Date() : undefined,
-              },
-            });
-          }
-          break;
-        }
-
-        case 'checkout.session.completed': {
-          const session = event.data.object as Stripe.Checkout.Session;
-          if (session.mode !== 'subscription') break;
-
-          const userId = session.metadata?.userId;
-          const tier = session.metadata?.tier;
-          const currency = session.metadata?.currency || null;
-          const customerId = typeof session.customer === 'string' ? session.customer : null;
-          const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
-
-          if (!userId || !tier) break;
-
-          await (prisma as any).subscription.upsert({
-            where: { userId },
-            create: {
-              user: { connect: { id: userId } },
-              tier,
-              status: 'ACTIVE',
-              stripeCustomerId: customerId,
-              stripeSubscriptionId,
-              stripePriceId: (PRICE_IDS as any)[tier] || null,
-              currency: currency || undefined,
-            },
-            update: {
-              tier,
-              status: 'ACTIVE',
-              stripeCustomerId: customerId || undefined,
-              stripeSubscriptionId,
-              stripePriceId: (PRICE_IDS as any)[tier] || null,
-              currency: currency || undefined,
-            },
-          });
-          break;
-        }
-
-        case 'customer.subscription.updated':
-        case 'customer.subscription.deleted': {
-          const subscription = event.data.object as Stripe.Subscription;
-          const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
-          const stripeSubscriptionId = subscription.id;
-
-          const priceId =
-            subscription.items?.data?.[0]?.price?.id ||
-            (subscription.items as any)?.data?.[0]?.plan?.id ||
-            null;
-
-          const dbSubscription = await (prisma as any).subscription.findFirst({
-            where: {
-              OR: [
-                customerId ? { stripeCustomerId: customerId } : undefined,
-                { stripeSubscriptionId },
-              ].filter(Boolean),
-            },
-          });
-
-          if (!dbSubscription) break;
-
-          if (event.type === 'customer.subscription.deleted') {
-            await (prisma as any).subscription.update({
-              where: { id: dbSubscription.id },
-              data: {
-                tier: 'FREE',
-                status: 'CANCELED',
-                stripeSubscriptionId: null,
-                stripePriceId: null,
-                cancelAtPeriodEnd: false,
-                currentPeriodStart: null,
-                currentPeriodEnd: null,
+              update: {
+                tier,
+                status: 'ACTIVE',
+                stripeCustomerId: customerId || undefined,
+                stripeSubscriptionId,
+                stripePriceId: (PRICE_IDS as any)[tier] || null,
+                currency: currency || undefined,
               },
             });
             break;
           }
 
-          const inferredTier = tierFromPriceId(priceId);
-          await (prisma as any).subscription.update({
-            where: { id: dbSubscription.id },
-            data: {
-              stripeCustomerId: customerId || undefined,
-              stripeSubscriptionId,
-              stripePriceId: priceId,
-              ...(inferredTier ? { tier: inferredTier } : {}),
-              status: mapStripeSubscriptionStatus(subscription.status),
-              currentPeriodStart: subscription.current_period_start
-                ? new Date(subscription.current_period_start * 1000)
-                : null,
-              currentPeriodEnd: subscription.current_period_end
-                ? new Date(subscription.current_period_end * 1000)
-                : null,
-              cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
-            },
-          });
-          break;
-        }
+          case 'customer.subscription.updated':
+          case 'customer.subscription.deleted': {
+            const subscription = event.data.object as Stripe.Subscription;
+            const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
+            const stripeSubscriptionId = subscription.id;
 
-        default:
-          // Ignore other events for now.
-          break;
+            const priceId =
+              subscription.items?.data?.[0]?.price?.id ||
+              (subscription.items as any)?.data?.[0]?.plan?.id ||
+              null;
+
+            const dbSubscription = await (prisma as any).subscription.findFirst({
+              where: {
+                OR: [
+                  customerId ? { stripeCustomerId: customerId } : undefined,
+                  { stripeSubscriptionId },
+                ].filter(Boolean),
+              },
+            });
+
+            if (!dbSubscription) break;
+
+            if (event.type === 'customer.subscription.deleted') {
+              await (prisma as any).subscription.update({
+                where: { id: dbSubscription.id },
+                data: {
+                  tier: 'FREE',
+                  status: 'CANCELED',
+                  stripeSubscriptionId: null,
+                  stripePriceId: null,
+                  cancelAtPeriodEnd: false,
+                  currentPeriodStart: null,
+                  currentPeriodEnd: null,
+                },
+              });
+              break;
+            }
+
+            const inferredTier = tierFromPriceId(priceId);
+            await (prisma as any).subscription.update({
+              where: { id: dbSubscription.id },
+              data: {
+                stripeCustomerId: customerId || undefined,
+                stripeSubscriptionId,
+                stripePriceId: priceId,
+                ...(inferredTier ? { tier: inferredTier } : {}),
+                status: mapStripeSubscriptionStatus(subscription.status),
+                currentPeriodStart: subscription.current_period_start
+                  ? new Date(subscription.current_period_start * 1000)
+                  : null,
+                currentPeriodEnd: subscription.current_period_end
+                  ? new Date(subscription.current_period_end * 1000)
+                  : null,
+                cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
+              },
+            });
+            break;
+          }
+
+          default:
+            // Ignore other events for now.
+            break;
+        }
+      } catch (handlerError) {
+        // The idempotency row is written before the handler runs, so leaving it
+        // behind after a failure would make Stripe's retry look like a replay
+        // and the payment would never be applied. Release it and let the retry
+        // through.
+        try {
+          await (prisma as any).stripeWebhookEvent.delete({ where: { id: event.id } });
+        } catch {
+          // Best effort: a stuck row is better than losing the original error.
+        }
+        throw handlerError;
       }
 
       res.json({ received: true });

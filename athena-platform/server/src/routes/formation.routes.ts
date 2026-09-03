@@ -79,4 +79,39 @@ router.post('/:id/submit', async (req: AuthRequest, res: Response, next: NextFun
   }
 });
 
+// Fetch the payment details for a registration that is awaiting payment.
+// Submitting already returns these, but an applicant who abandoned checkout
+// needs a way back to the same intent without re-submitting.
+router.post('/:id/payment-intent', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const payment = await FormationService.getFormationPayment(req.user!.id, req.params.id);
+    res.json(payment);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Confirm payment from the browser after Stripe checkout. The webhook is the
+// authoritative path; this exists so the applicant is not left looking at a
+// PAYMENT_PENDING screen while the webhook is in flight.
+router.post('/:id/confirm-payment', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { paymentIntentId } = req.body;
+
+    if (typeof paymentIntentId !== 'string' || paymentIntentId.trim().length === 0) {
+      res.status(400).json({ error: 'paymentIntentId is required' });
+      return;
+    }
+
+    const registration = await FormationService.confirmFormationPayment(
+      req.user!.id,
+      req.params.id,
+      paymentIntentId.trim()
+    );
+    res.json(registration);
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;
