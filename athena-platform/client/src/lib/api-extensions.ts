@@ -37,6 +37,10 @@ export const videoApi = {
     mentionedUserIds?: string[];
     location?: string;
     audioTrackId?: string;
+    // A duet: the pipeline composes this reel beside the one named here.
+    duetOfVideoId?: string;
+    // WebVTT captions uploaded with mediaApi.upload('captions', file).
+    captionsUrl?: string;
   }) => api.post('/video', data),
 
   // The pipeline's progress on a reel you published (author only).

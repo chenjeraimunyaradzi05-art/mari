@@ -23,6 +23,7 @@ import { ReportDialog } from '@/components/safety/ReportDialog';
 import { ReactionButton, ReactionSummary, type ReactionCounts } from './ReactionBar';
 import { PollCard } from './PollCard';
 import { WhyThis } from './WhyThis';
+import { SensitiveGate } from './SensitiveGate';
 import CommentSection from './CommentSection';
 import toast from 'react-hot-toast';
 
@@ -290,6 +291,7 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
         </div>
       </div>
 
+      <SensitiveGate active={Boolean(post.isSensitive)} className="mx-4 mb-2">
       {/* Content */}
       <div className="px-4 pb-2">
         <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
@@ -351,6 +353,7 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
           )}
         </div>
       )}
+      </SensitiveGate>
 
       {/* Stats/Counts */}
       <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2 text-xs text-slate-500">

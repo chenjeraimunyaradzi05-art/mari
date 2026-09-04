@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { BarChart3, CalendarClock, Image, Loader2, MessageSquare, Plus, Send, Trash2, Trophy, Video, X } from 'lucide-react';
+import { BarChart3, CalendarClock, EyeOff, Image, Loader2, MessageSquare, Plus, Send, Trash2, Trophy, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore, useCreatePost } from '@/lib/hooks';
@@ -62,6 +62,7 @@ export default function CreatePostPage() {
 
   const [scheduling, setScheduling] = useState(false);
   const [scheduledFor, setScheduledFor] = useState('');
+  const [isSensitive, setIsSensitive] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const minSchedule = useMemo(() => toLocalInputValue(new Date(Date.now() + 10 * 60000)), []);
@@ -120,6 +121,7 @@ export default function CreatePostPage() {
         mediaUrls: kind !== 'POLL' && mediaUrls.length ? mediaUrls : undefined,
         poll: kind === 'POLL' ? { options: cleanOptions, durationHours } : undefined,
         scheduledFor: scheduling && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
+        isSensitive,
       });
 
       setContent('');
@@ -309,6 +311,14 @@ export default function CreatePostPage() {
             <input type="checkbox" checked={scheduling} onChange={(e) => setScheduling(e.target.checked)} className="h-4 w-4" />
             <CalendarClock className="h-4 w-4 text-slate-400" />
             Schedule for later
+          </label>
+          <label
+            className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"
+            title="Blurred in the feed until a reader chooses to see it. For posts about harassment, loss, medical detail and the like."
+          >
+            <input type="checkbox" checked={isSensitive} onChange={(e) => setIsSensitive(e.target.checked)} className="h-4 w-4" />
+            <EyeOff className="h-4 w-4 text-slate-400" />
+            Sensitive content
           </label>
           {scheduling && (
             <input

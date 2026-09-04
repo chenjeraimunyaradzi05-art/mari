@@ -34,6 +34,7 @@ import StoriesStrip from '@/components/community/StoriesStrip';
 import { ReactionButton, ReactionSummary, type ReactionCounts } from '@/components/community/ReactionBar';
 import { PollCard, type PollResults } from '@/components/community/PollCard';
 import { WhyThis } from '@/components/community/WhyThis';
+import { SensitiveGate } from '@/components/community/SensitiveGate';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
@@ -77,6 +78,7 @@ interface Post {
   poll?: PollResults | null;
   reasons?: string[];
   isPinned?: boolean;
+  isSensitive?: boolean;
   _count?: {
     likes: number;
     comments: number;
@@ -302,6 +304,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         </div>
       </div>
 
+      <SensitiveGate active={Boolean(post.isSensitive)} className="mb-4">
       {/* Content */}
       <div className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap mb-4">
         {renderSocialText(post.content)}
@@ -346,6 +349,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
           )}
         </div>
       )}
+      </SensitiveGate>
 
       {/* Stats */}
       <div className="flex items-center justify-between gap-2 text-sm text-slate-500 dark:text-slate-400 py-2 border-t border-b border-slate-100 dark:border-slate-700">

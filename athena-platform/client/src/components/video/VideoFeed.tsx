@@ -34,6 +34,9 @@ function mapApiToVideoItem(v: any): VideoItem {
     hashtags: Array.isArray(v.hashtags) ? v.hashtags : undefined,
     soundId: v.sound?.id ?? v.audioTrackId ?? undefined,
     soundTitle: v.sound?.title ?? undefined,
+    duetOf: v.duetOf ? { id: v.duetOf.id, name: v.duetOf.author?.displayName || 'ATHENA member' } : undefined,
+    duetCount: v.duetCount ?? 0,
+    captionsUrl: v.captionsUrl ?? undefined,
     createdAt: v.createdAt,
   };
 }
@@ -223,6 +226,11 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
     router.push(`/profile/${authorId}`);
   }, [router]);
 
+  // A duet is recorded in the studio with the original alongside.
+  const handleDuet = useCallback((id: string) => {
+    router.push(isAuthenticated ? `/dashboard/creator-studio?duet=${id}` : `/login?redirect=${encodeURIComponent(`/dashboard/creator-studio?duet=${id}`)}`);
+  }, [router, isAuthenticated]);
+
   const handleView = useCallback((id: string, watchDuration: number, completionPct: number) => {
     addToHistory(id, completionPct / 100, completionPct >= 90);
     void videoApi
@@ -324,6 +332,9 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
                 isBookmarked: bookmarkedVideos.includes(video.id) || Boolean(video.isBookmarked),
                 tags: video.hashtags,
                 sound: video.soundId ? { id: video.soundId, title: video.soundTitle || 'Original sound' } : undefined,
+                duetOf: video.duetOf,
+                duetCount: video.duetCount,
+                captionsUrl: video.captionsUrl,
                 createdAt: video.createdAt || new Date().toISOString()
             }}
             isActive={index === currentIndex}
@@ -332,6 +343,7 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
             onShare={handleShare}
             onComment={setCommentsFor}
             onAuthorClick={handleAuthorClick}
+            onDuet={handleDuet}
             onView={handleView}
           />
         </div>

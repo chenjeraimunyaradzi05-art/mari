@@ -29,6 +29,7 @@ import StoriesStrip from '@/components/community/StoriesStrip';
 import { ReactionButton, ReactionSummary, type ReactionCounts } from '@/components/community/ReactionBar';
 import { PollCard, type PollResults } from '@/components/community/PollCard';
 import { WhyThis } from '@/components/community/WhyThis';
+import { SensitiveGate } from '@/components/community/SensitiveGate';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
 
 type FeedAuthor = {
@@ -55,6 +56,7 @@ type FeedPost = {
   reactionCounts?: ReactionCounts;
   poll?: PollResults | null;
   reasons?: string[];
+  isSensitive?: boolean;
   author: FeedAuthor;
 };
 
@@ -281,6 +283,7 @@ function PostCard({
         )}
       </header>
 
+      <SensitiveGate active={Boolean(post.isSensitive)}>
       {media.length > 0 && (
         <div
           className={cn(
@@ -317,6 +320,18 @@ function PostCard({
           <PollCard postId={post.id} poll={post.poll} canVote={isAuthenticated} compact />
         </div>
       )}
+
+      {/* The caption sits inside the gate too, so a sensitive post shows
+          nothing of itself until asked; the actions stay usable. */}
+      {post.isSensitive && (
+        <p className="break-words pt-2 text-sm leading-5 text-slate-900 dark:text-slate-100">
+          <Link href={`/profile/${post.author.id}`} className="font-semibold">
+            {handleFor(post.author)}
+          </Link>{' '}
+          <span className="whitespace-pre-line break-words">{renderSocialText(post.content)}</span>
+        </p>
+      )}
+      </SensitiveGate>
 
       <div className="flex items-center gap-3 pt-3 lg:gap-2">
         {isAuthenticated ? (
@@ -377,12 +392,14 @@ function PostCard({
           a hashtag) otherwise pushes the caption past the column edge. pre-line
           rather than pre-wrap keeps newlines without letting preserved trailing
           spaces hang past the content edge. */}
-      <p className="break-words pt-1 text-sm leading-5 text-slate-900 dark:text-slate-100">
-        <Link href={`/profile/${post.author.id}`} className="font-semibold">
-          {handleFor(post.author)}
-        </Link>{' '}
-        <span className="whitespace-pre-line break-words">{renderSocialText(post.content)}</span>
-      </p>
+      {!post.isSensitive && (
+        <p className="break-words pt-1 text-sm leading-5 text-slate-900 dark:text-slate-100">
+          <Link href={`/profile/${post.author.id}`} className="font-semibold">
+            {handleFor(post.author)}
+          </Link>{' '}
+          <span className="whitespace-pre-line break-words">{renderSocialText(post.content)}</span>
+        </p>
+      )}
 
       {comments > 0 && (
         <Link

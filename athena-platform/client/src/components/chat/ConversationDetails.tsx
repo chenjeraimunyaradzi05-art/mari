@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { Info, ShieldCheck, Timer, User } from 'lucide-react';
+import { Info, Search, ShieldCheck, Timer, User } from 'lucide-react';
+import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useChatStore } from '@/lib/stores/chat.store';
 import { usePresenceStore } from '@/lib/stores/presence.store';
@@ -16,9 +17,38 @@ export default function ConversationDetails() {
   const { activeConversationId, conversations, messages, setDisappearingTtl } = useChatStore();
   const { isOnline } = usePresenceStore();
   const [savingTtl, setSavingTtl] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Array<{ id: string; senderId: string; content: string; createdAt: string }> | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const conversation = conversations.find((c) => c.id === activeConversationId);
   const participant = conversation?.participants?.[0];
+
+  const runSearch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const q = query.trim();
+    if (!q || !conversation) return;
+    setSearching(true);
+    try {
+      const res = await messageApi.search(conversation.id, q);
+      setResults(Array.isArray(res.data?.data) ? [...res.data.data].reverse() : []);
+    } catch {
+      toast.error('Search failed');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // A hit that is on screen scrolls into view; the thread only holds the
+  // latest messages, so older hits are listed without a jump.
+  const jumpTo = (id: string) => {
+    const el = document.getElementById(`msg-${id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-rose-400');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-rose-400'), 1500);
+    }
+  };
 
   // Shared media is whatever has actually been sent in this thread — no
   // placeholder tiles standing in for files that do not exist.
@@ -107,6 +137,44 @@ export default function ConversationDetails() {
               <User className="w-4 h-4 mr-2" /> View Profile
             </Link>
           </div>
+        </div>
+
+        <div>
+          <p className="text-xs uppercase tracking-widest text-slate-400 dark:text-slate-500">Search in conversation</p>
+          <form onSubmit={runSearch} className="mt-3 flex items-center gap-2">
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (!e.target.value.trim()) setResults(null);
+              }}
+              placeholder="Find a message"
+              aria-label="Search messages"
+              className="input flex-1 text-sm"
+            />
+            <button type="submit" disabled={searching || !query.trim()} aria-label="Search" className="btn-outline p-2">
+              <Search className="h-4 w-4" />
+            </button>
+          </form>
+          {results && (
+            <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+              {results.length === 0 && <li className="text-xs text-slate-500">No messages match.</li>}
+              {results.map((hit) => (
+                <li key={hit.id}>
+                  <button
+                    type="button"
+                    onClick={() => jumpTo(hit.id)}
+                    className="w-full rounded-lg border border-slate-100 px-2 py-1.5 text-left text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800"
+                  >
+                    <span className="block truncate text-slate-800 dark:text-slate-200">{hit.content}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {hit.senderId === participant.id ? participant.name : 'You'} · {format(new Date(hit.createdAt), 'd MMM, h:mm a')}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div>

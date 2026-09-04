@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Check, Loader2, Music, Sparkles, Tag, UploadCloud, Video, X } from 'lucide-react';
+import { Subtitles, Check, Copy, Loader2, Music, Sparkles, Tag, UploadCloud, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -134,6 +134,10 @@ function CreatorStudioContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presetSoundId = searchParams.get('sound')?.trim() || null;
+  // ?duet=<id>: this reel answers another and is composed beside it.
+  const duetId = searchParams.get('duet')?.trim() || null;
+  const [duetOf, setDuetOf] = useState<{ id: string; title: string; author: string; thumbnailUrl: string | null; videoUrl: string } | null>(null);
+  const [captionsFile, setCaptionsFile] = useState<File | null>(null);
 
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState('');
@@ -169,6 +173,28 @@ function CreatorStudioContent() {
       })
       .catch(() => toast.error('That sound could not be found'));
   }, [presetSoundId]);
+
+  useEffect(() => {
+    if (!duetId) {
+      setDuetOf(null);
+      return;
+    }
+    videoApi
+      .getVideo(duetId)
+      .then((r) => {
+        const v = r.data?.data;
+        if (!v) throw new Error('missing');
+        setDuetOf({
+          id: v.id,
+          title: v.title || v.description || 'a reel',
+          author: v.author?.displayName || 'ATHENA member',
+          thumbnailUrl: v.thumbnailUrl ?? null,
+          videoUrl: v.videoUrl,
+        });
+        setTitle((current) => current || `Duet with ${v.author?.displayName || 'a member'}`);
+      })
+      .catch(() => toast.error('That reel could not be found'));
+  }, [duetId]);
 
   const pick = (next: File | null) => {
     setError(null);
@@ -261,6 +287,17 @@ function CreatorStudioContent() {
         throw new Error('The upload finished but returned no file.');
       }
 
+      let captionsUrl: string | undefined;
+      if (captionsFile) {
+        captionsUrl = await mediaApi
+          .upload('captions', captionsFile)
+          .then((r) => r.data?.data?.url as string | undefined)
+          .catch(() => {
+            toast('The captions file could not be uploaded; publishing without it.', { icon: '⚠️' });
+            return undefined;
+          });
+      }
+
       setStage('publishing');
       const created = await videoApi.create({
         title: title.trim(),
@@ -272,6 +309,8 @@ function CreatorStudioContent() {
         type,
         hashtags: parsedTags,
         audioTrackId: sound?.id,
+        duetOfVideoId: duetOf?.id,
+        captionsUrl,
       });
       const id = created.data?.data?.id as string | undefined;
       if (!id) throw new Error('The reel was not created.');
@@ -333,6 +372,30 @@ function CreatorStudioContent() {
 
       <div className="grid lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3 space-y-4">
+          {duetOf && (
+            <div className="flex items-center gap-3 rounded-2xl border border-purple-200 bg-purple-50 p-3 dark:border-purple-900/50 dark:bg-purple-900/20">
+              <div className="h-20 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-black">
+                {duetOf.thumbnailUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- media CDN
+                  <img src={duetOf.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <video src={duetOf.videoUrl} muted className="h-full w-full object-cover" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1 text-sm font-semibold text-purple-900 dark:text-purple-100">
+                  <Copy className="h-4 w-4" /> Duet with {duetOf.author}
+                </p>
+                <p className="truncate text-xs text-purple-800/80 dark:text-purple-200/80">{duetOf.title}</p>
+                <p className="mt-1 text-xs text-purple-800/80 dark:text-purple-200/80">
+                  Record your reply. It will be composed beside the original, yours on the left, when you publish.
+                </p>
+              </div>
+              <Link href="/dashboard/creator-studio" aria-label="Cancel the duet" className="p-1 text-purple-700 hover:text-purple-900 dark:text-purple-200">
+                <X className="h-4 w-4" />
+              </Link>
+            </div>
+          )}
           <label
             className={cn(
               'block cursor-pointer border-2 border-dashed rounded-2xl p-8 text-center transition',
@@ -496,6 +559,22 @@ function CreatorStudioContent() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label htmlFor="reel-captions" className="mb-1 flex items-center gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                <Subtitles className="h-4 w-4" /> Subtitles (optional)
+              </label>
+              <input
+                id="reel-captions"
+                type="file"
+                accept=".vtt,text/vtt"
+                disabled={busy}
+                onChange={(e) => setCaptionsFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-xs text-slate-500 file:mr-3 file:rounded-full file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-medium file:text-slate-700 dark:file:bg-slate-800 dark:file:text-slate-200"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                A WebVTT file. Viewers can turn captions on and off in the player.
+              </p>
             </div>
             <div className="space-y-2">
               <p className="text-xs text-slate-500">Before you publish</p>

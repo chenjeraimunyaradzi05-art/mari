@@ -591,6 +591,15 @@ export const mentionApi = {
   suggest: (q: string) => api.get('/users/suggest', { params: { q } }),
 };
 
+// Topics: hashtags as places, with follow state the ranked feed honours.
+export const topicApi = {
+  trending: (params?: { days?: number; limit?: number }) => api.get('/topics/trending', { params }),
+  get: (tag: string) => api.get(`/topics/${encodeURIComponent(tag)}`),
+  following: () => api.get('/topics/me/following'),
+  follow: (tag: string) => api.post(`/topics/${encodeURIComponent(tag)}/follow`),
+  unfollow: (tag: string) => api.delete(`/topics/${encodeURIComponent(tag)}/follow`),
+};
+
 // "See fewer posts from" and muted topics, honoured by the ranked feeds.
 export const feedPreferencesApi = {
   get: () => api.get('/ai-algorithms/feed-preferences'),
@@ -663,6 +672,10 @@ export const messageApi = {
 
   getMessages: (conversationId: string, params?: { limit?: number; before?: string }) =>
     api.get(`/messages/conversations/${conversationId}/messages`, { params }),
+
+  // Searches the thread's text; the most recent matches come back first.
+  search: (conversationId: string, q: string) =>
+    api.get(`/messages/conversations/${conversationId}/messages`, { params: { q, limit: 50 } }),
 
   send: (conversationId: string, content: string) =>
     api.post(`/messages/conversations/${conversationId}/messages`, { content }),

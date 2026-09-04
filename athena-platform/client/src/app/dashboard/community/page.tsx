@@ -17,7 +17,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api } from '@/lib/api';
+import { api, topicApi } from '@/lib/api';
 import Feed from '@/components/community/Feed';
 import CreatePostWidget from '@/components/community/CreatePostWidget';
 import AchievementsPanel from '@/components/community/AchievementsPanel';
@@ -159,7 +159,20 @@ export default function CommunityPage() {
     },
   });
 
-  const trendingTopics = extractTrendingTopics(feedOverview?.posts ?? []);
+  // Counted across posts and reels on the server; the client-side count over
+  // this page of the feed stays as the fallback when that is empty.
+  const { data: serverTopics = [], isLoading: isLoadingTopics } = useQuery({
+    queryKey: ['topics', 'trending', 7],
+    queryFn: async () => {
+      const res = await topicApi.trending({ days: 7, limit: 5 });
+      const rows = (res.data?.data ?? []) as Array<{ tag: string; total: number }>;
+      return rows.map((row) => ({
+        tag: `#${row.tag}`,
+        posts: `${formatCount(row.total)} ${row.total === 1 ? 'mention' : 'mentions'} this week`,
+      }));
+    },
+  });
+  const trendingTopics = serverTopics.length > 0 ? serverTopics : extractTrendingTopics(feedOverview?.posts ?? []);
   const stats: CommunityStat[] = [
     {
       label: 'Recent feed posts',
@@ -301,7 +314,7 @@ export default function CommunityPage() {
               <h2 className="text-base font-semibold text-slate-900 dark:text-white">Trending topics</h2>
               <Flame className="w-4 h-4 text-orange-500" />
             </div>
-            {isLoadingFeedOverview ? (
+            {isLoadingFeedOverview && isLoadingTopics ? (
               <div className="flex justify-center py-4">
                 <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
               </div>
@@ -312,16 +325,17 @@ export default function CommunityPage() {
             ) : (
               <div className="space-y-3">
                 {trendingTopics.map((topic) => (
-                  <div
+                  <Link
                     key={topic.tag}
-                    className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800"
+                    href={`/topics/${encodeURIComponent(topic.tag.replace(/^#/, ''))}`}
+                    className="flex items-center justify-between p-3 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700"
                   >
                     <div>
                       <div className="text-sm font-semibold text-slate-900 dark:text-white">{topic.tag}</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">{topic.posts}</div>
                     </div>
                     <ArrowUpRight className="w-4 h-4 text-slate-400" />
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

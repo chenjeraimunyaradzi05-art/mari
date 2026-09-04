@@ -338,7 +338,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
             );
           }
           return (
-            <div key={message.id} className={`flex group ${isMe ? 'justify-end' : 'justify-start'}`}>
+            <div key={message.id} id={`msg-${message.id}`} className={`flex group rounded-lg ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex items-center gap-1 max-w-[80%] ${isMe ? 'flex-row' : 'flex-row-reverse'}`}>
                 {/* Per-message actions, revealed on hover/focus */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">

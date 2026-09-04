@@ -23,6 +23,10 @@ export interface VideoItem {
   hashtags?: string[];
   soundId?: string;
   soundTitle?: string;
+  // The reel this one answers, when it is a duet.
+  duetOf?: { id: string; name: string };
+  duetCount?: number;
+  captionsUrl?: string;
   createdAt?: string;
 }
 

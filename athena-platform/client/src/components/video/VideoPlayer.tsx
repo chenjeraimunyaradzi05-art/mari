@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause, Music } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause, Music, Copy, Subtitles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { handleFromName } from '@/lib/social-text';
 import { Avatar } from '@/components/ui/avatar';
@@ -31,6 +31,11 @@ export interface VideoPost {
   tags?: string[];
   /** The sound the reel plays; links to every reel using it. */
   sound?: { id: string; title: string };
+  /** The reel this one answers, when it is a duet. */
+  duetOf?: { id: string; name: string };
+  duetCount?: number;
+  /** WebVTT captions, shown with the CC toggle. */
+  captionsUrl?: string;
   createdAt: string;
 }
 
@@ -42,6 +47,7 @@ interface VideoPlayerProps {
   onShare: (id: string) => void;
   onComment: (id: string) => void;
   onAuthorClick: (authorId: string) => void;
+  onDuet?: (id: string) => void;
   onView?: (id: string, watchDuration: number, completionPct: number) => void;
 }
 
@@ -53,6 +59,7 @@ export function VideoPlayer({
   onShare,
   onComment,
   onAuthorClick,
+  onDuet,
   onView,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,7 +67,14 @@ export function VideoPlayer({
   const { isMuted, toggleMute } = useVideoFeedStore(); // Global mute state
   const [progress, setProgress] = useState(0);
   const [showControls, setShowControls] = useState(false);
+  const [captionsOn, setCaptionsOn] = useState(true);
   const watchTimeRef = useRef(0);
+
+  // Subtitles follow the toggle; the browser's own track UI is hidden behind it.
+  useEffect(() => {
+    const track = videoRef.current?.textTracks?.[0];
+    if (track) track.mode = captionsOn ? 'showing' : 'hidden';
+  }, [captionsOn, video.captionsUrl]);
 
   // Sync mute state
   useEffect(() => {
@@ -155,7 +169,12 @@ export function VideoPlayer({
         className="h-full w-full object-cover"
         onTimeUpdate={handleTimeUpdate}
         aria-label={video.title}
-      />
+        crossOrigin={video.captionsUrl ? 'anonymous' : undefined}
+      >
+        {video.captionsUrl && (
+          <track kind="captions" src={video.captionsUrl} srcLang="en" label="Subtitles" default />
+        )}
+      </video>
 
       {/* Overlay gradient */}
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/60 pointer-events-none" />
@@ -279,6 +298,37 @@ export function VideoPlayer({
           <span className="text-white text-xs font-medium">{formatCount(video.shares)}</span>
         </button>
 
+        {/* Duet: answer this reel with one of your own, composed side by side. */}
+        {onDuet && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuet(video.id);
+            }}
+            className="flex flex-col items-center"
+            aria-label="Duet this reel"
+          >
+            <div className="p-2 text-white">
+              <Copy className="w-6 h-6" />
+            </div>
+            <span className="text-white text-xs font-medium">{video.duetCount ? formatCount(video.duetCount) : 'Duet'}</span>
+          </button>
+        )}
+
+        {video.captionsUrl && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setCaptionsOn((on) => !on);
+            }}
+            className={cn('p-2', captionsOn ? 'text-white' : 'text-white/50')}
+            aria-label={captionsOn ? 'Hide captions' : 'Show captions'}
+            aria-pressed={captionsOn}
+          >
+            <Subtitles className="w-6 h-6" />
+          </button>
+        )}
+
         {/* Mute toggle */}
         <button
           onClick={(e) => {
@@ -286,6 +336,7 @@ export function VideoPlayer({
             toggleMute();
           }}
           className="p-2 text-white"
+          aria-label={isMuted ? 'Unmute' : 'Mute'}
         >
           {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
         </button>
@@ -314,6 +365,15 @@ export function VideoPlayer({
             </span>
           )}
         </div>
+        {video.duetOf && (
+          <Link
+            href={`/explore?video=${video.duetOf.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="mb-1 inline-flex items-center gap-1 text-xs text-white/80 hover:text-white hover:underline"
+          >
+            <Copy className="h-3 w-3" /> Duet with @{handleFromName(video.duetOf.name)}
+          </Link>
+        )}
         <p className="text-sm line-clamp-2 mb-2">{video.title}</p>
         {video.description && (
           <p className="text-xs text-white/80 line-clamp-2">{video.description}</p>

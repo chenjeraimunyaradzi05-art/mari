@@ -17,8 +17,10 @@ import Link from 'next/link';
 const TOKEN = /(@\[[^\]\n]{1,80}\]\([0-9a-fA-F-]{36}\)|#[\p{L}\p{N}_]{2,64}|https?:\/\/[^\s<>"')\]]+)/gu;
 const MENTION = /^@\[([^\]\n]{1,80})\]\(([0-9a-fA-F-]{36})\)$/;
 
+// A hashtag is a place: its own page with the posts and reels that carry it
+// and a Follow button the ranked feed honours.
 export function hashtagHref(tag: string): string {
-  return `/search?q=${encodeURIComponent(tag.startsWith('#') ? tag : `#${tag}`)}`;
+  return `/topics/${encodeURIComponent(tag.replace(/^#+/, '').toLowerCase())}`;
 }
 
 export function renderSocialText(text: string, linkClassName = 'font-medium text-rose-600 hover:underline dark:text-rose-400'): ReactNode[] {
