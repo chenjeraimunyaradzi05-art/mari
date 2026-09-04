@@ -267,6 +267,38 @@ router.get('/me/mentions', authenticate, async (req: AuthRequest, res, next) => 
 });
 
 // ===========================================
+// PIN A COMMENT
+// ===========================================
+// The post's author keeps one comment at the top of the thread. Pinning a
+// second one replaces the first.
+router.patch('/:postId/comments/:commentId/pin', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { postId, commentId } = req.params;
+    const pinned = req.body?.pinned !== false;
+
+    const comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true, postId: true, isHidden: true, post: { select: { authorId: true } } },
+    });
+    if (!comment || comment.postId !== postId || comment.isHidden) {
+      throw new ApiError(404, 'Comment not found');
+    }
+    if (comment.post.authorId !== req.user!.id) {
+      throw new ApiError(403, 'Only the post’s author can pin a comment');
+    }
+
+    await prisma.$transaction([
+      prisma.comment.updateMany({ where: { postId, isPinned: true }, data: { isPinned: false } }),
+      ...(pinned ? [prisma.comment.update({ where: { id: commentId }, data: { isPinned: true } })] : []),
+    ]);
+
+    res.json({ success: true, message: pinned ? 'Comment pinned' : 'Comment unpinned', data: { commentId, isPinned: pinned } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // SAVED COLLECTIONS
 // ===========================================
 // Folders for saved posts. A save without a folder sits in "Unsorted"; a

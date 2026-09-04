@@ -119,6 +119,7 @@ export const REPOST_OF_INCLUDE = {
       content: true,
       type: true,
       mediaUrls: true,
+      mediaAlt: true,
       createdAt: true,
       updatedAt: true,
       isHidden: true,

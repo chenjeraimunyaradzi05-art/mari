@@ -4,7 +4,9 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn() },
-    follow: { findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn() },
+    follow: { findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn(), findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
+    followRequest: { findUnique: jest.fn(async () => null), upsert: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     notification: { create: jest.fn() },
   },
 }));

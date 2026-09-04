@@ -29,6 +29,7 @@ import jobRoutes from './routes/job.routes';
 import postRoutes from './routes/post.routes';
 import postSocialRoutes from './routes/post-social.routes';
 import postRepostRoutes from './routes/post-repost.routes';
+import followRequestRoutes from './routes/follow-request.routes';
 import postInsightsRoutes from './routes/post-insights.routes';
 import storyHighlightRoutes from './routes/story-highlights.routes';
 import { startScheduledPostPublisher } from './services/scheduled-posts.service';
@@ -529,6 +530,7 @@ app.use('/api', async (req: Request, res: Response, next: NextFunction) => {
 
 // API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', followRequestRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/jobs', jobRoutes);
 // Reactions, polls, comment likes, pins and the "mine" listings sit ahead of

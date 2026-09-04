@@ -5,6 +5,8 @@
 
 import { prisma } from '../utils/prisma';
 import { REPOST_OF_INCLUDE } from './post-decoration.service';
+import { authorAudienceWhere, followingIdsOf } from './audience.service';
+import { mutedWordMatcher } from '../utils/muted-words';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
 import { logger } from '../utils/logger';
 
@@ -117,6 +119,8 @@ interface FeedPreferences {
   creators: Set<string>;
   hashtags: string[];
   followedHashtags: string[];
+  // The viewer's muted words, as a matcher; null when they have none.
+  muted: ((text: string | null | undefined) => boolean) | null;
 }
 
 /**
@@ -124,7 +128,8 @@ interface FeedPreferences {
  * out; followed topics are boosted and named in the reasons.
  */
 async function loadFeedExclusions(userId?: string): Promise<FeedPreferences> {
-  if (!userId) return { creators: new Set(), hashtags: [], followedHashtags: [] };
+  const none: FeedPreferences = { creators: new Set(), hashtags: [], followedHashtags: [], muted: null };
+  if (!userId) return none;
   try {
     const prefs = await prisma.userFeedPreferences.findUnique({
       where: { userId },
@@ -132,18 +137,28 @@ async function loadFeedExclusions(userId?: string): Promise<FeedPreferences> {
     });
     const clean = (tags: string[] | undefined) =>
       (tags ?? []).map((tag) => tag.replace(/^#+/, '').toLowerCase()).filter(Boolean);
+    // Muted words live with the safety settings; a missing row means none.
+    let muted: FeedPreferences['muted'] = null;
+    try {
+      const safety = await prisma.userSafetySettings.findUnique({ where: { userId }, select: { blockedKeywords: true } });
+      muted = mutedWordMatcher(safety?.blockedKeywords ?? []);
+    } catch {
+      muted = null;
+    }
     return {
       creators: new Set(prefs?.blockedCreators ?? []),
       hashtags: clean(prefs?.blockedHashtags),
       followedHashtags: clean(prefs?.followedHashtags),
+      muted,
     };
   } catch {
-    return { creators: new Set(), hashtags: [], followedHashtags: [] };
+    return none;
   }
 }
 
-function isExcluded(post: any, exclusions: { creators: Set<string>; hashtags: string[] }): boolean {
+function isExcluded(post: any, exclusions: FeedPreferences): boolean {
   if (exclusions.creators.has(post.authorId)) return true;
+  if (exclusions.muted && exclusions.muted(post.content)) return true;
   if (exclusions.hashtags.length === 0) return false;
   const text = String(post.content ?? '').toLowerCase();
   return exclusions.hashtags.some((tag) => text.includes(`#${tag}`));
@@ -266,6 +281,9 @@ export async function generateFeed(options: FeedOptions): Promise<{
     }
   }
 
+  // Connections-only authors reach their followers; private authors nobody.
+  where = { AND: [where, authorAudienceWhere(userId, followingIds)] };
+
   let rankedPosts: ScorePost[] = [];
 
   // "See fewer posts from X" and muted topics apply to every ranked feed.
@@ -282,6 +300,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
     const inNetworkWhere: any = {
       authorId: { in: [...new Set([...followingIds, userId])] },
       isHidden: false,
+      AND: [authorAudienceWhere(userId, followingIds)],
     };
     if (type !== 'all') inNetworkWhere.type = type.toUpperCase();
 
@@ -610,6 +629,7 @@ export async function getTrendingPosts(
           isPublic: true,
           isHidden: false,
           createdAt: { gte: startTime },
+          AND: [authorAudienceWhere()],
         },
         include: {
           ...REPOST_OF_INCLUDE,
@@ -684,6 +704,7 @@ export async function getVideoFeed(
     type: 'VIDEO',
     isPublic: true,
     isHidden: false,
+    AND: [authorAudienceWhere(userId, await followingIdsOf(userId))],
   };
 
   if (cursor) {
@@ -803,6 +824,7 @@ export async function getForYouFeed(
       isPublic: true,
       isHidden: false,
       createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      AND: [authorAudienceWhere(userId, followingIds)],
     },
     include: {
       ...REPOST_OF_INCLUDE,

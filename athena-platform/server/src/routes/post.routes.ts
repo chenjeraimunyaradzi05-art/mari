@@ -29,10 +29,50 @@ import {
 import { parseScheduledFor } from '../services/scheduled-posts.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
 import { resolveMentionedUserIds } from '../utils/mentions';
+import { authorAudienceWhere, canViewAuthor } from '../services/audience.service';
+import { mutedWordMatcher } from '../utils/muted-words';
+import { emitToUserRoom, isUserOnline } from '../services/socket.service';
 
 const router = Router();
 
 const POST_TYPES = ['TEXT', 'IMAGE', 'VIDEO', 'ARTICLE', 'JOB_SHARE', 'COURSE_SHARE', 'POLL', 'WIN'];
+const ALT_MAX = 300;
+
+/** Alt text per media item: trimmed strings, capped, never longer than the media list. */
+function normalizeMediaAlt(raw: unknown, mediaCount: number): string[] | undefined {
+  if (!Array.isArray(raw) || mediaCount === 0) return undefined;
+  const alts = raw
+    .slice(0, mediaCount)
+    .map((value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, ALT_MAX) : ''));
+  return alts.some((alt) => alt.length > 0) ? alts : undefined;
+}
+
+/** The viewer's muted words, or none when they have not set any. */
+async function mutedWordsOf(userId: string): Promise<string[]> {
+  try {
+    const row = await prisma.userSafetySettings.findUnique({ where: { userId }, select: { blockedKeywords: true } });
+    return row?.blockedKeywords ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Tells followers who are online that there is a new post to read. The feed
+ * shows a "new posts" pill rather than shifting under the reader. Bounded so
+ * a very popular author does not stall the request.
+ */
+function announceNewPost(postId: string, authorId: string, authorName: string) {
+  prisma.follow
+    .findMany({ where: { followingId: authorId }, select: { followerId: true }, take: 2000 })
+    .then((rows) => {
+      const payload = { postId, authorId, authorName, at: new Date().toISOString() };
+      for (const row of rows) {
+        if (isUserOnline(row.followerId)) emitToUserRoom(row.followerId, 'feed:new', payload);
+      }
+    })
+    .catch((error) => logger.debug('New-post announcement skipped', { error: error instanceof Error ? error.message : String(error) }));
+}
 
 // Everyone named with @[Name](id) hears about it, except the author naming
 // themselves. Scheduled posts notify when they publish, not when they are
@@ -81,6 +121,8 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       const where: any = {
         authorId: { in: followingIds },
         isHidden: false,
+        // A private member's posts stay theirs even from followers.
+        AND: [authorAudienceWhere(req.user.id, followingIds)],
       };
 
       // Optional content type filter
@@ -102,6 +144,7 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
                 headline: true,
               },
             },
+            ...REPOST_OF_INCLUDE,
           },
           orderBy: { createdAt: 'desc' },
           skip: (page - 1) * limit,
@@ -275,7 +318,8 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
               orderBy: { createdAt: 'asc' },
             },
           },
-          orderBy: { createdAt: 'desc' },
+          // The author's pinned comment leads the thread.
+          orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
           take: 50,
         },
         _count: {
@@ -293,6 +337,20 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 
     if (post.isHidden && !isAdmin && req.user?.id !== post.authorId) {
       throw new ApiError(404, 'Post not found');
+    }
+
+    // A connections-only author's posts are for their followers; a private
+    // author's for nobody else.
+    if (!isAdmin && !(await canViewAuthor(req.user?.id, post.authorId))) {
+      throw new ApiError(404, 'Post not found');
+    }
+
+    // The viewer's muted words drop comments from the thread they read.
+    const muted = req.user ? mutedWordMatcher(await mutedWordsOf(req.user.id)) : null;
+    if (muted && Array.isArray(post.comments)) {
+      post.comments = post.comments
+        .filter((c) => !muted(c.content))
+        .map((c) => ({ ...c, replies: Array.isArray(c.replies) ? c.replies.filter((r) => !muted(r.content)) : c.replies }));
     }
 
     const blockedAuthorIds = new Set(
@@ -367,6 +425,7 @@ router.post(
     body('poll').optional().isObject(),
     body('scheduledFor').optional({ values: 'null' }).isString(),
     body('isSensitive').optional().isBoolean(),
+    body('mediaAlt').optional().isArray({ max: 10 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -380,6 +439,7 @@ router.post(
         maxLength: CONTENT_LIMITS.post,
       });
       const mediaUrls = normalizeMediaUrls(req.body.mediaUrls);
+      const mediaAlt = normalizeMediaAlt(req.body.mediaAlt, mediaUrls?.length ?? 0);
       const type = req.body.type || 'TEXT';
       const isPublic = req.body.isPublic ?? true;
 
@@ -419,6 +479,7 @@ router.post(
           ...(scheduledFor ? { scheduledFor, isHidden: true } : {}),
           mentionedUserIds,
           isSensitive: req.body.isSensitive === true,
+          ...(mediaAlt ? { mediaAlt } : {}),
         },
         include: {
           author: {
@@ -433,6 +494,11 @@ router.post(
           },
         },
       });
+
+      // Followers who are online learn there is something new to read.
+      if (!scheduledFor && post.isPublic && !post.isHidden) {
+        announceNewPost(post.id, req.user!.id, post.author?.displayName || `${post.author?.firstName ?? ''}`.trim());
+      }
 
       // Index in OpenSearch if public
       if (post.isPublic && !post.isHidden) {
@@ -589,6 +655,7 @@ router.patch(
     body('content').optional().isString().isLength({ max: CONTENT_LIMITS.post }),
     body('isPublic').optional().isBoolean(),
     body('isSensitive').optional().isBoolean(),
+    body('commentsOff').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -612,7 +679,7 @@ router.patch(
       throw new ApiError(403, 'Not authorized to edit this post');
     }
 
-    const data: { content?: string; isPublic?: boolean; isSensitive?: boolean } = {};
+    const data: { content?: string; isPublic?: boolean; isSensitive?: boolean; commentsOff?: boolean } = {};
     if (req.body.content !== undefined) {
       data.content = normalizeUserText(req.body.content, {
         field: 'content',
@@ -624,6 +691,9 @@ router.patch(
     }
     if (req.body.isSensitive !== undefined) {
       data.isSensitive = req.body.isSensitive === true;
+    }
+    if (req.body.commentsOff !== undefined) {
+      data.commentsOff = req.body.commentsOff === true;
     }
 
     if (Object.keys(data).length === 0) {
@@ -842,6 +912,11 @@ router.post(
         throw new ApiError(404, 'Post not found');
       }
 
+      // The author can close the thread; their own replies still go through.
+      if (post.commentsOff && post.authorId !== req.user!.id) {
+        throw new ApiError(403, 'Comments are off for this post');
+      }
+
       await assertContentAllowed(content, { kind: 'comment', userId: req.user!.id });
 
       if (parentId) {
@@ -935,14 +1010,16 @@ router.delete('/:postId/comments/:commentId', authenticate, async (req: AuthRequ
 
     const comment = await prisma.comment.findUnique({
       where: { id: commentId },
-      select: { authorId: true },
+      select: { authorId: true, post: { select: { authorId: true } } },
     });
 
     if (!comment) {
       throw new ApiError(404, 'Comment not found');
     }
 
-    if (comment.authorId !== req.user!.id && req.user!.role !== 'ADMIN') {
+    // The commenter, the post's author (it is their thread) or an admin.
+    const isPostAuthor = comment.post?.authorId === req.user!.id;
+    if (comment.authorId !== req.user!.id && !isPostAuthor && req.user!.role !== 'ADMIN') {
       throw new ApiError(403, 'Not authorized');
     }
 
@@ -984,6 +1061,17 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
       if (!isAdmin) {
         where.isHidden = false;
       }
+    }
+
+    // A connections-only member's posts are for their followers only.
+    if (!isAdmin && !(await canViewAuthor(req.user?.id, userId))) {
+      res.json({
+        success: true,
+        data: [],
+        pagination: { page, limit, total: 0, pages: 0 },
+        meta: { isProtected: true },
+      });
+      return;
     }
 
     const [posts, total] = await Promise.all([

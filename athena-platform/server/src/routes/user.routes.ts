@@ -15,6 +15,7 @@ import { logger } from '../utils/logger';
 import { parsePagination } from '../utils/pagination';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { getBlockedRelationshipIds } from '../utils/safety-store';
+import { approvesFollowers, profileAccess } from '../services/audience.service';
 
 const router = Router();
 
@@ -721,18 +722,76 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(403, 'This profile is private');
     }
 
-    // Check if current user follows this user
-    let isFollowing = false;
+    // Who may see what: a connections-only profile shows non-followers a
+    // limited card with a request-to-follow button; a private one is closed.
+    const access = await profileAccess(req.user?.id, id);
+    if (access.access === 'closed') {
+      throw new ApiError(403, 'This profile is private');
+    }
+
+    const isFollowing = Boolean(req.user && req.user.id !== id && access.isFollower);
+
+    // A pending request, and the people the viewer follows who follow this
+    // member ("Followed by Mei C. and 2 others you follow").
+    let followRequested = false;
+    let mutualFollowers: { count: number; names: string[] } = { count: 0, names: [] };
     if (req.user && req.user.id !== id) {
-      const follow = await prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: req.user.id,
-            followingId: id,
-          },
+      const [pending, mine] = await Promise.all([
+        prisma.followRequest.findUnique({
+          where: { requesterId_targetId: { requesterId: req.user.id, targetId: id } },
+          select: { status: true },
+        }),
+        prisma.follow.findMany({ where: { followerId: req.user.id }, select: { followingId: true } }),
+      ]);
+      followRequested = pending?.status === 'PENDING';
+      const followingIds = mine.map((f) => f.followingId).filter((fid) => fid !== id);
+      if (followingIds.length > 0) {
+        const [mutualRows, count] = await Promise.all([
+          prisma.follow.findMany({
+            where: { followingId: id, followerId: { in: followingIds } },
+            select: { follower: { select: { displayName: true, firstName: true, lastName: true } } },
+            take: 3,
+          }),
+          prisma.follow.count({ where: { followingId: id, followerId: { in: followingIds } } }),
+        ]);
+        mutualFollowers = {
+          count,
+          names: mutualRows.map(
+            (row) =>
+              row.follower.displayName?.trim() ||
+              [row.follower.firstName, row.follower.lastName].filter(Boolean).join(' ').trim() ||
+              'Member'
+          ),
+        };
+      }
+    }
+
+    const approvesFollowers = access.visibility !== 'public';
+
+    if (access.access === 'limited') {
+      res.json({
+        success: true,
+        data: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          displayName: user.displayName,
+          avatar: user.avatar,
+          headline: user.headline,
+          persona: user.persona,
+          city: user.city,
+          state: user.state,
+          country: user.country,
+          createdAt: user.createdAt,
+          _count: user._count,
+          isLimited: true,
+          approvesFollowers,
+          isFollowing,
+          followRequested,
+          mutualFollowers,
         },
       });
-      isFollowing = !!follow;
+      return;
     }
 
     res.json({
@@ -740,6 +799,9 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       data: {
         ...user,
         isFollowing,
+        followRequested,
+        approvesFollowers,
+        mutualFollowers,
       },
     });
   } catch (error) {
@@ -1281,6 +1343,29 @@ router.post('/:id/follow', authenticate, async (req: AuthRequest, res, next) => 
       return;
     }
 
+    // Members who approve their followers get a request instead of a follow.
+    if (await approvesFollowers(id)) {
+      const request = await prisma.followRequest.upsert({
+        where: { requesterId_targetId: { requesterId: req.user!.id, targetId: id } },
+        update: { status: 'PENDING' },
+        create: { requesterId: req.user!.id, targetId: id },
+        select: { id: true, status: true, updatedAt: true, createdAt: true },
+      });
+      // Only a fresh request rings the bell; a re-press of the button does not.
+      if (request.createdAt.getTime() === request.updatedAt.getTime() || Date.now() - request.updatedAt.getTime() < 1500) {
+        await notifySocial({
+          recipientId: id,
+          actorId: req.user!.id,
+          type: 'FOLLOW_REQUEST',
+          title: 'Follow request',
+          message: (name) => `${name} asked to follow you`,
+          link: '/dashboard/notifications#follow-requests',
+        });
+      }
+      res.json({ success: true, message: 'Follow request sent', following: false, requested: true });
+      return;
+    }
+
     await prisma.follow.create({
       data: {
         followerId: req.user!.id,
@@ -1321,6 +1406,10 @@ router.delete('/:id/follow', authenticate, async (req: AuthRequest, res, next) =
         followerId: req.user!.id,
         followingId: id,
       },
+    });
+    // Also withdraws a request that was never answered.
+    await prisma.followRequest.deleteMany({
+      where: { requesterId: req.user!.id, targetId: id, status: 'PENDING' },
     });
 
     res.json({

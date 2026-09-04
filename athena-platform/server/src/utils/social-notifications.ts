@@ -31,7 +31,7 @@ export async function actorDisplayName(userId: string): Promise<string> {
 export interface SocialNotificationInput {
   recipientId: string;
   actorId: string;
-  type: Extract<NotificationType, 'LIKE' | 'COMMENT' | 'FOLLOW' | 'MENTION' | 'REPOST'>;
+  type: Extract<NotificationType, 'LIKE' | 'COMMENT' | 'FOLLOW' | 'MENTION' | 'REPOST' | 'FOLLOW_REQUEST'>;
   title: string;
   /** Built from the actor's name so the row reads "Priya liked your post". */
   message: (actorName: string) => string;
