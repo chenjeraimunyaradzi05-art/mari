@@ -146,6 +146,7 @@ enum NotificationType {
   COMMENT
   FOLLOW
   MENTION
+  REPOST
   JOB_MATCH
   APPLICATION_UPDATE
   MESSAGE
@@ -678,6 +679,8 @@ model User {
   pollVotes            PollVote[]
   commentLikes         CommentLike[]
   statusViews          StatusView[]
+  savedCollections     SavedCollection[]
+  storyHighlights      StoryHighlight[]
 
   // Gamification
   xp                   Int               @default(0)
@@ -1407,17 +1410,48 @@ model Post {
   // or the page gave nothing back.
   linkPreview Json?
 
+  // Reposts. A plain repost has empty content and points at the original; a
+  // quote post carries its own words as well. Deleting the original clears
+  // the pointer on quotes (their words stay) and removes plain reposts.
+  repostOfId  String?
+  repostOf    Post?  @relation("PostReposts", fields: [repostOfId], references: [id], onDelete: SetNull)
+  reposts     Post[] @relation("PostReposts")
+  repostCount Int    @default(0)
+
+  // Times the post was on someone's screen. Distinct people are the
+  // PostImpression rows; this counts every showing.
+  impressionCount Int @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  comments  Comment[]
-  likes     Like[]
-  saves     PostSave[]
-  pollVotes PollVote[]
+  comments    Comment[]
+  likes       Like[]
+  saves       PostSave[]
+  pollVotes   PollVote[]
+  impressions PostImpression[]
 
   @@index([authorId])
   @@index([createdAt])
   @@index([scheduledFor])
+  @@index([repostOfId])
+}
+
+// One row per person (or anonymous browser) who has had the post on screen,
+// so the author can see reach as well as impressions.
+model PostImpression {
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  // The viewer's user id, or "anon:" plus a hash of a browser-generated key.
+  viewerKey String
+  userId    String?
+  // Where it was seen: feed, profile, post, saved, search.
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@unique([postId, viewerKey])
+  @@index([postId, createdAt])
 }
 
 model PollVote {
@@ -1440,12 +1474,65 @@ model PostSave {
   postId    String
   userId    String
   createdAt DateTime @default(now())
+  // Optional folder; a save with none sits in "Unsorted".
+  collectionId String?
+  collection   SavedCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([postId, userId])
   @@index([userId])
+  @@index([collectionId])
+}
+
+// A named folder for saved posts, private to its owner.
+model SavedCollection {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  saves PostSave[]
+
+  @@index([userId])
+}
+
+// Stories a member chose to keep on their profile after the 24 hours. Each
+// item copies the story's media so it survives the story expiring.
+model StoryHighlight {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  coverUrl  String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items StoryHighlightItem[]
+
+  @@index([userId])
+}
+
+model StoryHighlightItem {
+  id          String         @id @default(uuid())
+  highlightId String
+  highlight   StoryHighlight @relation(fields: [highlightId], references: [id], onDelete: Cascade)
+  statusId    String?
+  type        StatusType     @default(IMAGE)
+  mediaUrl    String
+  caption     String?
+  // When the story was originally posted.
+  takenAt     DateTime
+  position    Int            @default(0)
+  createdAt   DateTime       @default(now())
+
+  @@unique([highlightId, statusId])
+  @@index([highlightId])
 }
 
 model Comment {
