@@ -5,7 +5,6 @@ export { default as DashboardSidebar } from './DashboardSidebar';
 // Feature Components
 export { default as NotificationDropdown } from './NotificationDropdown';
 export { default as UserMenuDropdown } from './UserMenuDropdown';
-export { default as CreatePostModal } from './CreatePostModal';
 export { default as Providers } from './Providers';
 
 // Re-export UI components

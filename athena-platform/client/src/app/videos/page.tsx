@@ -24,7 +24,7 @@ export default function VideosPage() {
           </span>
         </Link>
 
-        <Link href="/dashboard/create-post" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
+        <Link href="/dashboard/creator-studio" className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:shadow-md transition">
           <div className="flex items-center gap-2 text-sm font-semibold text-primary-600">
             <Video className="h-4 w-4" /> Share a video
           </div>

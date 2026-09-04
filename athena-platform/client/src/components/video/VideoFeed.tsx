@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { videoApi } from '@/lib/api-extensions';
 import { Loader2 } from 'lucide-react';
 import { useVideoFeedStore, VideoItem } from '@/lib/stores/video.store';
+import { useAuthStore } from '@/lib/store';
 import { Skeleton } from '@/components/ui/loading';
 
 // Maps a Video row from GET /video/feed onto the store interface. The field names
@@ -29,34 +30,47 @@ function mapApiToVideoItem(v: any): VideoItem {
     views: v.viewCount ?? 0,
     duration: v.duration ?? undefined,
     isLiked: v.isLiked ?? false,
-    hashtags: v.hashtags ?? undefined,
+    isBookmarked: v.isSaved ?? false,
+    hashtags: Array.isArray(v.hashtags) ? v.hashtags : undefined,
     createdAt: v.createdAt,
   };
 }
 
 interface VideoFeedProps {
-  initialVideos?: any[]; 
+  initialVideos?: any[];
   category?: string;
+  /** Restrict the feed to one topic; comes from ?topic= on /explore. */
+  hashtag?: string;
+  /**
+   * A reel to open on. Share links, the homepage reel tiles and the saved
+   * list all arrive as /explore?video=<id>; the feed used to ignore it and
+   * open on whatever was newest.
+   */
+  initialVideoId?: string;
 }
 
-export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
+export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoId }: VideoFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Use global store
-  const { 
-      feed, 
-      currentIndex, 
-      setFeed, 
-      appendVideos, 
+  const {
+      feed,
+      currentIndex,
+      setFeed,
+      appendVideos,
       setIndex,
       toggleLike,
       toggleBookmark,
       bookmarkedVideos,
       markAsShared,
       addToHistory,
+      setCommentCount,
   } = useVideoFeedStore();
 
   const router = useRouter();
+  // The feed reports isLiked / isSaved for the signed-in viewer, so it waits
+  // for the session to be restored before the first fetch (see useFeed).
+  const { isAuthenticated, isLoading: authLoading } = useAuthStore();
 
   const [loadingLocal, setLoadingLocal] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -82,12 +96,25 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
       const response = await videoApi.getFeed({
         limit: 10,
         feed: category,
+        hashtag: hashtag || undefined,
         cursor: mode === 'more' ? cursorRef.current ?? undefined : undefined,
       });
 
       const newVideos: any[] = Array.isArray(response.data?.data) ? response.data.data : [];
-      const mappedVideos: VideoItem[] = newVideos.map(mapApiToVideoItem);
+      let mappedVideos: VideoItem[] = newVideos.map(mapApiToVideoItem);
       cursorRef.current = response.data?.nextCursor ?? null;
+
+      // The requested reel leads, then the feed continues behind it. A reel
+      // that is gone (removed, hidden) simply falls through to the feed.
+      if (mode === 'reset' && initialVideoId) {
+        const opener = await videoApi
+          .getVideo(initialVideoId)
+          .then((r) => (r.data?.data ? mapApiToVideoItem(r.data.data) : null))
+          .catch(() => null);
+        if (opener) {
+          mappedVideos = [opener, ...mappedVideos.filter((v) => v.id !== opener.id)];
+        }
+      }
 
       if (mode === 'reset') setFeed(mappedVideos);
       else if (mappedVideos.length > 0) appendVideos(mappedVideos);
@@ -100,32 +127,33 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
       isFetchingRef.current = false;
       setLoadingLocal(false);
     }
-  }, [category, setFeed, appendVideos]);
+  }, [category, hashtag, initialVideoId, setFeed, appendVideos]);
 
-  // Load on mount and whenever the category changes. Keying the effect on the
-  // category is deliberate: the feed belongs to a category, so switching tabs has
-  // to clear the old videos and pull the new ones. Depending on `feed.length`
-  // instead would leave a category switch showing the previous tab's videos.
+  // Load on mount and whenever the slice changes. Keying the effect on the
+  // category, topic and opener is deliberate: the feed belongs to that slice,
+  // so switching tabs has to clear the old videos and pull the new ones.
   useEffect(() => {
     if (initialVideos.length > 0) {
       setFeed(initialVideos.map(mapApiToVideoItem));
       return;
     }
+    if (authLoading) return;
     setFeed([]);
     setIndex(0);
+    if (containerRef.current) containerRef.current.scrollTo({ top: 0 });
     void fetchVideos('reset');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category]);
+  }, [category, hashtag, initialVideoId, authLoading, isAuthenticated]);
 
   const handleScroll = () => {
       if (!containerRef.current) return;
-      
+
       const { scrollTop, clientHeight } = containerRef.current;
       const index = Math.round(scrollTop / clientHeight);
-      
+
       if (index !== currentIndex) {
         setIndex(index);
-        
+
         // Load more
         if (index > feed.length - 4) {
           void fetchVideos('more');
@@ -187,7 +215,7 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
   }, [feed, markAsShared]);
 
   const handleAuthorClick = useCallback((authorId: string) => {
-    router.push(`/dashboard/profile/${authorId}`);
+    router.push(`/profile/${authorId}`);
   }, [router]);
 
   const handleView = useCallback((id: string, watchDuration: number, completionPct: number) => {
@@ -198,6 +226,8 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
         // View telemetry is best-effort and must never interrupt playback.
       });
   }, [addToHistory]);
+
+  const commentsVideo = commentsFor ? feed.find((v) => v.id === commentsFor) : undefined;
 
   return (
     <>
@@ -238,7 +268,12 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
         <div className="h-full w-full snap-start flex items-center justify-center bg-zinc-900 px-8 text-center">
           <div>
             <p className="text-sm text-white/70">
-              {loadError ?? 'There are no videos in this feed yet.'}
+              {loadError ??
+                (hashtag
+                  ? `No reels tagged #${hashtag} yet.`
+                  : category === 'following'
+                    ? 'Nobody you follow has posted a reel yet.'
+                    : 'There are no videos in this feed yet.')}
             </p>
             {loadError && (
               <button
@@ -261,17 +296,17 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
           data-video-id={video.id}
           data-active={index === currentIndex}
         >
-          <VideoPlayer 
+          <VideoPlayer
             video={{
                 id: video.id,
                 title: video.description,
                 description: video.description,
                 videoUrl: video.url,
                 thumbnailUrl: video.thumbnail,
-                duration: 0, 
+                duration: 0,
                 author: {
                     id: video.creator.id,
-                    firstName: video.creator.username, 
+                    firstName: video.creator.username,
                     lastName: '',
                     avatarUrl: video.creator.avatar
                 },
@@ -279,7 +314,8 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
                 comments: video.comments,
                 shares: video.shares,
                 isLiked: video.isLiked || false,
-                isBookmarked: bookmarkedVideos.includes(video.id),
+                isBookmarked: bookmarkedVideos.includes(video.id) || Boolean(video.isBookmarked),
+                tags: video.hashtags,
                 createdAt: video.createdAt || new Date().toISOString()
             }}
             isActive={index === currentIndex}
@@ -292,7 +328,7 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
           />
         </div>
       ))}
-      
+
       {loadingLocal && (
         <div className="h-full w-full snap-start flex items-center justify-center bg-zinc-900">
            <Loader2 className="w-8 h-8 animate-spin text-white" />
@@ -300,7 +336,12 @@ export function VideoFeed({ initialVideos = [], category }: VideoFeedProps) {
       )}
     </div>
 
-    <VideoComments videoId={commentsFor} onClose={() => setCommentsFor(null)} />
+    <VideoComments
+      videoId={commentsFor}
+      creatorId={commentsVideo?.creator.id}
+      onClose={() => setCommentsFor(null)}
+      onCountChange={setCommentCount}
+    />
     </>
   );
 }

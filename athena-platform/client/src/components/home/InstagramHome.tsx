@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { handleFromName, renderSocialText } from '@/lib/social-text';
 import { postApi, userApi } from '@/lib/api';
 import { useAuth, useLikePost, useUnlikePost } from '@/lib/hooks';
 import StoriesStrip from '@/components/community/StoriesStrip';
@@ -58,7 +59,7 @@ function authorName(author: FeedAuthor): string {
 }
 
 function handleFor(author: FeedAuthor): string {
-  return authorName(author).toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || 'member';
+  return handleFromName(authorName(author));
 }
 
 function initials(author: FeedAuthor): string {
@@ -156,7 +157,7 @@ function PostCard({
   };
 
   const share = async () => {
-    const url = `${window.location.origin}/feed?post=${post.id}`;
+    const url = `${window.location.origin}/posts/${post.id}`;
     try {
       if (navigator.share) {
         await navigator.share({ title: authorName(post.author), text: post.content, url });
@@ -296,7 +297,7 @@ function PostCard({
             )}
           />
         </button>
-        <Link href={`/dashboard/community/post/${post.id}`} aria-label="Comments">
+        <Link href={`/posts/${post.id}`} aria-label="Comments">
           <MessageCircle className="h-6 w-6 text-slate-900 hover:opacity-60 lg:h-5 lg:w-5 dark:text-white" />
         </Link>
         <button type="button" onClick={share} aria-label="Share">
@@ -343,12 +344,12 @@ function PostCard({
         <Link href={`/profile/${post.author.id}`} className="font-semibold">
           {handleFor(post.author)}
         </Link>{' '}
-        <span className="whitespace-pre-line break-words">{post.content}</span>
+        <span className="whitespace-pre-line break-words">{renderSocialText(post.content)}</span>
       </p>
 
       {comments > 0 && (
         <Link
-          href={`/dashboard/community/post/${post.id}`}
+          href={`/posts/${post.id}`}
           className="mt-1 inline-block text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400"
         >
           View all {comments} comments
@@ -395,7 +396,7 @@ function PostCard({
 const PAGE_SIZE = 10;
 
 export default function InstagramHome() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [page, setPage] = useState(1);
@@ -403,8 +404,18 @@ export default function InstagramHome() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [announcement, setAnnouncement] = useState('');
 
+  // The feed carries per-viewer state (liked, saved, followed). On a full
+  // load the silent session refresh races this request, and a fetch that goes
+  // out before the token exists returns the signed-out view: every author
+  // showed "Follow" and every heart was empty until the next navigation. So
+  // wait for auth to settle, and fetch again whenever it changes.
   useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
+
+    setPosts(null);
+    setFailed(false);
+    setPage(1);
 
     postApi
       .getFeed({ tab: 'for-you', algorithm: 'engagement', limit: PAGE_SIZE, page: 1 })
@@ -421,7 +432,7 @@ export default function InstagramHome() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
@@ -538,15 +549,18 @@ export default function InstagramHome() {
 
           {failed && (
             <p className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
-              We canThe feed is reconnecting. Please refresh.apos;t reach the feed right now. Try refreshing in a moment.
+              We can&apos;t reach the feed right now. Try refreshing in a moment.
             </p>
           )}
 
           {posts?.length === 0 && (
             <div className="py-16 text-center">
-              <p className="text-sm text-slate-500 dark:text-slate-400">It<p className="text-sm text-slate-500 dark:text-slate-400">No posts yet.</p>apos;s quiet in here. Be the one who starts it.</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                It&apos;s quiet in here. Be the one who starts it.
+              </p>
+              {/* A member goes straight to the composer; a visitor joins first. */}
               <Link
-                href="/register"
+                href={isAuthenticated ? '/dashboard/create-post' : '/register'}
                 className="mt-3 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400"
               >
                 Write the first post

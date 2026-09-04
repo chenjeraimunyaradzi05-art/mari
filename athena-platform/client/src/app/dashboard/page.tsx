@@ -269,7 +269,7 @@ export default function DashboardPage() {
             {feedData.posts.slice(0, 3).map((post: any) => (
               <Link
                 key={post.id}
-                href={`/dashboard/community/post/${post.id}`}
+                href={`/posts/${post.id}`}
                 className="flex items-start space-x-4 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
               >
                 <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 font-semibold">

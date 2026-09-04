@@ -13,6 +13,10 @@ import {
   Settings,
   Check,
   CheckCheck,
+  Heart,
+  UserPlus,
+  Award,
+  Gift,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotificationStore, Notification as StoreNotification } from '@/lib/stores/notification.store';
@@ -25,6 +29,12 @@ const notificationIcons: Record<StoreNotification['type'], React.ElementType> = 
   MENTION: MessageCircle,
   SYSTEM: AlertCircle,
   MENTOR_SESSION: Calendar,
+  LIKE: Heart,
+  COMMENT: MessageCircle,
+  FOLLOW: UserPlus,
+  ACHIEVEMENT: Award,
+  LEVEL_UP: Award,
+  GIFT_RECEIVED: Gift,
 };
 
 const notificationColors: Record<StoreNotification['type'], string> = {
@@ -34,6 +44,12 @@ const notificationColors: Record<StoreNotification['type'], string> = {
   MENTION: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500',
   SYSTEM: 'bg-slate-100 dark:bg-slate-700 text-slate-500',
   MENTOR_SESSION: 'bg-orange-100 dark:bg-orange-900/30 text-orange-500',
+  LIKE: 'bg-rose-100 dark:bg-rose-900/30 text-rose-500',
+  COMMENT: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
+  FOLLOW: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
+  ACHIEVEMENT: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
+  LEVEL_UP: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-500',
+  GIFT_RECEIVED: 'bg-amber-100 dark:bg-amber-900/30 text-amber-500',
 };
 
 export default function NotificationDropdown() {

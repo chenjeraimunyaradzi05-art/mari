@@ -11,10 +11,16 @@ interface CommentSectionProps {
 }
 
 type CommentAuthor = {
+  id?: string;
   firstName: string;
   lastName: string;
+  displayName?: string | null;
   avatar?: string | null;
 };
+
+function commentAuthorName(author: CommentAuthor): string {
+  return author.displayName?.trim() || `${author.firstName} ${author.lastName}`.trim() || 'Member';
+}
 
 type PostComment = {
   id: string;
@@ -36,8 +42,10 @@ export default function CommentSection({ postId }: CommentSectionProps) {
     e.preventDefault();
     if (!content.trim()) return;
 
+    // A reply is threaded by parentId. Replies to replies attach to the same
+    // top-level comment, which keeps the thread one level deep on screen.
     addComment.mutate(
-      { postId, content: replyTo ? `@${replyTo.author.firstName} ${replyTo.author.lastName} ${content}` : content },
+      { postId, content, parentId: replyTo ? replyTo.parentId || replyTo.id : undefined },
       {
         onSuccess: () => {
           setContent('');
@@ -96,7 +104,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
         <div className="bg-white dark:bg-slate-900 p-3 rounded-lg rounded-tl-none shadow-sm border border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between mb-1">
             <span className="text-sm font-semibold text-slate-900 dark:text-white">
-              {comment.author.firstName} {comment.author.lastName}
+              {commentAuthorName(comment.author)}
             </span>
             <span className="text-xs text-slate-500">
               {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
@@ -136,7 +144,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
           <div className="flex-1 relative">
             {replyTo && (
               <div className="text-xs text-slate-500 mb-1 flex items-center gap-2">
-                Replying to {replyTo.author.firstName} {replyTo.author.lastName}
+                Replying to {commentAuthorName(replyTo.author)}
                 <button type="button" className="text-slate-400 hover:text-slate-600" onClick={() => setReplyTo(null)}>
                   Cancel
                 </button>
@@ -146,7 +154,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
               type="text"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder={replyTo ? `Reply to ${replyTo.author.firstName}...` : 'Add a comment...'}
+              placeholder={replyTo ? `Reply to ${commentAuthorName(replyTo.author)}...` : 'Add a comment...'}
               className="w-full px-4 py-2 pr-10 rounded-full border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
               disabled={addComment.isPending}
             />

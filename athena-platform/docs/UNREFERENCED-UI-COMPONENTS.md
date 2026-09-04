@@ -39,7 +39,7 @@ duplicate `CookieConsentBanner` under `components/gdpr/` that is also unused.
 | 826 | `studios/learner/SkillsAssessmentUI.tsx` |
 | 798 | `studios/learner/StudentClassroomView.tsx` |
 | 784 | `studios/employer/JobsManagerKanban.tsx` |
-| 744 | `super-app/CreatorUploadStudio.tsx` |
+| 744 | super-app/CreatorUploadStudio.tsx (deleted 2026-09-04; the reel publisher is the creator-studio page) |
 | 727 | `studios/settings/SafetyCenterAccess.tsx` |
 | 700 | `studios/mentor/EarningsDashboard.tsx` |
 | 649 | `studios/formation/FormationDashboard.tsx` |
@@ -47,14 +47,14 @@ duplicate `CookieConsentBanner` under `components/gdpr/` that is also unused.
 | 630 | `studios/community/CommunityGroupHome.tsx` |
 | 609 | `studios/organization/OrganizationPage.tsx` |
 | 585 | `studios/learner/BadgeWallet.tsx` |
-| 581 | `super-app/UserProfileHeader.tsx` |
+| 581 | super-app/UserProfileHeader.tsx (deleted 2026-09-04; the profile header lives in components/profile) |
 | 522 | `chat/MessageBubbles.tsx` |
-| 514 | `super-app/CommentThread.tsx` |
+| 514 | super-app/CommentThread.tsx (deleted 2026-09-04; threads are in components/video and components/community) |
 | 510 | `chat/ChatInput.tsx` |
 | 466 | `chat/MediaAttachmentUpload.tsx` |
 | 412 | `super-app/GlobalSearch.tsx` |
-| 411 | `super-app/NotificationCenter.tsx` |
-| 404 | `super-app/FeedInteraction.tsx` |
+| 411 | super-app/NotificationCenter.tsx (deleted 2026-09-04; NotificationDropdown is the mounted one) |
+| 404 | super-app/FeedInteraction.tsx (deleted 2026-09-04; the overlay is in VideoPlayer) |
 | 364 | `privacy/GranularCookieBanner.tsx` |
 | 341 | `chat/ChatLayout.tsx` |
 | 204 | `ai/FloatingAIButton.tsx` |

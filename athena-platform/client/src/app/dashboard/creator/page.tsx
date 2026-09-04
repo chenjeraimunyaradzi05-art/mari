@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import toast from 'react-hot-toast';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -12,10 +14,10 @@ import {
   Eye,
   Gift,
   Heart,
-  Play,
+  Loader2,
   Settings,
-  TrendingUp,
   Upload,
+  User,
   Users,
   Video,
   Wallet,
@@ -23,6 +25,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/hooks';
+
+// The server refuses a payout below this; the button says so instead of
+// letting someone press it and read the refusal in a toast.
+const MIN_PAYOUT_AUD = 50;
 
 interface CreatorStats {
   totalEarnings: number;
@@ -136,6 +143,7 @@ function aggregateTopGifters(gifts: any[]): TopGifter[] {
 }
 
 export default function CreatorDashboardPage() {
+  const { user } = useAuth();
   const [stats, setStats] = useState<CreatorStats | null>(null);
   const [earningsBreakdown, setEarningsBreakdown] = useState<EarningsBreakdown[]>([]);
   const [recentVideos, setRecentVideos] = useState<RecentVideo[]>([]);
@@ -143,6 +151,23 @@ export default function CreatorDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
+  const [requestingPayout, setRequestingPayout] = useState(false);
+
+  const profileHref = user?.id ? `/profile/${user.id}` : '/profile';
+
+  const requestPayout = async () => {
+    setRequestingPayout(true);
+    try {
+      await api.post('/creator/payouts/request');
+      toast.success('Payout requested. It reaches your account in 3 to 5 business days.');
+      // The pending balance has moved to Stripe; show that without a refetch.
+      setStats((current) => (current ? { ...current, pendingEarnings: 0, availableForPayout: 0 } : current));
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'The payout could not be requested.');
+    } finally {
+      setRequestingPayout(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -267,13 +292,14 @@ export default function CreatorDashboardPage() {
                 <option value="90d">Last 90 days</option>
                 <option value="all">All available</option>
               </select>
-              <Button>
-                <Upload className="w-4 h-4 mr-2" />
-                Upload Video
-              </Button>
-              <Button variant="outline">
-                <Play className="w-4 h-4 mr-2" />
-                Go Live
+              {/* "Go Live" used to sit here with no handler and no streaming
+                  backend behind it. A button that promises something the
+                  platform cannot do is worse than no button. */}
+              <Button asChild>
+                <Link href="/dashboard/creator-studio">
+                  <Upload className="w-4 h-4 mr-2" />
+                  Publish a reel
+                </Link>
               </Button>
             </div>
           </div>
@@ -411,7 +437,9 @@ export default function CreatorDashboardPage() {
                     <Video className="w-5 h-5 mr-2 text-indigo-600" />
                     Top Content
                   </CardTitle>
-                  <Button variant="ghost" size="sm">View All</Button>
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={profileHref}>View all</Link>
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent>
@@ -480,12 +508,22 @@ export default function CreatorDashboardPage() {
                   <p className="text-sm text-green-700">Lifetime Earnings</p>
                   <p className="text-lg font-semibold text-green-800">{formatCurrency(stats?.totalEarnings || 0)}</p>
                 </div>
-                <Button className="w-full">
-                  <Download className="w-4 h-4 mr-2" />
-                  Request Payout
+                <Button
+                  className="w-full"
+                  onClick={requestPayout}
+                  disabled={requestingPayout || (stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD}
+                >
+                  {requestingPayout ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 mr-2" />
+                  )}
+                  Request payout
                 </Button>
                 <p className="text-xs text-slate-500 text-center">
-                  Minimum payout: $50 AUD. Processing time: 3-5 business days.
+                  {(stats?.availableForPayout ?? 0) < MIN_PAYOUT_AUD
+                    ? `Payouts open at $${MIN_PAYOUT_AUD} AUD. Processing time: 3-5 business days.`
+                    : 'Processing time: 3-5 business days.'}
                 </p>
               </CardContent>
             </Card>
@@ -539,18 +577,27 @@ export default function CreatorDashboardPage() {
               <CardHeader>
                 <CardTitle>Quick Actions</CardTitle>
               </CardHeader>
+              {/* Each of these goes somewhere real. The previous three
+                  ("Stream Settings", "View Analytics", "Manage Subscribers")
+                  had no handler and no page behind them. */}
               <CardContent className="space-y-2">
-                <Button variant="outline" className="w-full justify-start">
-                  <Settings className="w-4 h-4 mr-2" />
-                  Stream Settings
+                <Button asChild variant="outline" className="w-full justify-start">
+                  <Link href="/dashboard/creator-studio">
+                    <Video className="w-4 h-4 mr-2" />
+                    Publish a reel
+                  </Link>
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <TrendingUp className="w-4 h-4 mr-2" />
-                  View Analytics
+                <Button asChild variant="outline" className="w-full justify-start">
+                  <Link href={profileHref}>
+                    <User className="w-4 h-4 mr-2" />
+                    Your public profile
+                  </Link>
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Users className="w-4 h-4 mr-2" />
-                  Manage Subscribers
+                <Button asChild variant="outline" className="w-full justify-start">
+                  <Link href="/dashboard/settings/notifications">
+                    <Settings className="w-4 h-4 mr-2" />
+                    Notification settings
+                  </Link>
                 </Button>
               </CardContent>
             </Card>

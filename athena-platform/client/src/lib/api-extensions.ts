@@ -12,6 +12,9 @@ export const videoApi = {
     cursor?: string;
     feed?: string;
     type?: string;
+    // A topic slice: the homepage circles and a tapped #tag open the feed
+    // filtered to one hashtag.
+    hashtag?: string;
   }) => api.get('/video/feed', { params }),
 
   // Get single video
@@ -48,9 +51,17 @@ export const videoApi = {
   getComments: (id: string, params?: { page?: number; limit?: number }) =>
     api.get(`/video/${id}/comments`, { params }),
 
-  // Add comment
-  addComment: (id: string, content: string) =>
-    api.post(`/video/${id}/comments`, { content }),
+  // Add a comment, or a reply when parentId names the comment being answered.
+  addComment: (id: string, content: string, parentId?: string) =>
+    api.post(`/video/${id}/comments`, parentId ? { content, parentId } : { content }),
+
+  // Creator only: pin (or unpin) a top-level comment to the head of the thread.
+  pinComment: (id: string, commentId: string) =>
+    api.patch(`/video/${id}/comments/${commentId}/pin`),
+
+  // The comment's author, the reel's creator, or an admin.
+  deleteComment: (id: string, commentId: string) =>
+    api.delete(`/video/${id}/comments/${commentId}`),
 
   // Share video
   share: (id: string, data: { title: string; url: string; description?: string; message?: string }) =>

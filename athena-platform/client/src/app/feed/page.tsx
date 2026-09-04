@@ -34,6 +34,7 @@ import toast from 'react-hot-toast';
 import StoriesStrip from '@/components/community/StoriesStrip';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { renderSocialText } from '@/lib/social-text';
 import { mediaApi, safetyApi } from '@/lib/api';
 
 type FeedFilter = 'latest' | 'trending' | 'following';
@@ -147,7 +148,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
   };
 
   const handleShare = async () => {
-    const url = `${window.location.origin}/dashboard/community/post/${post.id}`;
+    const url = `${window.location.origin}/posts/${post.id}`;
     const title = `${post.author.displayName || 'Someone'} on ATHENA`;
 
     // The Web Share API is the right thing on mobile, where it opens the
@@ -278,7 +279,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
 
       {/* Content */}
       <div className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap mb-4">
-        {post.content}
+        {renderSocialText(post.content)}
       </div>
 
       {/* Media. The API returns mediaUrls: string[] alongside a post type; an
@@ -338,7 +339,7 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
           Like
         </button>
         <Link 
-          href={`/dashboard/community/post/${post.id}`}
+          href={`/posts/${post.id}`}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
         >
           <MessageSquare className="w-5 h-5" />

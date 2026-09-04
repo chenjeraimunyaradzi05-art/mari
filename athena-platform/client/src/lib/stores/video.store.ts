@@ -80,6 +80,10 @@ interface VideoFeedState {
   
   // Creator follow
   toggleFollow: (creatorId: string) => void;
+
+  // The comments sheet reports the thread size it is showing so the counter
+  // on the player moves when a comment is posted or removed.
+  setCommentCount: (videoId: string, count: number) => void;
 }
 
 export const useVideoFeedStore = create<VideoFeedState>()(
@@ -100,13 +104,17 @@ export const useVideoFeedStore = create<VideoFeedState>()(
       watchHistory: [],
       videoProgress: {},
 
+      // The server now says whether the signed-in viewer has liked or saved
+      // each video. That is the truth; the locally persisted lists only fill
+      // in for a signed-out viewer, or for a like made before the page
+      // refreshed. Overriding the server with the local list is what made a
+      // like from another device show as un-liked here.
       setFeed: (videos) => {
-        // Merge with bookmarked/liked state
         const { bookmarkedVideos, likedVideos } = get();
         const enrichedVideos = videos.map(v => ({
           ...v,
-          isBookmarked: bookmarkedVideos.includes(v.id),
-          isLiked: likedVideos.includes(v.id),
+          isBookmarked: Boolean(v.isBookmarked) || bookmarkedVideos.includes(v.id),
+          isLiked: Boolean(v.isLiked) || likedVideos.includes(v.id),
         }));
         set({ feed: enrichedVideos, currentIndex: 0, page: 1 });
       },
@@ -114,8 +122,8 @@ export const useVideoFeedStore = create<VideoFeedState>()(
       appendVideos: (videos) => set((state) => {
         const enrichedVideos = videos.map(v => ({
           ...v,
-          isBookmarked: state.bookmarkedVideos.includes(v.id),
-          isLiked: state.likedVideos.includes(v.id),
+          isBookmarked: Boolean(v.isBookmarked) || state.bookmarkedVideos.includes(v.id),
+          isLiked: Boolean(v.isLiked) || state.likedVideos.includes(v.id),
         }));
         return { 
           feed: [...state.feed, ...enrichedVideos],
@@ -212,6 +220,10 @@ export const useVideoFeedStore = create<VideoFeedState>()(
       clearHistory: () => set({ watchHistory: [], videoProgress: {} }),
 
       getRecentlyWatched: (limit = 20) => get().watchHistory.slice(0, limit),
+
+      setCommentCount: (videoId, count) => set((state) => ({
+        feed: state.feed.map(video => (video.id === videoId ? { ...video, comments: count } : video)),
+      })),
 
       toggleFollow: (creatorId) => set((state) => ({
         feed: state.feed.map(video => {

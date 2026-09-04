@@ -131,10 +131,13 @@ export function useLogout() {
 // USER HOOKS
 // ============================================
 export function useProfile(userId?: string) {
+  // isFollowing is per viewer, so the profile waits for the session to settle
+  // and refetches when it changes (see useFeed).
+  const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
-    queryKey: ['profile', userId],
+    queryKey: ['profile', userId, isAuthenticated],
     queryFn: () => userApi.getProfile(userId!),
-    enabled: !!userId,
+    enabled: !!userId && !isLoading,
     select: (response) => response.data.data,
   });
 }
@@ -546,19 +549,28 @@ export function useUnsaveJob() {
 // ============================================
 // POST HOOKS
 // ============================================
+// The feed and the post carry per-viewer state (isLiked, isSaved, whether the
+// author is followed). On a full page load the session is restored by a
+// silent refresh that races the first fetch, so a request sent before the
+// token exists comes back as the signed-out view and is then cached. Waiting
+// for auth to settle, and keying on it, means the signed-in view is what gets
+// fetched and a login or logout refetches rather than serving the stale one.
 export function useFeed(params?: any) {
+  const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
-    queryKey: ['feed', params],
+    queryKey: ['feed', params, isAuthenticated],
     queryFn: () => postApi.getFeed(params),
+    enabled: !isLoading,
     select: (response) => response.data.data,
   });
 }
 
 export function usePost(id: string) {
+  const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
-    queryKey: ['post', id],
+    queryKey: ['post', id, isAuthenticated],
     queryFn: () => postApi.getById(id),
-    enabled: !!id,
+    enabled: !!id && !isLoading,
     select: (response) => response.data.data,
   });
 }
@@ -662,8 +674,8 @@ export function useCommentOnPost() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ postId, content }: { postId: string; content: string }) =>
-      postApi.comment(postId, content),
+    mutationFn: ({ postId, content, parentId }: { postId: string; content: string; parentId?: string }) =>
+      postApi.comment(postId, content, parentId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post'] });
       toast.success('Comment added!');

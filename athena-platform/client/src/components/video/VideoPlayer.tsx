@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause, MoreHorizontal } from 'lucide-react';
+import Link from 'next/link';
+import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { handleFromName } from '@/lib/social-text';
 import { Avatar } from '@/components/ui/avatar';
 import { useVideoFeedStore } from '@/lib/stores/video.store';
 
@@ -290,9 +292,18 @@ export function VideoPlayer({
       {/* Bottom info */}
       <div className="absolute bottom-4 left-3 right-20 text-white">
         <div className="flex items-center gap-2 mb-2">
-          <span className="font-semibold">
-            @{video.author.firstName.toLowerCase()}{video.author.lastName.toLowerCase()}
-          </span>
+          {/* One handle from the display name, so "Mei Chen" reads @meichen
+              rather than "@mei chen" with a space in it. */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAuthorClick(video.author.id);
+            }}
+            className="font-semibold hover:underline"
+          >
+            @{handleFromName(`${video.author.firstName} ${video.author.lastName}`)}
+          </button>
           {video.author.isVerified && (
             <span className="bg-blue-500 rounded-full w-4 h-4 flex items-center justify-center">
               <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -305,10 +316,19 @@ export function VideoPlayer({
         {video.description && (
           <p className="text-xs text-white/80 line-clamp-2">{video.description}</p>
         )}
+        {/* Tags open the feed sliced to that topic. They were rendered as
+            plain text before, so a tag could be read but never followed. */}
         {video.tags && video.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {video.tags.slice(0, 3).map((tag) => (
-              <span key={tag} className="text-xs text-primary-300">#{tag}</span>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {video.tags.slice(0, 4).map((tag) => (
+              <Link
+                key={tag}
+                href={`/explore?topic=${encodeURIComponent(tag)}`}
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs font-medium text-white/80 hover:text-white hover:underline"
+              >
+                #{tag}
+              </Link>
             ))}
           </div>
         )}

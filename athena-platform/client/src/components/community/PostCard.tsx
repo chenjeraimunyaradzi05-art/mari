@@ -1,23 +1,27 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { Heart, MessageCircle, Share2, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useLikePost, useUnlikePost, useDeletePost, useAuthStore } from '@/lib/hooks';
 import { Avatar } from '@/components/ui/avatar';
+import { renderSocialText } from '@/lib/social-text';
 import CommentSection from './CommentSection';
 import toast from 'react-hot-toast';
 
 interface PostCardProps {
   post: any;
+  // The post page opens with the thread showing; the feed keeps it folded.
+  defaultShowComments?: boolean;
 }
 
-export default function PostCard({ post }: PostCardProps) {
+export default function PostCard({ post, defaultShowComments = false }: PostCardProps) {
   const { user } = useAuthStore();
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
   const deletePost = useDeletePost();
-  const [showComments, setShowComments] = useState(false);
+  const [showComments, setShowComments] = useState(defaultShowComments);
   const [showMenu, setShowMenu] = useState(false);
   const [mediaError, setMediaError] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -57,9 +61,10 @@ export default function PostCard({ post }: PostCardProps) {
   };
 
   // Same behaviour as the feed's share: the system sheet on mobile, a copied
-  // link everywhere else.
+  // link everywhere else. The link is the public post page, so it opens for
+  // whoever it is sent to.
   const handleShare = async () => {
-    const url = `${window.location.origin}/dashboard/community/post/${post.id}`;
+    const url = `${window.location.origin}/posts/${post.id}`;
 
     if (navigator.share) {
       try {
@@ -83,19 +88,22 @@ export default function PostCard({ post }: PostCardProps) {
       {/* Header */}
       <div className="p-4 flex items-start justify-between">
         <div className="flex gap-3">
-          <div className="flex-shrink-0">
+          <Link href={`/profile/${post.author?.id}`} className="flex-shrink-0">
             <Avatar
-              src={post.author.avatar || undefined}
+              src={post.author?.avatar || undefined}
               alt={authorName}
               fallback={(authorName || 'U').slice(0, 2).toUpperCase()}
               className="w-12 h-12"
             />
-          </div>
+          </Link>
           <div>
-            <h3 className="font-semibold text-slate-900 group cursor-pointer hover:underline hover:text-blue-600">
-                {authorName}
-            </h3>
-            <p className="text-xs text-slate-500 line-clamp-1">{post.author.headline || 'Member'}</p>
+            <Link
+              href={`/profile/${post.author?.id}`}
+              className="font-semibold text-slate-900 hover:underline hover:text-blue-600"
+            >
+              {authorName}
+            </Link>
+            <p className="text-xs text-slate-500 line-clamp-1">{post.author?.headline || 'Member'}</p>
             <p className="text-xs text-slate-400 mt-0.5">
               {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })} • 
               <span className="ml-1">Public</span>
@@ -127,7 +135,9 @@ export default function PostCard({ post }: PostCardProps) {
 
       {/* Content */}
       <div className="px-4 pb-2">
-        <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">{post.content}</p>
+        <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
+          {renderSocialText(String(post.content ?? ''))}
+        </p>
       </div>
 
       {/* Media */}
@@ -190,9 +200,15 @@ export default function PostCard({ post }: PostCardProps) {
                 </>
            )}
         </div>
-        <div className="hover:text-blue-600 hover:underline cursor-pointer">
-          {Number(post.commentCount) > 0 ? `${post.commentCount} comments` : ''}
-        </div>
+        {Number(post.commentCount) > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowComments((open) => !open)}
+            className="hover:text-blue-600 hover:underline"
+          >
+            {post.commentCount} comments
+          </button>
+        )}
       </div>
 
       {/* Actions */}

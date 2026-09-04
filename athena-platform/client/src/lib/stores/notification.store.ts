@@ -1,8 +1,25 @@
 import { create } from 'zustand';
 
+// Mirrors the server's NotificationType enum. The social types were missing,
+// so every like, comment and follow arrived in the bell as a grey "system"
+// notice.
+export type NotificationKind =
+  | 'JOB_MATCH'
+  | 'APPLICATION_UPDATE'
+  | 'MESSAGE'
+  | 'MENTION'
+  | 'SYSTEM'
+  | 'MENTOR_SESSION'
+  | 'LIKE'
+  | 'COMMENT'
+  | 'FOLLOW'
+  | 'ACHIEVEMENT'
+  | 'LEVEL_UP'
+  | 'GIFT_RECEIVED';
+
 export interface Notification {
   id: string;
-  type: 'JOB_MATCH' | 'APPLICATION_UPDATE' | 'MESSAGE' | 'MENTION' | 'SYSTEM' | 'MENTOR_SESSION';
+  type: NotificationKind;
   title: string;
   message: string;
   link?: string;
