@@ -15,6 +15,8 @@ export const videoApi = {
     // A topic slice: the homepage circles and a tapped #tag open the feed
     // filtered to one hashtag.
     hashtag?: string;
+    // Every reel that uses one sound.
+    sound?: string;
   }) => api.get('/video/feed', { params }),
 
   // Get single video
@@ -22,6 +24,7 @@ export const videoApi = {
 
   // Create new video post. The fields mirror the Video model: topics are
   // `hashtags`, and the closest thing to a category is the VideoType `type`.
+  // The reel comes back PROCESSING; poll getProcessing until it is PUBLISHED.
   create: (data: {
     title?: string;
     description?: string;
@@ -33,7 +36,11 @@ export const videoApi = {
     hashtags?: string[];
     mentionedUserIds?: string[];
     location?: string;
+    audioTrackId?: string;
   }) => api.post('/video', data),
+
+  // The pipeline's progress on a reel you published (author only).
+  getProcessing: (id: string) => api.get(`/video/${id}/processing`),
 
   // Like a video
   like: (id: string) => api.post(`/video/${id}/like`),
@@ -99,6 +106,118 @@ export const videoApi = {
 
   // Delete video
   delete: (id: string) => api.delete(`/video/${id}`),
+};
+
+// ============================================
+// SOUNDS API
+// ============================================
+export interface SoundSummary {
+  id: string;
+  title: string;
+  artist: string | null;
+  audioUrl: string;
+  duration: number;
+  coverUrl: string | null;
+  isOriginal: boolean;
+  useCount: number;
+  sourceVideoId: string | null;
+}
+
+export interface TrendingSound extends SoundSummary {
+  videoCount: number;
+  recentVideos: Array<{ id: string; thumbnailUrl: string | null }>;
+}
+
+export const soundApi = {
+  // Ranked by how many reels used each sound in the period.
+  trending: (params?: { period?: 'day' | 'week' | 'month' | 'all'; limit?: number }) =>
+    api.get('/sounds/trending', { params }),
+
+  get: (id: string) => api.get(`/sounds/${id}`),
+
+  videos: (id: string, params?: { limit?: number; cursor?: string }) =>
+    api.get(`/sounds/${id}/videos`, { params }),
+
+  // An uploaded audio file (see mediaApi.upload('audio', file)) becomes a sound.
+  create: (data: {
+    title: string;
+    artist?: string;
+    audioUrl: string;
+    duration: number;
+    licenseType?: string;
+    coverUrl?: string;
+  }) => api.post('/sounds', data),
+
+  // "Use this sound" on a reel that plays its own audio.
+  fromVideo: (videoId: string) => api.post(`/sounds/from-video/${videoId}`),
+};
+
+// ============================================
+// LIVE STREAMING API
+// ============================================
+export type LiveStreamStatus = 'SCHEDULED' | 'LIVE' | 'ENDED';
+
+export interface LiveStream {
+  id: string;
+  hostId: string;
+  host: { id: string; displayName: string | null; avatar: string | null; headline: string | null; isVerified: boolean };
+  title: string;
+  description: string | null;
+  category: string | null;
+  thumbnailUrl: string | null;
+  status: LiveStreamStatus;
+  playbackUrl: string | null;
+  viewerCount: number;
+  peakViewers: number;
+  totalGiftPoints: number;
+  messageCount: number;
+  scheduledFor: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  isHost: boolean;
+  // Host only.
+  streamKey?: string;
+  ingestUrl?: string | null;
+  ingestConfigured?: boolean;
+}
+
+export interface LiveChatMessage {
+  id: string;
+  streamId: string;
+  userId: string;
+  content: string;
+  createdAt: string;
+  user: { id: string; displayName: string | null; avatar: string | null };
+  isHost?: boolean;
+}
+
+export const livestreamApi = {
+  list: (params?: { status?: 'LIVE' | 'ENDED'; category?: string; limit?: number }) =>
+    api.get('/livestream', { params }),
+  mine: () => api.get('/livestream/mine'),
+  get: (id: string) => api.get(`/livestream/${id}`),
+  create: (data: {
+    title: string;
+    description?: string;
+    category?: string;
+    thumbnailUrl?: string;
+    playbackUrl?: string;
+    scheduledFor?: string;
+  }) => api.post('/livestream', data),
+  update: (
+    id: string,
+    data: { title?: string; description?: string | null; category?: string | null; thumbnailUrl?: string | null; playbackUrl?: string | null }
+  ) => api.patch(`/livestream/${id}`, data),
+  start: (id: string) => api.post(`/livestream/${id}/start`),
+  end: (id: string) => api.post(`/livestream/${id}/end`),
+  messages: (id: string, params?: { limit?: number }) => api.get(`/livestream/${id}/messages`, { params }),
+  say: (id: string, content: string) => api.post(`/livestream/${id}/messages`, { content }),
+  gifts: () => api.get('/livestream/gifts'),
+  wallet: () => api.get('/livestream/wallet'),
+  gift: (id: string, giftType: string, message?: string) =>
+    api.post(`/livestream/${id}/gift`, message ? { giftType, message } : { giftType }),
+  leaderboard: (id: string, params?: { limit?: number }) => api.get(`/livestream/${id}/leaderboard`, { params }),
 };
 
 // ============================================

@@ -31,7 +31,9 @@ export interface ChatMessage {
   senderId: string;
   content: string;
   createdAt: string;
-  type: 'text' | 'image' | 'video' | 'file';
+  type: 'text' | 'image' | 'video' | 'file' | 'system';
+  // Disappearing messages: when this passes the row is gone on both sides.
+  expiresAt?: string;
   mediaUrl?: string;
   status?: ChatMessageStatus;
   replyTo?: ChatMessageReply;
@@ -74,6 +76,7 @@ export function toChatMessage(raw: any, viewerId?: string): ChatMessage {
     content: raw.content ?? '',
     createdAt: raw.createdAt,
     type: mapMessageType(raw?.type),
+    expiresAt: typeof raw?.expiresAt === 'string' ? raw.expiresAt : undefined,
     // Only the sender has a receipt to show; an inbound message is simply here.
     status: isMine ? (raw?.isRead ? 'read' : 'sent') : undefined,
     replyTo: raw?.replyTo
@@ -101,6 +104,8 @@ function mapMessageType(type: unknown): ChatMessage['type'] {
       return 'video';
     case 'FILE':
       return 'file';
+    case 'SYSTEM':
+      return 'system';
     default:
       return 'text';
   }
@@ -123,6 +128,8 @@ export interface Conversation {
   isPinned?: boolean;
   isMuted?: boolean;
   isArchived?: boolean;
+  // Disappearing messages timer in seconds; null or undefined is off.
+  disappearingTtlSeconds?: number | null;
 }
 
 interface ChatState {
@@ -161,7 +168,10 @@ interface ChatState {
   failMessage: (conversationId: string, messageId: string, error: string) => void;
   retryMessage: (conversationId: string, messageId: string) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
-  
+  // Several at once, for the expiry sweep.
+  removeMessages: (conversationId: string, messageIds: string[]) => void;
+  setDisappearingTtl: (conversationId: string, ttl: number | null) => void;
+
   // Draft actions
   setDraft: (conversationId: string, content: string) => void;
   clearDraft: (conversationId: string) => void;
@@ -521,6 +531,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       };
     });
+  },
+
+  removeMessages: (conversationId, messageIds) => {
+    if (messageIds.length === 0) return;
+    const gone = new Set(messageIds);
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: (state.messages[conversationId] || []).filter((msg) => !gone.has(msg.id)),
+      },
+    }));
+  },
+
+  setDisappearingTtl: (conversationId, ttl) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId ? { ...c, disappearingTtlSeconds: ttl } : c
+      ),
+    }));
   },
 
   // Draft management

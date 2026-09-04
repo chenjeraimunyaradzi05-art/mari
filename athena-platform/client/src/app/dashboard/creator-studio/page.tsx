@@ -1,28 +1,28 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Loader2, Sparkles, Tag, UploadCloud, Video } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Check, Loader2, Music, Sparkles, Tag, UploadCloud, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { mediaApi } from '@/lib/api';
-import { videoApi } from '@/lib/api-extensions';
+import { soundApi, videoApi, type SoundSummary, type TrendingSound } from '@/lib/api-extensions';
 import { cn } from '@/lib/utils';
 
 /**
  * Publish a reel.
  *
- * This page had a file picker, a title, a rich-text editor and a Publish
- * button that did nothing at all: no upload, no request, no message. It was
- * the only "upload" entry point linked from the creator dashboard, the videos
- * page and the reels rail, so nobody could put a reel on the platform.
+ * Publishing is: capture a poster frame and the duration in the browser,
+ * upload the file, create the Video row (which the server hands to its
+ * processing pipeline), then follow the pipeline until the reel is live.
+ * The pipeline probes the file, makes its own poster and a web rendition,
+ * and registers the reel's original sound; the browser-side capture means
+ * the reel has a poster and a length even before that finishes.
  *
- * Publishing is two calls: the file goes to the media store, and the returned
- * URL becomes a Video row. The description is plain text because that is what
- * the Video model holds and what the player shows; HTML from an editor would
- * have been rendered as tags.
+ * A sound can be chosen from what is trending, handed in from a reel or the
+ * sounds page as ?sound=<id>, or uploaded as an audio file.
  */
 
 const VIDEO_TYPES = [
@@ -33,8 +33,12 @@ const VIDEO_TYPES = [
 ] as const;
 
 type VideoType = (typeof VIDEO_TYPES)[number]['value'];
+type Stage = 'idle' | 'preparing' | 'uploading' | 'publishing' | 'processing';
 
 const MAX_FILE_BYTES = 200 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const PROCESSING_POLL_MS = 2000;
+const PROCESSING_TIMEOUT_MS = 10 * 60 * 1000;
 
 function parseTags(raw: string): string[] {
   return Array.from(
@@ -47,19 +51,124 @@ function parseTags(raw: string): string[] {
   ).slice(0, 20);
 }
 
-export default function CreatorStudioPage() {
+interface CapturedMetadata {
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+  poster: Blob | null;
+}
+
+/** Reads the length and dimensions and grabs a frame, all in the browser. */
+function captureVideoMetadata(file: File): Promise<CapturedMetadata> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    const finish = (result: CapturedMetadata) => {
+      URL.revokeObjectURL(url);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ duration: null, width: null, height: null, poster: null }), 15000);
+
+    video.onerror = () => {
+      clearTimeout(timer);
+      finish({ duration: null, width: null, height: null, poster: null });
+    };
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : null;
+      video.currentTime = Math.min(1, (duration ?? 2) / 2);
+    };
+    video.onseeked = () => {
+      clearTimeout(timer);
+      const width = video.videoWidth || null;
+      const height = video.videoHeight || null;
+      const duration = Number.isFinite(video.duration) ? video.duration : null;
+      try {
+        const scale = width && width > 720 ? 720 / width : 1;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round((width ?? 720) * scale);
+        canvas.height = Math.round((height ?? 1280) * scale);
+        canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => finish({ duration, width, height, poster: blob }), 'image/jpeg', 0.85);
+      } catch {
+        finish({ duration, width, height, poster: null });
+      }
+    };
+    video.src = url;
+  });
+}
+
+function audioDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const audio = document.createElement('audio');
+    audio.preload = 'metadata';
+    const done = (value: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    audio.onloadedmetadata = () => done(Number.isFinite(audio.duration) ? audio.duration : null);
+    audio.onerror = () => done(null);
+    audio.src = url;
+  });
+}
+
+function aspectRatioOf(width: number | null, height: number | null): string | undefined {
+  if (!width || !height) return undefined;
+  const ratio = width / height;
+  if (Math.abs(ratio - 9 / 16) < 0.02) return '9:16';
+  if (Math.abs(ratio - 16 / 9) < 0.02) return '16:9';
+  if (Math.abs(ratio - 1) < 0.02) return '1:1';
+  if (Math.abs(ratio - 4 / 5) < 0.02) return '4:5';
+  return `${width}:${height}`;
+}
+
+const errorMessage = (err: unknown, fallback: string) =>
+  (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+  (err as Error)?.message ||
+  fallback;
+
+function CreatorStudioContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const presetSoundId = searchParams.get('sound')?.trim() || null;
+
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState('');
   const [type, setType] = useState<VideoType>('REEL');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [stage, setStage] = useState<'idle' | 'uploading' | 'publishing'>('idle');
+  const [stage, setStage] = useState<Stage>('idle');
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const [trending, setTrending] = useState<TrendingSound[]>([]);
+  const [sound, setSound] = useState<SoundSummary | null>(null);
+  const [soundBusy, setSoundBusy] = useState(false);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
   const parsedTags = parseTags(tags);
   const busy = stage !== 'idle';
+
+  useEffect(() => {
+    soundApi
+      .trending({ limit: 8 })
+      .then((r) => setTrending(Array.isArray(r.data?.data) ? r.data.data : []))
+      .catch(() => setTrending([]));
+  }, []);
+
+  useEffect(() => {
+    if (!presetSoundId) return;
+    soundApi
+      .get(presetSoundId)
+      .then((r) => {
+        if (r.data?.data) setSound(r.data.data);
+      })
+      .catch(() => toast.error('That sound could not be found'));
+  }, [presetSoundId]);
 
   const pick = (next: File | null) => {
     setError(null);
@@ -78,6 +187,50 @@ export default function CreatorStudioPage() {
     setFile(next);
   };
 
+  const uploadOwnSound = async (audio: File | null) => {
+    if (!audio) return;
+    if (!audio.type.startsWith('audio/')) {
+      toast.error('Choose an audio file (MP3, M4A, WAV or OGG).');
+      return;
+    }
+    if (audio.size > MAX_AUDIO_BYTES) {
+      toast.error('That audio file is over 20 MB.');
+      return;
+    }
+    setSoundBusy(true);
+    try {
+      const duration = await audioDuration(audio);
+      const upload = await mediaApi.upload('audio', audio);
+      const audioUrl = upload.data?.data?.url as string | undefined;
+      if (!audioUrl) throw new Error('The upload returned no file.');
+      const created = await soundApi.create({
+        title: audio.name.replace(/\.[^.]+$/, '').slice(0, 120) || 'My sound',
+        audioUrl,
+        duration: Math.max(1, Math.round(duration ?? 1)),
+      });
+      setSound(created.data?.data ?? null);
+      toast.success('Sound added');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not add that sound'));
+    } finally {
+      setSoundBusy(false);
+      if (audioInputRef.current) audioInputRef.current.value = '';
+    }
+  };
+
+  const waitForProcessing = async (id: string) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < PROCESSING_TIMEOUT_MS) {
+      const status = await videoApi.getProcessing(id).then((r) => r.data?.data).catch(() => null);
+      if (status) {
+        setProgress(Number(status.processingProgress) || 0);
+        if (status.status !== 'PROCESSING') return status;
+      }
+      await new Promise((resolve) => setTimeout(resolve, PROCESSING_POLL_MS));
+    }
+    return null;
+  };
+
   const publish = async () => {
     setError(null);
     if (!file) {
@@ -90,7 +243,18 @@ export default function CreatorStudioPage() {
     }
 
     try {
+      setStage('preparing');
+      const meta = await captureVideoMetadata(file);
+
       setStage('uploading');
+      let thumbnailUrl: string | undefined;
+      if (meta.poster) {
+        const poster = new File([meta.poster], 'poster.jpg', { type: 'image/jpeg' });
+        thumbnailUrl = await mediaApi
+          .upload('thumbnail', poster)
+          .then((r) => r.data?.data?.url as string | undefined)
+          .catch(() => undefined);
+      }
       const upload = await mediaApi.upload('video', file);
       const videoUrl = upload.data?.data?.url as string | undefined;
       if (!videoUrl) {
@@ -102,21 +266,38 @@ export default function CreatorStudioPage() {
         title: title.trim(),
         description: description.trim() || undefined,
         videoUrl,
+        thumbnailUrl,
+        duration: meta.duration ? Math.max(1, Math.round(meta.duration)) : undefined,
+        aspectRatio: aspectRatioOf(meta.width, meta.height),
         type,
         hashtags: parsedTags,
+        audioTrackId: sound?.id,
       });
-
       const id = created.data?.data?.id as string | undefined;
-      toast.success('Your reel is live.');
-      router.push(id ? `/explore?video=${id}` : '/explore');
+      if (!id) throw new Error('The reel was not created.');
+
+      setStage('processing');
+      setProgress(5);
+      const result = await waitForProcessing(id);
+      if (result?.processingError) {
+        toast('Published, though processing hit a snag: ' + result.processingError, { icon: '⚠️' });
+      } else {
+        toast.success('Your reel is live.');
+      }
+      router.push(`/explore?video=${id}`);
     } catch (err) {
-      const message =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-        (err as Error)?.message ||
-        'Publishing failed. Try again.';
-      setError(message);
+      setError(errorMessage(err, 'Publishing failed. Try again.'));
       setStage('idle');
+      setProgress(0);
     }
+  };
+
+  const stageLabel: Record<Stage, string> = {
+    idle: 'Publish',
+    preparing: 'Reading the video...',
+    uploading: 'Uploading...',
+    publishing: 'Publishing...',
+    processing: `Processing ${progress}%`,
   };
 
   return (
@@ -130,9 +311,25 @@ export default function CreatorStudioPage() {
         </div>
         <Button className="gap-2" onClick={publish} disabled={busy || !file}>
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          {stage === 'uploading' ? 'Uploading...' : stage === 'publishing' ? 'Publishing...' : 'Publish'}
+          {stageLabel[stage]}
         </Button>
       </div>
+
+      {stage === 'processing' && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium text-slate-900 dark:text-white">Making your reel web-ready</span>
+            <span className="text-slate-500">{progress}%</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div className="h-full bg-rose-500 transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Poster frame, a rendition every phone can play, and the reel&apos;s sound. You can leave this page; it
+            publishes on its own.
+          </p>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3 space-y-4">
@@ -184,6 +381,79 @@ export default function CreatorStudioPage() {
                 placeholder="What happens in it, and what you want people to take away. #tags in here count too."
                 className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
+            </div>
+          </div>
+
+          {/* Sound */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 bg-white dark:bg-slate-900">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <Music className="w-4 h-4" /> Sound
+              </h2>
+              <Link href="/sounds" className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                Browse all
+              </Link>
+            </div>
+            {sound ? (
+              <div className="flex items-center gap-3 rounded-lg bg-rose-50 px-3 py-2 dark:bg-rose-900/20">
+                <Check className="w-4 h-4 text-rose-600" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{sound.title}</p>
+                  <p className="truncate text-xs text-slate-500">{sound.artist || (sound.isOriginal ? 'Original sound' : 'Uploaded sound')}</p>
+                </div>
+                <audio src={sound.audioUrl} controls preload="none" className="h-8 w-40" />
+                <button
+                  type="button"
+                  onClick={() => setSound(null)}
+                  aria-label="Remove sound"
+                  className="p-1 text-slate-500 hover:text-slate-700"
+                  disabled={busy}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">
+                Leave this empty and the reel&apos;s own audio becomes its sound, which others can then use.
+              </p>
+            )}
+            {trending.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {trending.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setSound(option)}
+                    disabled={busy}
+                    className={cn(
+                      'max-w-full truncate rounded-full border px-3 py-1 text-xs transition',
+                      sound?.id === option.id
+                        ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
+                    )}
+                  >
+                    {option.title}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div>
+              <input
+                ref={audioInputRef}
+                type="file"
+                accept="audio/*"
+                className="sr-only"
+                id="own-sound"
+                disabled={busy || soundBusy}
+                onChange={(e) => void uploadOwnSound(e.target.files?.[0] ?? null)}
+              />
+              <label
+                htmlFor="own-sound"
+                className={cn('btn-outline inline-flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs', (busy || soundBusy) && 'opacity-60')}
+              >
+                {soundBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+                Upload your own sound
+              </label>
             </div>
           </div>
         </div>
@@ -254,7 +524,7 @@ export default function CreatorStudioPage() {
               <Link href="/explore" className="font-medium text-rose-600 dark:text-rose-400">
                 Reels
               </Link>{' '}
-              and on your profile straight away.
+              and on your profile as soon as processing finishes, usually within a minute.
             </p>
           </div>
 
@@ -266,5 +536,14 @@ export default function CreatorStudioPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams needs a Suspense boundary above it.
+export default function CreatorStudioPage() {
+  return (
+    <Suspense fallback={<div className="max-w-6xl mx-auto p-6 text-slate-500">Loading...</div>}>
+      <CreatorStudioContent />
+    </Suspense>
   );
 }

@@ -38,6 +38,8 @@ import {
   TrendingUp,
   Shield,
   Wallet,
+  Radio,
+  Music,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -62,6 +64,8 @@ const NAV_ITEMS: Record<AppMode, { label: string; icon: React.ElementType; href:
     { label: 'Feed', icon: Home, href: '/feed' },
     { label: 'Discover', icon: Compass, href: '/discover' },
     { label: 'Videos', icon: Play, href: '/videos' },
+    { label: 'Live', icon: Radio, href: '/live' },
+    { label: 'Sounds', icon: Music, href: '/sounds' },
     { label: 'Communities', icon: Users, href: '/communities' },
     { label: 'Events', icon: Calendar, href: '/events' },
   ],

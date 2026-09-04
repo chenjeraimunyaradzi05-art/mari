@@ -21,8 +21,29 @@ class SocketClient {
   private token: string | null = null;
   // counterpart user id -> conversation id, for the events the server keys by user
   private conversationByUser = new Map<string, string>();
+  // Pages that hold a socket (live rooms, channels) are told when the
+  // instance is replaced or reconnects, so they re-register and re-join
+  // rather than listening on a socket that no longer exists.
+  private changeListeners = new Set<() => void>();
 
   private constructor() {}
+
+  public onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private notify() {
+    for (const listener of this.changeListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener that throws must not stop the others being told.
+      }
+    }
+  }
 
   public static getInstance(): SocketClient {
     if (!SocketClient.instance) {
@@ -53,6 +74,9 @@ class SocketClient {
     });
 
     this.setupListeners();
+    this.socket.on('connect', () => this.notify());
+    this.socket.on('disconnect', () => this.notify());
+    this.notify();
   }
 
   public disconnect() {
@@ -64,6 +88,7 @@ class SocketClient {
     this.conversationByUser.clear();
     this.token = null;
     this.userId = null;
+    this.notify();
   }
 
   public isConnected(): boolean {
@@ -170,6 +195,22 @@ class SocketClient {
       useChatStore
         .getState()
         .applyReaction(conversationId, messageId, emoji, action === 'removed' ? 'removed' : 'added', userId === this.userId);
+    });
+
+    // Disappearing messages: the sweep says which ids are gone, and a timer
+    // change arrives so the thread's banner follows without a refetch.
+    this.socket.on('messages:expired', (payload) => {
+      const { conversationId, messageIds } = payload || {};
+      if (!conversationId || !Array.isArray(messageIds)) return;
+      useChatStore.getState().removeMessages(conversationId, messageIds);
+    });
+
+    this.socket.on('messages:settings', (payload) => {
+      const { conversationId, disappearingTtlSeconds } = payload || {};
+      if (!conversationId) return;
+      useChatStore
+        .getState()
+        .setDisappearingTtl(conversationId, typeof disappearingTtlSeconds === 'number' ? disappearingTtlSeconds : null);
     });
 
     // ===========================

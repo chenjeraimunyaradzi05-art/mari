@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause, Music } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { handleFromName } from '@/lib/social-text';
 import { Avatar } from '@/components/ui/avatar';
@@ -29,6 +29,8 @@ export interface VideoPost {
   isBookmarked: boolean;
   category?: string;
   tags?: string[];
+  /** The sound the reel plays; links to every reel using it. */
+  sound?: { id: string; title: string };
   createdAt: string;
 }
 
@@ -331,6 +333,18 @@ export function VideoPlayer({
               </Link>
             ))}
           </div>
+        )}
+        {/* The sound: tap it to see every reel that uses it, and to use it yourself. */}
+        {video.sound && (
+          <Link
+            href={`/explore?sound=${encodeURIComponent(video.sound.id)}`}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-2 inline-flex max-w-full items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs text-white backdrop-blur hover:bg-white/25"
+            aria-label={`Sound: ${video.sound.title}`}
+          >
+            <Music className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="truncate">{video.sound.title}</span>
+          </Link>
         )}
       </div>
     </div>

@@ -1,11 +1,13 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { VideoFeed } from '@/components/video';
 import { cn } from '@/lib/utils';
-import { Compass, TrendingUp, Users, Bookmark, X } from 'lucide-react';
+import { Compass, TrendingUp, Users, Bookmark, X, Music } from 'lucide-react';
+import { soundApi } from '@/lib/api-extensions';
 
 /**
  * /explore?video=<id> opens on that reel, /explore?topic=<tag> shows one topic.
@@ -20,13 +22,35 @@ function ExploreContent() {
   const searchParams = useSearchParams();
   const initialVideoId = searchParams.get('video') ?? undefined;
   const topic = (searchParams.get('topic') ?? '').replace(/^#+/, '').trim().toLowerCase() || undefined;
+  // /explore?sound=<id>: every reel that plays one sound, with a way to use it.
+  const soundId = searchParams.get('sound')?.trim() || undefined;
 
   const [activeTab, setActiveTab] = useState('for-you');
+  const [soundTitle, setSoundTitle] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!soundId) {
+      setSoundTitle(null);
+      return;
+    }
+    let cancelled = false;
+    soundApi
+      .get(soundId)
+      .then((r) => {
+        if (!cancelled) setSoundTitle(r.data?.data?.title ?? 'Sound');
+      })
+      .catch(() => {
+        if (!cancelled) setSoundTitle('Sound');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [soundId]);
 
   // A tab change drops the deep link: once the viewer has moved on, the
   // requested reel should not keep leading every tab.
   useEffect(() => {
-    if (activeTab !== 'for-you' && (initialVideoId || topic)) {
+    if (activeTab !== 'for-you' && (initialVideoId || topic || soundId)) {
       router.replace('/explore');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -76,12 +100,36 @@ function ExploreContent() {
             </span>
           </div>
         )}
+
+        {soundId && activeTab === 'for-you' && (
+          <div className="mt-2 flex justify-center gap-2">
+            <span className="inline-flex max-w-[60vw] items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+              <Music className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate">{soundTitle ?? 'Sound'}</span>
+              <button
+                type="button"
+                onClick={() => router.replace('/explore')}
+                aria-label="Clear sound"
+                className="rounded-full p-0.5 hover:bg-white/20"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+            <Link
+              href={`/dashboard/creator-studio?sound=${encodeURIComponent(soundId)}`}
+              className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-black hover:bg-white/90"
+            >
+              Use this sound
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Video feed */}
       <VideoFeed
         category={activeTab === 'for-you' ? undefined : activeTab}
         hashtag={activeTab === 'for-you' ? topic : undefined}
+        soundId={activeTab === 'for-you' ? soundId : undefined}
         initialVideoId={activeTab === 'for-you' ? initialVideoId : undefined}
       />
 

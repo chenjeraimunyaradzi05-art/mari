@@ -609,7 +609,24 @@ export const messageApi = {
     api.post(`/messages/conversations/${conversationId}/messages`, { content }),
 
   startConversation: (userId: string) => api.post('/messages/conversations', { userId }),
+
+  // Disappearing messages: null turns the timer off; otherwise one of the
+  // allowed TTLs in seconds (1 hour, 24 hours, 7 days, 90 days).
+  updateConversationSettings: (conversationId: string, disappearingTtlSeconds: number | null) =>
+    api.patch(`/messages/conversations/${conversationId}/settings`, { disappearingTtlSeconds }),
 };
+
+export const DISAPPEARING_MESSAGE_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: 'Off' },
+  { value: 3600, label: '1 hour' },
+  { value: 86400, label: '24 hours' },
+  { value: 604800, label: '7 days' },
+  { value: 7776000, label: '90 days' },
+];
+
+export function disappearingLabel(ttl: number | null | undefined): string {
+  return DISAPPEARING_MESSAGE_OPTIONS.find((option) => option.value === (ttl ?? null))?.label ?? 'Off';
+}
 
 // ============================================
 // EMPLOYER API

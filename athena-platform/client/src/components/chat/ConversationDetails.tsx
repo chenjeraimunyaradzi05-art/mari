@@ -1,18 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
-import { Info, ShieldCheck, User } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Info, ShieldCheck, Timer, User } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useChatStore } from '@/lib/stores/chat.store';
 import { usePresenceStore } from '@/lib/stores/presence.store';
+import { DISAPPEARING_MESSAGE_OPTIONS, messageApi } from '@/lib/api';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export default function ConversationDetails() {
-  const { activeConversationId, conversations, messages } = useChatStore();
+  const { activeConversationId, conversations, messages, setDisappearingTtl } = useChatStore();
   const { isOnline } = usePresenceStore();
+  const [savingTtl, setSavingTtl] = useState(false);
 
   const conversation = conversations.find((c) => c.id === activeConversationId);
   const participant = conversation?.participants?.[0];
@@ -36,6 +39,31 @@ export default function ConversationDetails() {
       </div>
     );
   }
+
+  const ttl = conversation.disappearingTtlSeconds ?? null;
+
+  // Either side may set the timer. The server writes a system message into
+  // the thread naming who changed it and pushes the new setting to both
+  // people, so the other person is told rather than left to notice.
+  const changeTtl = async (raw: string) => {
+    const next = raw === 'off' ? null : Number(raw);
+    if (next === ttl) return;
+    setSavingTtl(true);
+    try {
+      await messageApi.updateConversationSettings(conversation.id, next);
+      setDisappearingTtl(conversation.id, next);
+      toast.success(
+        next === null
+          ? 'Disappearing messages are off'
+          : `New messages disappear after ${DISAPPEARING_MESSAGE_OPTIONS.find((o) => o.value === next)?.label}`
+      );
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message || 'Could not change the timer');
+    } finally {
+      setSavingTtl(false);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -73,12 +101,41 @@ export default function ConversationDetails() {
           <p className="text-xs uppercase tracking-widest text-slate-400 dark:text-slate-500">Actions</p>
           <div className="mt-3 space-y-2">
             <Link
-              href={`/dashboard/profile/${participant.id}`}
+              href={`/profile/${participant.id}`}
               className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start')}
             >
               <User className="w-4 h-4 mr-2" /> View Profile
             </Link>
           </div>
+        </div>
+
+        <div>
+          <p className="text-xs uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            Disappearing messages
+          </p>
+          <label className="mt-3 flex items-center gap-3">
+            <span className="rounded-lg bg-slate-100 p-2 text-slate-500 dark:bg-slate-800">
+              <Timer className="w-4 h-4" />
+            </span>
+            <select
+              value={ttl === null ? 'off' : String(ttl)}
+              onChange={(event) => void changeTtl(event.target.value)}
+              disabled={savingTtl}
+              aria-label="Disappearing messages timer"
+              className="input flex-1 text-sm"
+            >
+              {DISAPPEARING_MESSAGE_OPTIONS.map((option) => (
+                <option key={option.label} value={option.value === null ? 'off' : String(option.value)}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            {ttl
+              ? 'New messages in this chat are deleted for both of you once the timer runs out. Messages sent before you changed it stay.'
+              : 'Turn on a timer and new messages delete themselves for both of you when it runs out.'}
+          </p>
         </div>
 
         <div>

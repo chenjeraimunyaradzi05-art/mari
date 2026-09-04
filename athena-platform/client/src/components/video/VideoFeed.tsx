@@ -32,6 +32,8 @@ function mapApiToVideoItem(v: any): VideoItem {
     isLiked: v.isLiked ?? false,
     isBookmarked: v.isSaved ?? false,
     hashtags: Array.isArray(v.hashtags) ? v.hashtags : undefined,
+    soundId: v.sound?.id ?? v.audioTrackId ?? undefined,
+    soundTitle: v.sound?.title ?? undefined,
     createdAt: v.createdAt,
   };
 }
@@ -41,6 +43,8 @@ interface VideoFeedProps {
   category?: string;
   /** Restrict the feed to one topic; comes from ?topic= on /explore. */
   hashtag?: string;
+  /** Restrict the feed to every reel using one sound; ?sound= on /explore. */
+  soundId?: string;
   /**
    * A reel to open on. Share links, the homepage reel tiles and the saved
    * list all arrive as /explore?video=<id>; the feed used to ignore it and
@@ -49,7 +53,7 @@ interface VideoFeedProps {
   initialVideoId?: string;
 }
 
-export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoId }: VideoFeedProps) {
+export function VideoFeed({ initialVideos = [], category, hashtag, soundId, initialVideoId }: VideoFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Use global store
@@ -97,6 +101,7 @@ export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoI
         limit: 10,
         feed: category,
         hashtag: hashtag || undefined,
+        sound: soundId || undefined,
         cursor: mode === 'more' ? cursorRef.current ?? undefined : undefined,
       });
 
@@ -127,11 +132,11 @@ export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoI
       isFetchingRef.current = false;
       setLoadingLocal(false);
     }
-  }, [category, hashtag, initialVideoId, setFeed, appendVideos]);
+  }, [category, hashtag, soundId, initialVideoId, setFeed, appendVideos]);
 
   // Load on mount and whenever the slice changes. Keying the effect on the
-  // category, topic and opener is deliberate: the feed belongs to that slice,
-  // so switching tabs has to clear the old videos and pull the new ones.
+  // category, topic, sound and opener is deliberate: the feed belongs to that
+  // slice, so switching tabs has to clear the old videos and pull the new ones.
   useEffect(() => {
     if (initialVideos.length > 0) {
       setFeed(initialVideos.map(mapApiToVideoItem));
@@ -143,7 +148,7 @@ export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoI
     if (containerRef.current) containerRef.current.scrollTo({ top: 0 });
     void fetchVideos('reset');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, hashtag, initialVideoId, authLoading, isAuthenticated]);
+  }, [category, hashtag, soundId, initialVideoId, authLoading, isAuthenticated]);
 
   const handleScroll = () => {
       if (!containerRef.current) return;
@@ -271,6 +276,8 @@ export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoI
               {loadError ??
                 (hashtag
                   ? `No reels tagged #${hashtag} yet.`
+                  : soundId
+                    ? 'No reels use this sound yet. Be the first.'
                   : category === 'following'
                     ? 'Nobody you follow has posted a reel yet.'
                     : 'There are no videos in this feed yet.')}
@@ -316,6 +323,7 @@ export function VideoFeed({ initialVideos = [], category, hashtag, initialVideoI
                 isLiked: video.isLiked || false,
                 isBookmarked: bookmarkedVideos.includes(video.id) || Boolean(video.isBookmarked),
                 tags: video.hashtags,
+                sound: video.soundId ? { id: video.soundId, title: video.soundTitle || 'Original sound' } : undefined,
                 createdAt: video.createdAt || new Date().toISOString()
             }}
             isActive={index === currentIndex}

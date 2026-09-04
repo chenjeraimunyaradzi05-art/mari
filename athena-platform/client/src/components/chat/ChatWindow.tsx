@@ -29,8 +29,10 @@ import {
   Paperclip,
   Reply,
   Smile,
+  Timer,
   X,
 } from 'lucide-react';
+import { disappearingLabel } from '@/lib/api';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +47,17 @@ const ATTACHMENT_ACCEPT = 'image/*,video/*';
 const MAX_ATTACHMENTS = 4;
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏'];
 const TYPING_IDLE_MS = 2500;
+
+// "Disappears in 3h", for the timer badge on a message with an expiry.
+function timeUntil(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'any moment';
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
 
 export default function ChatWindow({ conversationId }: ChatWindowProps) {
   const { data: apiMessages, isLoading } = useMessages(conversationId);
@@ -288,10 +301,28 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
         )}
       </div>
 
+      {conversation?.disappearingTtlSeconds ? (
+        <div className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs text-amber-800 bg-amber-50 border-b border-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900/40">
+          <Timer className="w-3.5 h-3.5" />
+          New messages disappear after {disappearingLabel(conversation.disappearingTtlSeconds)}
+        </div>
+      ) : null}
+
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {currentMessages.map((message) => {
           const isMe = message.senderId === user?.id;
+          if (message.type === 'system') {
+            // A notice about the thread itself (the timer changed), not a
+            // message from either person, so it sits between the bubbles.
+            return (
+              <div key={message.id} className="flex justify-center">
+                <span className="max-w-[85%] rounded-full bg-slate-200/70 px-3 py-1 text-center text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {message.content}
+                </span>
+              </div>
+            );
+          }
           return (
             <div key={message.id} className={`flex group ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex items-center gap-1 max-w-[80%] ${isMe ? 'flex-row' : 'flex-row-reverse'}`}>
@@ -371,6 +402,16 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                     }`}
                   >
                     <span>{format(new Date(message.createdAt), 'h:mm a')}</span>
+                    {message.expiresAt && (
+                      <span
+                        className="inline-flex items-center gap-0.5"
+                        title={`Disappears in ${timeUntil(message.expiresAt)}`}
+                        aria-label={`Disappears in ${timeUntil(message.expiresAt)}`}
+                      >
+                        <Timer className="w-3 h-3" />
+                        {timeUntil(message.expiresAt)}
+                      </span>
+                    )}
                     {isMe && <DeliveryStatus status={message.status} />}
                   </div>
 

@@ -17,6 +17,7 @@ import {
   Loader2,
   Settings,
   Upload,
+  Radio,
   User,
   Users,
   Video,
@@ -292,9 +293,12 @@ export default function CreatorDashboardPage() {
                 <option value="90d">Last 90 days</option>
                 <option value="all">All available</option>
               </select>
-              {/* "Go Live" used to sit here with no handler and no streaming
-                  backend behind it. A button that promises something the
-                  platform cannot do is worse than no button. */}
+              <Button asChild variant="outline">
+                <Link href="/dashboard/live">
+                  <Radio className="w-4 h-4 mr-2" />
+                  Go live
+                </Link>
+              </Button>
               <Button asChild>
                 <Link href="/dashboard/creator-studio">
                   <Upload className="w-4 h-4 mr-2" />

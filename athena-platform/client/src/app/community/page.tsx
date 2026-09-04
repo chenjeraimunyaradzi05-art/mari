@@ -20,6 +20,7 @@ import { channelApi } from '@/lib/api-extensions';
 import { mediaApi } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
 import { socketClient } from '@/lib/socket';
+import { useSocket } from '@/lib/hooks/use-socket';
 
 /**
  * Community channels.
@@ -109,6 +110,7 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
 
 export default function CommunityPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { socket, connected: socketConnected } = useSocket();
   const currentUserId = user?.id ?? '';
 
   const [channels, setChannels] = useState<ApiChannel[]>([]);
@@ -246,11 +248,10 @@ export default function CommunityPage() {
     return () => clearInterval(timer);
   }, [activeChannelId]);
 
-  // Live delivery through the channel room.
+  // Live delivery through the channel room. Keyed on the socket instance and
+  // its connection so a replaced or reconnected socket re-joins the room.
   useEffect(() => {
-    if (!activeChannelId || authLoading) return;
-    const socket = socketClient.getSocket();
-    if (!socket) return;
+    if (!activeChannelId || authLoading || !socket || !socketConnected) return;
 
     const onMessage = (payload: { channelId?: string; message?: ApiMessage }) => {
       if (payload?.channelId !== activeChannelId || !payload.message) return;
@@ -285,9 +286,9 @@ export default function CommunityPage() {
       socket.off('channels:message', onMessage);
       socket.off('channels:user_typing', onTyping);
       socket.off('channels:user_stopped_typing', onStoppedTyping);
-      socket.emit('channels:leave', activeChannelId);
+      if (socket.connected) socket.emit('channels:leave', activeChannelId);
     };
-  }, [activeChannelId, authLoading, isAuthenticated, currentUserId]);
+  }, [activeChannelId, authLoading, socket, socketConnected, currentUserId]);
 
   // Typing indicators expire on their own if the stop event never arrives.
   useEffect(() => {

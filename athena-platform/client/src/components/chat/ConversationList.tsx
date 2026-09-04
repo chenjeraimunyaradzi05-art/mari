@@ -20,8 +20,10 @@ export default function ConversationList() {
         lastMessage?: { senderId: string; content: string; createdAt: string };
         unreadCount: number;
         updatedAt: string;
+        disappearingTtlSeconds?: number | null;
       }) => ({
         id: c.id,
+        disappearingTtlSeconds: c.disappearingTtlSeconds ?? null,
         participants: [c.participant].map(p => ({
           id: p.id,
           name: `${p.firstName} ${p.lastName}`,

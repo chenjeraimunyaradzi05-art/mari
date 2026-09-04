@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Bell,
   Bookmark,
+  Radio,
   Settings,
   Menu,
   X,
@@ -44,6 +45,7 @@ const modeNavigation: Record<AppMode, NavigationItem[]> = {
     { name: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
     { name: 'Saved', href: '/dashboard/saved', icon: Bookmark },
     { name: 'Creator Studio', href: '/dashboard/creator-studio', icon: PenSquare },
+    { name: 'Go Live', href: '/dashboard/live', icon: Radio },
     { name: 'AI Tools', href: '/dashboard/ai', icon: Sparkles },
   ],
   professional: [
