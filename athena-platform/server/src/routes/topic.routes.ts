@@ -107,6 +107,29 @@ router.get('/me/following', authenticate, async (req: AuthRequest, res, next) =>
   }
 });
 
+/**
+ * GET /api/topics/suggest?q=lead
+ * The composer's # autocomplete: topics in use over the last 30 days that
+ * start with what was typed, busiest first. An empty query gives the busiest.
+ */
+router.get('/suggest', optionalAuth, async (req, res, next) => {
+  try {
+    const q = normalizeTag(req.query.q).slice(0, 40);
+    const topics = await trendingTopics(30, 200);
+    const matches = topics
+      .filter((t) => (q ? t.tag.startsWith(q) : true))
+      .slice(0, 8)
+      .map((t) => ({ tag: t.tag, count: t.posts + t.videos }));
+    // What was typed is always a valid new topic, offered when nothing matches it exactly.
+    if (q.length >= 2 && !matches.some((m) => m.tag === q)) {
+      matches.push({ tag: q, count: 0 });
+    }
+    res.json({ success: true, data: matches.slice(0, 8) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:tag', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const tag = normalizeTag(req.params.tag);

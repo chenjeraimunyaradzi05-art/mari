@@ -3,7 +3,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    status: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
+    status: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
     statusView: { findMany: jest.fn(async () => []), findUnique: jest.fn(), create: jest.fn() },
     $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
   },
@@ -72,7 +72,7 @@ describe('Stories: seen state and views', () => {
   });
 
   it('a view is recorded once per viewer and never for the author', async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: 's1', userId: 'u-a', expiresAt: new Date(Date.now() + 1000), viewCount: 2 });
+    prisma.status.findFirst.mockResolvedValue({ id: 's1', userId: 'u-a', expiresAt: new Date(Date.now() + 1000), viewCount: 2 });
     prisma.statusView.findUnique.mockResolvedValue(null);
     prisma.statusView.create.mockResolvedValue({});
     prisma.status.update.mockResolvedValue({ viewCount: 3 });

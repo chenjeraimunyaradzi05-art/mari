@@ -18,6 +18,7 @@ import {
 } from '../services/direct-message.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { isBlockedRelationship } from '../utils/safety-store';
+import { canOpenConversation } from '../services/message-permissions.service';
 import {
   conversationTtl,
   expiryFor,
@@ -258,6 +259,13 @@ router.post(
       // Neither side of a block gets to open a thread with the other.
       if (await isBlockedRelationship(myUserId, targetUserId)) {
         throw new ApiError(403, 'You cannot message this user');
+      }
+
+      // "Who can message me": a thread that already exists stays open; a new
+      // one respects the other member's choice.
+      const verdict = await canOpenConversation(myUserId, targetUserId);
+      if (!verdict.allowed) {
+        throw new ApiError(403, verdict.reason);
       }
 
       const conversation = await getOrCreateDirectConversation(myUserId, targetUserId);

@@ -21,6 +21,21 @@ type StoryType = 'image' | 'video';
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 const CAPTION_MAX = 200;
 
+/**
+ * Which stories a viewer may see: everyone's public ones, their own, and the
+ * close-friends stories of members who put them on their list.
+ */
+export function closeFriendsAudienceWhere(viewerId?: string) {
+  if (!viewerId) return { audience: 'EVERYONE' as const };
+  return {
+    OR: [
+      { audience: 'EVERYONE' as const },
+      { userId: viewerId },
+      { audience: 'CLOSE_FRIENDS' as const, user: { closeFriends: { some: { friendId: viewerId } } } },
+    ],
+  };
+}
+
 function normalizeStoryType(value: unknown): StoryType {
   return value === 'video' ? 'video' : 'image';
 }
@@ -35,6 +50,7 @@ function storyView(story: {
   type: string;
   mediaUrl: string;
   caption: string | null;
+  audience?: string;
   viewCount: number;
   createdAt: Date;
   expiresAt: Date;
@@ -45,6 +61,7 @@ function storyView(story: {
     type: story.type === 'VIDEO' ? 'video' : 'image',
     mediaUrl: story.mediaUrl,
     caption: story.caption,
+    audience: story.audience === 'CLOSE_FRIENDS' ? 'close_friends' : 'everyone',
     createdAt: story.createdAt.toISOString(),
     expiresAt: story.expiresAt.toISOString(),
     viewed: options.viewed,
@@ -64,7 +81,8 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const viewerId = req.user?.id;
 
     const stories = await prisma.status.findMany({
-      where: { expiresAt: { gt: now } },
+      // Close-friends stories reach the author's list and the author.
+      where: { expiresAt: { gt: now }, ...closeFriendsAudienceWhere(viewerId) },
       include: {
         user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } },
       },
@@ -132,6 +150,7 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
       maxLength: CAPTION_MAX,
       allowEmpty: true,
     });
+    const audience = req.body?.audience === 'close_friends' ? 'CLOSE_FRIENDS' : 'EVERYONE';
 
     const created = await prisma.status.create({
       data: {
@@ -139,6 +158,7 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
         type: type === 'video' ? 'VIDEO' : 'IMAGE',
         mediaUrl,
         caption: caption || null,
+        audience,
         expiresAt: new Date(Date.now() + STORY_TTL_MS),
       },
     });
@@ -155,8 +175,8 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
  */
 router.post('/:id/view', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const story = await prisma.status.findUnique({
-      where: { id: req.params.id },
+    const story = await prisma.status.findFirst({
+      where: { id: req.params.id, ...closeFriendsAudienceWhere(req.user!.id) },
       select: { id: true, userId: true, expiresAt: true, viewCount: true },
     });
     if (!story || story.expiresAt.getTime() <= Date.now()) throw new ApiError(404, 'Story not found');
