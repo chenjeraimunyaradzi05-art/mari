@@ -1,6 +1,6 @@
 # Athena Production Deployment Guide
 
-> **Current deployment:** Railway (backend) + Netlify (frontend).
+> **Current deployment:** Netlify (web) + Neon (database) + an always-on Node host for the API.
 > See [DEPLOY.md](../../../athena-platform/DEPLOY.md) for the quick-start guide.
 > This document covers additional deployment options and production hardening.
 
@@ -13,7 +13,8 @@
 cd server
 
 # Set production DATABASE_URL
-export DATABASE_URL="postgresql://username:password@your-host:5432/athena_production?schema=public&sslmode=require"
+# The Neon DIRECT (unpooled) endpoint — migrations cannot run through the pooler. See NEON_SETUP.md.
+export DATABASE_URL="$DIRECT_DATABASE_URL"
 
 # Run migrations
 npx prisma migrate deploy
@@ -116,19 +117,19 @@ npm run build
 pm2 start npm --name athena-web -- start
 ```
 
-**Option C: Netlify + Railway (Current)**
+**Option C: Netlify + Neon + API host (Current)**
 - Client: Deploy to Netlify (connect GitHub repo, base dir `athena-platform/client`)
-- Server: Deploy to Railway (connect GitHub repo, root dir `athena-platform/server`)
-- Database: Railway PostgreSQL (auto-managed `DATABASE_URL`)
-- Migrations run automatically on deploy via `start.ts` → `prisma migrate deploy`
+- Server: Deploy to an always-on Node host (root dir `athena-platform/server`, Dockerfile or `npm ci && npm run build`, start `node dist/start.js`)
+- Database: Neon PostgreSQL — pooled `DATABASE_URL` at runtime, direct `DIRECT_DATABASE_URL` for migrations (see [NEON_SETUP.md](../../../NEON_SETUP.md))
+- Migrations run automatically on deploy via `start.ts` → `prisma migrate deploy`, and from the "Build and Deploy" workflow
 
 ### Step 6: Verify Deployment
 
 ```bash
 # Check health endpoints
-curl https://mari-production-5c60.up.railway.app/health
-curl https://mari-production-5c60.up.railway.app/readyz
-curl https://mari-production-5c60.up.railway.app/health/auth-diag
+curl https://api.your-domain.com/health
+curl https://api.your-domain.com/readyz
+curl https://api.your-domain.com/health/auth-diag
 
 # Check frontend
 curl https://athena-empress.netlify.app
@@ -152,10 +153,10 @@ curl https://athena-empress.netlify.app
 ## 📊 Post-Launch Monitoring
 
 1. **Sentry**: Check for errors at [sentry.io](https://sentry.io)
-2. **Railway Logs**: View API logs in Railway Dashboard → Service → Logs
+2. **API host logs**: View API logs in the host's dashboard; `start.ts` prints boot and migration output
 3. **Netlify Deploys**: Check build logs in Netlify Dashboard → Deploys
 4. **Stripe**: Monitor payments at [dashboard.stripe.com](https://dashboard.stripe.com)
-5. **Database**: Monitor connections via Railway PostgreSQL metrics
+5. **Database**: Monitor connections, compute and storage in the Neon console → Monitoring
 6. **Auth Diagnostics**: `GET /health/auth-diag` (12-point auth flow check)
 
 ---

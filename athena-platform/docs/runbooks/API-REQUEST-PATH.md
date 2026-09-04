@@ -4,7 +4,7 @@
 under `client/src/app/api/`.**
 
 The client's axios instance uses `baseURL = '/api'`, so every call goes to the
-**Next.js origin**, not to Railway. What forwards it to the backend differs
+**Next.js origin**, not to the API host. What forwards it to the backend differs
 between local development and production, and that difference has already
 shipped one class of bug.
 
@@ -24,7 +24,7 @@ On Netlify, both `middleware.ts` and `next.config.js` deliberately skip their
 rewrites (`if (process.env.NETLIFY) return []`). Nothing in `netlify.toml` or
 `public/_redirects` proxies `/api/*` either — a rule in those files cannot read
 an environment variable, so proxying from there would mean hardcoding the
-Railway host in two more places. The route handlers do the work instead.
+API host in two more places. The route handlers do the work instead.
 
 **So the route handlers are dead code locally and load-bearing in production.**
 That asymmetry is the whole hazard.

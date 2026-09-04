@@ -1,6 +1,6 @@
 # API Overview
 
-**Base URL:** `https://mari-production-5c60.up.railway.app`  
+**Base URL:** the API host's public URL — `NEXT_PUBLIC_API_URL` on the web tier, written as `https://api.your-domain.com` below  
 **Stack:** Express + TypeScript + Prisma ORM + PostgreSQL  
 **Auth:** JWT Bearer tokens (access) + HttpOnly cookies (refresh)
 

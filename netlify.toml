@@ -19,7 +19,7 @@
   NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
   # Set NEXT_PUBLIC_API_URL in Netlify Dashboard Environment Variables
-  # Example: NEXT_PUBLIC_API_URL = "https://server-production-1849.up.railway.app"
+  # Example: NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
 
 # Enable Next.js runtime - REQUIRED for Next.js 14 on Netlify
 [[plugins]]
@@ -28,7 +28,7 @@
 # No /api/* or /uploads/* redirect rules here on purpose.
 #
 # Redirects in this file cannot read environment variables, so proxying to the
-# backend from here would mean hardcoding the Railway host. Both paths are
+# backend from here would mean hardcoding the API host. Both paths are
 # proxied in-app instead, reading NEXT_PUBLIC_API_URL at request time:
 #
 #   /api/auth/*   app/api/auth/*        (forwards Set-Cookie itself)

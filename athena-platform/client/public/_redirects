@@ -4,7 +4,7 @@
 # Intentionally empty of /api/* and /uploads/* rules.
 #
 # A rule here cannot read environment variables, so proxying to the backend
-# from this file would mean hardcoding the Railway host and changing it in two
+# from this file would mean hardcoding the API host and changing it in two
 # places on every environment move. Both paths are proxied in-app instead,
 # reading NEXT_PUBLIC_API_URL at request time:
 #

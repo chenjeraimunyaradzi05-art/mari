@@ -255,8 +255,7 @@ Assessment:
 - `athena-platform/README.md`
 - `athena-platform/docs/runbooks/ONCALL.md`
 - `athena-platform/docs/compliance/GDPR_COMPLIANCE_CHECKLIST.md`
-- `api/README.md`
-- `web/README.md`
+- api/README.md and web/README.md (Railway root-directory stubs; removed together with Railway, September 2026)
 
 These are generally useful and grounded in real files, though some line references or environment assumptions may still age.
 
@@ -409,8 +408,7 @@ The platform is best described as:
 
 ### Deployment stub docs
 
-- `api/README.md`
-- `web/README.md`
+- api/README.md and web/README.md (Railway root-directory stubs; removed together with Railway, September 2026)
 
 ### Monorepo top-level docs
 

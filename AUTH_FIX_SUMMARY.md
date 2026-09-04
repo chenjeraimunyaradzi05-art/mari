@@ -357,24 +357,24 @@ npm test 2>&1 | grep -A5 "auth"
 ## Current Auth Architecture
 
 ```
-Browser → Netlify (Next.js) → Railway (Express API)
+Browser → Netlify (Next.js) → API host (Express API) → Neon (PostgreSQL)
 
 1. Login/Register:
    Browser POST /api/auth/login
    → Next.js API route handler (client/src/app/api/auth/login/route.ts)
-   → Forwards to Railway backend
+   → Forwards to the API host
    → Backend returns accessToken in JSON body + refreshToken as HttpOnly cookie
    → API route handler forwards Set-Cookie header to browser
    → Client stores accessToken in-memory only (NOT localStorage)
 
 2. Authenticated requests:
    Browser GET /api/users/me
-   → Netlify middleware rewrites to Railway (edge function)
+   → Proxied to the API host (route handler on Netlify, middleware rewrite locally)
    → Authorization: Bearer <accessToken> header forwarded
 
 3. Token refresh:
    Browser POST /api/auth/refresh (with HttpOnly cookie)
-   → Next.js API route handler forwards cookie to Railway
+   → Next.js API route handler forwards cookie to the API host
    → Backend validates refreshToken, issues new accessToken + rotates cookie
    → API route handler forwards new Set-Cookie to browser
 ```
@@ -389,6 +389,6 @@ Browser → Netlify (Next.js) → Railway (Express API)
 
 ## Database
 
-**Current:** PostgreSQL 16 on Railway (auto-managed `DATABASE_URL`)
+**Current:** PostgreSQL 16 on Neon (pooled `DATABASE_URL` at runtime, direct `DIRECT_DATABASE_URL` for migrations)
 **Migrations:** Run automatically on deploy via `start.ts` → `prisma migrate deploy`
 

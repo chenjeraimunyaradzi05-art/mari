@@ -27,7 +27,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ── API Proxy ────────────────────────────────────────────────────
-  // Rewrite /api/* and /uploads/* to the Railway backend.
+  // Rewrite /api/* and /uploads/* to the API host at NEXT_PUBLIC_API_URL.
   // Running in middleware (Edge Function on Netlify) ensures this
   // executes before any redirect rules or serverless functions.
   //

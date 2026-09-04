@@ -22,10 +22,9 @@
   # REQUIRED — set in Netlify Dashboard → Site Settings → Environment Variables:
   #   NEXT_PUBLIC_API_URL = "https://api.your-domain.com"
   #   NEXT_PUBLIC_APP_URL = "https://YOUR-APP.netlify.app"
-  # Neon support:
-  #   Netlify Database provisions NETLIFY_DB_URL automatically when @netlify/database is installed.
-  #   Existing Neon deployments can provide NEON_DATABASE_URL / NEON_DIRECT_DATABASE_URL.
-  #   The build wrapper maps these values to DATABASE_URL / DIRECT_DATABASE_URL before Next builds.
+  # No database variables here. The web tier never opens a database
+  # connection: every /api request is proxied to the API host, which is the
+  # only thing that holds the Neon DATABASE_URL / DIRECT_DATABASE_URL.
   # -------------------------------------------------------
 
 # Enable Next.js runtime (handles SSR, ISR, API routes, middleware)
@@ -43,7 +42,7 @@
 # app/uploads/[...path] route that actually proxies user media.
 #
 # A redirect in this file cannot read an environment variable, so sending
-# these to the backend from here would mean hardcoding the Railway host.
+# these to the backend from here would mean hardcoding the API host.
 # Both paths are proxied in-app instead, reading NEXT_PUBLIC_API_URL at
 # request time:
 #

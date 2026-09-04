@@ -24,7 +24,7 @@
 
 ### 1.1 Database (PostgreSQL)
 - [ ] **Production Database Provisioned**
-  - Recommended: Neon, Supabase, or AWS RDS
+  - Neon — see [NEON_SETUP.md](../NEON_SETUP.md) for the pooled and direct URLs
   - Ensure `sslmode=require` in connection string
 - [ ] **Run Prisma Migrations**
   ```bash
@@ -48,16 +48,17 @@
 
 ---
 
-## 2. Backend Deployment (Render/Railway)
+## 2. Backend Deployment (API host)
 
 ### 2.1 Environment Variables
-Copy from `.env.production.example` and configure:
+Copy from `.env.production.template` and configure:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `NODE_ENV` | ✅ | Set to `production` |
 | `PORT` | ✅ | Default `5000` |
-| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `DATABASE_URL` | ✅ | Neon pooled connection string |
+| `DIRECT_DATABASE_URL` | ✅ | Neon direct connection string (migrations) |
 | `JWT_SECRET` | ✅ | Min 32 random chars |
 | `JWT_EXPIRES_IN` | ✅ | e.g., `7d` |
 | `REDIS_URL` | ✅ | Redis connection string |

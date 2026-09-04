@@ -1,8 +1,13 @@
 name: Build and Deploy
 
-# The main-branch release pipeline: migrate the database, then push the API and
-# the web app to whichever hosts are configured. Verification lives in CI, which
-# runs on the same commit; nothing is rebuilt here that CI already builds.
+# The main-branch release pipeline: migrate the Neon database, then publish
+# the web app to Netlify. Verification lives in CI, which runs on the same
+# commit; nothing is rebuilt here that CI already builds.
+#
+# The Express API is not deployed from here. Neon hosts the database only, so
+# the API runs on whichever always-on Node host is configured (see
+# DEPLOYMENT_GUIDE.md). A host that builds from GitHub redeploys itself on
+# this same push and reads the same Neon URLs from its own environment.
 
 on:
   push:
@@ -23,17 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       database: ${{ steps.probe.outputs.database }}
-      railway-api: ${{ steps.probe.outputs.railway-api }}
-      railway-web: ${{ steps.probe.outputs.railway-web }}
       netlify: ${{ steps.probe.outputs.netlify }}
     steps:
       - name: Probe deployment credentials
         id: probe
         env:
-          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_API_SERVICE: ${{ secrets.RAILWAY_API_SERVICE }}
-          RAILWAY_WEB_SERVICE: ${{ secrets.RAILWAY_WEB_SERVICE }}
+          # Either secret name works. NEON_DIRECT_DATABASE_URL is the name the
+          # server's own database-url resolver reads; DIRECT_DATABASE_URL is
+          # the generic one Prisma reads. Whichever is set, it must be Neon's
+          # direct (unpooled) endpoint, not the "-pooler" one.
+          DIRECT_DATABASE_URL: ${{ secrets.NEON_DIRECT_DATABASE_URL || secrets.DIRECT_DATABASE_URL }}
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
@@ -45,13 +49,11 @@ jobs:
           }
           {
             echo "database=$(configured "$DIRECT_DATABASE_URL")"
-            echo "railway-api=$(configured "$RAILWAY_TOKEN" "$RAILWAY_API_SERVICE")"
-            echo "railway-web=$(configured "$RAILWAY_TOKEN" "$RAILWAY_WEB_SERVICE")"
             echo "netlify=$(configured "$NETLIFY_AUTH_TOKEN" "$NETLIFY_SITE_ID")"
           } >> "$GITHUB_OUTPUT"
 
   migrate:
-    name: Migrate database
+    name: Migrate Neon database
     runs-on: ubuntu-latest
     needs: preflight
     if: needs.preflight.outputs.database == 'true'
@@ -61,8 +63,8 @@ jobs:
       run:
         working-directory: athena-platform/server
     env:
-      DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
-      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      DATABASE_URL: ${{ secrets.NEON_DIRECT_DATABASE_URL || secrets.DIRECT_DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.NEON_DIRECT_DATABASE_URL || secrets.DIRECT_DATABASE_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +82,12 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      # The pooled connection cannot run DDL, so migrations go through the
-      # direct URL.
+      # Neon's pooled endpoint sits behind PgBouncer in transaction mode, which
+      # cannot run the DDL and advisory locks Prisma migrations need, so this
+      # job is handed the direct endpoint. The pooled URL belongs on the API
+      # host for runtime traffic. `migrate deploy` only applies migration files
+      # and never diffs the live schema — the database is shared, see
+      # athena-platform/docs/runbooks/SHARED-DATABASE-HAZARD.md.
       - name: Deploy migrations
         run: npx prisma migrate deploy
 
@@ -100,63 +106,7 @@ jobs:
 
   # `!cancelled()` rather than `success()`: when no database URL is configured
   # the migrate job is skipped, and a skipped dependency would otherwise skip
-  # every deploy behind it. A failed migration still blocks them.
-  deploy-api:
-    name: Deploy API to Railway
-    runs-on: ubuntu-latest
-    needs: [preflight, migrate]
-    if: ${{ !cancelled() && !failure() && needs.preflight.outputs.railway-api == 'true' }}
-    environment:
-      name: production
-    defaults:
-      run:
-        working-directory: athena-platform/server
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Deploy
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_SERVICE: ${{ secrets.RAILWAY_API_SERVICE }}
-        run: railway up --service "$RAILWAY_SERVICE" --detach
-
-  deploy-web-railway:
-    name: Deploy web to Railway
-    runs-on: ubuntu-latest
-    needs: [preflight, migrate]
-    if: ${{ !cancelled() && !failure() && needs.preflight.outputs.railway-web == 'true' }}
-    environment:
-      name: production
-    defaults:
-      run:
-        working-directory: athena-platform/client
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Deploy
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_SERVICE: ${{ secrets.RAILWAY_WEB_SERVICE }}
-        run: railway up --service "$RAILWAY_SERVICE" --detach
-
+  # the deploy behind it. A failed migration still blocks it.
   deploy-web-netlify:
     name: Deploy web to Netlify
     runs-on: ubuntu-latest

@@ -6,7 +6,7 @@ This guide explains how to deploy the ATHENA web frontend to Netlify.
 ## Prerequisites
 - Netlify account (https://netlify.com)
 - GitHub repository connected
-- Railway API service deployed and running
+- The API deployed on its host and reachable over HTTPS (see [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)); the database is on Neon (see [NEON_SETUP.md](NEON_SETUP.md))
 
 ## Quick Setup
 
@@ -21,16 +21,16 @@ This guide explains how to deploy the ATHENA web frontend to Netlify.
 When configuring the site:
 - **Base directory**: `athena-platform/client`
 - **Build command**: `npm ci --legacy-peer-deps && npm run build`
-- **Publish directory**: leave empty (`@netlify/plugin-nextjs` manages this)
+- **Publish directory**: `.next` (set in `netlify.toml`; it must not equal the base directory)
 - **Functions directory**: Leave empty (Next.js plugin handles this)
 
 ### Step 3: Add Environment Variables
 Go to Site Settings → Environment Variables and add:
 
 ```
-NEXT_PUBLIC_API_URL=https://your-railway-service.up.railway.app
+NEXT_PUBLIC_API_URL=https://api.your-domain.com
 NEXT_PUBLIC_APP_URL=https://your-site.netlify.app
-NEXT_PUBLIC_SOCKET_URL=https://your-railway-service.up.railway.app
+NEXT_PUBLIC_SOCKET_URL=https://api.your-domain.com
 NODE_VERSION=20
 NPM_FLAGS=--legacy-peer-deps
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx (if using Stripe)
@@ -102,7 +102,7 @@ Used when base directory is set in Netlify:
 - Auth requests under `/api/auth/*` are handled by Next.js route handlers so cookies can be forwarded correctly.
 - Non-auth API traffic is handled by the client runtime and backend URL environment configuration.
 - Uploads are served through the Next.js uploads route.
-- Socket.IO should connect directly to Railway using `NEXT_PUBLIC_SOCKET_URL`.
+- Socket.IO connects directly to the API host using `NEXT_PUBLIC_SOCKET_URL` (falls back to `NEXT_PUBLIC_API_URL`).
 
 ## Deployment Options
 
@@ -135,9 +135,9 @@ netlify deploy --prod
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Yes | Railway backend URL (e.g. `https://your-service.up.railway.app`) |
+| `NEXT_PUBLIC_API_URL` | Yes | The API host's public URL (e.g. `https://api.your-domain.com`) |
 | `NEXT_PUBLIC_APP_URL` | Yes | Your Netlify site URL |
-| `NEXT_PUBLIC_SOCKET_URL` | Recommended | Railway realtime origin; defaults to `NEXT_PUBLIC_API_URL` |
+| `NEXT_PUBLIC_SOCKET_URL` | Recommended | The API host's realtime origin; defaults to `NEXT_PUBLIC_API_URL` |
 | `NODE_VERSION` | Yes | Set to `20` |
 | `NPM_FLAGS` | Recommended | Set to `--legacy-peer-deps` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key |

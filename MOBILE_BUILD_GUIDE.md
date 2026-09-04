@@ -3,7 +3,7 @@
 ## Overview
 The ATHENA mobile app is built with Expo/React Native and deployed using EAS Build.
 
-**Important**: Mobile apps CANNOT be deployed on Railway or Netlify. They require:
+**Important**: Mobile apps CANNOT be deployed on Netlify or the API host. They require:
 - **EAS Build** for building APK/IPA files
 - **App Store** for iOS distribution  
 - **Google Play Store** for Android distribution
@@ -131,7 +131,7 @@ Set in `eas.json` under each profile's `env` section:
 
 | Variable | Description |
 |----------|-------------|
-| `API_URL` | Backend API URL (Railway) |
+| `API_URL` | Backend API URL (the API host's public URL) |
 | `APP_VARIANT` | development/preview/staging/production |
 
 For sensitive values, use EAS Secrets:

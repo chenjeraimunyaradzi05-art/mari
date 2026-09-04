@@ -158,20 +158,26 @@ npm run e2e
 
 ## 🚢 Deployment
 
-### Backend (Railway)
+### Database (Neon)
 
-1. Connect your GitHub repository
+Serverless PostgreSQL. Two connection strings: the pooled one in `DATABASE_URL`
+for runtime, the direct one in `DIRECT_DATABASE_URL` for migrations. Setup in
+[NEON_SETUP.md](../NEON_SETUP.md).
+
+### Backend (API host)
+
+1. Any always-on Node 20 host that builds from GitHub (Railway is no longer used)
 2. Set root directory to `athena-platform/server`
-3. Railway auto-detects `Dockerfile` / `nixpacks.toml`
-4. Entry point: `node dist/start.js` (runs Prisma migrations then boots server)
-5. Add environment variables from `server/.env.railway`
+3. Build with the `Dockerfile`, or `npm ci && npm run build`
+4. Entry point: `node dist/start.js` (runs Prisma migrations against Neon, then boots the server)
+5. Add environment variables from `server/.env.production.template`
 
 ### Frontend (Netlify)
 
 1. Connect your GitHub repository
 2. Set base directory to `athena-platform/client`
 3. `@netlify/plugin-nextjs` handles SSR, API routes, and middleware automatically
-4. Add environment variables: `NEXT_PUBLIC_API_URL` = Railway backend URL
+4. Add environment variables: `NEXT_PUBLIC_API_URL` = the API host's public URL
 
 See [DEPLOY.md](./DEPLOY.md) for the complete deployment guide.
 
