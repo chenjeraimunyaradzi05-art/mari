@@ -24,18 +24,20 @@ import {
 import {
   useFeed,
   useCreatePost,
-  useLikePost,
-  useUnlikePost,
   useSavePost,
   useUnsavePost,
   useAuth,
 } from '@/lib/hooks';
+import { useReactToPost } from '@/lib/social-hooks';
 import toast from 'react-hot-toast';
 import StoriesStrip from '@/components/community/StoriesStrip';
+import { ReactionButton, ReactionSummary, type ReactionCounts } from '@/components/community/ReactionBar';
+import { PollCard, type PollResults } from '@/components/community/PollCard';
+import { WhyThis } from '@/components/community/WhyThis';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
-import { mediaApi, safetyApi } from '@/lib/api';
+import { mediaApi, safetyApi, type ReactionType } from '@/lib/api';
 
 type FeedFilter = 'latest' | 'trending' | 'following';
 
@@ -70,6 +72,11 @@ interface Post {
   // Returned per post by GET /posts/feed for a signed-in viewer, so the
   // bookmark shows the right state on first paint rather than after a toggle.
   isSaved?: boolean;
+  myReaction?: ReactionType | null;
+  reactionCounts?: ReactionCounts;
+  poll?: PollResults | null;
+  reasons?: string[];
+  isPinned?: boolean;
   _count?: {
     likes: number;
     comments: number;
@@ -104,19 +111,23 @@ function authorInitials(author: Post['author']): string {
 }
 
 function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string }) {
-  const likePost = useLikePost();
-  const unlikePost = useUnlikePost();
+  const react = useReactToPost();
   const savePost = useSavePost();
   const unsavePost = useUnsavePost();
-  // The API returns isLiked and likeCount directly; the likes[]/_count shapes
-  // are kept as fallbacks for any caller still passing them.
-  const [isLiked, setIsLiked] = useState(
-    post.isLiked ?? post.likes?.some((like) => like.userId === currentUserId) ?? false
+  // The API returns myReaction and reactionCounts; isLiked/likeCount and the
+  // older likes[]/_count shapes are kept as fallbacks.
+  const [reaction, setReaction] = useState<ReactionType | null>(
+    post.myReaction ??
+      ((post.isLiked ?? post.likes?.some((like) => like.userId === currentUserId)) ? 'LIKE' : null)
   );
-  const [likeCount, setLikeCount] = useState(post.likeCount ?? post._count?.likes ?? 0);
+  const [counts, setCounts] = useState<ReactionCounts>(() => {
+    const total = post.likeCount ?? post._count?.likes ?? 0;
+    return post.reactionCounts ?? (total ? { LIKE: total } : {});
+  });
   const [isSaved, setIsSaved] = useState(post.isSaved ?? false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reported, setReported] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const mediaUrls = (post.mediaUrls ?? []).filter(
     (url): url is string => typeof url === 'string' && url.length > 0
@@ -126,16 +137,23 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
     setIsHydrated(true);
   }, []);
 
-  const handleLike = async () => {
-    if (isLiked) {
-      setIsLiked(false);
-      setLikeCount(prev => prev - 1);
-      unlikePost.mutate(post.id);
-    } else {
-      setIsLiked(true);
-      setLikeCount(prev => prev + 1);
-      likePost.mutate(post.id);
-    }
+  const changeReaction = (next: ReactionType | null) => {
+    const previous = reaction;
+    const previousCounts = counts;
+    const updated: ReactionCounts = { ...counts };
+    if (previous) updated[previous] = Math.max(0, (updated[previous] ?? 0) - 1);
+    if (next) updated[next] = (updated[next] ?? 0) + 1;
+    setReaction(next);
+    setCounts(updated);
+    react.mutate(
+      { postId: post.id, type: next },
+      {
+        onError: () => {
+          setReaction(previous);
+          setCounts(previousCounts);
+        },
+      }
+    );
   };
 
   // Optimistic like the heart, and rolled back if the request fails so the
@@ -194,8 +212,15 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
     }
   };
 
+  if (hidden) return null;
+
   return (
     <article className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition">
+      {post.type === 'WIN' && (
+        <p className="mb-3 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          🏆 Win
+        </p>
+      )}
       {/* Author */}
       <div className="flex items-start justify-between mb-4">
         <Link href={`/profile/${post.author.id}`} className="flex items-center gap-3">
@@ -282,6 +307,12 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
         {renderSocialText(post.content)}
       </div>
 
+      {post.poll && (
+        <div className="mb-4">
+          <PollCard postId={post.id} poll={post.poll} canVote={Boolean(currentUserId)} />
+        </div>
+      )}
+
       {/* Media. The API returns mediaUrls: string[] alongside a post type; an
           earlier shape (post.media) never existed on the wire, so image posts
           rendered without their image. Plain <img> keeps one bad URL from
@@ -317,27 +348,23 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       )}
 
       {/* Stats */}
-      <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 py-2 border-t border-b border-slate-100 dark:border-slate-700">
-        <span>{likeCount} likes</span>
-        <span>{post.commentCount ?? post._count?.comments ?? 0} comments</span>
+      <div className="flex items-center justify-between gap-2 text-sm text-slate-500 dark:text-slate-400 py-2 border-t border-b border-slate-100 dark:border-slate-700">
+        <ReactionSummary counts={counts} className="text-sm" />
+        <div className="flex items-center gap-3">
+          <WhyThis
+            reasons={post.reasons}
+            authorId={post.author.id}
+            authorName={authorName(post.author)}
+            isOwn={post.author.id === currentUserId}
+            onHidden={() => setHidden(true)}
+          />
+          <span>{post.commentCount ?? post._count?.comments ?? 0} comments</span>
+        </div>
       </div>
 
       {/* Actions */}
       <div className="flex items-center justify-between pt-3">
-        <button 
-          onClick={handleLike}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-            isLiked 
-              ? 'text-red-500 bg-red-50 dark:bg-red-900/20' 
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-          }`}
-        >
-          <Heart
-            key={String(isLiked)}
-            className={cn('w-5 h-5', isLiked && 'fill-current animate-heart-pop')}
-          />
-          Like
-        </button>
+        <ReactionButton value={reaction} onChange={changeReaction} disabled={!currentUserId} />
         <Link 
           href={`/posts/${post.id}`}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"

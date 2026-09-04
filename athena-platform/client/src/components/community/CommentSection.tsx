@@ -1,10 +1,16 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { usePost, useCommentOnPost, useAuthStore } from '@/lib/hooks';
+import { useToggleCommentLike } from '@/lib/social-hooks';
 import { formatDistanceToNow } from 'date-fns';
 import { Avatar } from '@/components/ui/avatar';
-import { Send, Loader2 } from 'lucide-react';
+import { Heart, Send, Loader2 } from 'lucide-react';
+import { renderSocialText } from '@/lib/social-text';
+import { serializeMentions, type MentionPick } from '@/lib/mentions';
+import { MentionTextarea } from './MentionTextarea';
+import { cn } from '@/lib/utils';
 
 interface CommentSectionProps {
   postId: string;
@@ -29,29 +35,58 @@ type PostComment = {
   author: CommentAuthor;
   parentId?: string | null;
   replies?: PostComment[];
+  likeCount?: number;
+  isLiked?: boolean;
 };
 
 export default function CommentSection({ postId }: CommentSectionProps) {
   const { data: post, isLoading } = usePost(postId);
   const addComment = useCommentOnPost();
+  const toggleLike = useToggleCommentLike();
   const { user } = useAuthStore();
   const [content, setContent] = useState('');
+  const [picks, setPicks] = useState<MentionPick[]>([]);
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
+  // Optimistic like state per comment, keyed by id, on top of what the API said.
+  const [likes, setLikes] = useState<Record<string, { liked: boolean; count: number }>>({});
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = () => {
     if (!content.trim()) return;
 
     // A reply is threaded by parentId. Replies to replies attach to the same
     // top-level comment, which keeps the thread one level deep on screen.
     addComment.mutate(
-      { postId, content, parentId: replyTo ? replyTo.parentId || replyTo.id : undefined },
+      {
+        postId,
+        content: serializeMentions(content.trim(), picks),
+        parentId: replyTo ? replyTo.parentId || replyTo.id : undefined,
+      },
       {
         onSuccess: () => {
           setContent('');
+          setPicks([]);
           setReplyTo(null);
         },
       }
+    );
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submit();
+  };
+
+  const likeStateOf = (comment: PostComment) =>
+    likes[comment.id] ?? { liked: Boolean(comment.isLiked), count: comment.likeCount ?? 0 };
+
+  const toggle = (comment: PostComment) => {
+    if (!user) return;
+    const current = likeStateOf(comment);
+    const next = { liked: !current.liked, count: Math.max(0, current.count + (current.liked ? -1 : 1)) };
+    setLikes((prev) => ({ ...prev, [comment.id]: next }));
+    toggleLike.mutate(
+      { postId, commentId: comment.id, liked: current.liked },
+      { onError: () => setLikes((prev) => ({ ...prev, [comment.id]: current })) }
     );
   };
 
@@ -76,6 +111,14 @@ export default function CommentSection({ postId }: CommentSectionProps) {
       map.set(comment.id, { ...comment, replies: [] });
     });
 
+    // Replies arrive nested on their parent from the API; flatten so a reply
+    // that also came as a top-level row is not shown twice.
+    items.forEach((comment) => {
+      (comment.replies ?? []).forEach((reply) => {
+        if (!map.has(reply.id)) map.set(reply.id, { ...reply, replies: [] });
+      });
+    });
+
     map.forEach((comment) => {
       if (comment.parentId) {
         const parent = map.get(comment.parentId);
@@ -93,54 +136,70 @@ export default function CommentSection({ postId }: CommentSectionProps) {
 
   const threadedComments = buildThread(comments);
 
-  const CommentItem = ({ comment, depth = 0 }: { comment: PostComment; depth?: number }) => (
-    <div className="flex gap-3" style={{ marginLeft: depth * 20 }}>
-      <Avatar 
-        src={comment.author.avatar || undefined} 
-        fallback={comment.author.firstName?.[0] ?? '?'}
-        size="sm"
-      />
-      <div className="flex-1">
-        <div className="bg-white dark:bg-slate-900 p-3 rounded-lg rounded-tl-none shadow-sm border border-slate-100 dark:border-slate-800">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm font-semibold text-slate-900 dark:text-white">
-              {commentAuthorName(comment.author)}
-            </span>
-            <span className="text-xs text-slate-500">
-              {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
-            </span>
+  const CommentItem = ({ comment, depth = 0 }: { comment: PostComment; depth?: number }) => {
+    const state = likeStateOf(comment);
+    return (
+      <div className="flex gap-3" style={{ marginLeft: depth * 20 }}>
+        <Link href={comment.author.id ? `/profile/${comment.author.id}` : '#'} className="flex-shrink-0">
+          <Avatar
+            src={comment.author.avatar || undefined}
+            fallback={comment.author.firstName?.[0] ?? '?'}
+            size="sm"
+          />
+        </Link>
+        <div className="flex-1">
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-lg rounded-tl-none shadow-sm border border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between mb-1">
+              <Link
+                href={comment.author.id ? `/profile/${comment.author.id}` : '#'}
+                className="text-sm font-semibold text-slate-900 dark:text-white hover:underline"
+              >
+                {commentAuthorName(comment.author)}
+              </Link>
+              <span className="text-xs text-slate-500">
+                {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
+              </span>
+            </div>
+            <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">
+              {renderSocialText(comment.content)}
+            </p>
           </div>
-          <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{comment.content}</p>
-        </div>
-        <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
-          <button
-            className="hover:text-purple-600"
-            onClick={() => setReplyTo(comment)}
-          >
-            Reply
-          </button>
-        </div>
-        {comment.replies && comment.replies.length > 0 && (
-          <div className="mt-3 space-y-3">
-            {comment.replies.map((reply) => (
-              <CommentItem key={reply.id} comment={reply} depth={depth + 1} />
-            ))}
+          <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
+            <button
+              type="button"
+              onClick={() => toggle(comment)}
+              disabled={!user}
+              aria-pressed={state.liked}
+              aria-label={state.liked ? 'Unlike comment' : 'Like comment'}
+              className={cn('inline-flex items-center gap-1 hover:text-rose-600', state.liked && 'text-rose-600')}
+            >
+              <Heart className={cn('h-3.5 w-3.5', state.liked && 'fill-current')} />
+              {state.count > 0 && <span>{state.count}</span>}
+            </button>
+            {user && (
+              <button className="hover:text-purple-600" onClick={() => setReplyTo(comment)}>
+                Reply
+              </button>
+            )}
           </div>
-        )}
+          {comment.replies && comment.replies.length > 0 && (
+            <div className="mt-3 space-y-3">
+              {comment.replies.map((reply) => (
+                <CommentItem key={reply.id} comment={reply} depth={depth + 1} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
-    <div className="border-t border-slate-100 bg-slate-50 p-4 space-y-4">
+    <div className="border-t border-slate-100 bg-slate-50 p-4 space-y-4 dark:border-slate-800 dark:bg-slate-900/40">
       {/* Input */}
       {user && (
         <form onSubmit={handleSubmit} className="flex gap-3">
-          <Avatar 
-             src={user.avatar || undefined} 
-             fallback={user.firstName[0]} 
-             size="sm"
-          />
+          <Avatar src={user.avatar || undefined} fallback={user.firstName[0]} size="sm" />
           <div className="flex-1 relative">
             {replyTo && (
               <div className="text-xs text-slate-500 mb-1 flex items-center gap-2">
@@ -150,20 +209,25 @@ export default function CommentSection({ postId }: CommentSectionProps) {
                 </button>
               </div>
             )}
-            <input
-              type="text"
+            <MentionTextarea
+              singleLine
               value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder={replyTo ? `Reply to ${commentAuthorName(replyTo.author)}...` : 'Add a comment...'}
-              className="w-full px-4 py-2 pr-10 rounded-full border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+              onChange={setContent}
+              picks={picks}
+              onPicksChange={setPicks}
+              onSubmitShortcut={submit}
+              placeholder={replyTo ? `Reply to ${commentAuthorName(replyTo.author)}...` : 'Add a comment... @ to mention someone'}
+              maxLength={2000}
               disabled={addComment.isPending}
+              className="w-full px-4 py-2 pr-10 rounded-full border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             />
             <button
-               type="submit"
-               disabled={!content.trim() || addComment.isPending}
-               className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-purple-600 disabled:opacity-50"
+              type="submit"
+              disabled={!content.trim() || addComment.isPending}
+              className="absolute right-2 top-2 text-slate-400 hover:text-purple-600 disabled:opacity-50"
+              aria-label="Post comment"
             >
-                <Send className="w-4 h-4" />
+              <Send className="w-4 h-4" />
             </button>
           </div>
         </form>
@@ -172,11 +236,9 @@ export default function CommentSection({ postId }: CommentSectionProps) {
       {/* List */}
       <div className="space-y-4">
         {threadedComments.length === 0 ? (
-           <p className="text-center text-sm text-slate-500 py-2">No comments yet. Be the first!</p>
+          <p className="text-center text-sm text-slate-500 py-2">No comments yet. Be the first!</p>
         ) : (
-          threadedComments.map((comment) => (
-            <CommentItem key={comment.id} comment={comment} />
-          ))
+          threadedComments.map((comment) => <CommentItem key={comment.id} comment={comment} />)
         )}
       </div>
     </div>

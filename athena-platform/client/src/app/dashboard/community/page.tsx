@@ -31,6 +31,17 @@ const tabs = [
 
 type TabId = (typeof tabs)[number]['id'];
 
+// Slices of the feed by kind of post. Wins and polls are the two the
+// community asks for by name; the rest ride the type filter the API has.
+const POST_FILTERS = [
+  { value: 'all', label: 'Everything' },
+  { value: 'win', label: '🏆 Wins' },
+  { value: 'poll', label: 'Polls' },
+  { value: 'video', label: 'Video' },
+  { value: 'image', label: 'Photos' },
+] as const;
+type PostFilter = (typeof POST_FILTERS)[number]['value'];
+
 type CommunityPost = {
   id: string;
   content?: string | null;
@@ -112,6 +123,7 @@ function getLeaderboardPoints(entry: LeaderboardEntry): string {
 
 export default function CommunityPage() {
   const [activeTab, setActiveTab] = useState<TabId>('for-you');
+  const [postFilter, setPostFilter] = useState<PostFilter>('all');
   const { data: feedOverview, isLoading: isLoadingFeedOverview } = useQuery({
     queryKey: ['community-dashboard', 'feed-overview'],
     queryFn: async () => {
@@ -257,7 +269,28 @@ export default function CommunityPage() {
           {activeTab === 'achievements' ? (
             <AchievementsPanel />
           ) : (
-            <Feed tab={activeTab} />
+            <>
+              <div className="flex flex-wrap gap-2 pt-3" role="tablist" aria-label="Kind of post">
+                {POST_FILTERS.map((filter) => (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={postFilter === filter.value}
+                    onClick={() => setPostFilter(filter.value)}
+                    className={cn(
+                      'rounded-full border px-3 py-1 text-xs font-medium transition',
+                      postFilter === filter.value
+                        ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
+                    )}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+              <Feed tab={activeTab} contentType={postFilter} />
+            </>
           )}
         </div>
 

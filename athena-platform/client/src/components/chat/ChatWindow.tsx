@@ -26,13 +26,17 @@ import {
   CheckCheck,
   Clock,
   FileText,
+  Mic,
   Paperclip,
   Reply,
   Smile,
+  Square,
   Timer,
   X,
 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { disappearingLabel } from '@/lib/api';
+import { VoiceRecorder } from './VoiceRecorder';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,6 +82,16 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
 
   const [newMessage, setNewMessage] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [recording, setRecording] = useState(false);
+
+  // A story reply arrives as ?text=: the quoted line lands in the composer so
+  // the sender can add to it before sending.
+  const searchParams = useSearchParams();
+  const prefill = searchParams?.get('text') ?? '';
+  useEffect(() => {
+    if (prefill) setNewMessage((current) => current || prefill);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill, conversationId]);
   const [replyTo, setReplyTo] = useState<StoreMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -223,11 +237,11 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
 
     const picked = Array.from(files);
     const supported = picked.filter(
-      (file) => file.type.startsWith('image/') || file.type.startsWith('video/')
+      (file) => file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')
     );
 
     if (supported.length < picked.length) {
-      toast.error('Only images and video can be attached to a message');
+      toast.error('Only images, video and audio can be attached to a message');
     }
 
     const room = MAX_ATTACHMENTS - attachments.length;
@@ -512,23 +526,45 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
             variant="outline"
             size="icon"
             aria-label="Attach images or video"
-            disabled={attachments.length >= MAX_ATTACHMENTS}
+            disabled={attachments.length >= MAX_ATTACHMENTS || recording}
             onClick={() => fileInputRef.current?.click()}
           >
             <Paperclip className="w-4 h-4" />
           </Button>
-          <div className="flex-1">
-            <Input
-              value={newMessage}
-              onChange={(e) => handleTyping(e.target.value)}
-              onBlur={stopTyping}
-              placeholder="Type a message..."
-              aria-label="Message"
+          {recording ? (
+            <VoiceRecorder
+              onCancel={() => setRecording(false)}
+              onRecorded={(file) => {
+                setRecording(false);
+                setAttachments((prev) => [...prev, file].slice(0, MAX_ATTACHMENTS));
+              }}
             />
-          </div>
-          <Button type="submit" disabled={(!newMessage.trim() && attachments.length === 0) || isSending}>
-            {uploadAttachment.isPending ? 'Uploading...' : 'Send'}
-          </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Record a voice note"
+                disabled={attachments.length >= MAX_ATTACHMENTS}
+                onClick={() => setRecording(true)}
+              >
+                <Mic className="w-4 h-4" />
+              </Button>
+              <div className="flex-1">
+                <Input
+                  value={newMessage}
+                  onChange={(e) => handleTyping(e.target.value)}
+                  onBlur={stopTyping}
+                  placeholder="Type a message..."
+                  aria-label="Message"
+                />
+              </div>
+              <Button type="submit" disabled={(!newMessage.trim() && attachments.length === 0) || isSending}>
+                {uploadAttachment.isPending ? 'Uploading...' : 'Send'}
+              </Button>
+            </>
+          )}
         </form>
       </div>
     </div>
@@ -549,6 +585,15 @@ function MessageAttachment({ attachment }: { attachment: NonNullable<StoreMessag
 
   if (attachment.type === 'video') {
     return <video src={attachment.url} controls className="max-h-64 w-full rounded-md" />;
+  }
+
+  if (attachment.type === 'audio') {
+    return (
+      <div className="flex items-center gap-2">
+        <Mic className="h-4 w-4 flex-shrink-0 opacity-70" aria-hidden />
+        <audio src={attachment.url} controls preload="metadata" className="h-9 w-56 max-w-full" aria-label="Voice note" />
+      </div>
+    );
   }
 
   return (

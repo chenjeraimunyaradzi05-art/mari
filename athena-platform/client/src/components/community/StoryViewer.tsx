@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import Link from 'next/link';
+import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 export type Story = {
@@ -11,6 +12,10 @@ export type Story = {
   mediaUrl: string;
   createdAt: string;
   expiresAt: string;
+  caption?: string | null;
+  viewed?: boolean;
+  // Only present on your own stories.
+  viewCount?: number;
 };
 
 export type StoryBucket = {
@@ -20,26 +25,43 @@ export type StoryBucket = {
     avatar: string | null;
   };
   stories: Story[];
+  hasUnseen?: boolean;
 };
 
 interface StoryViewerProps {
   buckets: StoryBucket[];
   initialBucket: number;
   onClose: () => void;
+  /** The viewer's own id: their stories show a view count instead of a reply box. */
+  currentUserId?: string;
+  /** Called once per story the moment it is shown, so the server can count the view. */
+  onView?: (story: Story) => void;
+  /** Called when the viewer asks who watched one of their own stories. */
+  onViewers?: (story: Story) => void;
+  onDelete?: (story: Story) => void;
 }
 
 const IMAGE_DURATION_MS = 5000;
 const TICK_MS = 50;
 
-export function StoryViewer({ buckets, initialBucket, onClose }: StoryViewerProps) {
+export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, onView, onViewers, onDelete }: StoryViewerProps) {
   const [bucketIndex, setBucketIndex] = useState(initialBucket);
   const [storyIndex, setStoryIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const viewedRef = useRef(new Set<string>());
 
   const bucket = buckets[bucketIndex];
   const story = bucket?.stories?.[storyIndex];
+  const isOwn = Boolean(currentUserId && bucket?.user.id === currentUserId);
+
+  // Tell the server once per story, the first time it is on screen.
+  useEffect(() => {
+    if (!story || !onView || isOwn || viewedRef.current.has(story.id)) return;
+    viewedRef.current.add(story.id);
+    onView(story);
+  }, [story, onView, isOwn]);
 
   const goNext = useCallback(() => {
     setProgress(0);
@@ -118,6 +140,10 @@ export function StoryViewer({ buckets, initialBucket, onClose }: StoryViewerProp
     return Number.isNaN(date.getTime()) ? '' : formatDistanceToNow(date, { addSuffix: true });
   })();
 
+  const replyHref = `/dashboard/messages?user=${bucket.user.id}&text=${encodeURIComponent(
+    `Replying to your story${story.caption ? ` "${story.caption.slice(0, 60)}"` : ''}: `
+  )}`;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/95"
@@ -139,7 +165,7 @@ export function StoryViewer({ buckets, initialBucket, onClose }: StoryViewerProp
         </div>
 
         <header className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 px-4 pb-4 pt-8 bg-gradient-to-b from-black/70 to-transparent">
-          <div className="h-9 w-9 overflow-hidden rounded-full border border-white/30">
+          <Link href={`/profile/${bucket.user.id}`} className="h-9 w-9 overflow-hidden rounded-full border border-white/30">
             {bucket.user.avatar ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -152,11 +178,21 @@ export function StoryViewer({ buckets, initialBucket, onClose }: StoryViewerProp
                 {bucket.user.displayName.slice(0, 2).toUpperCase()}
               </div>
             )}
-          </div>
+          </Link>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-white">{bucket.user.displayName}</p>
             {posted && <p className="text-xs text-white/60">{posted}</p>}
           </div>
+          {isOwn && onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(story)}
+              aria-label="Delete this story"
+              className="rounded-full p-1.5 text-white/80 transition hover:bg-white/10 hover:text-white"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -215,6 +251,28 @@ export function StoryViewer({ buckets, initialBucket, onClose }: StoryViewerProp
         >
           <ChevronRight className="ml-auto h-6 w-6 text-white/0 transition group-hover:text-white/50" />
         </button>
+
+        {/* Caption, and the reply box or the view count. */}
+        <footer className="absolute inset-x-0 bottom-0 z-20 space-y-3 bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-10">
+          {story.caption && <p className="text-center text-sm text-white drop-shadow">{story.caption}</p>}
+          {isOwn ? (
+            <button
+              type="button"
+              onClick={() => onViewers?.(story)}
+              className="mx-auto flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur hover:bg-white/25"
+            >
+              <Eye className="h-4 w-4" />
+              {story.viewCount ?? 0} {story.viewCount === 1 ? 'view' : 'views'}
+            </button>
+          ) : currentUserId ? (
+            <Link
+              href={replyHref}
+              className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/40 px-4 py-1.5 text-sm text-white hover:bg-white/10"
+            >
+              <MessageCircle className="h-4 w-4" /> Reply to {bucket.user.displayName.split(' ')[0]}
+            </Link>
+          ) : null}
+        </footer>
       </div>
     </div>
   );

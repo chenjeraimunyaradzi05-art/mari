@@ -8,7 +8,7 @@ export interface ChatMessageReply {
 
 export interface ChatMessageAttachment {
   id: string;
-  type: 'image' | 'video' | 'file';
+  type: 'image' | 'video' | 'audio' | 'file';
   url: string;
   name?: string;
   size?: number;
@@ -31,7 +31,7 @@ export interface ChatMessage {
   senderId: string;
   content: string;
   createdAt: string;
-  type: 'text' | 'image' | 'video' | 'file' | 'system';
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'system';
   // Disappearing messages: when this passes the row is gone on both sides.
   expiresAt?: string;
   mediaUrl?: string;
@@ -102,6 +102,8 @@ function mapMessageType(type: unknown): ChatMessage['type'] {
       return 'image';
     case 'VIDEO':
       return 'video';
+    case 'AUDIO':
+      return 'audio';
     case 'FILE':
       return 'file';
     case 'SYSTEM':
@@ -115,6 +117,7 @@ function attachmentType(contentType: unknown): ChatMessageAttachment['type'] {
   const value = String(contentType || '');
   if (value.startsWith('image/')) return 'image';
   if (value.startsWith('video/')) return 'video';
+  if (value.startsWith('audio/')) return 'audio';
   return 'file';
 }
 

@@ -12,8 +12,10 @@ import Link from 'next/link';
 
 // One alternation so the pieces come back in document order. Hashtags allow
 // letters and digits from any script, which is what the community page's
-// trending-topic extractor accepts too.
-const TOKEN = /(#[\p{L}\p{N}_]{2,64}|https?:\/\/[^\s<>"')\]]+)/gu;
+// trending-topic extractor accepts too. A mention is stored as
+// @[Display Name](userId) and rendered as "@Display Name" linking to them.
+const TOKEN = /(@\[[^\]\n]{1,80}\]\([0-9a-fA-F-]{36}\)|#[\p{L}\p{N}_]{2,64}|https?:\/\/[^\s<>"')\]]+)/gu;
+const MENTION = /^@\[([^\]\n]{1,80})\]\(([0-9a-fA-F-]{36})\)$/;
 
 export function hashtagHref(tag: string): string {
   return `/search?q=${encodeURIComponent(tag.startsWith('#') ? tag : `#${tag}`)}`;
@@ -29,7 +31,14 @@ export function renderSocialText(text: string, linkClassName = 'font-medium text
     const start = match.index ?? 0;
     if (start > last) nodes.push(text.slice(last, start));
 
-    if (token.startsWith('#')) {
+    const mention = MENTION.exec(token);
+    if (mention) {
+      nodes.push(
+        <Link key={key++} href={`/profile/${mention[2]}`} className={linkClassName} onClick={(e) => e.stopPropagation()}>
+          @{mention[1]}
+        </Link>
+      );
+    } else if (token.startsWith('#')) {
       nodes.push(
         <Link key={key++} href={hashtagHref(token)} className={linkClassName} onClick={(e) => e.stopPropagation()}>
           {token}

@@ -18,7 +18,28 @@ import {
 import { cn } from '@/lib/utils';
 import { Avatar, Badge } from '@/components/ui';
 import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
+import toast from 'react-hot-toast';
 import { useEvents, useRegisterEvent, useSaveEvent, useUnsaveEvent } from '@/lib/hooks';
+import { HostEventDialog } from '@/components/events/HostEventDialog';
+
+// The system share sheet where there is one; a copied link everywhere else.
+async function shareEvent(event: { id: string; title: string; description: string }) {
+  const url = `${window.location.origin}/events?event=${event.id}`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: event.title, text: event.description.slice(0, 140), url });
+      return;
+    } catch {
+      // Cancelled: fall through to copying.
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast.success('Link copied');
+  } catch {
+    toast.error('Could not copy the link');
+  }
+}
 
 interface Event {
   id: string;
@@ -60,6 +81,7 @@ export default function EventsPage() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [hosting, setHosting] = useState(false);
 
   useEffect(() => {
     const now = new Date();
@@ -105,11 +127,13 @@ export default function EventsPage() {
             Discover webinars, workshops, and networking opportunities
           </p>
         </div>
-        <button className="btn-primary flex items-center space-x-2">
+        <button type="button" onClick={() => setHosting(true)} className="btn-primary flex items-center space-x-2">
           <Plus className="w-4 h-4" />
           <span>Host Event</span>
         </button>
       </div>
+
+      <HostEventDialog open={hosting} onClose={() => setHosting(false)} />
 
       {/* Calendar Strip */}
       <div className="card">
@@ -355,7 +379,12 @@ export default function EventsPage() {
                         className={cn('w-5 h-5', event.isSaved && 'fill-current')}
                       />
                     </button>
-                    <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition">
+                    <button
+                      type="button"
+                      onClick={() => void shareEvent(event)}
+                      aria-label={`Share ${event.title}`}
+                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
+                    >
                       <Share2 className="w-5 h-5" />
                     </button>
                   </div>

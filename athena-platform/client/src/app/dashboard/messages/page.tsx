@@ -19,10 +19,12 @@ import { Loading } from '@/components/ui/loading';
 export default function MessagesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ user?: string | string[] }>;
+  searchParams: Promise<{ user?: string | string[]; text?: string | string[] }>;
 }) {
-  const { user } = use(searchParams);
+  const { user, text } = use(searchParams);
   const targetUserId = Array.isArray(user) ? user[0] : user;
+  // A story reply carries the quoted line along so it lands in the composer.
+  const prefill = Array.isArray(text) ? text[0] : text;
 
   const router = useRouter();
   const { isLoading: authLoading } = useAuth();
@@ -43,8 +45,9 @@ export default function MessagesPage({
     if (!conversationId) return;
     // replace, not push: backing out should return to the profile the reader
     // came from, not bounce through this resolver again.
-    router.replace(`/dashboard/messages/${conversationId}`);
-  }, [conversationId, router]);
+    const query = prefill ? `?text=${encodeURIComponent(prefill)}` : '';
+    router.replace(`/dashboard/messages/${conversationId}${query}`);
+  }, [conversationId, router, prefill]);
 
   if (targetUserId && !startConversation.isError) {
     return (

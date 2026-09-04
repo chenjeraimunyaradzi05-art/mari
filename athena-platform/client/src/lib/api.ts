@@ -226,6 +226,16 @@ export const jobApi = {
 // ============================================
 // POST API
 // ============================================
+export type ReactionType = 'LIKE' | 'CELEBRATE' | 'SUPPORT' | 'INSIGHTFUL' | 'INSPIRED';
+
+export const REACTIONS: { type: ReactionType; emoji: string; label: string }[] = [
+  { type: 'LIKE', emoji: '❤️', label: 'Like' },
+  { type: 'CELEBRATE', emoji: '🎉', label: 'Celebrate' },
+  { type: 'SUPPORT', emoji: '💜', label: 'Support' },
+  { type: 'INSIGHTFUL', emoji: '💡', label: 'Insightful' },
+  { type: 'INSPIRED', emoji: '✨', label: 'Inspired' },
+];
+
 export const postApi = {
   getFeed: (params?: any) => api.get('/posts/feed', { params }),
 
@@ -240,6 +250,22 @@ export const postApi = {
   like: (id: string) => api.post(`/posts/${id}/like`),
 
   unlike: (id: string) => api.delete(`/posts/${id}/like`),
+
+  // A reaction with a meaning (LIKE, CELEBRATE, SUPPORT, INSIGHTFUL, INSPIRED).
+  // Reacting again with another type changes it; unlike removes it.
+  react: (id: string, type: ReactionType) => api.post(`/posts/${id}/react`, { type }),
+
+  vote: (id: string, optionId: string) => api.post(`/posts/${id}/vote`, { optionId }),
+
+  likeComment: (postId: string, commentId: string) => api.post(`/posts/${postId}/comments/${commentId}/like`),
+
+  unlikeComment: (postId: string, commentId: string) => api.delete(`/posts/${postId}/comments/${commentId}/like`),
+
+  pin: (id: string, pinned: boolean) => api.patch(`/posts/${id}/pin`, { pinned }),
+
+  getScheduled: () => api.get('/posts/me/scheduled'),
+
+  getMentions: () => api.get('/posts/me/mentions'),
 
   save: (id: string) => api.post(`/posts/${id}/save`),
 
@@ -553,8 +579,41 @@ export const groupsApi = {
 // ============================================
 export const statusApi = {
   feed: () => api.get('/status/feed'),
-  create: (data: { type: 'image' | 'video'; mediaUrl: string }) => api.post('/status', data),
+  create: (data: { type: 'image' | 'video'; mediaUrl: string; caption?: string }) => api.post('/status', data),
+  // Marks a story watched: its ring goes quiet for you, its count goes up for the author.
+  view: (id: string) => api.post(`/status/${id}/view`),
+  viewers: (id: string) => api.get(`/status/${id}/viewers`),
   delete: (id: string) => api.delete(`/status/${id}`),
+};
+
+// The composer's @ autocomplete.
+export const mentionApi = {
+  suggest: (q: string) => api.get('/users/suggest', { params: { q } }),
+};
+
+// "See fewer posts from" and muted topics, honoured by the ranked feeds.
+export const feedPreferencesApi = {
+  get: () => api.get('/ai-algorithms/feed-preferences'),
+  update: (data: { blockedCreators?: string[]; blockedHashtags?: string[] }) =>
+    api.patch('/ai-algorithms/feed-preferences', data),
+};
+
+export const eventHostApi = {
+  create: (data: {
+    title: string;
+    description: string;
+    type: 'webinar' | 'workshop' | 'networking' | 'conference' | 'meetup';
+    format: 'virtual' | 'in-person' | 'hybrid';
+    date: string;
+    startTime: string;
+    endTime: string;
+    location?: string;
+    link?: string;
+    image?: string;
+    maxAttendees?: number | null;
+    price?: number;
+    tags?: string[];
+  }) => api.post('/events', data),
 };
 
 // ============================================

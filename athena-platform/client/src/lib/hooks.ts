@@ -1093,7 +1093,11 @@ export function useToggleMessageReaction() {
 export function useUploadChatAttachment() {
   return useMutation({
     mutationFn: async (file: File): Promise<OutgoingAttachment> => {
-      const uploadType = file.type.startsWith('video/') ? 'video' : 'post';
+      const uploadType = file.type.startsWith('video/')
+        ? 'video'
+        : file.type.startsWith('audio/')
+          ? 'audio'
+          : 'post';
       const response = await mediaApi.upload(uploadType, file);
       const uploaded = response.data.data;
 

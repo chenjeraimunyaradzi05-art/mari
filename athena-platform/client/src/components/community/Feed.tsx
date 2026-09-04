@@ -7,7 +7,7 @@ import { Loader2 } from 'lucide-react';
 
 interface FeedProps {
   tab: 'for-you' | 'following';
-  contentType?: 'all' | 'video' | 'image' | 'text';
+  contentType?: 'all' | 'video' | 'image' | 'text' | 'poll' | 'win';
 }
 
 export default function Feed({ tab, contentType = 'all' }: FeedProps) {

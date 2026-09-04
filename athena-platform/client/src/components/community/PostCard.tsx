@@ -7,18 +7,22 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Bookmark,
   Flag,
-  Heart,
   Link2,
   MessageCircle,
   MoreHorizontal,
+  Pin,
   Share2,
   Trash2,
 } from 'lucide-react';
-import { useLikePost, useUnlikePost, useDeletePost, useAuthStore } from '@/lib/hooks';
-import { postApi } from '@/lib/api';
+import { useDeletePost, useAuthStore } from '@/lib/hooks';
+import { usePinPost, useReactToPost } from '@/lib/social-hooks';
+import { postApi, type ReactionType } from '@/lib/api';
 import { Avatar } from '@/components/ui/avatar';
 import { renderSocialText } from '@/lib/social-text';
 import { ReportDialog } from '@/components/safety/ReportDialog';
+import { ReactionButton, ReactionSummary, type ReactionCounts } from './ReactionBar';
+import { PollCard } from './PollCard';
+import { WhyThis } from './WhyThis';
 import CommentSection from './CommentSection';
 import toast from 'react-hot-toast';
 
@@ -34,14 +38,26 @@ const errorMessage = (error: unknown) =>
 export default function PostCard({ post, defaultShowComments = false }: PostCardProps) {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
-  const likePost = useLikePost();
-  const unlikePost = useUnlikePost();
+  const react = useReactToPost();
+  const pinPost = usePinPost();
   const deletePost = useDeletePost();
   const [showComments, setShowComments] = useState(defaultShowComments);
   const [showMenu, setShowMenu] = useState(false);
   const [mediaError, setMediaError] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Reactions are optimistic: the emoji and the counts move at once and a
+  // failed write puts both back. Seeded from the server on every refetch.
+  const [reaction, setReaction] = useState<ReactionType | null>(post.myReaction ?? (post.isLiked ? 'LIKE' : null));
+  const [counts, setCounts] = useState<ReactionCounts>(
+    post.reactionCounts ?? (post.likeCount ? { LIKE: Number(post.likeCount) } : {})
+  );
+  useEffect(() => {
+    setReaction(post.myReaction ?? (post.isLiked ? 'LIKE' : null));
+    setCounts(post.reactionCounts ?? (post.likeCount ? { LIKE: Number(post.likeCount) } : {}));
+  }, [post.id, post.myReaction, post.isLiked, post.reactionCounts, post.likeCount]);
 
   // Saved state is optimistic: seeded from the server, flipped on tap and put
   // back only if the request fails.
@@ -75,13 +91,32 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
     `${post?.author?.firstName || ''} ${post?.author?.lastName || ''}`.trim() ||
     'Member';
 
-  const handleLike = () => {
-    if (!user) return;
-    if (post.isLiked) {
-      unlikePost.mutate(post.id);
-    } else {
-      likePost.mutate(post.id);
+  const changeReaction = (next: ReactionType | null) => {
+    if (!user) {
+      toast.error('Sign in to react');
+      return;
     }
+    const previous = reaction;
+    const previousCounts = counts;
+    const updated: ReactionCounts = { ...counts };
+    if (previous) updated[previous] = Math.max(0, (updated[previous] ?? 0) - 1);
+    if (next) updated[next] = (updated[next] ?? 0) + 1;
+    setReaction(next);
+    setCounts(updated);
+    react.mutate(
+      { postId: post.id, type: next },
+      {
+        onError: () => {
+          setReaction(previous);
+          setCounts(previousCounts);
+        },
+      }
+    );
+  };
+
+  const togglePin = () => {
+    setShowMenu(false);
+    pinPost.mutate({ postId: post.id, pinned: !post.isPinned });
   };
 
   const handleSave = async () => {
@@ -132,8 +167,24 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
     await copyLink();
   };
 
+  if (hidden) return null;
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+      {(post.isPinned || post.type === 'WIN') && (
+        <div className="flex items-center gap-2 px-4 pt-3 text-[11px] font-semibold uppercase tracking-wide">
+          {post.isPinned && (
+            <span className="inline-flex items-center gap-1 text-slate-500">
+              <Pin size={12} /> Pinned
+            </span>
+          )}
+          {post.type === 'WIN' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+              🏆 Win
+            </span>
+          )}
+        </div>
+      )}
       {/* Header */}
       <div className="p-4 flex items-start justify-between">
         <div className="flex gap-3">
@@ -215,6 +266,18 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
                 <button
                   type="button"
                   role="menuitem"
+                  onClick={togglePin}
+                  disabled={pinPost.isPending}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <Pin size={16} />
+                  {post.isPinned ? 'Unpin from profile' : 'Pin to profile'}
+                </button>
+              )}
+              {isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
                   onClick={handleDelete}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
                 >
@@ -232,6 +295,11 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
         <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
           {renderSocialText(String(post.content ?? ''))}
         </p>
+        {post.poll && (
+          <div className="mt-3">
+            <PollCard postId={post.id} poll={post.poll} canVote={Boolean(user)} />
+          </div>
+        )}
       </div>
 
       {/* Media */}
@@ -285,39 +353,31 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
       )}
 
       {/* Stats/Counts */}
-      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500">
-        <div className="flex items-center gap-1 group cursor-pointer hover:text-blue-600 hover:underline">
-         {Number(post.likeCount) > 0 && (
-                <>
-                 <span className="bg-blue-100 p-0.5 rounded-full"><Heart size={10} className="fill-blue-600 text-blue-600" /></span>
-            <span>{post.likeCount} likes</span>
-                </>
-           )}
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2 text-xs text-slate-500">
+        <ReactionSummary counts={counts} />
+        <div className="flex items-center gap-3">
+          <WhyThis
+            reasons={post.reasons}
+            authorId={post.author?.id}
+            authorName={authorName}
+            isOwn={isOwner}
+            onHidden={() => setHidden(true)}
+          />
+          {Number(post.commentCount) > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowComments((open) => !open)}
+              className="hover:text-blue-600 hover:underline"
+            >
+              {post.commentCount} comments
+            </button>
+          )}
         </div>
-        {Number(post.commentCount) > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowComments((open) => !open)}
-            className="hover:text-blue-600 hover:underline"
-          >
-            {post.commentCount} comments
-          </button>
-        )}
       </div>
 
       {/* Actions */}
       <div className="px-2 py-1 flex items-center justify-between">
-        <button
-            onClick={handleLike}
-            className={`flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium ${
-                post.isLiked
-                ? 'text-blue-600 hover:bg-blue-50'
-                : 'text-slate-500 hover:bg-slate-100'
-            }`}
-        >
-          <Heart size={20} className={post.isLiked ? 'fill-blue-600' : ''} />
-          <span>Like</span>
-        </button>
+        <ReactionButton value={reaction} onChange={changeReaction} disabled={!user} />
         <button
           onClick={() => setShowComments(!showComments)}
           className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"

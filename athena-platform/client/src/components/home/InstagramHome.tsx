@@ -22,9 +22,13 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { handleFromName, renderSocialText } from '@/lib/social-text';
-import { postApi, userApi } from '@/lib/api';
-import { useAuth, useLikePost, useUnlikePost } from '@/lib/hooks';
+import { postApi, userApi, type ReactionType } from '@/lib/api';
+import { useAuth } from '@/lib/hooks';
+import { useReactToPost } from '@/lib/social-hooks';
 import StoriesStrip from '@/components/community/StoriesStrip';
+import { ReactionButton, ReactionSummary, type ReactionCounts } from '@/components/community/ReactionBar';
+import { PollCard, type PollResults } from '@/components/community/PollCard';
+import { WhyThis } from '@/components/community/WhyThis';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
 
 type FeedAuthor = {
@@ -47,6 +51,10 @@ type FeedPost = {
   commentCount?: number;
   isLiked?: boolean;
   isSaved?: boolean;
+  myReaction?: ReactionType | null;
+  reactionCounts?: ReactionCounts;
+  poll?: PollResults | null;
+  reasons?: string[];
   author: FeedAuthor;
 };
 
@@ -119,11 +127,11 @@ function PostCard({
   isAuthenticated: boolean;
   currentUserId?: string;
 }) {
-  const likePost = useLikePost();
-  const unlikePost = useUnlikePost();
-  const [liked, setLiked] = useState(post.isLiked ?? false);
-  const [likes, setLikes] = useState(post.likeCount ?? 0);
+  const react = useReactToPost();
+  const [reaction, setReaction] = useState<ReactionType | null>(post.myReaction ?? (post.isLiked ? 'LIKE' : null));
+  const [counts, setCounts] = useState<ReactionCounts>(post.reactionCounts ?? (post.likeCount ? { LIKE: post.likeCount } : {}));
   const [comments, setComments] = useState(post.commentCount ?? 0);
+  const [hidden, setHidden] = useState(false);
   const [saved, setSaved] = useState(post.isSaved ?? false);
   const [following, setFollowing] = useState(post.author.isFollowing ?? false);
   const [shareLabel, setShareLabel] = useState<string | null>(null);
@@ -198,20 +206,39 @@ function PostCard({
     (u): u is string => typeof u === 'string' && u.length > 0
   );
 
-  const toggleLike = () => {
-    if (liked) {
-      setLiked(false);
-      setLikes((n) => Math.max(0, n - 1));
-      unlikePost.mutate(post.id);
-    } else {
-      setLiked(true);
-      setLikes((n) => n + 1);
-      likePost.mutate(post.id);
-    }
+  // Optimistic: the emoji and the counts move at once; a failed write puts
+  // both back. Changing from one reaction to another moves one count across.
+  const changeReaction = (next: ReactionType | null) => {
+    if (!isAuthenticated) return;
+    const previous = reaction;
+    const previousCounts = counts;
+    const updated: ReactionCounts = { ...counts };
+    if (previous) updated[previous] = Math.max(0, (updated[previous] ?? 0) - 1);
+    if (next) updated[next] = (updated[next] ?? 0) + 1;
+    setReaction(next);
+    setCounts(updated);
+    react.mutate(
+      { postId: post.id, type: next },
+      {
+        onError: () => {
+          setReaction(previous);
+          setCounts(previousCounts);
+        },
+      }
+    );
   };
+  const toggleLike = () => changeReaction(reaction ? null : 'LIKE');
+  const liked = reaction !== null;
+
+  if (hidden) return null;
 
   return (
     <article className="border-b border-slate-200 pb-4 dark:border-slate-800">
+      {post.type === 'WIN' && (
+        <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          🏆 Win
+        </p>
+      )}
       <header className="flex items-center gap-3 py-3">
         <Link href={`/profile/${post.author.id}`} className="story-ring">
           <span className="block rounded-full border-2 border-white dark:border-slate-950">
@@ -285,18 +312,20 @@ function PostCard({
         </div>
       )}
 
+      {post.poll && (
+        <div className="mt-3">
+          <PollCard postId={post.id} poll={post.poll} canVote={isAuthenticated} compact />
+        </div>
+      )}
+
       <div className="flex items-center gap-3 pt-3 lg:gap-2">
-        <button type="button" onClick={toggleLike} aria-label={liked ? 'Unlike' : 'Like'}>
-          <Heart
-            key={String(liked)}
-            className={cn(
-              'h-6 w-6 transition lg:h-5 lg:w-5',
-              liked
-                ? 'fill-rose-500 text-rose-500 animate-heart-pop'
-                : 'text-slate-900 hover:opacity-60 dark:text-white'
-            )}
-          />
-        </button>
+        {isAuthenticated ? (
+          <ReactionButton value={reaction} onChange={changeReaction} compact />
+        ) : (
+          <Link href="/login" aria-label="Sign in to like">
+            <Heart className="h-6 w-6 text-slate-900 hover:opacity-60 lg:h-5 lg:w-5 dark:text-white" />
+          </Link>
+        )}
         <Link href={`/posts/${post.id}`} aria-label="Comments">
           <MessageCircle className="h-6 w-6 text-slate-900 hover:opacity-60 lg:h-5 lg:w-5 dark:text-white" />
         </Link>
@@ -332,9 +361,17 @@ function PostCard({
         )}
       </div>
 
-      <p className="pt-2 text-sm font-semibold text-slate-900 dark:text-white">
-        {likes.toLocaleString()} {likes === 1 ? 'like' : 'likes'}
-      </p>
+      <div className="flex items-center justify-between gap-2 pt-2">
+        <ReactionSummary counts={counts} className="text-sm font-semibold text-slate-900 dark:text-white" />
+        <WhyThis
+          reasons={post.reasons}
+          authorId={post.author.id}
+          authorName={authorName(post.author)}
+          isOwn={post.author.id === currentUserId}
+          onHidden={() => setHidden(true)}
+          className="ml-auto"
+        />
+      </div>
 
       {/* break-words matters in the narrow column: a long unbroken token (a URL,
           a hashtag) otherwise pushes the caption past the column edge. pre-line
