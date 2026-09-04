@@ -19,6 +19,7 @@ import {
   Settings,
   Gift,
   Repeat2,
+  UserCheck,
 } from 'lucide-react';
 import {
   useNotifications,
@@ -28,6 +29,7 @@ import {
   useDeleteNotification,
 } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
+import { FollowRequests } from '@/components/community/FollowRequests';
 
 type NotificationType =
   | 'JOB_MATCH'
@@ -39,6 +41,7 @@ type NotificationType =
   | 'LIKE'
   | 'COMMENT'
   | 'FOLLOW'
+  | 'FOLLOW_REQUEST'
   | 'REPOST'
   | 'ACHIEVEMENT'
   | 'LEVEL_UP'
@@ -66,6 +69,7 @@ const notificationIcons: Record<NotificationType, React.ElementType> = {
   LIKE: Heart,
   COMMENT: MessageCircle,
   FOLLOW: UserPlus,
+  FOLLOW_REQUEST: UserCheck,
   REPOST: Repeat2,
   ACHIEVEMENT: Award,
   LEVEL_UP: Award,
@@ -82,6 +86,7 @@ const notificationColors: Record<NotificationType, string> = {
   LIKE: 'bg-red-100 dark:bg-red-900/30 text-red-500',
   COMMENT: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
   FOLLOW: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
+  FOLLOW_REQUEST: 'bg-rose-100 dark:bg-rose-900/30 text-rose-500',
   REPOST: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
   ACHIEVEMENT: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
   LEVEL_UP: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-500',
@@ -239,6 +244,8 @@ export default function NotificationsPage() {
           <span>Settings</span>
         </Link>
       </div>
+
+      <FollowRequests />
 
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-white p-4 shadow dark:bg-slate-800">
         <div className="flex items-center space-x-4">

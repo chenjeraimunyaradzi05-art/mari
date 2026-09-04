@@ -18,6 +18,7 @@ export type RepostOriginal = {
   content: string;
   type?: string;
   mediaUrls?: unknown;
+  mediaAlt?: unknown;
   createdAt: string | Date;
   isSensitive?: boolean;
   author?: {
@@ -93,7 +94,7 @@ export function RepostEmbed({
             <video src={first} muted playsInline preload="metadata" className={cn('max-h-64 w-full object-cover', original.isSensitive && 'blur-lg')} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={first} alt="" className={cn('max-h-64 w-full object-cover', original.isSensitive && 'blur-lg')} />
+            <img src={first} alt={Array.isArray(original.mediaAlt) && typeof original.mediaAlt[0] === 'string' ? original.mediaAlt[0] : ''} className={cn('max-h-64 w-full object-cover', original.isSensitive && 'blur-lg')} />
           )}
         </div>
       )}

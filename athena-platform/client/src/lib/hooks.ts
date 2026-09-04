@@ -224,9 +224,10 @@ export function useFollow() {
 
   return useMutation({
     mutationFn: userApi.follow,
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['profile'] });
-      toast.success('Following!');
+      // Members who approve their followers answer with a request, not a follow.
+      toast.success(response.data?.requested ? 'Request sent' : 'Following!');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to follow');

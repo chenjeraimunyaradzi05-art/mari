@@ -3,6 +3,7 @@
 import React from 'react';
 import { useFeed } from '@/lib/hooks';
 import PostCard from './PostCard';
+import { NewPostsPill } from './NewPostsPill';
 import { Loader2 } from 'lucide-react';
 
 interface FeedProps {
@@ -39,6 +40,7 @@ export default function Feed({ tab, contentType = 'all' }: FeedProps) {
 
   return (
     <div className="space-y-4">
+      <NewPostsPill />
       {posts.map((post: any) => (
         <PostCard key={post.id} post={post} />
       ))}

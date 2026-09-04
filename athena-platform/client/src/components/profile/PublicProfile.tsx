@@ -72,6 +72,12 @@ type ProfileUser = {
   currentCompany?: string | null;
   createdAt: string;
   isFollowing?: boolean;
+  // Members who approve their followers: the button asks instead of following.
+  approvesFollowers?: boolean;
+  followRequested?: boolean;
+  // A followers-only profile seen by a non-follower: name, picture, counts.
+  isLimited?: boolean;
+  mutualFollowers?: { count: number; names: string[] };
   profile?: {
     aboutMe?: string | null;
     linkedinUrl?: string | null;
@@ -100,6 +106,16 @@ type ProfileUser = {
   }>;
   _count?: { followers?: number; following?: number; posts?: number };
 };
+
+/** "Followed by Mei C., Priya R. and 2 others you follow". */
+function mutualFollowersLine(mutual: { count: number; names: string[] }): string {
+  const names = mutual.names.slice(0, 2);
+  const rest = mutual.count - names.length;
+  if (names.length === 0) return `Followed by ${mutual.count} ${mutual.count === 1 ? 'person' : 'people'} you follow`;
+  const list = names.join(', ');
+  if (rest <= 0) return `Followed by ${list}${names.length > 1 ? ', who you follow' : ', who you follow'}`;
+  return `Followed by ${list} and ${rest} ${rest === 1 ? 'other' : 'others'} you follow`;
+}
 
 type ProfilePost = {
   id: string;
@@ -190,14 +206,39 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
   // request actually fails. Both routes are idempotent, so a stale button
   // cannot produce an "already following" error any more.
   const [following, setFollowing] = useState(false);
+  // A pending request to follow someone who approves their followers.
+  const [requested, setRequested] = useState(false);
   const [followerDelta, setFollowerDelta] = useState(0);
   useEffect(() => {
     setFollowing(Boolean(profile?.isFollowing));
+    setRequested(Boolean(profile?.followRequested));
     setFollowerDelta(0);
-  }, [profile?.isFollowing, userId]);
+  }, [profile?.isFollowing, profile?.followRequested, userId]);
 
   const toggleFollow = () => {
+    // Pressing "Requested" withdraws the request.
+    if (requested && !following) {
+      setRequested(false);
+      unfollow.mutate(userId, { onError: () => setRequested(true) });
+      return;
+    }
     const next = !following;
+    const approves = Boolean(profile?.approvesFollowers);
+    if (next && approves) {
+      setRequested(true);
+      follow.mutate(userId, {
+        onSuccess: (res) => {
+          // Already a follower on the server (accepted meanwhile): show it.
+          if (res.data?.following) {
+            setRequested(false);
+            setFollowing(true);
+            setFollowerDelta((d) => d + 1);
+          }
+        },
+        onError: () => setRequested(false),
+      });
+      return;
+    }
     setFollowing(next);
     setFollowerDelta((d) => d + (next ? 1 : -1));
     const revert = () => {
@@ -317,6 +358,9 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                     {where}
                   </p>
                 )}
+                {!isOwnProfile && (profile.mutualFollowers?.count ?? 0) > 0 && (
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{mutualFollowersLine(profile.mutualFollowers!)}</p>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -336,11 +380,13 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                     <button
                       type="button"
                       onClick={toggleFollow}
-                      aria-pressed={following}
-                      className={cn('flex items-center gap-2 px-4 py-2', following ? 'btn-outline' : 'btn-primary')}
+                      aria-pressed={following || requested}
+                      className={cn('flex items-center gap-2 px-4 py-2', following || requested ? 'btn-outline' : 'btn-primary')}
                     >
                       <UserPlus className="h-4 w-4" />
-                      <span>{following ? 'Following' : 'Follow'}</span>
+                      <span>
+                        {following ? 'Following' : requested ? 'Requested' : profile.approvesFollowers ? 'Request to follow' : 'Follow'}
+                      </span>
                     </button>
                     <Link
                       href={`/dashboard/messages?user=${userId}`}
@@ -415,6 +461,20 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
           ))}
         </div>
       </section>
+
+      {profile.isLimited && (
+        <section className="card flex items-start gap-3">
+          <Lock className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-400" />
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">{name} approves who follows them</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {requested
+                ? 'Your request is waiting. Once accepted, their posts and full profile appear here.'
+                : 'Request to follow to see their posts and full profile.'}
+            </p>
+          </div>
+        </section>
+      )}
 
       <StoryHighlights userId={userId} isOwn={isOwnProfile} displayName={name} avatar={profile.avatar ?? null} />
 
@@ -495,7 +555,11 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
               </div>
             ) : (
               <p className="py-8 text-center text-slate-500 dark:text-slate-400">
-                {isOwnProfile ? 'You have not posted yet.' : `${name} has not posted yet.`}
+                {isOwnProfile
+                  ? 'You have not posted yet.'
+                  : profile.isLimited
+                    ? 'Posts are shared with followers.'
+                    : `${name} has not posted yet.`}
               </p>
             )}
           </section>

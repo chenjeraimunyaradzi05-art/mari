@@ -11,6 +11,7 @@ import {
   FolderPlus,
   Link2,
   MessageCircle,
+  MessageCircleOff,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -36,6 +37,11 @@ import { SensitiveGate } from './SensitiveGate';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { MentionTextarea } from './MentionTextarea';
 import CommentSection from './CommentSection';
+
+/** The author's description of an image, when they wrote one. */
+export function altFor(mediaAlt: unknown, index: number): string {
+  return Array.isArray(mediaAlt) && typeof mediaAlt[index] === 'string' ? (mediaAlt[index] as string) : '';
+}
 
 // The mentions already in a post, so editing keeps them resolvable.
 function picksIn(content: string): MentionPick[] {
@@ -75,6 +81,23 @@ export default function PostCard({ post, defaultShowComments = false, source = '
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
   const impressionRef = useImpression(post.id, source);
+
+  // The author can close the thread; existing comments stay readable.
+  const [commentsOff, setCommentsOff] = useState<boolean>(Boolean(post.commentsOff));
+  useEffect(() => setCommentsOff(Boolean(post.commentsOff)), [post.commentsOff, post.id]);
+  const toggleComments = async () => {
+    setShowMenu(false);
+    const next = !commentsOff;
+    setCommentsOff(next);
+    try {
+      await postApi.setCommentsOff(post.id, next);
+      toast.success(next ? 'Comments turned off' : 'Comments turned on');
+      queryClient.invalidateQueries({ queryKey: ['post', post.id] });
+    } catch (error) {
+      setCommentsOff(!next);
+      toast.error(errorMessage(error) || 'Could not change the comment setting');
+    }
+  };
 
   // Reposts: the original this post points at, and whether this is a plain
   // repost (no words of its own) that should render as the original.
@@ -391,6 +414,17 @@ export default function PostCard({ post, defaultShowComments = false, source = '
                 <button
                   type="button"
                   role="menuitem"
+                  onClick={() => void toggleComments()}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  {commentsOff ? <MessageCircle size={16} /> : <MessageCircleOff size={16} />}
+                  {commentsOff ? 'Turn comments on' : 'Turn comments off'}
+                </button>
+              )}
+              {isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
                   onClick={togglePin}
                   disabled={pinPost.isPending}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
@@ -469,7 +503,7 @@ export default function PostCard({ post, defaultShowComments = false, source = '
           ) : post.mediaUrls.length === 1 ? (
             <img
               src={post.mediaUrls[0]}
-              alt="Post media"
+              alt={altFor(post.mediaAlt, 0) || 'Post media'}
               onError={() => setMediaError(true)}
               className="w-full h-auto object-cover max-h-[520px]"
             />
@@ -488,7 +522,7 @@ export default function PostCard({ post, defaultShowComments = false, source = '
                 >
                   <img
                     src={url}
-                    alt={`Post media ${idx + 1}`}
+                    alt={altFor(post.mediaAlt, idx) || `Post media ${idx + 1}`}
                     onError={() => setMediaError(true)}
                     className="w-full h-full object-cover aspect-square"
                   />
@@ -546,9 +580,10 @@ export default function PostCard({ post, defaultShowComments = false, source = '
         <button
           onClick={() => setShowComments(!showComments)}
           className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
+          title={commentsOff ? 'The author has turned comments off' : undefined}
         >
-          <MessageCircle size={20} />
-          <span>Comment</span>
+          {commentsOff ? <MessageCircleOff size={20} /> : <MessageCircle size={20} />}
+          <span>{commentsOff ? 'Comments off' : 'Comment'}</span>
         </button>
         <RepostButton
           targetId={post.id}

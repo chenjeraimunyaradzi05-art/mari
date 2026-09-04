@@ -13,6 +13,7 @@ export type NotificationKind =
   | 'LIKE'
   | 'COMMENT'
   | 'FOLLOW'
+  | 'FOLLOW_REQUEST'
   | 'REPOST'
   | 'ACHIEVEMENT'
   | 'LEVEL_UP'

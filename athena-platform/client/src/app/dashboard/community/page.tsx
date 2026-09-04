@@ -23,6 +23,7 @@ import CreatePostWidget from '@/components/community/CreatePostWidget';
 import AchievementsPanel from '@/components/community/AchievementsPanel';
 import StoriesStrip from '@/components/community/StoriesStrip';
 import { SuggestedPeople } from '@/components/community/SuggestedPeople';
+import { FollowRequests } from '@/components/community/FollowRequests';
 
 const tabs = [
   { id: 'for-you', name: 'For You', icon: TrendingUp },
@@ -341,6 +342,8 @@ export default function CommunityPage() {
               </div>
             )}
           </div>
+
+          <FollowRequests compact />
 
           <SuggestedPeople limit={4} compact />
 

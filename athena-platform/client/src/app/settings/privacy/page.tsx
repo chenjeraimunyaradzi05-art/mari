@@ -134,9 +134,19 @@ export default function PrivacySettingsPage() {
           </h2>
           <div className="space-y-3">
             {[
-              { value: 'public', label: 'Public', desc: 'Anyone can view your profile', icon: Globe },
-              { value: 'connections', label: 'Connections Only', desc: 'Only your connections can view your profile', icon: Users },
-              { value: 'private', label: 'Private', desc: 'Only you can see your profile', icon: Lock },
+              { value: 'public', label: 'Public', desc: 'Anyone can view your profile and posts, and follow you straight away', icon: Globe },
+              {
+                value: 'connections',
+                label: 'Followers only',
+                desc: 'You approve who follows you. Only followers see your posts and full profile; others see your name, picture and a request button',
+                icon: Users,
+              },
+              {
+                value: 'private',
+                label: 'Private',
+                desc: 'Only you can see your profile, and your posts appear in no one else’s feed',
+                icon: Lock,
+              },
             ].map((option) => (
               <label
                 key={option.value}

@@ -172,6 +172,11 @@ export const userApi = {
   addEducation: (data: any) => api.post('/users/me/education', data),
 
   follow: (userId: string) => api.post(`/users/${userId}/follow`),
+  // Members who approve their followers: what is waiting, and the answer.
+  followRequests: () => api.get('/users/me/follow-requests'),
+  followRequestCount: () => api.get('/users/me/follow-requests/count'),
+  acceptFollowRequest: (id: string) => api.post(`/users/me/follow-requests/${id}/accept`),
+  declineFollowRequest: (id: string) => api.post(`/users/me/follow-requests/${id}/decline`),
 
   unfollow: (userId: string) => api.delete(`/users/${userId}/follow`),
 
@@ -293,6 +298,11 @@ export const postApi = {
     api.post('/posts/impressions', data),
   getInsights: (id: string) => api.get(`/posts/${id}/insights`),
   getMyInsights: (days = 30) => api.get('/posts/me/insights', { params: { days } }),
+
+  // The author's thread controls.
+  setCommentsOff: (id: string, commentsOff: boolean) => api.patch(`/posts/${id}`, { commentsOff }),
+  pinComment: (postId: string, commentId: string, pinned: boolean) =>
+    api.patch(`/posts/${postId}/comments/${commentId}/pin`, { pinned }),
 
   // Saved-post folders.
   saveTo: (id: string, collectionId: string | null) => api.patch(`/posts/${id}/save`, { collectionId }),

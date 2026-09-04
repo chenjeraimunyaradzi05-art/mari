@@ -18,6 +18,7 @@ import {
   Award,
   Gift,
   Repeat2,
+  UserCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotificationStore, Notification as StoreNotification } from '@/lib/stores/notification.store';
@@ -39,6 +40,7 @@ const notificationIcons: Record<StoreNotification['type'], React.ElementType> = 
   LIKE: Heart,
   COMMENT: MessageCircle,
   FOLLOW: UserPlus,
+  FOLLOW_REQUEST: UserCheck,
   REPOST: Repeat2,
   ACHIEVEMENT: Award,
   LEVEL_UP: Award,
@@ -55,6 +57,7 @@ const notificationColors: Record<StoreNotification['type'], string> = {
   LIKE: 'bg-rose-100 dark:bg-rose-900/30 text-rose-500',
   COMMENT: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
   FOLLOW: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
+  FOLLOW_REQUEST: 'bg-rose-100 dark:bg-rose-900/30 text-rose-500',
   REPOST: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
   ACHIEVEMENT: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
   LEVEL_UP: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-500',

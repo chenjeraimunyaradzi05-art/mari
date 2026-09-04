@@ -54,6 +54,8 @@ export default function CreatePostPage() {
   const [isPublic, setIsPublic] = useState(true);
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [mediaKind, setMediaKind] = useState<'IMAGE' | 'VIDEO' | null>(null);
+  // Alt text for the attached image, for members who use a screen reader.
+  const [mediaAlt, setMediaAlt] = useState('');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,6 +121,7 @@ export default function CreatePostPage() {
         isPublic,
         type: postType,
         mediaUrls: kind !== 'POLL' && mediaUrls.length ? mediaUrls : undefined,
+        mediaAlt: kind !== 'POLL' && mediaUrls.length && mediaKind === 'IMAGE' && mediaAlt.trim() ? [mediaAlt.trim()] : undefined,
         poll: kind === 'POLL' ? { options: cleanOptions, durationHours } : undefined,
         scheduledFor: scheduling && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
         isSensitive,
@@ -128,6 +131,7 @@ export default function CreatePostPage() {
       setPicks([]);
       setMediaUrls([]);
       setMediaKind(null);
+      setMediaAlt('');
       setOptions(['', '']);
       if (scheduling) {
         toast.success(`Scheduled for ${format(new Date(scheduledFor), 'd MMM, h:mm a')}`);
@@ -291,6 +295,7 @@ export default function CreatePostPage() {
                   onClick={() => {
                     setMediaUrls([]);
                     setMediaKind(null);
+                    setMediaAlt('');
                   }}
                   aria-label="Remove attachment"
                   className="text-slate-400 hover:text-slate-600"
@@ -298,6 +303,18 @@ export default function CreatePostPage() {
                   <X className="h-3.5 w-3.5" />
                 </button>
               </span>
+            )}
+            {mediaUrls.length > 0 && mediaKind === 'IMAGE' && (
+              <label className="block w-full">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Describe the image (alt text)</span>
+                <input
+                  value={mediaAlt}
+                  onChange={(e) => setMediaAlt(e.target.value)}
+                  maxLength={300}
+                  placeholder="What is in the picture, for members who use a screen reader"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </label>
             )}
           </div>
         )}

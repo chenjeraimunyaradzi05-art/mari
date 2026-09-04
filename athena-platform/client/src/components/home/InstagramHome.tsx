@@ -34,6 +34,7 @@ import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPr
 import { RepostButton } from '@/components/community/RepostButton';
 import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/community/RepostEmbed';
 import { useImpression } from '@/lib/impressions';
+import { altFor } from '@/components/community/PostCard';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
 
 type FeedAuthor = {
@@ -62,6 +63,7 @@ type FeedPost = {
   reasons?: string[];
   isSensitive?: boolean;
   linkPreview?: LinkPreview | null;
+  mediaAlt?: string[] | null;
   repostOfId?: string | null;
   repostOf?: (FeedPost & RepostOriginal) | null;
   repostUnavailable?: boolean;
@@ -327,7 +329,7 @@ function PostCard({
               <img
                 key={url}
                 src={url}
-                alt=""
+                alt={altFor(post.mediaAlt, media.indexOf(url))}
                 loading="lazy"
                 className="max-h-[585px] w-full object-cover"
               />

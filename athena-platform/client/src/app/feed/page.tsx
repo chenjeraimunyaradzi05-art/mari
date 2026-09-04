@@ -39,6 +39,8 @@ import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPr
 import { RepostButton } from '@/components/community/RepostButton';
 import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/community/RepostEmbed';
 import { useImpression } from '@/lib/impressions';
+import { NewPostsPill } from '@/components/community/NewPostsPill';
+import { altFor } from '@/components/community/PostCard';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
@@ -84,6 +86,7 @@ interface Post {
   isPinned?: boolean;
   isSensitive?: boolean;
   linkPreview?: LinkPreview | null;
+  mediaAlt?: string[] | null;
   repostOfId?: string | null;
   repostOf?: (Post & RepostOriginal) | null;
   repostUnavailable?: boolean;
@@ -365,7 +368,7 @@ function PostCard({ post, currentUserId, repostedBy }: { post: Post; currentUser
               <img
                 key={url}
                 src={url}
-                alt=""
+                alt={altFor(post.mediaAlt, mediaUrls.indexOf(url))}
                 loading="lazy"
                 className="max-h-[32rem] w-full object-cover"
               />
@@ -742,6 +745,7 @@ export default function FeedPage() {
               </div>
             ) : posts && posts.length > 0 ? (
               <div className="space-y-4">
+                <NewPostsPill />
                 {posts.map((post: Post) => (
                   <PostCard key={post.id} post={post} currentUserId={user?.id} />
                 ))}
