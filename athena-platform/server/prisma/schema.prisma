@@ -670,6 +670,9 @@ model User {
   giftBalancePurchases GiftBalancePurchase[]
   giftsSent            GiftTransaction[]     @relation("GiftsSent")
   giftsReceived        GiftTransaction[]     @relation("GiftsReceived")
+  audioTracks          AudioTrack[]          @relation("AudioTracksCreated")
+  liveStreams          LiveStream[]
+  liveStreamMessages   LiveStreamMessage[]
 
   // Gamification
   xp                   Int               @default(0)
@@ -1651,6 +1654,16 @@ model Video {
   mentionedUserIds String[]
   location         String?
 
+  // Processing pipeline. sourceUrl is the upload as received; videoUrl becomes
+  // the web-ready rendition once processing finishes. Progress is 0-100 while
+  // status is PROCESSING; processingError is why a reel could not be published.
+  sourceUrl          String?
+  width              Int?
+  height             Int?
+  processingProgress Int       @default(0)
+  processingError    String?
+  processedAt        DateTime?
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   publishedAt DateTime?
@@ -1666,6 +1679,7 @@ model Video {
   @@index([type])
   @@index([createdAt])
   @@index([engagementScore])
+  @@index([audioTrackId])
 }
 
 model VideoLike {
@@ -1731,17 +1745,81 @@ model VideoView {
 }
 
 model AudioTrack {
-  id          String   @id @default(uuid())
-  title       String
-  artist      String?
-  audioUrl    String
-  duration    Int
-  useCount    Int      @default(0)
-  isOriginal  Boolean  @default(false)
-  licenseType String?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(uuid())
+  title         String
+  artist        String?
+  audioUrl      String
+  duration      Int
+  useCount      Int      @default(0)
+  isOriginal    Boolean  @default(false)
+  licenseType   String?
+  coverUrl      String?
+  createdById   String?
+  createdBy     User?    @relation("AudioTracksCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  // The reel an original sound was lifted from, so "use this sound" is one
+  // track per reel rather than a new track per tap.
+  sourceVideoId String?  @unique
+  isHidden      Boolean  @default(false)
+  createdAt     DateTime @default(now())
 
   @@index([useCount])
+  @@index([createdById])
+}
+
+// ===========================================
+// LIVE STREAMS
+// ===========================================
+// The stream itself is carried by an RTMP ingest and HLS playback pair the
+// host's encoder talks to (see livestream.service for where those come from);
+// this row is the thing viewers find, chat on and send gifts to.
+
+enum LiveStreamStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+}
+
+model LiveStream {
+  id              String           @id @default(uuid())
+  hostId          String
+  host            User             @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  category        String?
+  thumbnailUrl    String?
+  status          LiveStreamStatus @default(SCHEDULED)
+  // What the host's encoder authenticates with. Shown to the host only.
+  streamKey       String           @unique
+  ingestUrl       String?
+  playbackUrl     String?
+  viewerCount     Int              @default(0)
+  peakViewers     Int              @default(0)
+  totalGiftPoints Int              @default(0)
+  messageCount    Int              @default(0)
+  scheduledFor    DateTime?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  replayVideoId   String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  messages LiveStreamMessage[]
+  gifts    GiftTransaction[]
+
+  @@index([status, startedAt])
+  @@index([hostId])
+}
+
+model LiveStreamMessage {
+  id        String     @id @default(uuid())
+  streamId  String
+  stream    LiveStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime   @default(now())
+
+  @@index([streamId, createdAt])
 }
 
 model Channel {
@@ -1867,6 +1945,11 @@ model Conversation {
   lastMessageId String?
   messageCount  Int      @default(0)
 
+  // Disappearing messages. When set, every new message in this thread gets an
+  // expiresAt this many seconds ahead and is deleted once it passes. Null is
+  // off. Either participant may change it; a system message records who did.
+  disappearingTtlSeconds Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -1917,6 +2000,9 @@ model Message {
   editedAt     DateTime? // Message edit timestamp
   deletedAt    DateTime? // Soft delete support
   isArchived   Boolean   @default(false) // Archive status
+  // Set from the conversation's disappearing-message setting at send time;
+  // the sweep deletes the row once this passes and reads filter it out before.
+  expiresAt    DateTime?
 
   createdAt DateTime @default(now())
 
@@ -1927,6 +2013,7 @@ model Message {
   @@index([isArchived])
   @@index([replyToId])
   @@index([partitionKey])
+  @@index([expiresAt])
 }
 
 model MessageReaction {
@@ -2362,8 +2449,8 @@ model ServiceOrder {
   deliveryMessage    String?
   revisionReason     String?
   cancellationReason String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   service SkillService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   client  User         @relation("ServiceOrdersClient", fields: [clientId], references: [id], onDelete: Cascade)
@@ -2629,11 +2716,17 @@ model GiftTransaction {
 
   message String?
 
+  // Set when the gift was sent during a live stream, for that stream's total
+  // and leaderboard. Null for gifts sent from a profile or a reel.
+  streamId String?
+  stream   LiveStream? @relation(fields: [streamId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
 
   @@index([senderId])
   @@index([receiverId])
   @@index([createdAt])
+  @@index([streamId])
 }
 
 model CreatorPayout {
