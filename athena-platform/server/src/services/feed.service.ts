@@ -4,6 +4,7 @@
  */
 
 import { prisma } from '../utils/prisma';
+import { REPOST_OF_INCLUDE } from './post-decoration.service';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
 import { logger } from '../utils/logger';
 
@@ -40,6 +41,9 @@ export interface FeedPost {
   isPinned?: boolean;
   // Blurred until the reader chooses to see it.
   isSensitive?: boolean;
+  // The original a repost or quote points at (null once decorated if it is gone).
+  repostOf?: { id: string; [key: string]: unknown } | null;
+  repostCount?: number;
   // Why this post is in front of the viewer, in plain words. Every ranked
   // post has at least one; the client shows them behind "Why this?". The
   // chronological video feed carries none: it is not ranked.
@@ -284,6 +288,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
     const inNetworkPosts = await prisma.post.findMany({
       where: inNetworkWhere,
       include: {
+        ...REPOST_OF_INCLUDE,
         author: {
           select: {
             id: true,
@@ -408,6 +413,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
     const candidatePosts = await prisma.post.findMany({
       where,
       include: {
+        ...REPOST_OF_INCLUDE,
         author: {
           select: {
             id: true,
@@ -502,6 +508,8 @@ export async function generateFeed(options: FeedOptions): Promise<{
     poll: post.poll ?? null,
     isPinned: Boolean(post.isPinned),
     isSensitive: Boolean(post.isSensitive),
+    repostOf: post.repostOf ?? null,
+    repostCount: post.repostCount ?? 0,
     reasons: reasonsFor(post, {
       userId,
       followingIds,
@@ -604,6 +612,7 @@ export async function getTrendingPosts(
           createdAt: { gte: startTime },
         },
         include: {
+          ...REPOST_OF_INCLUDE,
           author: {
             select: {
               id: true,
@@ -650,6 +659,8 @@ export async function getTrendingPosts(
         poll: post.poll ?? null,
         isPinned: Boolean(post.isPinned),
         isSensitive: Boolean(post.isSensitive),
+        repostOf: post.repostOf ?? null,
+        repostCount: post.repostCount ?? 0,
         reasons: ['Trending in the community'],
       }));
     },
@@ -682,6 +693,7 @@ export async function getVideoFeed(
   const videos = await prisma.post.findMany({
     where,
     include: {
+      ...REPOST_OF_INCLUDE,
       author: {
         select: {
           id: true,
@@ -793,6 +805,7 @@ export async function getForYouFeed(
       createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
     },
     include: {
+      ...REPOST_OF_INCLUDE,
       author: {
         select: {
           id: true,
@@ -855,6 +868,8 @@ export async function getForYouFeed(
     poll: post.poll ?? null,
     isPinned: Boolean(post.isPinned),
     isSensitive: Boolean(post.isSensitive),
+    repostOf: post.repostOf ?? null,
+    repostCount: post.repostCount ?? 0,
     reasons: reasonsFor(post, { userId, followingIds, userPersona: user.persona ?? undefined, source: 'discovery' }),
   }));
 

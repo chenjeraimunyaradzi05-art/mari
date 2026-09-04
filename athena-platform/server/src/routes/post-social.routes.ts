@@ -8,6 +8,11 @@
  *   PATCH  /api/posts/:id/pin                        pin one post to the top of your profile
  *   GET    /api/posts/me/scheduled                   what you have queued
  *   GET    /api/posts/me/mentions                    posts that name you
+ *   GET    /api/posts/collections                    your saved-post folders, with counts
+ *   POST   /api/posts/collections                    { name, description? }
+ *   PATCH  /api/posts/collections/:id
+ *   DELETE /api/posts/collections/:id                the saves inside go back to Unsorted
+ *   PATCH  /api/posts/:id/save                       { collectionId | null }  file a save (saving it first if needed)
  *
  * Mounted ahead of post.routes so `me/scheduled` is never read as a post id.
  */
@@ -19,6 +24,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { isBlockedRelationship } from '../utils/safety-store';
+import { normalizeOptionalUserText, normalizeUserText } from '../utils/contentSafety';
 import {
   decoratePosts,
   isPollClosed,
@@ -255,6 +261,157 @@ router.get('/me/mentions', authenticate, async (req: AuthRequest, res, next) => 
       take: 50,
     });
     res.json({ success: true, data: await decoratePosts(posts, req.user!.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// SAVED COLLECTIONS
+// ===========================================
+// Folders for saved posts. A save without a folder sits in "Unsorted"; a
+// folder that is deleted lets its saves fall back there rather than losing them.
+
+const COLLECTION_NAME_MAX = 40;
+const COLLECTION_DESCRIPTION_MAX = 160;
+const MAX_COLLECTIONS = 20;
+
+function firstMediaOf(mediaUrls: unknown): string | null {
+  return Array.isArray(mediaUrls) && typeof mediaUrls[0] === 'string' ? mediaUrls[0] : null;
+}
+
+router.get('/collections', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const rows = await prisma.savedCollection.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        _count: { select: { saves: true } },
+        // The newest save with media gives the folder its cover.
+        saves: {
+          orderBy: { createdAt: 'desc' },
+          take: 4,
+          select: { post: { select: { mediaUrls: true } } },
+        },
+      },
+    });
+
+    const unsorted = await prisma.postSave.count({ where: { userId: req.user!.id, collectionId: null } });
+
+    res.json({
+      success: true,
+      data: {
+        unsortedCount: unsorted,
+        collections: rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          count: row._count.saves,
+          cover: row.saves.map((s) => firstMediaOf(s.post.mediaUrls)).find(Boolean) ?? null,
+          updatedAt: row.updatedAt,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/collections', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const name = normalizeUserText(req.body?.name, { field: 'name', maxLength: COLLECTION_NAME_MAX });
+    const description = normalizeOptionalUserText(req.body?.description, {
+      field: 'description',
+      maxLength: COLLECTION_DESCRIPTION_MAX,
+      allowEmpty: true,
+    });
+
+    const existing = await prisma.savedCollection.findMany({
+      where: { userId: req.user!.id },
+      select: { id: true, name: true },
+    });
+    if (existing.length >= MAX_COLLECTIONS) {
+      throw new ApiError(400, `You can keep up to ${MAX_COLLECTIONS} collections`);
+    }
+    if (existing.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      throw new ApiError(409, 'You already have a collection with that name');
+    }
+
+    const created = await prisma.savedCollection.create({
+      data: { userId: req.user!.id, name, description: description || null },
+    });
+    res.status(201).json({
+      success: true,
+      message: 'Collection created',
+      data: { id: created.id, name: created.name, description: created.description, count: 0, cover: null, updatedAt: created.updatedAt },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+async function loadOwnCollection(id: string, userId: string) {
+  const row = await prisma.savedCollection.findUnique({ where: { id } });
+  if (!row || row.userId !== userId) {
+    throw new ApiError(404, 'Collection not found');
+  }
+  return row;
+}
+
+router.patch('/collections/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const existing = await loadOwnCollection(req.params.id, req.user!.id);
+    const data: { name?: string; description?: string | null } = {};
+    if (req.body?.name !== undefined) {
+      data.name = normalizeUserText(req.body.name, { field: 'name', maxLength: COLLECTION_NAME_MAX });
+    }
+    if (req.body?.description !== undefined) {
+      data.description =
+        normalizeOptionalUserText(req.body.description, {
+          field: 'description',
+          maxLength: COLLECTION_DESCRIPTION_MAX,
+          allowEmpty: true,
+        }) || null;
+    }
+    const updated = await prisma.savedCollection.update({ where: { id: existing.id }, data });
+    res.json({ success: true, data: { id: updated.id, name: updated.name, description: updated.description } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/collections/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const existing = await loadOwnCollection(req.params.id, req.user!.id);
+    await prisma.savedCollection.delete({ where: { id: existing.id } });
+    res.json({ success: true, message: 'Collection removed; its posts are still saved' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    await loadVisiblePost(id, req.user!.id);
+
+    const collectionId: string | null =
+      typeof req.body?.collectionId === 'string' && req.body.collectionId ? req.body.collectionId : null;
+    if (collectionId) {
+      await loadOwnCollection(collectionId, req.user!.id);
+    }
+
+    // Filing a post you had not saved saves it in one step.
+    await prisma.postSave.upsert({
+      where: { postId_userId: { postId: id, userId: req.user!.id } },
+      update: { collectionId },
+      create: { postId: id, userId: req.user!.id, collectionId },
+    });
+    if (collectionId) {
+      await prisma.savedCollection.update({ where: { id: collectionId }, data: { updatedAt: new Date() } });
+    }
+
+    res.json({ success: true, message: collectionId ? 'Saved to collection' : 'Moved to Unsorted', data: { collectionId } });
   } catch (error) {
     next(error);
   }

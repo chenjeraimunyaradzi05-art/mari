@@ -27,7 +27,7 @@ export interface GroupedNotification extends NotificationRow {
   actors: string[];
 }
 
-const GROUPABLE = new Set(['LIKE', 'COMMENT', 'FOLLOW', 'MENTION']);
+const GROUPABLE = new Set(['LIKE', 'COMMENT', 'FOLLOW', 'MENTION', 'REPOST']);
 const WINDOW_MS = 48 * 60 * 60 * 1000;
 
 function actorNameOf(row: NotificationRow): string | null {
@@ -57,6 +57,8 @@ function genericTail(type: string): string {
       return 'started following you';
     case 'MENTION':
       return 'mentioned you';
+    case 'REPOST':
+      return 'reposted your post';
     default:
       return '';
   }

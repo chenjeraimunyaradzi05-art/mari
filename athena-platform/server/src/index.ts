@@ -28,6 +28,9 @@ import userRoutes from './routes/user.routes';
 import jobRoutes from './routes/job.routes';
 import postRoutes from './routes/post.routes';
 import postSocialRoutes from './routes/post-social.routes';
+import postRepostRoutes from './routes/post-repost.routes';
+import postInsightsRoutes from './routes/post-insights.routes';
+import storyHighlightRoutes from './routes/story-highlights.routes';
 import { startScheduledPostPublisher } from './services/scheduled-posts.service';
 import organizationRoutes from './routes/organization.routes';
 import courseRoutes from './routes/course.routes';
@@ -531,6 +534,8 @@ app.use('/api/jobs', jobRoutes);
 // Reactions, polls, comment likes, pins and the "mine" listings sit ahead of
 // the post routes so `me/scheduled` is never read as a post id.
 app.use('/api/posts', postSocialRoutes);
+app.use('/api/posts', postRepostRoutes);
+app.use('/api/posts', postInsightsRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/courses', courseRoutes);
@@ -559,6 +564,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/engagement', engagementRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api/status/highlights', storyHighlightRoutes);
 app.use('/api/status', statusRoutes);
 app.use('/api/algorithms', algorithmRoutes);
 app.use('/api/verification', verificationRoutes);

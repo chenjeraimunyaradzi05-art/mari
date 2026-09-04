@@ -66,7 +66,7 @@ describe('Post saves', () => {
     const call = (prisma.postSave.upsert as any).mock.calls[0][0];
     expect(call.where).toEqual({ postId_userId: { postId: 'p1', userId: VIEWER } });
     expect(call.update).toEqual({});
-    expect(call.create).toEqual({ postId: 'p1', userId: VIEWER });
+    expect(call.create).toEqual({ postId: 'p1', userId: VIEWER, collectionId: null });
   });
 
   it('404s for a hidden post rather than revealing it exists', async () => {

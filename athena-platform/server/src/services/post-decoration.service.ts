@@ -106,7 +106,51 @@ export function isPollClosed(poll: PollDefinition, now = new Date()): boolean {
   return new Date(poll.endsAt).getTime() <= now.getTime();
 }
 
-type PostLike = { id: string; poll?: unknown; likeCount?: number };
+/**
+ * The original a repost or quote points at, included by every list route so
+ * a repost renders the same everywhere. Visibility is settled in
+ * decoratePosts: a hidden or private original is replaced by a marker.
+ */
+export const REPOST_OF_INCLUDE = {
+  repostOf: {
+    select: {
+      id: true,
+      authorId: true,
+      content: true,
+      type: true,
+      mediaUrls: true,
+      createdAt: true,
+      updatedAt: true,
+      isHidden: true,
+      isPublic: true,
+      isSensitive: true,
+      linkPreview: true,
+      poll: true,
+      likeCount: true,
+      commentCount: true,
+      shareCount: true,
+      repostCount: true,
+      author: {
+        select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+      },
+    },
+  },
+} as const;
+
+type RepostOfRow = {
+  id: string;
+  isHidden?: boolean;
+  isPublic?: boolean;
+  [key: string]: unknown;
+};
+
+type PostLike = {
+  id: string;
+  poll?: unknown;
+  likeCount?: number;
+  repostOfId?: string | null;
+  repostOf?: RepostOfRow | null;
+};
 
 export interface Decorations {
   isLiked: boolean;
@@ -114,11 +158,17 @@ export interface Decorations {
   reactionCounts: Partial<Record<ReactionType, number>>;
   isSaved: boolean;
   poll: PollResults | null;
+  /** The viewer has a plain repost of this post. */
+  isReposted: boolean;
+  /** True when this is a repost whose original has since gone. */
+  repostUnavailable: boolean;
 }
 
 /**
  * Attaches reactions, saved state and poll results to a page of posts in
- * three grouped queries, never one per post.
+ * a handful of grouped queries, never one per post. The original inside a
+ * repost is decorated the same way, so a plain repost can render as the
+ * original with its own live state.
  */
 export async function decoratePosts<T extends PostLike>(
   posts: T[],
@@ -126,10 +176,14 @@ export async function decoratePosts<T extends PostLike>(
   now = new Date()
 ): Promise<Array<T & Decorations>> {
   if (posts.length === 0) return [];
-  const ids = posts.map((p) => p.id);
-  const pollPostIds = posts.filter((p) => readPoll(p.poll)).map((p) => p.id);
+  const originals = posts
+    .map((p) => p.repostOf)
+    .filter((o): o is RepostOfRow => Boolean(o) && !posts.some((p) => p.id === (o as RepostOfRow).id));
+  const rows: PostLike[] = [...posts, ...originals];
+  const ids = Array.from(new Set(rows.map((p) => p.id)));
+  const pollPostIds = rows.filter((p) => readPoll(p.poll)).map((p) => p.id);
 
-  const [reactionRows, mine, saves, voteRows, myVotes] = await Promise.all([
+  const [reactionRows, mine, saves, voteRows, myVotes, myReposts] = await Promise.all([
     prisma.like.groupBy({
       by: ['postId', 'type'],
       where: { postId: { in: ids } },
@@ -154,7 +208,19 @@ export async function decoratePosts<T extends PostLike>(
           select: { postId: true, optionId: true },
         })
       : Promise.resolve([] as Array<{ postId: string; optionId: string }>),
+    viewerId
+      ? prisma.post.findMany({
+          where: { authorId: viewerId, repostOfId: { in: ids }, content: '' },
+          select: { repostOfId: true },
+        })
+      : Promise.resolve([] as Array<{ repostOfId: string | null }>),
   ]);
+
+  const reposted = new Set(
+    (Array.isArray(myReposts) ? myReposts : [])
+      .map((r) => (r as { repostOfId?: string | null }).repostOfId)
+      .filter((id): id is string => typeof id === 'string')
+  );
 
   const counts = new Map<string, Partial<Record<ReactionType, number>>>();
   for (const row of reactionRows) {
@@ -173,7 +239,7 @@ export async function decoratePosts<T extends PostLike>(
   }
   const myVoteByPost = new Map(myVotes.map((v) => [v.postId, v.optionId]));
 
-  return posts.map((post) => {
+  const decorate = <P extends PostLike>(post: P) => {
     const definition = readPoll(post.poll);
     let poll: PollResults | null = null;
     if (definition) {
@@ -198,6 +264,20 @@ export async function decoratePosts<T extends PostLike>(
       reactionCounts: counts.get(post.id) ?? {},
       isSaved: saved.has(post.id),
       poll,
+      isReposted: reposted.has(post.id),
+    };
+  };
+
+  return posts.map((post) => {
+    // A repost whose original is hidden, private or deleted shows a marker
+    // rather than someone else's withdrawn words.
+    const original = post.repostOf ?? null;
+    const originalGone = original ? Boolean(original.isHidden) || original.isPublic === false : false;
+    const repostUnavailable = Boolean(post.repostOfId) && (!original || originalGone);
+    return {
+      ...decorate(post),
+      repostOf: original && !originalGone ? decorate(original) : null,
+      repostUnavailable,
     };
   });
 }

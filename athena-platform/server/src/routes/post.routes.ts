@@ -24,6 +24,7 @@ import {
   decoratePosts,
   isReactionType,
   reactionVerb,
+  REPOST_OF_INCLUDE,
 } from '../services/post-decoration.service';
 import { parseScheduledFor } from '../services/scheduled-posts.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
@@ -242,6 +243,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
             headline: true,
           },
         },
+        ...REPOST_OF_INCLUDE,
         comments: {
           where: {
             parentId: null,
@@ -661,7 +663,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
 
     const existingPost = await prisma.post.findUnique({
       where: { id },
-      select: { authorId: true },
+      select: { authorId: true, repostOfId: true },
     });
 
     if (!existingPost) {
@@ -672,7 +674,17 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(403, 'Not authorized to delete this post');
     }
 
+    // Plain reposts have nothing of their own to show once the original is
+    // gone; quotes keep their words and show the original as unavailable.
+    await prisma.post.deleteMany({ where: { repostOfId: id, content: '' } });
     await prisma.post.delete({ where: { id } });
+    // A deleted repost or quote no longer counts on its original.
+    if (existingPost.repostOfId) {
+      await prisma.post.updateMany({
+        where: { id: existingPost.repostOfId, repostCount: { gt: 0 } },
+        data: { repostCount: { decrement: 1 } },
+      });
+    }
 
     // Remove from index
     await deleteDocument(IndexNames.POSTS, id);
@@ -988,6 +1000,7 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
               headline: true,
             },
           },
+          ...REPOST_OF_INCLUDE,
           _count: {
             select: {
               comments: true,
@@ -1032,10 +1045,15 @@ async function loadVisiblePost(id: string, userId: string) {
   return post;
 }
 
+// ?collectionId=<id> lists one folder; ?collectionId=none lists the unsorted.
 router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const collection = typeof req.query.collectionId === 'string' ? req.query.collectionId : '';
     const saves = await prisma.postSave.findMany({
-      where: { userId: req.user!.id },
+      where: {
+        userId: req.user!.id,
+        ...(collection === 'none' ? { collectionId: null } : collection ? { collectionId: collection } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         post: {
@@ -1043,18 +1061,20 @@ router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
             author: {
               select: { id: true, displayName: true, avatar: true, headline: true },
             },
+            ...REPOST_OF_INCLUDE,
           },
         },
       },
     });
 
+    const collectionByPost = new Map(saves.map((save) => [save.postId, save.collectionId ?? null]));
     const decorated = await decoratePosts(
       saves.map((save) => save.post),
       req.user!.id
     );
     res.json({
       success: true,
-      data: decorated.map((post) => ({ ...post, isSaved: true })),
+      data: decorated.map((post) => ({ ...post, isSaved: true, collectionId: collectionByPost.get(post.id) ?? null })),
     });
   } catch (error) {
     next(error);
@@ -1066,14 +1086,23 @@ router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
     const { id } = req.params;
     await loadVisiblePost(id, req.user!.id);
 
+    // Straight into a folder when the client names one it owns.
+    const collectionId = typeof req.body?.collectionId === 'string' && req.body.collectionId ? req.body.collectionId : null;
+    if (collectionId) {
+      const owned = await prisma.savedCollection.findUnique({ where: { id: collectionId }, select: { userId: true } });
+      if (!owned || owned.userId !== req.user!.id) {
+        throw new ApiError(404, 'Collection not found');
+      }
+    }
+
     // Upsert keeps a double-tap idempotent instead of a unique-constraint error.
     await prisma.postSave.upsert({
       where: { postId_userId: { postId: id, userId: req.user!.id } },
-      update: {},
-      create: { postId: id, userId: req.user!.id },
+      update: collectionId ? { collectionId } : {},
+      create: { postId: id, userId: req.user!.id, collectionId },
     });
 
-    res.status(201).json({ success: true, message: 'Post saved' });
+    res.status(201).json({ success: true, message: 'Post saved', data: { collectionId } });
   } catch (error) {
     next(error);
   }
