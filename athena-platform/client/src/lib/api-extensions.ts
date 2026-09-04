@@ -111,13 +111,21 @@ export const channelApi = {
   // Get channel by ID
   getChannel: (id: string) => api.get(`/channels/${id}`),
 
-  // Create new channel
+  // Create new channel. `type` is the server's ChannelType; whether it is
+  // public and whether members may post are separate flags, not a type.
   create: (data: {
     name: string;
     description?: string;
-    type: 'public' | 'private' | 'direct';
-    icon?: string;
-    memberIds?: string[];
+    type:
+      | 'EMPLOYER_BROADCAST'
+      | 'MENTOR_BROADCAST'
+      | 'COMMUNITY_CHANNEL'
+      | 'EDUCATION_CHANNEL'
+      | 'CREATOR_CHANNEL';
+    isPublic?: boolean;
+    allowReplies?: boolean;
+    avatarUrl?: string;
+    bannerUrl?: string;
   }) => api.post('/channels', data),
 
   // Update channel
@@ -131,8 +139,8 @@ export const channelApi = {
   getMessages: (id: string, params?: { page?: number; limit?: number; before?: string }) =>
     api.get(`/channels/${id}/messages`, { params }),
 
-  // Send message to channel
-  sendMessage: (id: string, data: { content: string; attachments?: string[] }) =>
+  // Send message to channel. Attachments are uploaded first and sent as URLs.
+  sendMessage: (id: string, data: { content: string; mediaUrls?: string[] }) =>
     api.post(`/channels/${id}/messages`, data),
 
   // Edit message

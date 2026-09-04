@@ -1,20 +1,17 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { 
-  Hash, 
-  Lock, 
-  Plus, 
-  Search, 
-  Settings, 
-  Users, 
+import { useState } from 'react';
+import Link from 'next/link';
+import {
+  BellOff,
   ChevronDown,
   ChevronRight,
+  Compass,
+  Hash,
+  Lock,
   MessageSquare,
-  Bell,
-  BellOff,
-  MoreHorizontal
+  Plus,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -35,6 +32,10 @@ export interface Channel {
   };
   memberCount: number;
   isMuted: boolean;
+  /** Whether the viewer belongs to it. Public channels are listed either way. */
+  isMember?: boolean;
+  ownerId?: string;
+  allowReplies?: boolean;
 }
 
 interface ChannelSidebarProps {
@@ -42,7 +43,7 @@ interface ChannelSidebarProps {
   activeChannelId?: string;
   onChannelSelect: (channelId: string) => void;
   onCreateChannel: () => void;
-  onSearchClick?: () => void;
+  onDiscover?: () => void;
 }
 
 export function ChannelSidebar({
@@ -50,39 +51,20 @@ export function ChannelSidebar({
   activeChannelId,
   onChannelSelect,
   onCreateChannel,
-  onSearchClick,
+  onDiscover,
 }: ChannelSidebarProps) {
-  const [expandedSections, setExpandedSections] = useState({
-    channels: true,
-    directMessages: true,
-  });
+  const [expanded, setExpanded] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const publicChannels = channels.filter((c) => c.type === 'public');
-  const privateChannels = channels.filter((c) => c.type === 'private');
-  const directMessages = channels.filter((c) => c.type === 'direct');
-
-  const filteredChannels = (list: Channel[]) =>
-    list.filter((c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-  const toggleSection = (section: 'channels' | 'directMessages') => {
-    setExpandedSections((prev) => ({
-      ...prev,
-      [section]: !prev[section],
-    }));
-  };
+  const query = searchQuery.trim().toLowerCase();
+  const visible = channels.filter((c) => c.type !== 'direct' && (!query || c.name.toLowerCase().includes(query)));
+  // The ones you belong to first, then the public rooms you could join.
+  const joined = visible.filter((c) => c.isMember !== false);
+  const open = visible.filter((c) => c.isMember === false);
 
   const getChannelIcon = (channel: Channel) => {
-    if (channel.type === 'direct') {
-      return (
-        <Avatar
-          src={channel.icon}
-          fallback={channel.name[0]}
-          size="sm"
-        />
-      );
+    if (channel.icon) {
+      return <Avatar src={channel.icon} fallback={channel.name[0]} size="xs" />;
     }
     if (channel.type === 'private') {
       return <Lock className="w-4 h-4 text-slate-500" />;
@@ -99,7 +81,13 @@ export function ChannelSidebar({
       <div className="p-4 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-slate-900 dark:text-white">Community</h2>
-          <Button variant="ghost" size="icon" onClick={onCreateChannel} data-testid="create-channel-button">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onCreateChannel}
+            aria-label="Create channel"
+            data-testid="create-channel-button"
+          >
             <Plus className="w-4 h-4" />
           </Button>
         </div>
@@ -117,23 +105,19 @@ export function ChannelSidebar({
 
       {/* Channel list */}
       <div className="flex-1 overflow-y-auto py-2">
-        {/* Public Channels */}
         <div className="mb-2">
           <button
-            onClick={() => toggleSection('channels')}
+            onClick={() => setExpanded((v) => !v)}
             className="w-full flex items-center px-4 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hover:text-slate-700 dark:hover:text-slate-200"
+            aria-expanded={expanded}
           >
-            {expandedSections.channels ? (
-              <ChevronDown className="w-3 h-3 mr-1" />
-            ) : (
-              <ChevronRight className="w-3 h-3 mr-1" />
-            )}
+            {expanded ? <ChevronDown className="w-3 h-3 mr-1" /> : <ChevronRight className="w-3 h-3 mr-1" />}
             Channels
           </button>
-          
-          {expandedSections.channels && (
+
+          {expanded && (
             <div className="mt-1 space-y-0.5">
-              {filteredChannels([...publicChannels, ...privateChannels]).map((channel) => (
+              {joined.map((channel) => (
                 <ChannelItem
                   key={channel.id}
                   channel={channel}
@@ -142,27 +126,22 @@ export function ChannelSidebar({
                   icon={getChannelIcon(channel)}
                 />
               ))}
+              {joined.length === 0 && (
+                <p className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">
+                  {query ? 'No channel by that name.' : 'You have not joined a channel yet.'}
+                </p>
+              )}
             </div>
           )}
         </div>
 
-        {/* Direct Messages */}
-        <div>
-          <button
-            onClick={() => toggleSection('directMessages')}
-            className="w-full flex items-center px-4 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider hover:text-slate-700 dark:hover:text-slate-200"
-          >
-            {expandedSections.directMessages ? (
-              <ChevronDown className="w-3 h-3 mr-1" />
-            ) : (
-              <ChevronRight className="w-3 h-3 mr-1" />
-            )}
-            Direct Messages
-          </button>
-          
-          {expandedSections.directMessages && (
+        {expanded && open.length > 0 && (
+          <div className="mb-2">
+            <p className="px-4 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Open to join
+            </p>
             <div className="mt-1 space-y-0.5">
-              {filteredChannels(directMessages).map((channel) => (
+              {open.map((channel) => (
                 <ChannelItem
                   key={channel.id}
                   channel={channel}
@@ -172,20 +151,33 @@ export function ChannelSidebar({
                 />
               ))}
             </div>
-          )}
+          </div>
+        )}
+
+        {/* One-to-one threads are a different product (Messages), not an
+            always-empty "Direct Messages" section here. */}
+        <div className="mt-4 px-2">
+          <Link
+            href="/dashboard/messages"
+            className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md"
+          >
+            <MessageSquare className="w-4 h-4 text-slate-500" />
+            Direct messages
+          </Link>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-slate-200 dark:border-slate-800">
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full justify-start"
-          onClick={onCreateChannel}
-        >
+      <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+        {onDiscover && (
+          <Button variant="outline" size="sm" className="w-full justify-start" onClick={onDiscover}>
+            <Compass className="w-4 h-4 mr-2" />
+            Browse channels
+          </Button>
+        )}
+        <Button variant="outline" size="sm" className="w-full justify-start" onClick={onCreateChannel}>
           <Plus className="w-4 h-4 mr-2" />
-          Create Channel
+          Create channel
         </Button>
       </div>
     </div>
@@ -209,6 +201,7 @@ function ChannelItem({ channel, isActive, onClick, icon }: ChannelItemProps) {
           ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
       )}
+      aria-current={isActive ? 'true' : undefined}
       data-testid="channel-item"
     >
       <span className="flex-shrink-0">{icon}</span>
