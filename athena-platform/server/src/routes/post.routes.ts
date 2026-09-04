@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -18,8 +19,34 @@ import {
   normalizeSafeUrl,
   normalizeUserText,
 } from '../utils/contentSafety';
+import {
+  buildPoll,
+  decoratePosts,
+  isReactionType,
+  reactionVerb,
+} from '../services/post-decoration.service';
+import { parseScheduledFor } from '../services/scheduled-posts.service';
+import { resolveMentionedUserIds } from '../utils/mentions';
 
 const router = Router();
+
+const POST_TYPES = ['TEXT', 'IMAGE', 'VIDEO', 'ARTICLE', 'JOB_SHARE', 'COURSE_SHARE', 'POLL', 'WIN'];
+
+// Everyone named with @[Name](id) hears about it, except the author naming
+// themselves. Scheduled posts notify when they publish, not when they are
+// queued, so nothing here runs for those.
+async function notifyMentions(actorId: string, mentionedUserIds: string[], where: 'post' | 'comment', postId: string) {
+  for (const userId of mentionedUserIds) {
+    await notifySocial({
+      recipientId: userId,
+      actorId,
+      type: 'MENTION',
+      title: 'You were mentioned',
+      message: (name) => `${name} mentioned you in a ${where}`,
+      link: socialLinks.post(postId),
+    });
+  }
+}
 
 
 // ===========================================
@@ -81,28 +108,15 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
         prisma.post.count({ where }),
       ]);
 
-      const postIds = posts.map((p) => p.id);
-      const [likes, saves] = await Promise.all([
-        prisma.like.findMany({
-          where: { userId: req.user.id, postId: { in: postIds } },
-          select: { postId: true },
-        }),
-        prisma.postSave.findMany({
-          where: { userId: req.user.id, postId: { in: postIds } },
-          select: { postId: true },
-        }),
-      ]);
-      const likedPostIds = new Set(likes.map((l) => l.postId));
-      const savedPostIds = new Set(saves.map((s) => s.postId));
+      const decorated = await decoratePosts(posts, req.user.id);
 
       res.json({
         success: true,
-        data: posts.map((post) => ({
+        data: decorated.map((post) => ({
           ...post,
           // Everyone on this tab is followed by definition, except the viewer.
           author: { ...post.author, isFollowing: post.authorId !== req.user!.id },
-          isLiked: likedPostIds.has(post.id),
-          isSaved: savedPostIds.has(post.id),
+          reasons: [post.authorId === req.user!.id ? 'Your post' : 'Someone you follow'],
         })),
         pagination: {
           page,
@@ -118,9 +132,9 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'Invalid feed tab');
     }
 
-    const normalizedType = ((): 'all' | 'video' | 'image' | 'text' => {
+    const normalizedType = ((): 'all' | 'video' | 'image' | 'text' | 'poll' | 'win' => {
       const t = String(typeParam || 'all').toLowerCase();
-      if (t === 'video' || t === 'image' || t === 'text') return t;
+      if (t === 'video' || t === 'image' || t === 'text' || t === 'poll' || t === 'win') return t;
       return 'all';
     })();
 
@@ -142,16 +156,7 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     // authors and decorate the rest here.
     const blocked = new Set(blockedIds);
     const visiblePosts = result.posts.filter((post) => !blocked.has(post.authorId));
-
-    let posts: unknown[] = visiblePosts;
-    if (req.user) {
-      const saves = await prisma.postSave.findMany({
-        where: { userId: req.user.id, postId: { in: visiblePosts.map((p) => p.id) } },
-        select: { postId: true },
-      });
-      const savedPostIds = new Set(saves.map((s) => s.postId));
-      posts = visiblePosts.map((post) => ({ ...post, isSaved: savedPostIds.has(post.id) }));
-    }
+    const posts = await decoratePosts(visiblePosts, req.user?.id);
 
     res.json({
       success: true,
@@ -303,25 +308,29 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     // Increment view count
     await recordPostView(id, req.user?.id);
 
-    // Check if liked
-    let isLiked = false;
-    if (req.user) {
-      const like = await prisma.like.findUnique({
-        where: {
-          userId_postId: {
-            userId: req.user.id,
-            postId: id,
-          },
-        },
-      });
-      isLiked = !!like;
-    }
+    const [decorated] = await decoratePosts([post], req.user?.id);
+
+    // Which comments the viewer has liked, in one query for the whole thread.
+    const commentIds = post.comments.flatMap((comment) => [comment.id, ...comment.replies.map((r) => r.id)]);
+    const likedCommentIds = new Set(
+      req.user && commentIds.length
+        ? (
+            await prisma.commentLike.findMany({
+              where: { userId: req.user.id, commentId: { in: commentIds } },
+              select: { commentId: true },
+            })
+          ).map((row) => row.commentId)
+        : []
+    );
 
     const comments = post.comments
       .filter((comment) => !blockedAuthorIds.has(comment.authorId))
       .map((comment) => ({
         ...comment,
-        replies: comment.replies.filter((reply) => !blockedAuthorIds.has(reply.authorId)),
+        isLiked: likedCommentIds.has(comment.id),
+        replies: comment.replies
+          .filter((reply) => !blockedAuthorIds.has(reply.authorId))
+          .map((reply) => ({ ...reply, isLiked: likedCommentIds.has(reply.id) })),
       }));
 
     // The counters are denormalised and have drifted before (seed rows carried
@@ -330,11 +339,10 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       data: {
-        ...post,
+        ...decorated,
         likeCount: post._count?.likes ?? post.likeCount,
         commentCount: post._count?.comments ?? post.commentCount,
         comments,
-        isLiked,
       },
     });
   } catch (error) {
@@ -350,9 +358,11 @@ router.post(
   authenticate,
   [
     body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.post }),
-    body('type').optional().isIn(['TEXT', 'IMAGE', 'VIDEO', 'ARTICLE', 'JOB_SHARE', 'COURSE_SHARE']),
+    body('type').optional().isIn(POST_TYPES),
     body('mediaUrls').optional().isArray({ max: 10 }),
     body('isPublic').optional().isBoolean(),
+    body('poll').optional().isObject(),
+    body('scheduledFor').optional({ values: 'null' }).isString(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -368,6 +378,18 @@ router.post(
       const mediaUrls = normalizeMediaUrls(req.body.mediaUrls);
       const type = req.body.type || 'TEXT';
       const isPublic = req.body.isPublic ?? true;
+
+      // A poll carries its options and close time; any other type ignores them.
+      const poll = type === 'POLL' ? buildPoll(req.body.poll) : undefined;
+
+      let scheduledFor: Date | undefined;
+      try {
+        scheduledFor = parseScheduledFor(req.body.scheduledFor);
+      } catch (error) {
+        throw new ApiError(400, error instanceof Error ? error.message : 'Invalid schedule');
+      }
+
+      const mentionedUserIds = (await resolveMentionedUserIds(content)).filter((id) => id !== req.user!.id);
 
       await assertContentAllowed(content, { kind: 'post', userId: req.user!.id });
 
@@ -388,9 +410,10 @@ router.post(
           type,
           mediaUrls,
           isPublic,
-          // Store enriched data if schema supports it, otherwise index it
-          // Assuming schema doesn't have tags/score yet, we might use metadata if available or just use it for search indexing below
-          // Check schema...
+          ...(poll ? { poll: poll as unknown as Prisma.InputJsonValue } : {}),
+          // A scheduled post waits hidden until the publisher flips it visible.
+          ...(scheduledFor ? { scheduledFor, isHidden: true } : {}),
+          mentionedUserIds,
         },
         include: {
           author: {
@@ -422,9 +445,13 @@ router.post(
         });
       }
 
+      if (!scheduledFor && mentionedUserIds.length > 0) {
+        await notifyMentions(req.user!.id, mentionedUserIds, 'post', post.id);
+      }
+
       res.status(201).json({
         success: true,
-        message: 'Post created',
+        message: scheduledFor ? 'Post scheduled' : 'Post created',
         data: post,
       });
     } catch (error) {
@@ -660,6 +687,10 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Post not found');
     }
 
+    // A plain like, or a reaction with a meaning when `type` names one.
+    const requested = typeof req.body?.type === 'string' ? req.body.type.toUpperCase() : 'LIKE';
+    const type = isReactionType(requested) ? requested : 'LIKE';
+
     // Idempotent. The client toggles optimistically, and a second tap that
     // raced the first, or a stale "not liked" state, used to come back as a
     // 400 that made the client revert a like the server had already stored.
@@ -673,7 +704,11 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
     });
 
     if (existingLike) {
-      res.json({ success: true, message: 'Post liked', liked: true });
+      // Rows from before reactions existed carry no type and mean LIKE.
+      if ((existingLike.type ?? 'LIKE') !== type) {
+        await prisma.like.update({ where: { id: existingLike.id }, data: { type } });
+      }
+      res.json({ success: true, message: 'Post liked', liked: true, reaction: type });
       return;
     }
 
@@ -681,6 +716,7 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       data: {
         userId: req.user!.id,
         postId: id,
+        type,
       },
     });
 
@@ -694,8 +730,8 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       recipientId: post.authorId,
       actorId: req.user!.id,
       type: 'LIKE',
-      title: 'New like',
-      message: (name) => `${name} liked your post`,
+      title: type === 'LIKE' ? 'New like' : 'New reaction',
+      message: (name) => `${name} ${reactionVerb(type)} your post`,
       link: socialLinks.post(id),
     });
 
@@ -703,6 +739,7 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       success: true,
       message: 'Post liked',
       liked: true,
+      reaction: type,
     });
   } catch (error) {
     next(error);
@@ -845,6 +882,13 @@ router.post(
         }
       }
 
+      const mentioned = (await resolveMentionedUserIds(content)).filter(
+        (userId) => userId !== req.user!.id && userId !== post.authorId
+      );
+      if (mentioned.length > 0) {
+        await notifyMentions(req.user!.id, mentioned, 'comment', id);
+      }
+
       res.status(201).json({
         success: true,
         data: comment,
@@ -936,7 +980,8 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        // The pinned post leads the profile.
+        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -945,7 +990,7 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
 
     res.json({
       success: true,
-      data: posts,
+      data: await decoratePosts(posts, req.user?.id),
       pagination: {
         page,
         limit,
@@ -988,9 +1033,13 @@ router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
       },
     });
 
+    const decorated = await decoratePosts(
+      saves.map((save) => save.post),
+      req.user!.id
+    );
     res.json({
       success: true,
-      data: saves.map((save) => ({ ...save.post, isSaved: true })),
+      data: decorated.map((post) => ({ ...post, isSaved: true })),
     });
   } catch (error) {
     next(error);

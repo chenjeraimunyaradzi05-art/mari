@@ -5,7 +5,8 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     post: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     postSave: { findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
-    like: { findMany: jest.fn() },
+    like: { findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []) },
+    pollVote: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
     follow: { findMany: jest.fn() },
     // Blocking is symmetric and lives on the safety settings row, so the feed
     // reads it on every authenticated request to filter both directions.
@@ -111,7 +112,7 @@ describe('Post saves', () => {
 
     const res = await request(app).get('/api/posts/me/saved').expect(200);
 
-    expect(res.body.data).toEqual([
+    expect(res.body.data).toMatchObject([
       { id: 'p1', content: 'hello', author: { id: OTHER }, isSaved: true },
     ]);
   });

@@ -492,6 +492,61 @@ router.delete(
 );
 
 // ===========================================
+// MENTION SUGGESTIONS
+// ===========================================
+// The composer's @ autocomplete: a handful of members whose name starts with
+// what was typed. People you follow come first, since they are who you are
+// most likely to mean. Must sit above /:id or "suggest" is read as a user id.
+router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 40) : '';
+    if (q.length < 1) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+
+    const select = { id: true, displayName: true, firstName: true, lastName: true, avatar: true, headline: true };
+    const nameMatch = {
+      OR: [
+        { displayName: { startsWith: q, mode: 'insensitive' as const } },
+        { firstName: { startsWith: q, mode: 'insensitive' as const } },
+        { lastName: { startsWith: q, mode: 'insensitive' as const } },
+        { displayName: { contains: ` ${q}`, mode: 'insensitive' as const } },
+      ],
+    };
+
+    const [followed, others] = await Promise.all([
+      prisma.user.findMany({
+        where: { isActive: true, followers: { some: { followerId: req.user!.id } }, ...nameMatch },
+        select,
+        take: 6,
+      }),
+      prisma.user.findMany({
+        where: { isActive: true, id: { not: req.user!.id }, ...nameMatch },
+        select,
+        orderBy: { displayName: 'asc' },
+        take: 8,
+      }),
+    ]);
+
+    const seen = new Set<string>();
+    const merged = [...followed, ...others]
+      .filter((user) => (seen.has(user.id) ? false : (seen.add(user.id), true)))
+      .slice(0, 8)
+      .map((user) => ({
+        id: user.id,
+        name: user.displayName?.trim() || [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+        avatar: user.avatar,
+        headline: user.headline,
+      }));
+
+    res.json({ success: true, data: merged });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // GET USER PROFILE (PUBLIC)
 // ===========================================
 router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {

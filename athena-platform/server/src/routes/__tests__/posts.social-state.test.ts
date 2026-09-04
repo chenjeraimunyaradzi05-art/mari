@@ -5,7 +5,8 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     post: { findMany: jest.fn(), count: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     follow: { findMany: jest.fn() },
-    like: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
+    like: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), groupBy: jest.fn(async () => []) },
+    pollVote: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
     postSave: { findMany: jest.fn() },
     comment: { findUnique: jest.fn(), create: jest.fn() },
     user: { findUnique: jest.fn() },

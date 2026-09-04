@@ -1,77 +1,117 @@
+/**
+ * Stories: a photo or clip that lasts 24 hours.
+ *
+ *   GET    /api/status/feed         one bucket per member, yours first; each story says whether you have seen it
+ *   POST   /api/status              post one (with an optional caption)
+ *   POST   /api/status/:id/view     you watched it: the ring goes quiet, the author's count goes up
+ *   GET    /api/status/:id/viewers  who watched yours
+ *   DELETE /api/status/:id
+ */
+
 import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
-import { normalizeSafeUrl } from '../utils/contentSafety';
+import { normalizeOptionalUserText, normalizeSafeUrl } from '../utils/contentSafety';
 
 const router = Router();
 
 type StoryType = 'image' | 'video';
 
-type StatusRecord = {
-  id: string;
-  userId: string;
-  type: StoryType;
-  mediaUrl: string;
-  createdAt: string;
-  expiresAt: string;
-};
+const STORY_TTL_MS = 24 * 60 * 60 * 1000;
+const CAPTION_MAX = 200;
 
 function normalizeStoryType(value: unknown): StoryType {
   return value === 'video' ? 'video' : 'image';
 }
 
+function displayNameOf(user: { displayName?: string | null; firstName?: string | null; lastName?: string | null } | null | undefined) {
+  return user?.displayName?.trim() || [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || 'Member';
+}
+
+function storyView(story: {
+  id: string;
+  userId: string;
+  type: string;
+  mediaUrl: string;
+  caption: string | null;
+  viewCount: number;
+  createdAt: Date;
+  expiresAt: Date;
+}, options: { viewed: boolean; isOwn: boolean }) {
+  return {
+    id: story.id,
+    userId: story.userId,
+    type: story.type === 'VIDEO' ? 'video' : 'image',
+    mediaUrl: story.mediaUrl,
+    caption: story.caption,
+    createdAt: story.createdAt.toISOString(),
+    expiresAt: story.expiresAt.toISOString(),
+    viewed: options.viewed,
+    // Only the author sees the count; nobody else's curiosity is a metric.
+    ...(options.isOwn ? { viewCount: story.viewCount } : {}),
+  };
+}
+
 /**
  * GET /api/status/feed
- * Returns grouped stories (one bucket per user).
+ * Grouped stories, one bucket per member. The viewer's own bucket comes
+ * first, then buckets with something unseen, then the rest, newest first.
  */
 router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const now = new Date();
+    const viewerId = req.user?.id;
 
     const stories = await prisma.status.findMany({
       where: { expiresAt: { gt: now } },
       include: {
-        user: {
-          select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true },
-        },
+        user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' },
       take: 500,
     });
 
-    const byUser = new Map<string, { user: any; stories: StatusRecord[] }>();
+    const seen = new Set(
+      viewerId && stories.length
+        ? (
+            await prisma.statusView.findMany({
+              where: { userId: viewerId, statusId: { in: stories.map((s) => s.id) } },
+              select: { statusId: true },
+            })
+          ).map((v) => v.statusId)
+        : []
+    );
+
+    const byUser = new Map<string, { user: any; stories: ReturnType<typeof storyView>[]; hasUnseen: boolean; latest: string }>();
     for (const s of stories) {
-      const u = s.user;
-      const userBucket = byUser.get(s.userId) || {
-        user: {
-          id: s.userId,
-          displayName:
-            u?.displayName || `${u?.firstName || ''} ${u?.lastName || ''}`.trim() || 'Member',
-          avatar: u?.avatar || null,
-        },
+      const isOwn = s.userId === viewerId;
+      const viewed = isOwn || seen.has(s.id);
+      const bucket = byUser.get(s.userId) || {
+        user: { id: s.userId, displayName: displayNameOf(s.user), avatar: s.user?.avatar || null },
         stories: [],
+        hasUnseen: false,
+        latest: '',
       };
-
-      userBucket.stories.push({
-        id: s.id,
-        userId: s.userId,
-        type: s.type === 'VIDEO' ? 'video' : 'image',
-        mediaUrl: s.mediaUrl,
-        createdAt: s.createdAt.toISOString(),
-        expiresAt: s.expiresAt.toISOString(),
-      });
-
-      byUser.set(s.userId, userBucket);
+      bucket.stories.push(storyView(s, { viewed, isOwn }));
+      if (!viewed) bucket.hasUnseen = true;
+      bucket.latest = s.createdAt.toISOString();
+      byUser.set(s.userId, bucket);
     }
 
     const feed = Array.from(byUser.values()).sort((a, b) => {
-      const aLatest = a.stories[0]?.createdAt || '';
-      const bLatest = b.stories[0]?.createdAt || '';
-      return bLatest.localeCompare(aLatest);
+      if (viewerId) {
+        if (a.user.id === viewerId) return -1;
+        if (b.user.id === viewerId) return 1;
+      }
+      if (a.hasUnseen !== b.hasUnseen) return a.hasUnseen ? -1 : 1;
+      return b.latest.localeCompare(a.latest);
     });
 
-    res.json({ success: true, data: feed });
+    res.json({
+      success: true,
+      data: feed.map(({ latest: _latest, ...bucket }) => bucket),
+    });
   } catch (err) {
     next(err);
   }
@@ -87,29 +127,96 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
       field: 'mediaUrl',
       allowRelativeUploads: true,
     });
-
-    const createdAt = new Date();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const caption = normalizeOptionalUserText(req.body?.caption, {
+      field: 'caption',
+      maxLength: CAPTION_MAX,
+      allowEmpty: true,
+    });
 
     const created = await prisma.status.create({
       data: {
         userId: req.user!.id,
         type: type === 'video' ? 'VIDEO' : 'IMAGE',
         mediaUrl,
-        expiresAt,
+        caption: caption || null,
+        expiresAt: new Date(Date.now() + STORY_TTL_MS),
       },
     });
 
-    const record: StatusRecord = {
-      id: created.id,
-      userId: created.userId,
-      type: created.type === 'VIDEO' ? 'video' : 'image',
-      mediaUrl: created.mediaUrl,
-      createdAt: created.createdAt.toISOString(),
-      expiresAt: created.expiresAt.toISOString(),
-    };
+    res.status(201).json({ success: true, data: storyView(created, { viewed: true, isOwn: true }) });
+  } catch (err) {
+    next(err);
+  }
+});
 
-    res.status(201).json({ success: true, data: record });
+/**
+ * POST /api/status/:id/view
+ * Idempotent: watching twice is one view.
+ */
+router.post('/:id/view', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const story = await prisma.status.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true, expiresAt: true, viewCount: true },
+    });
+    if (!story || story.expiresAt.getTime() <= Date.now()) throw new ApiError(404, 'Story not found');
+
+    // Authors watching their own story are not an audience.
+    if (story.userId === req.user!.id) {
+      res.json({ success: true, viewCount: story.viewCount });
+      return;
+    }
+
+    const existing = await prisma.statusView.findUnique({
+      where: { statusId_userId: { statusId: story.id, userId: req.user!.id } },
+      select: { id: true },
+    });
+    if (existing) {
+      res.json({ success: true, viewCount: story.viewCount });
+      return;
+    }
+
+    const [, updated] = await prisma.$transaction([
+      prisma.statusView.create({ data: { statusId: story.id, userId: req.user!.id } }),
+      prisma.status.update({ where: { id: story.id }, data: { viewCount: { increment: 1 } }, select: { viewCount: true } }),
+    ]);
+    res.status(201).json({ success: true, viewCount: updated.viewCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/status/:id/viewers (author only)
+ */
+router.get('/:id/viewers', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const story = await prisma.status.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true, viewCount: true },
+    });
+    if (!story) throw new ApiError(404, 'Story not found');
+    if (story.userId !== req.user!.id) throw new ApiError(403, 'Only the author can see who watched');
+
+    const views = await prisma.statusView.findMany({
+      where: { statusId: story.id },
+      include: { user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } } },
+      orderBy: { viewedAt: 'desc' },
+      take: 100,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        viewCount: story.viewCount,
+        viewers: views.map((view) => ({
+          id: view.user.id,
+          displayName: displayNameOf(view.user),
+          avatar: view.user.avatar,
+          viewedAt: view.viewedAt.toISOString(),
+        })),
+      },
+    });
   } catch (err) {
     next(err);
   }

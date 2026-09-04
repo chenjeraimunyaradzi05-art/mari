@@ -32,11 +32,12 @@ type RawReaction = { emoji: string; userId: string };
 
 // Message.type drives how clients render a row, so it has to describe the
 // payload rather than the endpoint that produced it.
-function messageTypeFor(attachments: SanitizedAttachment[] | undefined): 'TEXT' | 'IMAGE' | 'FILE' {
+function messageTypeFor(attachments: SanitizedAttachment[] | undefined): 'TEXT' | 'IMAGE' | 'AUDIO' | 'FILE' {
   if (!attachments || attachments.length === 0) return 'TEXT';
-  return attachments.every((attachment) => attachment.contentType?.startsWith('image/'))
-    ? 'IMAGE'
-    : 'FILE';
+  if (attachments.every((attachment) => attachment.contentType?.startsWith('image/'))) return 'IMAGE';
+  // A voice note: one recording and nothing else.
+  if (attachments.every((attachment) => attachment.contentType?.startsWith('audio/'))) return 'AUDIO';
+  return 'FILE';
 }
 
 // The client renders one chip per emoji with a count and whether the viewer

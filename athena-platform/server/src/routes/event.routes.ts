@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
+import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
 
 const router = Router();
 
@@ -239,6 +240,100 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
     }
 
     res.json({ success: true, data: await getEventView(req.params.id, req.user!.id, req.user?.role) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/events
+ * Host an event. The host details come from the member's own profile; the
+ * event is listed straight away. "Host Event" on the events page had no
+ * handler and there was no route for it to call.
+ */
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+router.post('/', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+
+    const title = normalizeUserText(b.title, { field: 'title', maxLength: 120 });
+    const description = normalizeUserText(b.description, { field: 'description', maxLength: 4000 });
+
+    const type = dbEventTypeFromParam(String(b.type ?? ''));
+    if (!type) throw new ApiError(400, 'type must be webinar, workshop, networking, conference or meetup');
+    const format = dbEventFormatFromParam(String(b.format ?? 'virtual') as EventFormat);
+
+    const date = new Date(String(b.date ?? ''));
+    if (Number.isNaN(date.getTime())) throw new ApiError(400, 'date must be a valid date');
+    if (date.getTime() < Date.now() - 24 * 60 * 60 * 1000) throw new ApiError(400, 'The event date has already passed');
+
+    const startTime = String(b.startTime ?? '');
+    const endTime = String(b.endTime ?? '');
+    if (!TIME_PATTERN.test(startTime) || !TIME_PATTERN.test(endTime)) {
+      throw new ApiError(400, 'startTime and endTime must be HH:MM');
+    }
+    if (endTime <= startTime) throw new ApiError(400, 'endTime must be after startTime');
+
+    const location = normalizeOptionalUserText(b.location, { field: 'location', maxLength: 200, allowEmpty: true }) || null;
+    const link = b.link ? normalizeSafeUrl(b.link, { field: 'link' }) : null;
+    if (format === 'VIRTUAL' && !link) throw new ApiError(400, 'A virtual event needs a link to join');
+    if (format === 'IN_PERSON' && !location) throw new ApiError(400, 'An in-person event needs a location');
+    if (format === 'HYBRID' && !link && !location) throw new ApiError(400, 'A hybrid event needs a link or a location');
+
+    const image = b.image
+      ? normalizeSafeUrl(b.image, { field: 'image', allowRelativeUploads: true })
+      : '/icon.svg';
+
+    const maxAttendees = b.maxAttendees === undefined || b.maxAttendees === null || b.maxAttendees === ''
+      ? null
+      : Number(b.maxAttendees);
+    if (maxAttendees !== null && (!Number.isInteger(maxAttendees) || maxAttendees < 1 || maxAttendees > 100000)) {
+      throw new ApiError(400, 'maxAttendees must be a whole number');
+    }
+
+    const price = b.price === undefined || b.price === null || b.price === '' ? 0 : Number(b.price);
+    if (!Number.isInteger(price) || price < 0 || price > 1_000_000) {
+      throw new ApiError(400, 'price must be a whole number of dollars');
+    }
+
+    const tags = Array.isArray(b.tags)
+      ? b.tags
+          .map((tag) => String(tag).trim().replace(/^#+/, '').toLowerCase())
+          .filter((tag) => tag.length >= 2 && tag.length <= 30)
+          .slice(0, 8)
+      : [];
+
+    const host = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { displayName: true, firstName: true, lastName: true, headline: true, avatar: true },
+    });
+    const hostName =
+      host?.displayName?.trim() || [host?.firstName, host?.lastName].filter(Boolean).join(' ').trim() || 'ATHENA member';
+
+    const created = await (prisma as any).event.create({
+      data: {
+        title,
+        description,
+        type,
+        format,
+        date,
+        startTime,
+        endTime,
+        location,
+        link,
+        image,
+        hostName,
+        hostTitle: host?.headline?.trim() || 'Community host',
+        hostAvatar: host?.avatar || '',
+        maxAttendees,
+        price,
+        tags,
+      },
+      include: { _count: { select: { registrations: true } } },
+    });
+
+    res.status(201).json({ success: true, data: eventView(created, req.user!.id) });
   } catch (err) {
     next(err);
   }

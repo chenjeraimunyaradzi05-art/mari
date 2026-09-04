@@ -35,17 +35,89 @@ export interface FeedPost {
   isLiked?: boolean;
   engagementScore: number;
   decayedScore: number;
+  // A poll's options and close time, decorated with votes by the route.
+  poll?: unknown;
+  isPinned?: boolean;
+  // Why this post is in front of the viewer, in plain words. Every ranked
+  // post has at least one; the client shows them behind "Why this?". The
+  // chronological video feed carries none: it is not ranked.
+  reasons?: string[];
 }
 
 export interface FeedOptions {
   userId?: string;
   page?: number;
   limit?: number;
-  type?: 'all' | 'video' | 'image' | 'text';
+  type?: 'all' | 'video' | 'image' | 'text' | 'poll' | 'win';
   algorithm?: 'chronological' | 'engagement' | 'personalized';
 }
 
-type ScorePost = any & { engagementScore: number; decayedScore: number };
+type ScorePost = any & { engagementScore: number; decayedScore: number; __source?: FeedSource };
+
+type FeedSource = 'network' | 'discovery' | 'trending' | 'recent';
+
+interface ReasonContext {
+  userId?: string;
+  followingIds: string[];
+  userPersona?: string;
+  source?: FeedSource;
+  now?: number;
+}
+
+/**
+ * The plain-words account of why a post ranked. Kept honest: each reason
+ * corresponds to a factor the scoring actually applied.
+ */
+export function reasonsFor(post: any, context: ReasonContext): string[] {
+  const reasons: string[] = [];
+  const authorName = post.author?.displayName?.trim() || 'someone';
+  const now = context.now ?? Date.now();
+  const ageHours = (now - new Date(post.createdAt).getTime()) / (1000 * 60 * 60);
+  const responses = (post.likeCount ?? 0) + (post.commentCount ?? 0) * 3 + (post.shareCount ?? 0) * 5;
+
+  if (context.userId && post.authorId === context.userId) {
+    reasons.push('Your post');
+  } else if (context.followingIds.includes(post.authorId)) {
+    reasons.push(`You follow ${authorName}`);
+  }
+
+  if (context.source === 'trending') reasons.push('Trending in the community');
+  else if (context.source === 'discovery') reasons.push('Popular with members like you');
+
+  if (context.userPersona && post.author?.persona === context.userPersona && !reasons.includes('Popular with members like you')) {
+    reasons.push('Same career stage as you');
+  }
+  if (post.type === 'WIN') reasons.push('A win worth celebrating');
+  if (ageHours < 1) reasons.push('Just posted');
+  else if (responses >= 20) reasons.push('Getting a lot of responses');
+
+  if (reasons.length === 0) reasons.push('Recent in the community');
+  return reasons.slice(0, 2);
+}
+
+/** Feed preferences that keep things out: "see fewer from" creators and muted topics. */
+async function loadFeedExclusions(userId?: string): Promise<{ creators: Set<string>; hashtags: string[] }> {
+  if (!userId) return { creators: new Set(), hashtags: [] };
+  try {
+    const prefs = await prisma.userFeedPreferences.findUnique({
+      where: { userId },
+      select: { blockedCreators: true, blockedHashtags: true },
+    });
+    return {
+      creators: new Set(prefs?.blockedCreators ?? []),
+      hashtags: (prefs?.blockedHashtags ?? []).map((tag) => tag.replace(/^#+/, '').toLowerCase()).filter(Boolean),
+    };
+  } catch {
+    return { creators: new Set(), hashtags: [] };
+  }
+}
+
+function isExcluded(post: any, exclusions: { creators: Set<string>; hashtags: string[] }): boolean {
+  if (exclusions.creators.has(post.authorId)) return true;
+  if (exclusions.hashtags.length === 0) return false;
+  const text = String(post.content ?? '').toLowerCase();
+  return exclusions.hashtags.some((tag) => text.includes(`#${tag}`));
+}
 
 function enforceCreatorDiversity<T extends { authorId: string }>(
   items: T[],
@@ -165,6 +237,9 @@ export async function generateFeed(options: FeedOptions): Promise<{
 
   let rankedPosts: ScorePost[] = [];
 
+  // "See fewer posts from X" and muted topics apply to every ranked feed.
+  const exclusions = await loadFeedExclusions(userId);
+
   // Personalized: OpportunityVerse-style sourcing with diversity enforcement.
   if (algorithm === 'personalized' && userId) {
     const target = page * limit;
@@ -204,7 +279,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
         followingIds,
         userPersona: userContext?.persona,
       });
-      return { ...post, engagementScore: score.engagement, decayedScore: score.final };
+      return { ...post, engagementScore: score.engagement, decayedScore: score.final, __source: 'network' as const };
     }).sort((a, b) => b.decayedScore - a.decayedScore);
 
     // 2) Out-of-network discovery (existing discovery logic)
@@ -214,6 +289,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
       // getForYouFeed already provides engagementScore/decayedScore fields
       engagementScore: p.engagementScore ?? 0,
       decayedScore: p.decayedScore ?? 0,
+      __source: 'discovery' as const,
     }));
 
     // 3) Trending
@@ -222,6 +298,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
       ...p,
       engagementScore: p.engagementScore ?? 0,
       decayedScore: p.decayedScore ?? 0,
+      __source: 'trending' as const,
     }));
 
     const maxPerCreator = getFeedDiversityLimit();
@@ -242,6 +319,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
     const countsByAuthor = new Map<string, number>();
     const canTake = (item: any) => {
       if (!item?.id || seen.has(item.id)) return false;
+      if (isExcluded(item, exclusions)) return false;
       const authorId = item.authorId || item.author?.id;
       if (!authorId) return true;
       const prev = countsByAuthor.get(authorId) || 0;
@@ -324,19 +402,22 @@ export async function generateFeed(options: FeedOptions): Promise<{
     });
 
     // Score and rank posts
-    const scoredPosts: ScorePost[] = candidatePosts.map((post) => {
-      const score = calculatePostScore(post, {
-        userId,
-        followingIds,
-        userPersona: userContext?.persona,
-      });
+    const scoredPosts: ScorePost[] = candidatePosts
+      .filter((post) => !isExcluded(post, exclusions))
+      .map((post) => {
+        const score = calculatePostScore(post, {
+          userId,
+          followingIds,
+          userPersona: userContext?.persona,
+        });
 
-      return {
-        ...post,
-        engagementScore: score.engagement,
-        decayedScore: score.final,
-      };
-    });
+        return {
+          ...post,
+          engagementScore: score.engagement,
+          decayedScore: score.final,
+          __source: 'recent' as const,
+        };
+      });
 
     // Sort by final score
     rankedPosts = scoredPosts.sort((a, b) => b.decayedScore - a.decayedScore);
@@ -389,6 +470,14 @@ export async function generateFeed(options: FeedOptions): Promise<{
     isLiked: likedPostIds.includes(post.id),
     engagementScore: post.engagementScore,
     decayedScore: post.decayedScore,
+    poll: post.poll ?? null,
+    isPinned: Boolean(post.isPinned),
+    reasons: reasonsFor(post, {
+      userId,
+      followingIds,
+      userPersona: userContext?.persona,
+      source: post.__source ?? (algorithm === 'chronological' ? 'recent' : undefined),
+    }),
   }));
 
   return {
@@ -521,6 +610,9 @@ export async function getTrendingPosts(
         },
         engagementScore: post.engagementScore,
         decayedScore: post.decayedScore,
+        poll: post.poll ?? null,
+        isPinned: Boolean(post.isPinned),
+        reasons: ['Trending in the community'],
       }));
     },
     300 // Cache for 5 minutes
@@ -722,6 +814,9 @@ export async function getForYouFeed(
     isLiked: likedIds.includes(post.id),
     engagementScore: post.engagementScore,
     decayedScore: post.decayedScore,
+    poll: post.poll ?? null,
+    isPinned: Boolean(post.isPinned),
+    reasons: reasonsFor(post, { userId, followingIds, userPersona: user.persona ?? undefined, source: 'discovery' }),
   }));
 
   return {
