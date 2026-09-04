@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { clearTokens, getAccessToken, setTokens } from './auth';
+import { refreshSession } from './session-refresh';
 
 // Direct backend origin — used for WebSocket connections and SSR calls
 export const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/$/, '');
@@ -54,14 +55,13 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        // Call refresh endpoint using HttpOnly cookie (server sets/rotates cookie)
-        const response = await axios.post(
-          `${API_BASE_URL}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-
-        const { accessToken } = response.data.data;
+        // Refresh through the shared single-flight call: several requests
+        // failing together must not each rotate the cookie, because the
+        // server revokes every session when a rotated token is replayed.
+        const { accessToken } = await refreshSession();
+        if (!accessToken) {
+          throw new Error('Session refresh returned no access token');
+        }
 
         setTokens(accessToken, null);
 
@@ -247,8 +247,10 @@ export const postApi = {
 
   getSaved: () => api.get('/posts/me/saved'),
 
-  comment: (postId: string, content: string) =>
-    api.post(`/posts/${postId}/comments`, { content }),
+  // parentId makes it a reply, threaded under that comment on the server
+  // rather than faked with an "@Name" prefix in the text.
+  comment: (postId: string, content: string, parentId?: string) =>
+    api.post(`/posts/${postId}/comments`, parentId ? { content, parentId } : { content }),
 
   deleteComment: (postId: string, commentId: string) =>
     api.delete(`/posts/${postId}/comments/${commentId}`),

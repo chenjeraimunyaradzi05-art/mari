@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore as useAppUIStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
+import { refreshSession } from '@/lib/session-refresh';
 import { socketClient } from '@/lib/socket';
 import { setTokens, clearTokens } from '@/lib/auth';
 import { getPreferredLocale } from '@/lib/utils';
@@ -38,15 +39,17 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   const { setLoading, login: storeLogin, logout: storeLogout } = useAuthStore();
 
   useEffect(() => {
-    // Try silent refresh via HttpOnly cookie on mount.
+    // Silent refresh via the HttpOnly cookie on mount. Strict Mode runs this
+    // effect twice, so the call is single-flight: both runs await the same
+    // request. Two real requests would hand the server a rotated token and it
+    // would revoke every session as a replay (see lib/session-refresh.ts).
     let mounted = true;
     (async () => {
       try {
-        const response = await authApi.refresh();
-        const { accessToken, user } = response.data.data || {};
+        const { accessToken, user } = await refreshSession();
         if (!mounted) return;
         if (accessToken && user) {
-          storeLogin(user, accessToken, '');
+          storeLogin(user as unknown as Parameters<typeof storeLogin>[0], accessToken, '');
           return;
         }
         if (accessToken) {

@@ -1,4 +1,5 @@
 import { clearTokens, getAccessToken, setTokens } from './auth';
+import { refreshSession } from './session-refresh';
 
 const AUTH_REFRESH_PATH = '/api/auth/refresh';
 const AUTH_PATHS_TO_SKIP_REFRESH = [
@@ -42,24 +43,12 @@ function buildHeaders(init: RequestInit = {}, token?: string | null): Headers {
   return headers;
 }
 
+// Shares the single in-flight refresh with the axios client and the session
+// bootstrap. A refresh token is single-use on the server, and a second call
+// racing the first is read as a replay that revokes every session.
 async function refreshAccessToken(): Promise<string | null> {
   try {
-    const response = await fetch(AUTH_REFRESH_PATH, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: '{}',
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = await response.json();
-    const accessToken = payload?.data?.accessToken;
-
+    const { accessToken } = await refreshSession();
     if (typeof accessToken !== 'string' || !accessToken) {
       return null;
     }
