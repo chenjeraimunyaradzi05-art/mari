@@ -10,6 +10,7 @@ import {
   normalizeStringList,
   normalizeUserText,
 } from '../utils/contentSafety';
+import { notifySocial, socialLinks } from '../utils/social-notifications';
 
 const router = Router();
 
@@ -18,6 +19,82 @@ function parseLimit(value: unknown, fallback = 20, max = 50): number {
   if (Number.isNaN(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, max);
 }
+
+// Topics are stored lowercase without the hash so "#Career", "career" and
+// "CAREER" are one tag. The same normalisation is applied to a filter.
+function normalizeHashtag(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/^#+/, '').toLowerCase() : '';
+}
+
+const HASHTAG_PATTERN = /#([\p{L}\p{N}_]{2,64})/gu;
+
+// Tags typed into a caption count as tags. Without this, a reel captioned
+// "#salary talk" was only findable by topic if the uploader also filled in a
+// separate tags field, which nobody did.
+function hashtagsIn(...texts: Array<string | null | undefined>): string[] {
+  const found = new Set<string>();
+  for (const text of texts) {
+    if (!text) continue;
+    for (const match of text.matchAll(HASHTAG_PATTERN)) {
+      found.add(match[1].toLowerCase());
+    }
+  }
+  return Array.from(found);
+}
+
+function mergeHashtags(explicit: string[], implied: string[]): string[] {
+  const merged = new Set<string>();
+  for (const tag of [...explicit, ...implied]) {
+    const clean = normalizeHashtag(tag);
+    if (clean) merged.add(clean);
+  }
+  return Array.from(merged).slice(0, 20);
+}
+
+// Every video list carries the viewer's own like and save state. Before this,
+// the reels player only knew what it had persisted in the browser, so a like
+// made on a phone showed as un-liked on a laptop and pressing the heart there
+// was answered with "Already liked this video".
+async function withViewerState<T extends { id: string }>(
+  videos: T[],
+  userId?: string
+): Promise<Array<T & { isLiked: boolean; isSaved: boolean }>> {
+  if (!userId || videos.length === 0) {
+    return videos.map((video) => ({ ...video, isLiked: false, isSaved: false }));
+  }
+
+  const ids = videos.map((video) => video.id);
+  const [likes, saves] = await Promise.all([
+    prisma.videoLike.findMany({
+      where: { userId, videoId: { in: ids } },
+      select: { videoId: true },
+    }),
+    prisma.videoSave.findMany({
+      where: { userId, videoId: { in: ids } },
+      select: { videoId: true },
+    }),
+  ]);
+  const liked = new Set(likes.map((like) => like.videoId));
+  const saved = new Set(saves.map((save) => save.videoId));
+
+  return videos.map((video) => ({
+    ...video,
+    isLiked: liked.has(video.id),
+    isSaved: saved.has(video.id),
+  }));
+}
+
+const PUBLIC_VIDEO_WHERE = { status: 'PUBLISHED' as const, isHidden: false };
+
+const AUTHOR_SELECT = {
+  author: {
+    select: { id: true, displayName: true, avatar: true, headline: true },
+  },
+};
+
+const COMMENT_AUTHOR_SELECT = {
+  author: { select: { id: true, displayName: true, avatar: true } },
+};
 
 // ===========================================
 // VIDEO FEED
@@ -29,6 +106,8 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const type = typeof req.query.type === 'string' ? req.query.type : undefined;
     // The explore tabs pick a feed; `type` stays available for VideoType filtering.
     const feed = typeof req.query.feed === 'string' ? req.query.feed : undefined;
+    // The homepage topic circles open a slice of the feed by tag.
+    const hashtag = normalizeHashtag(req.query.hashtag);
 
     const where: any = {
       status: 'PUBLISHED',
@@ -37,6 +116,10 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
     if (type) {
       where.type = type;
+    }
+
+    if (hashtag) {
+      where.hashtags = { has: hashtag };
     }
 
     if (feed === 'following') {
@@ -63,11 +146,7 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,
       take: limit + 1,
-      include: {
-        author: {
-          select: { id: true, displayName: true, avatar: true, headline: true },
-        },
-      },
+      include: AUTHOR_SELECT,
     });
 
     const hasMore = videos.length > limit;
@@ -76,7 +155,7 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
     res.json({
       success: true,
-      data: result,
+      data: await withViewerState(result, req.user?.id),
       nextCursor,
     });
   } catch (error) {
@@ -86,14 +165,6 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
 // The literal-path routes below must stay above `/:id`, or Express hands
 // "trending", "bookmarked" and friends to the lookup-by-id handler.
-
-const PUBLIC_VIDEO_WHERE = { status: 'PUBLISHED' as const, isHidden: false };
-
-const AUTHOR_SELECT = {
-  author: {
-    select: { id: true, displayName: true, avatar: true, headline: true },
-  },
-};
 
 function parsePage(value: unknown): number {
   const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
@@ -121,7 +192,7 @@ async function listVideos(
   ]);
 
   return {
-    data: videos,
+    data: await withViewerState(videos, req.user?.id),
     pagination: { page, limit, total, pages: Math.ceil(total / limit) },
   };
 }
@@ -173,9 +244,14 @@ router.get('/bookmarked', authenticate, async (req: AuthRequest, res, next) => {
       prisma.videoSave.count({ where }),
     ]);
 
+    const videos = await withViewerState(
+      saves.map((save) => save.video),
+      req.user!.id
+    );
+
     res.json({
       success: true,
-      data: saves.map((save) => ({ ...save.video, isSaved: true })),
+      data: videos.map((video) => ({ ...video, isSaved: true })),
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
@@ -198,7 +274,7 @@ router.get('/category/:category', optionalAuth, async (req: AuthRequest, res, ne
 
     const where = VIDEO_TYPES.includes(asType)
       ? { ...PUBLIC_VIDEO_WHERE, type: asType as never }
-      : { ...PUBLIC_VIDEO_WHERE, hashtags: { has: raw.toLowerCase() } };
+      : { ...PUBLIC_VIDEO_WHERE, hashtags: { has: normalizeHashtag(raw) } };
 
     const result = await listVideos(where, req);
     res.json({ success: true, ...result });
@@ -236,9 +312,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     const { id } = req.params;
     const video = await prisma.video.findUnique({
       where: { id },
-      include: {
-        author: { select: { id: true, displayName: true, avatar: true, headline: true } },
-      },
+      include: AUTHOR_SELECT,
     });
 
     const canViewUnpublished = req.user?.id === video?.authorId || req.user?.role === 'ADMIN';
@@ -246,7 +320,8 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Video not found');
     }
 
-    res.json({ success: true, data: video });
+    const [decorated] = await withViewerState([video], req.user?.id);
+    res.json({ success: true, data: decorated });
   } catch (error) {
     next(error);
   }
@@ -277,19 +352,22 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const title = normalizeOptionalUserText(req.body.title, {
+        field: 'title',
+        maxLength: CONTENT_LIMITS.videoTitle,
+        allowEmpty: true,
+      });
+      const description = normalizeOptionalUserText(req.body.description, {
+        field: 'description',
+        maxLength: CONTENT_LIMITS.videoDescription,
+        allowEmpty: true,
+      });
+
       const created = await prisma.video.create({
         data: {
           authorId: req.user!.id,
-          title: normalizeOptionalUserText(req.body.title, {
-            field: 'title',
-            maxLength: CONTENT_LIMITS.videoTitle,
-            allowEmpty: true,
-          }),
-          description: normalizeOptionalUserText(req.body.description, {
-            field: 'description',
-            maxLength: CONTENT_LIMITS.videoDescription,
-            allowEmpty: true,
-          }),
+          title,
+          description,
           type: req.body.type,
           status: 'PUBLISHED',
           videoUrl: normalizeSafeUrl(req.body.videoUrl, {
@@ -301,7 +379,10 @@ router.post(
             : undefined,
           duration: req.body.duration,
           aspectRatio: req.body.aspectRatio,
-          hashtags: normalizeStringList(req.body.hashtags, 'hashtags', 20, 64),
+          hashtags: mergeHashtags(
+            normalizeStringList(req.body.hashtags, 'hashtags', 20, 64),
+            hashtagsIn(title, description)
+          ),
           mentionedUserIds: normalizeStringList(req.body.mentionedUserIds, 'mentionedUserIds', 50, 100),
           location: normalizeOptionalUserText(req.body.location, {
             field: 'location',
@@ -377,7 +458,10 @@ router.patch(
         });
       }
       if (req.body.hashtags !== undefined) {
-        data.hashtags = normalizeStringList(req.body.hashtags, 'hashtags', 20, 64);
+        data.hashtags = mergeHashtags(
+          normalizeStringList(req.body.hashtags, 'hashtags', 20, 64),
+          []
+        );
       }
       if (req.body.mentionedUserIds !== undefined) {
         data.mentionedUserIds = normalizeStringList(req.body.mentionedUserIds, 'mentionedUserIds', 50, 100);
@@ -426,23 +510,34 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
   }
 });
 
+// A hidden or unpublished reel is treated as absent for everyone but its
+// author, the same rule the read route applies.
+async function loadPublicVideo(id: string) {
+  const video = await prisma.video.findUnique({ where: { id } });
+  if (!video || video.isHidden || video.status !== 'PUBLISHED') {
+    throw new ApiError(404, 'Video not found');
+  }
+  return video;
+}
+
 // ===========================================
 // LIKE VIDEO
 // ===========================================
 router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const video = await prisma.video.findUnique({ where: { id } });
-    if (!video || video.isHidden || video.status !== 'PUBLISHED') {
-      throw new ApiError(404, 'Video not found');
-    }
+    const video = await loadPublicVideo(id);
 
+    // Idempotent: the player toggles optimistically, and a second tap or a
+    // stale local state used to get a 400 that reverted a like the server
+    // already held.
     const existing = await prisma.videoLike.findUnique({
       where: { videoId_userId: { videoId: id, userId: req.user!.id } },
     });
 
     if (existing) {
-      throw new ApiError(400, 'Already liked this video');
+      res.json({ success: true, message: 'Video liked', liked: true });
+      return;
     }
 
     await prisma.videoLike.create({
@@ -454,7 +549,16 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       data: { likeCount: { increment: 1 } },
     });
 
-    res.json({ success: true, message: 'Video liked' });
+    await notifySocial({
+      recipientId: video.authorId,
+      actorId: req.user!.id,
+      type: 'LIKE',
+      title: 'New like',
+      message: (name) => `${name} liked your reel`,
+      link: socialLinks.video(id),
+    });
+
+    res.json({ success: true, message: 'Video liked', liked: true });
   } catch (error) {
     next(error);
   }
@@ -478,7 +582,7 @@ router.delete('/:id/like', authenticate, async (req: AuthRequest, res, next) => 
       });
     }
 
-    res.json({ success: true, message: 'Like removed' });
+    res.json({ success: true, message: 'Like removed', liked: false });
   } catch (error) {
     next(error);
   }
@@ -492,14 +596,16 @@ router.get('/:id/comments', optionalAuth, async (req: AuthRequest, res, next) =>
     const { id } = req.params;
     const limit = parseLimit(req.query.limit, 20, 50);
 
+    // A pinned comment is the creator's chosen opener, so it leads.
     const comments = await prisma.videoComment.findMany({
       where: { videoId: id, parentId: null, isHidden: false },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
       take: limit,
       include: {
-        author: { select: { id: true, displayName: true, avatar: true } },
+        ...COMMENT_AUTHOR_SELECT,
         replies: {
-          include: { author: { select: { id: true, displayName: true, avatar: true } } },
+          where: { isHidden: false },
+          include: COMMENT_AUTHOR_SELECT,
           orderBy: { createdAt: 'asc' },
         },
       },
@@ -526,25 +632,31 @@ router.post(
       }
 
       const { id } = req.params;
-      const video = await prisma.video.findUnique({ where: { id } });
-      if (!video || video.isHidden || video.status !== 'PUBLISHED') {
-        throw new ApiError(404, 'Video not found');
-      }
+      const video = await loadPublicVideo(id);
 
       const parentId = typeof req.body.parentId === 'string' && req.body.parentId.trim()
         ? req.body.parentId.trim()
         : undefined;
 
+      let parentAuthorId: string | undefined;
       if (parentId) {
         const parent = await prisma.videoComment.findUnique({
           where: { id: parentId },
-          select: { videoId: true, isHidden: true },
+          select: { videoId: true, isHidden: true, authorId: true, parentId: true },
         });
 
         if (!parent || parent.videoId !== id || parent.isHidden) {
           throw new ApiError(400, 'Invalid parent comment');
         }
+        // Threads are one level deep; a reply to a reply hangs off the same
+        // top-level comment so the thread never nests out of view.
+        parentAuthorId = parent.authorId;
+        if (parent.parentId) {
+          req.body.parentId = parent.parentId;
+        }
       }
+
+      const resolvedParentId = parentId ? String(req.body.parentId) : undefined;
 
       const comment = await prisma.videoComment.create({
         data: {
@@ -554,14 +666,35 @@ router.post(
             field: 'content',
             maxLength: CONTENT_LIMITS.comment,
           }),
-          parentId,
+          parentId: resolvedParentId,
         },
+        include: COMMENT_AUTHOR_SELECT,
       });
 
       await prisma.video.update({
         where: { id },
         data: { commentCount: { increment: 1 } },
       });
+
+      await notifySocial({
+        recipientId: video.authorId,
+        actorId: req.user!.id,
+        type: 'COMMENT',
+        title: 'New comment',
+        message: (name) => `${name} commented on your reel`,
+        link: socialLinks.video(id),
+      });
+
+      if (parentAuthorId && parentAuthorId !== video.authorId) {
+        await notifySocial({
+          recipientId: parentAuthorId,
+          actorId: req.user!.id,
+          type: 'COMMENT',
+          title: 'New reply',
+          message: (name) => `${name} replied to your comment`,
+          link: socialLinks.video(id),
+        });
+      }
 
       res.status(201).json({ success: true, data: comment });
     } catch (error) {
@@ -570,23 +703,106 @@ router.post(
   }
 );
 
+// The creator of a reel can pin one comment to the top of its thread. Only
+// the creator (or an admin): a pin is an editorial act on their own video.
+router.patch('/:id/comments/:commentId/pin', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id, commentId } = req.params;
+    const video = await loadPublicVideo(id);
+
+    if (video.authorId !== req.user!.id && req.user!.role !== 'ADMIN') {
+      throw new ApiError(403, 'Only the creator can pin a comment');
+    }
+
+    const comment = await prisma.videoComment.findUnique({
+      where: { id: commentId },
+      select: { id: true, videoId: true, isPinned: true, parentId: true, isHidden: true },
+    });
+    if (!comment || comment.videoId !== id || comment.isHidden) {
+      throw new ApiError(404, 'Comment not found');
+    }
+    if (comment.parentId) {
+      throw new ApiError(400, 'Only a top-level comment can be pinned');
+    }
+
+    // One pin per reel. Pinning a second comment unpins the first rather than
+    // leaving two rows fighting for the top of the thread.
+    const nextPinned = !comment.isPinned;
+    if (nextPinned) {
+      await prisma.videoComment.updateMany({
+        where: { videoId: id, isPinned: true },
+        data: { isPinned: false },
+      });
+    }
+
+    const updated = await prisma.videoComment.update({
+      where: { id: commentId },
+      data: { isPinned: nextPinned },
+      include: COMMENT_AUTHOR_SELECT,
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// A comment can be removed by whoever wrote it, by the creator of the reel it
+// sits on, or by an admin. Replies go with it.
+router.delete('/:id/comments/:commentId', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { id, commentId } = req.params;
+
+    const [video, comment] = await Promise.all([
+      prisma.video.findUnique({ where: { id }, select: { id: true, authorId: true } }),
+      prisma.videoComment.findUnique({
+        where: { id: commentId },
+        select: { id: true, videoId: true, authorId: true },
+      }),
+    ]);
+
+    if (!video || !comment || comment.videoId !== id) {
+      throw new ApiError(404, 'Comment not found');
+    }
+
+    const isAuthor = comment.authorId === req.user!.id;
+    const isCreator = video.authorId === req.user!.id;
+    if (!isAuthor && !isCreator && req.user!.role !== 'ADMIN') {
+      throw new ApiError(403, 'Not authorized');
+    }
+
+    // Replies cascade from the parent row, so the count has to come off for
+    // them too or the reel keeps advertising comments nobody can open.
+    const replyCount = await prisma.videoComment.count({ where: { parentId: commentId } });
+
+    await prisma.videoComment.delete({ where: { id: commentId } });
+
+    await prisma.video.update({
+      where: { id },
+      data: { commentCount: { decrement: 1 + replyCount } },
+    });
+
+    res.json({ success: true, message: 'Comment deleted', removed: 1 + replyCount });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ===========================================
 // SAVE VIDEO
 // ===========================================
 router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const video = await prisma.video.findUnique({ where: { id } });
-    if (!video || video.isHidden || video.status !== 'PUBLISHED') {
-      throw new ApiError(404, 'Video not found');
-    }
+    await loadPublicVideo(id);
 
     const existing = await prisma.videoSave.findUnique({
       where: { videoId_userId: { videoId: id, userId: req.user!.id } },
     });
 
     if (existing) {
-      throw new ApiError(400, 'Already saved this video');
+      res.json({ success: true, message: 'Video saved', saved: true });
+      return;
     }
 
     await prisma.videoSave.create({
@@ -598,7 +814,7 @@ router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
       data: { saveCount: { increment: 1 } },
     });
 
-    res.json({ success: true, message: 'Video saved' });
+    res.json({ success: true, message: 'Video saved', saved: true });
   } catch (error) {
     next(error);
   }
@@ -619,7 +835,7 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
       });
     }
 
-    res.json({ success: true, message: 'Save removed' });
+    res.json({ success: true, message: 'Save removed', saved: false });
   } catch (error) {
     next(error);
   }
@@ -644,10 +860,7 @@ router.post(
       }
 
       const { id } = req.params;
-      const video = await prisma.video.findUnique({ where: { id } });
-      if (!video || video.isHidden || video.status !== 'PUBLISHED') {
-        throw new ApiError(404, 'Video not found');
-      }
+      await loadPublicVideo(id);
 
       await prisma.videoView.create({
         data: {

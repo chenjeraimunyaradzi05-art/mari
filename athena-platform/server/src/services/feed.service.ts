@@ -27,6 +27,10 @@ export interface FeedPost {
     displayName: string;
     avatar: string | null;
     headline: string | null;
+    // Whether the viewer already follows this author. The feed's Follow
+    // button rendered "Follow" for everyone without it, and pressing it on
+    // someone already followed was answered with "Already following".
+    isFollowing?: boolean;
   };
   isLiked?: boolean;
   engagementScore: number;
@@ -377,6 +381,10 @@ export async function generateFeed(options: FeedOptions): Promise<{
       displayName: post.author.displayName || '',
       avatar: post.author.avatar,
       headline: post.author.headline,
+      // followingIds carries the viewer's own id so their posts rank as
+      // in-network; a member does not "follow" themselves.
+      isFollowing:
+        !!userId && post.author.id !== userId && followingIds.includes(post.author.id),
     },
     isLiked: likedPostIds.includes(post.id),
     engagementScore: post.engagementScore,
@@ -709,6 +717,7 @@ export async function getForYouFeed(
       displayName: post.author.displayName || '',
       avatar: post.author.avatar,
       headline: post.author.headline,
+      isFollowing: followingIds.includes(post.author.id),
     },
     isLiked: likedIds.includes(post.id),
     engagementScore: post.engagementScore,

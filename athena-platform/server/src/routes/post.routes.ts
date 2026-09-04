@@ -10,6 +10,7 @@ import { assertContentAllowed } from '../services/moderation.service';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
+import { notifySocial, socialLinks } from '../utils/social-notifications';
 import {
   CONTENT_LIMITS,
   normalizeMediaUrls,
@@ -98,6 +99,8 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
         success: true,
         data: posts.map((post) => ({
           ...post,
+          // Everyone on this tab is followed by definition, except the viewer.
+          author: { ...post.author, isFollowing: post.authorId !== req.user!.id },
           isLiked: likedPostIds.has(post.id),
           isSaved: savedPostIds.has(post.id),
         })),
@@ -244,6 +247,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
                 id: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 avatar: true,
               },
             },
@@ -255,6 +259,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
                     id: true,
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     avatar: true,
                   },
                 },
@@ -319,10 +324,15 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
         replies: comment.replies.filter((reply) => !blockedAuthorIds.has(reply.authorId)),
       }));
 
+    // The counters are denormalised and have drifted before (seed rows carried
+    // "15 comments" over an empty thread). On the one page that shows the
+    // thread itself, report what is actually there.
     res.json({
       success: true,
       data: {
         ...post,
+        likeCount: post._count?.likes ?? post.likeCount,
+        commentCount: post._count?.comments ?? post.commentCount,
         comments,
         isLiked,
       },
@@ -650,7 +660,9 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'Post not found');
     }
 
-    // Check if already liked
+    // Idempotent. The client toggles optimistically, and a second tap that
+    // raced the first, or a stale "not liked" state, used to come back as a
+    // 400 that made the client revert a like the server had already stored.
     const existingLike = await prisma.like.findUnique({
       where: {
         userId_postId: {
@@ -661,7 +673,8 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
     });
 
     if (existingLike) {
-      throw new ApiError(400, 'Already liked this post');
+      res.json({ success: true, message: 'Post liked', liked: true });
+      return;
     }
 
     await prisma.like.create({
@@ -677,22 +690,19 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
       data: { likeCount: { increment: 1 } },
     });
 
-    // Notify author (if not self)
-    if (post.authorId !== req.user!.id) {
-      await prisma.notification.create({
-        data: {
-          userId: post.authorId,
-          type: 'LIKE',
-          title: 'New like',
-          message: 'Someone liked your post',
-          link: `/posts/${id}`,
-        },
-      });
-    }
+    await notifySocial({
+      recipientId: post.authorId,
+      actorId: req.user!.id,
+      type: 'LIKE',
+      title: 'New like',
+      message: (name) => `${name} liked your post`,
+      link: socialLinks.post(id),
+    });
 
     res.json({
       success: true,
       message: 'Post liked',
+      liked: true,
     });
   } catch (error) {
     next(error);
@@ -794,6 +804,7 @@ router.post(
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               avatar: true,
             },
           },
@@ -806,17 +817,32 @@ router.post(
         data: { commentCount: { increment: 1 } },
       });
 
-      // Notify author
-      if (post.authorId !== req.user!.id) {
-        await prisma.notification.create({
-          data: {
-            userId: post.authorId,
-            type: 'COMMENT',
-            title: 'New comment',
-            message: 'Someone commented on your post',
-            link: `/posts/${id}`,
-          },
+      await notifySocial({
+        recipientId: post.authorId,
+        actorId: req.user!.id,
+        type: 'COMMENT',
+        title: 'New comment',
+        message: (name) => `${name} commented on your post`,
+        link: socialLinks.post(id),
+      });
+
+      // A reply also reaches the person being replied to, who may not be the
+      // post's author and would otherwise never learn it was there.
+      if (parentId) {
+        const parentAuthor = await prisma.comment.findUnique({
+          where: { id: parentId },
+          select: { authorId: true },
         });
+        if (parentAuthor && parentAuthor.authorId !== post.authorId) {
+          await notifySocial({
+            recipientId: parentAuthor.authorId,
+            actorId: req.user!.id,
+            type: 'COMMENT',
+            title: 'New reply',
+            message: (name) => `${name} replied to your comment`,
+            link: socialLinks.post(id),
+          });
+        }
       }
 
       res.status(201).json({

@@ -44,11 +44,11 @@ const CLIENT_SRC = path.resolve(__dirname, '..', '..', 'client', 'src');
 // Calls that look broken to the static walk but are correct in practice.
 // Keep each entry justified — an unexplained entry is a bug in waiting.
 const ALLOWED = new Map([
-  [
-    'POST /api/media/upload/video',
-    'Matches POST /api/media/upload/:type. "video" is a real key in FILE_CONFIGS, ' +
-      'so the parameterised route is the intended handler, not a shadowing accident.',
-  ],
+  // POST /api/media/upload/video used to be listed here for a literal call in
+  // an unmounted upload studio. That component is gone; every upload now goes
+  // through mediaApi.upload(type, file), which the walk resolves to the
+  // parameterised route. Re-add an entry, with its reason, if a literal call
+  // returns.
 ]);
 
 function fail(message) {

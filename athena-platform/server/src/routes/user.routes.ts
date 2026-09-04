@@ -13,6 +13,7 @@ import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRegionConfig, normalizeRegion } from '../utils/region';
 import { logger } from '../utils/logger';
 import { parsePagination } from '../utils/pagination';
+import { notifySocial, socialLinks } from '../utils/social-notifications';
 
 const router = Router();
 
@@ -1107,8 +1108,12 @@ router.post('/:id/follow', authenticate, async (req: AuthRequest, res, next) => 
       },
     });
 
+    // Idempotent: the feed's Follow button toggles optimistically, and a
+    // "you already follow them" 400 made it snap back to "Follow" for a
+    // relationship that exists.
     if (existingFollow) {
-      throw new ApiError(400, 'Already following this user');
+      res.json({ success: true, message: 'Following user', following: true });
+      return;
     }
 
     await prisma.follow.create({
@@ -1118,20 +1123,21 @@ router.post('/:id/follow', authenticate, async (req: AuthRequest, res, next) => 
       },
     });
 
-    // Create notification
-    await prisma.notification.create({
-      data: {
-        userId: id,
-        type: 'FOLLOW',
-        title: 'New follower',
-        message: `${req.user!.email} started following you`,
-        link: `/users/${req.user!.id}`,
-      },
+    // Named by display name, never by email, and pointed at the follower's
+    // public profile rather than a /users route the web client has never had.
+    await notifySocial({
+      recipientId: id,
+      actorId: req.user!.id,
+      type: 'FOLLOW',
+      title: 'New follower',
+      message: (name) => `${name} started following you`,
+      link: socialLinks.profile(req.user!.id),
     });
 
     res.json({
       success: true,
       message: 'Following user',
+      following: true,
     });
   } catch (error) {
     next(error);
