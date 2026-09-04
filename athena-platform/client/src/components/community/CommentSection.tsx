@@ -16,6 +16,7 @@ const errorMessage = (error: unknown) =>
 import { renderSocialText } from '@/lib/social-text';
 import { serializeMentions, type MentionPick } from '@/lib/mentions';
 import { MentionTextarea } from './MentionTextarea';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 import { cn } from '@/lib/utils';
 
 interface CommentSectionProps {
@@ -57,6 +58,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
   const [picks, setPicks] = useState<MentionPick[]>([]);
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
   const [sort, setSort] = useState<'top' | 'newest'>('top');
+  const [reportFor, setReportFor] = useState<PostComment | null>(null);
   // Optimistic like state per comment, keyed by id, on top of what the API said.
   const [likes, setLikes] = useState<Record<string, { liked: boolean; count: number }>>({});
 
@@ -249,6 +251,11 @@ export default function CommentSection({ postId }: CommentSectionProps) {
                 Delete
               </button>
             )}
+            {user && comment.author.id !== user.id && (
+              <button type="button" className="hover:text-red-600" onClick={() => setReportFor(comment)}>
+                Report
+              </button>
+            )}
           </div>
           {comment.replies && comment.replies.length > 0 && (
             <div className="mt-3 space-y-3">
@@ -335,6 +342,16 @@ export default function CommentSection({ postId }: CommentSectionProps) {
           threadedComments.map((comment) => <CommentItem key={comment.id} comment={comment} />)
         )}
       </div>
+
+      {reportFor && (
+        <ReportDialog
+          open
+          onClose={() => setReportFor(null)}
+          targetType="comment"
+          targetId={reportFor.id}
+          targetLabel={`${commentAuthorName(reportFor.author)}'s comment`}
+        />
+      )}
     </div>
   );
 }

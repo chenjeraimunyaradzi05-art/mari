@@ -299,6 +299,20 @@ export const postApi = {
   getInsights: (id: string) => api.get(`/posts/${id}/insights`),
   getMyInsights: (days = 30) => api.get('/posts/me/insights', { params: { days } }),
 
+  // What you are writing, kept until published or discarded.
+  getDrafts: () => api.get('/posts/me/drafts'),
+  saveDraft: (data: {
+    id?: string | null;
+    kind: string;
+    content: string;
+    mediaUrls?: string[];
+    mediaAlt?: string[];
+    poll?: { options: string[]; durationHours: number } | null;
+    isPublic?: boolean;
+    isSensitive?: boolean;
+  }) => api.put('/posts/me/drafts', data),
+  deleteDraft: (id: string) => api.delete(`/posts/me/drafts/${id}`),
+
   // The author's thread controls.
   setCommentsOff: (id: string, commentsOff: boolean) => api.patch(`/posts/${id}`, { commentsOff }),
   pinComment: (postId: string, commentId: string, pinned: boolean) =>
@@ -419,7 +433,7 @@ export const safetyApi = {
   getReports: () => api.get('/safety/reports'),
 
   createReport: (data: {
-    targetType: 'post' | 'video' | 'user' | 'message' | 'channel' | 'other';
+    targetType: 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel' | 'other';
     targetId?: string;
     reason: string;
     details?: string;

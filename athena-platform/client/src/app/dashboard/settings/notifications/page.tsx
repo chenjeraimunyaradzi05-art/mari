@@ -30,8 +30,23 @@ type NotificationPreferences = {
   };
   inApp: {
     all: boolean;
+    likes: boolean;
+    comments: boolean;
+    follows: boolean;
+    reposts: boolean;
+    mentions: boolean;
   };
 };
+
+type InAppSocialKey = Exclude<keyof NotificationPreferences['inApp'], 'all'>;
+
+const IN_APP_SOCIAL: { key: InAppSocialKey; name: string; description: string }[] = [
+  { key: 'likes', name: 'Reactions', description: 'When someone reacts to your post' },
+  { key: 'comments', name: 'Comments and replies', description: 'When someone comments on your post or replies to you' },
+  { key: 'follows', name: 'Follows', description: 'New followers and requests to follow you' },
+  { key: 'reposts', name: 'Reposts', description: 'When someone reposts or quotes you' },
+  { key: 'mentions', name: 'Mentions', description: 'When someone names you in a post or comment' },
+];
 
 type EmailPreferenceKey = keyof NotificationPreferences['email'];
 type PushPreferenceKey = keyof NotificationPreferences['push'];
@@ -68,6 +83,11 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   },
   inApp: {
     all: true,
+    likes: true,
+    comments: true,
+    follows: true,
+    reposts: true,
+    mentions: true,
   },
 };
 
@@ -157,6 +177,11 @@ function normalizePreferences(input: any): NotificationPreferences {
     },
     inApp: {
       all: typeof input?.inApp?.all === 'boolean' ? input.inApp.all : DEFAULT_PREFERENCES.inApp.all,
+      likes: typeof input?.inApp?.likes === 'boolean' ? input.inApp.likes : DEFAULT_PREFERENCES.inApp.likes,
+      comments: typeof input?.inApp?.comments === 'boolean' ? input.inApp.comments : DEFAULT_PREFERENCES.inApp.comments,
+      follows: typeof input?.inApp?.follows === 'boolean' ? input.inApp.follows : DEFAULT_PREFERENCES.inApp.follows,
+      reposts: typeof input?.inApp?.reposts === 'boolean' ? input.inApp.reposts : DEFAULT_PREFERENCES.inApp.reposts,
+      mentions: typeof input?.inApp?.mentions === 'boolean' ? input.inApp.mentions : DEFAULT_PREFERENCES.inApp.mentions,
     },
   };
 }
@@ -243,7 +268,22 @@ export default function NotificationsSettingsPage() {
         ? {
             ...current,
             inApp: {
+              ...current.inApp,
               all: !current.inApp.all,
+            },
+          }
+        : current
+    );
+  };
+
+  const handleToggleInAppSocial = (key: InAppSocialKey) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            inApp: {
+              ...current.inApp,
+              [key]: !current.inApp[key],
             },
           }
         : current
@@ -444,6 +484,23 @@ export default function NotificationsSettingsPage() {
                 label="In-app notifications"
                 onChange={handleToggleInApp}
               />
+            </div>
+            {/* The social kinds, each its own switch while the whole is on. */}
+            <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+              {IN_APP_SOCIAL.map((item) => (
+                <div key={item.key} className="flex items-center justify-between py-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">{item.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{item.description}</p>
+                  </div>
+                  <Toggle
+                    checked={draft.inApp.all && draft.inApp[item.key]}
+                    disabled={!draft.inApp.all}
+                    label={item.name}
+                    onChange={() => handleToggleInAppSocial(item.key)}
+                  />
+                </div>
+              ))}
             </div>
           </div>
 

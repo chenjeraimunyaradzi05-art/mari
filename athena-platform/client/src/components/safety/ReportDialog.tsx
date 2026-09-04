@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
  * through the same dialog rather than each inventing a prompt of their own.
  */
 
-type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel';
+type ReportTargetType = 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel';
 
 const REASONS: { value: string; label: string }[] = [
   { value: 'spam', label: 'Spam or misleading' },
@@ -26,6 +26,7 @@ const REASONS: { value: string; label: string }[] = [
 
 const TITLES: Record<ReportTargetType, string> = {
   post: 'Report this post',
+  comment: 'Report this comment',
   video: 'Report this reel',
   user: 'Report this member',
   message: 'Report this message',

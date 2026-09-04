@@ -1,16 +1,37 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { BarChart3, CalendarClock, EyeOff, Image, Loader2, MessageSquare, Plus, Send, Trash2, Trophy, Video, X } from 'lucide-react';
+import { BarChart3, CalendarClock, EyeOff, FileText, Image, Loader2, MessageSquare, Plus, Send, Trash2, Trophy, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore, useCreatePost } from '@/lib/hooks';
 import { useScheduledPosts } from '@/lib/social-hooks';
 import { mediaApi, postApi } from '@/lib/api';
-import { serializeMentions, mentionsToPlainText, type MentionPick } from '@/lib/mentions';
+import { MENTION_MARKUP, serializeMentions, mentionsToPlainText, type MentionPick } from '@/lib/mentions';
+
+type Draft = {
+  id: string;
+  kind: string;
+  content: string;
+  mediaUrls: string[];
+  mediaAlt: string[];
+  poll: { options?: string[]; durationHours?: number } | null;
+  isPublic: boolean;
+  isSensitive: boolean;
+  updatedAt: string;
+};
+
+/** The mentions already serialised in a draft, so resuming keeps them resolvable. */
+function picksIn(content: string): MentionPick[] {
+  const picks: MentionPick[] = [];
+  for (const match of content.matchAll(MENTION_MARKUP)) {
+    if (!picks.some((p) => p.id === match[2])) picks.push({ name: match[1], id: match[2] });
+  }
+  return picks;
+}
 import { MentionTextarea } from '@/components/community/MentionTextarea';
 import { cn } from '@/lib/utils';
 
@@ -66,6 +87,87 @@ export default function CreatePostPage() {
   const [scheduledFor, setScheduledFor] = useState('');
   const [isSensitive, setIsSensitive] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Drafts: saved two seconds after the last change, listed below to resume,
+  // and discarded once the post goes out.
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState<Date | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextAutosave = useRef(false);
+  const drafts = useQuery({
+    queryKey: ['post-drafts'],
+    queryFn: postApi.getDrafts,
+    enabled: Boolean(user),
+    select: (response) => (Array.isArray(response.data?.data) ? (response.data.data as Draft[]) : []),
+  });
+
+  useEffect(() => {
+    if (!user) return;
+    if (skipNextAutosave.current) {
+      skipNextAutosave.current = false;
+      return;
+    }
+    const hasSomething = content.trim().length > 0 || mediaUrls.length > 0;
+    if (!hasSomething && !draftId) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(async () => {
+      try {
+        const res = await postApi.saveDraft({
+          id: draftId,
+          kind,
+          content: serializeMentions(content, picks),
+          mediaUrls,
+          mediaAlt: mediaAlt.trim() ? [mediaAlt.trim()] : [],
+          poll: kind === 'POLL' ? { options, durationHours } : null,
+          isPublic,
+          isSensitive,
+        });
+        const saved = res.data?.data as Draft | null;
+        setDraftId(saved?.id ?? null);
+        setDraftSavedAt(saved ? new Date() : null);
+        queryClient.invalidateQueries({ queryKey: ['post-drafts'] });
+      } catch {
+        // A draft that fails to save is tried again on the next change.
+      }
+    }, 2000);
+    return () => {
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, picks, mediaUrls, mediaAlt, kind, options, durationHours, isPublic, isSensitive]);
+
+  const resumeDraft = (draft: Draft) => {
+    skipNextAutosave.current = true;
+    setDraftId(draft.id);
+    setDraftSavedAt(new Date(draft.updatedAt));
+    setKind((['TEXT', 'POLL', 'WIN'].includes(draft.kind) ? draft.kind : 'TEXT') as Kind);
+    setContent(mentionsToPlainText(draft.content));
+    setPicks(picksIn(draft.content));
+    setMediaUrls(draft.mediaUrls);
+    setMediaKind(draft.mediaUrls.length ? (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(draft.mediaUrls[0]) ? 'VIDEO' : 'IMAGE') : null);
+    setMediaAlt(draft.mediaAlt[0] ?? '');
+    if (draft.poll) {
+      setOptions(Array.isArray(draft.poll.options) && draft.poll.options.length >= 2 ? draft.poll.options : ['', '']);
+      setDurationHours(draft.poll.durationHours ?? 24);
+    }
+    setIsPublic(draft.isPublic);
+    setIsSensitive(draft.isSensitive);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const discardDraft = async (id: string) => {
+    try {
+      await postApi.deleteDraft(id);
+      if (draftId === id) {
+        setDraftId(null);
+        setDraftSavedAt(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ['post-drafts'] });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not discard the draft'));
+    }
+  };
 
   const minSchedule = useMemo(() => toLocalInputValue(new Date(Date.now() + 10 * 60000)), []);
 
@@ -133,6 +235,15 @@ export default function CreatePostPage() {
       setMediaKind(null);
       setMediaAlt('');
       setOptions(['', '']);
+      // Published: the draft has done its job.
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+      skipNextAutosave.current = true;
+      if (draftId) {
+        void postApi.deleteDraft(draftId).catch(() => {});
+        setDraftId(null);
+        setDraftSavedAt(null);
+        queryClient.invalidateQueries({ queryKey: ['post-drafts'] });
+      }
       if (scheduling) {
         toast.success(`Scheduled for ${format(new Date(scheduledFor), 'd MMM, h:mm a')}`);
         setScheduledFor('');
@@ -222,6 +333,12 @@ export default function CreatePostPage() {
         {picks.length > 0 && (
           <p className="text-xs text-slate-500">
             Mentioning {picks.map((p) => p.name).join(', ')}. Preview: {mentionsToPlainText(serializeMentions(content, picks)).slice(0, 120)}
+          </p>
+        )}
+
+        {draftSavedAt && (
+          <p className="flex items-center gap-1 text-xs text-slate-400">
+            <FileText className="h-3 w-3" /> Draft saved {format(draftSavedAt, 'h:mm a')}
           </p>
         )}
 
@@ -371,6 +488,38 @@ export default function CreatePostPage() {
           </button>
         </div>
       </form>
+
+      {drafts.data && drafts.data.filter((d) => d.id !== draftId).length > 0 && (
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Drafts</h2>
+          <ul className="mt-2 divide-y divide-slate-100 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            {drafts.data
+              .filter((d) => d.id !== draftId)
+              .map((draft) => (
+                <li key={draft.id} className="flex items-center gap-3 p-3 text-sm">
+                  <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                  <button type="button" onClick={() => resumeDraft(draft)} className="min-w-0 flex-1 text-left">
+                    <p className="truncate text-slate-800 dark:text-slate-200">
+                      {mentionsToPlainText(draft.content) || (draft.mediaUrls.length ? 'Media, no words yet' : 'Empty draft')}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {draft.kind === 'POLL' ? 'Poll · ' : draft.kind === 'WIN' ? 'Win · ' : ''}
+                      Saved {format(new Date(draft.updatedAt), 'EEE d MMM, h:mm a')} · Tap to continue
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void discardDraft(draft.id)}
+                    aria-label="Discard draft"
+                    className="p-1 text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
 
       {scheduled.data && scheduled.data.length > 0 && (
         <section className="mt-10">
