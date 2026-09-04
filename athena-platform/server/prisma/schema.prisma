@@ -1402,6 +1402,10 @@ model Post {
   // Blurred in the feed until the reader chooses to see it: for posts about
   // harassment, loss, medical detail and the like, marked by the author.
   isSensitive Boolean @default(false)
+  // Open Graph card for the first link in the post, fetched after posting:
+  // { url, title, description, image, siteName }. Null when there is no link
+  // or the page gave nothing back.
+  linkPreview Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
