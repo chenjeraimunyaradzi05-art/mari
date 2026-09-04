@@ -101,6 +101,8 @@ enum PostType {
   ARTICLE
   JOB_SHARE
   COURSE_SHARE
+  POLL
+  WIN
 }
 
 enum StatusType {
@@ -673,6 +675,9 @@ model User {
   audioTracks          AudioTrack[]          @relation("AudioTracksCreated")
   liveStreams          LiveStream[]
   liveStreamMessages   LiveStreamMessage[]
+  pollVotes            PollVote[]
+  commentLikes         CommentLike[]
+  statusViews          StatusView[]
 
   // Gamification
   xp                   Int               @default(0)
@@ -1386,15 +1391,39 @@ model Post {
   isHidden    Boolean @default(false)
   reportCount Int     @default(0)
 
+  // A POLL post's question lives in content; the options and close time live
+  // here: { options: [{ id, text }], endsAt }. Votes are PollVote rows.
+  poll Json?
+  // Scheduled posts are stored hidden with this set; the sweep flips them
+  // visible when it passes. Null for everything published immediately.
+  scheduledFor DateTime?
+  // Members named with @[Name](id) in the content, for "posts mentioning me".
+  mentionedUserIds String[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  comments Comment[]
-  likes    Like[]
-  saves    PostSave[]
+  comments  Comment[]
+  likes     Like[]
+  saves     PostSave[]
+  pollVotes PollVote[]
 
   @@index([authorId])
   @@index([createdAt])
+  @@index([scheduledFor])
+}
+
+model PollVote {
+  id       String   @id @default(uuid())
+  postId   String
+  post     Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  optionId String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
 }
 
 // Completes the save pattern: SavedJob, EventSave, VideoSave and
@@ -1436,8 +1465,22 @@ model Comment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  commentLikes CommentLike[]
+
   @@index([postId])
   @@index([authorId])
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+  @@index([commentId])
 }
 
 model Like {
@@ -1447,6 +1490,10 @@ model Like {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  // Which reaction: LIKE, CELEBRATE, SUPPORT, INSIGHTFUL or INSPIRED. One row
+  // per member per post whatever the type, so counts stay a count of people.
+  type String @default("LIKE")
 
   createdAt DateTime @default(now())
 
@@ -1907,13 +1954,31 @@ model Status {
 
   type     StatusType @default(IMAGE)
   mediaUrl String
+  caption  String?
+  // Distinct viewers; each is also a StatusView row so a story can be marked
+  // seen for the person who saw it.
+  viewCount Int @default(0)
 
   createdAt DateTime @default(now())
   expiresAt DateTime
 
+  views StatusView[]
+
   @@index([userId])
   @@index([expiresAt])
   @@index([createdAt])
+}
+
+model StatusView {
+  id       String   @id @default(uuid())
+  statusId String
+  status   Status   @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  viewedAt DateTime @default(now())
+
+  @@unique([statusId, userId])
+  @@index([userId])
 }
 
 model Referral {
