@@ -34,14 +34,29 @@ export interface ButtonProps
   asChild?: boolean;
 }
 
+// `asChild` renders the single child element with the button's styling instead
+// of wrapping it in a <button>. Ten call sites already pass it for a Link or an
+// anchor, and until now it was ignored: the prop reached the DOM as an unknown
+// attribute and the link rendered inside a real <button>, which is invalid
+// HTML and a control nested in a control for a screen reader.
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, children, ...props }, ref) => {
+    const classes = cn(buttonVariants({ variant, size, className }));
+
+    if (asChild && React.isValidElement(children)) {
+      const child = children as React.ReactElement<Record<string, unknown>>;
+      return React.cloneElement(child, {
+        ...props,
+        ...child.props,
+        className: cn(classes, child.props.className as string | undefined),
+        ref,
+      });
+    }
+
     return (
-      <button
-        className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
-        {...props}
-      />
+      <button className={classes} ref={ref} {...props}>
+        {children}
+      </button>
     );
   }
 );
