@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { groupNotifications, type NotificationRow } from '../services/notification-grouping.service';
 
 const router = Router();
 
@@ -137,10 +138,16 @@ router.get('/', authenticate, async (req: AuthRequest, res, next) => {
       },
     });
 
+    // ?grouped=false returns the raw rows; the bell and the page read groups.
+    const grouped =
+      req.query.grouped === 'false'
+        ? notifications
+        : groupNotifications(notifications as unknown as NotificationRow[]);
+
     res.json({
       success: true,
       data: {
-        notifications,
+        notifications: grouped,
         unreadCount,
         pagination: {
           page: pageNum,
@@ -150,6 +157,26 @@ router.get('/', authenticate, async (req: AuthRequest, res, next) => {
         },
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// MARK SEVERAL AS READ (a grouped row)
+// ===========================================
+router.patch('/read-many', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids)
+      ? (req.body.ids as unknown[]).filter((id): id is string => typeof id === 'string').slice(0, 200)
+      : [];
+    if (ids.length === 0) throw new ApiError(400, 'ids is required');
+
+    const result = await prisma.notification.updateMany({
+      where: { id: { in: ids }, userId: req.user!.id, readAt: null },
+      data: { readAt: new Date() },
+    });
+    res.json({ success: true, count: result.count });
   } catch (error) {
     next(error);
   }

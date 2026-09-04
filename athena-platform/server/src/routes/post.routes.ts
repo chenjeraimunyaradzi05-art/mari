@@ -26,6 +26,7 @@ import {
   reactionVerb,
 } from '../services/post-decoration.service';
 import { parseScheduledFor } from '../services/scheduled-posts.service';
+import { enrichPostLinkPreview } from '../services/link-preview.service';
 import { resolveMentionedUserIds } from '../utils/mentions';
 
 const router = Router();
@@ -273,7 +274,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
             },
           },
           orderBy: { createdAt: 'desc' },
-          take: 20,
+          take: 50,
         },
         _count: {
           select: {
@@ -450,6 +451,10 @@ router.post(
       if (!scheduledFor && mentionedUserIds.length > 0) {
         await notifyMentions(req.user!.id, mentionedUserIds, 'post', post.id);
       }
+
+      // The link card is fetched after answering, so posting never waits on
+      // someone else's server.
+      enrichPostLinkPreview(post.id, content);
 
       res.status(201).json({
         success: true,
@@ -631,6 +636,10 @@ router.patch(
       where: { id },
       data,
     });
+
+    if (data.content) {
+      enrichPostLinkPreview(id, data.content);
+    }
 
     res.json({
       success: true,

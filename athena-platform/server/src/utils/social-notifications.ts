@@ -50,6 +50,8 @@ export async function notifySocial(input: SocialNotificationInput): Promise<void
         title: input.title,
         message: input.message(name),
         link: input.link,
+        // Who did it, so several reactions to one post can be read as one row.
+        data: { actorId: input.actorId, actorName: name },
       },
     });
   } catch (error) {

@@ -14,6 +14,7 @@ import { getRegionConfig, normalizeRegion } from '../utils/region';
 import { logger } from '../utils/logger';
 import { parsePagination } from '../utils/pagination';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
+import { getBlockedRelationshipIds } from '../utils/safety-store';
 
 const router = Router();
 
@@ -541,6 +542,115 @@ router.get('/suggest', authenticate, async (req: AuthRequest, res, next) => {
       }));
 
     res.json({ success: true, data: merged });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// PEOPLE YOU MAY KNOW
+// ===========================================
+// Members worth following, each with the honest reason they are here:
+// followed by people you follow, the same career stage, the same city, or
+// simply well followed. Never anyone you already follow or have blocked.
+router.get('/suggested', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const viewerId = req.user!.id;
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '6'), 10) || 6, 1), 20);
+
+    const [me, following, blockedIds] = await Promise.all([
+      prisma.user.findUnique({ where: { id: viewerId }, select: { persona: true, city: true, state: true } }),
+      prisma.follow.findMany({ where: { followerId: viewerId }, select: { followingId: true } }),
+      getBlockedRelationshipIds(viewerId),
+    ]);
+    const followingIds = following.map((f) => f.followingId);
+    const excluded = new Set<string>([viewerId, ...followingIds, ...blockedIds]);
+
+    type Candidate = { score: number; mutuals: string[]; reasons: string[] };
+    const candidates = new Map<string, Candidate>();
+    const bump = (id: string, points: number, reason?: string, mutual?: string) => {
+      if (excluded.has(id)) return;
+      const entry = candidates.get(id) ?? { score: 0, mutuals: [], reasons: [] };
+      entry.score += points;
+      if (reason && !entry.reasons.includes(reason)) entry.reasons.push(reason);
+      if (mutual) entry.mutuals.push(mutual);
+      candidates.set(id, entry);
+    };
+
+    // Second degree: who the people you follow follow.
+    if (followingIds.length > 0) {
+      const secondDegree = await prisma.follow.findMany({
+        where: { followerId: { in: followingIds } },
+        select: { followingId: true, follower: { select: { displayName: true, firstName: true } } },
+        take: 2000,
+      });
+      for (const edge of secondDegree) {
+        const name = edge.follower.displayName?.trim() || edge.follower.firstName || 'someone you follow';
+        bump(edge.followingId, 3, undefined, name);
+      }
+    }
+
+    // Same stage and same place.
+    const select = { id: true, persona: true, city: true, state: true };
+    const [samePersona, sameCity] = await Promise.all([
+      me?.persona
+        ? prisma.user.findMany({ where: { isActive: true, persona: me.persona, id: { notIn: Array.from(excluded) } }, select, take: 60 })
+        : Promise.resolve([] as Array<{ id: string; persona: string; city: string | null; state: string | null }>),
+      me?.city
+        ? prisma.user.findMany({ where: { isActive: true, city: { equals: me.city, mode: 'insensitive' }, id: { notIn: Array.from(excluded) } }, select, take: 60 })
+        : Promise.resolve([] as Array<{ id: string; persona: string; city: string | null; state: string | null }>),
+    ]);
+    for (const user of samePersona) bump(user.id, 2, 'Same career stage as you');
+    for (const user of sameCity) bump(user.id, 2, `Also in ${me?.city}`);
+
+    // Well followed members fill the gaps when the graph is thin.
+    if (candidates.size < limit * 3) {
+      const popular = await prisma.follow.groupBy({
+        by: ['followingId'],
+        where: { followingId: { notIn: Array.from(excluded) } },
+        _count: { _all: true },
+        orderBy: { _count: { followingId: 'desc' } },
+        take: 40,
+      });
+      for (const row of popular) bump(row.followingId, Math.min(3, row._count._all / 50), 'Widely followed');
+    }
+
+    const ranked = Array.from(candidates.entries())
+      .sort((a, b) => b[1].score - a[1].score)
+      .slice(0, limit);
+    if (ranked.length === 0) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: ranked.map(([id]) => id) }, isActive: true },
+      select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true, headline: true, persona: true, city: true },
+    });
+    const byId = new Map(users.map((u) => [u.id, u]));
+
+    const data = ranked
+      .map(([id, entry]) => {
+        const user = byId.get(id);
+        if (!user) return null;
+        const reasons = [...entry.reasons];
+        if (entry.mutuals.length > 0) {
+          const [first, ...rest] = Array.from(new Set(entry.mutuals));
+          reasons.unshift(rest.length ? `Followed by ${first} and ${rest.length} ${rest.length === 1 ? 'other' : 'others'}` : `Followed by ${first}`);
+        }
+        return {
+          id: user.id,
+          name: user.displayName?.trim() || [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+          avatar: user.avatar,
+          headline: user.headline,
+          city: user.city,
+          reason: reasons[0] ?? 'Active in the community',
+          reasons,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    res.json({ success: true, data });
   } catch (error) {
     next(error);
   }

@@ -7,6 +7,7 @@ jest.mock('../../utils/prisma', () => ({
     videoLike: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn() },
     videoSave: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn(), count: jest.fn() },
     follow: { findMany: jest.fn() },
+    userFeedPreferences: { findUnique: jest.fn() },
     user: { findUnique: jest.fn() },
     notification: { create: jest.fn() },
   },

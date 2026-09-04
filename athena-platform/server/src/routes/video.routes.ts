@@ -167,6 +167,24 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       where.authorId = { in: following.map((f) => f.followingId) };
     }
 
+    // "See fewer from this creator" applies to reels as it does to posts. The
+    // preference is best-effort: a failed lookup must not take the feed down.
+    if (req.user) {
+      let blocked: string[] = [];
+      try {
+        const prefs = await prisma.userFeedPreferences.findUnique({
+          where: { userId: req.user.id },
+          select: { blockedCreators: true },
+        });
+        blocked = prefs?.blockedCreators ?? [];
+      } catch {
+        // Fall through with nothing hidden.
+      }
+      if (blocked.length > 0) {
+        where.authorId = { ...(where.authorId ?? {}), notIn: blocked };
+      }
+    }
+
     const orderBy: any[] =
       feed === 'trending'
         ? [{ engagementScore: 'desc' }, { viewCount: 'desc' }, { id: 'desc' }]
