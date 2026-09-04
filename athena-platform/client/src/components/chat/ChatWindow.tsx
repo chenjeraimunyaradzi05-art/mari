@@ -15,10 +15,13 @@ import {
   ChatMessage as StoreMessage,
 } from '@/lib/stores/chat.store';
 import { socketClient } from '@/lib/socket';
+import { usePresenceStore } from '@/lib/stores/presence.store';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
+import Link from 'next/link';
 import {
   AlertCircle,
+  ArrowLeft,
   Check,
   CheckCheck,
   Clock,
@@ -28,6 +31,7 @@ import {
   Smile,
   X,
 } from 'lucide-react';
+import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -48,6 +52,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
   const uploadAttachment = useUploadChatAttachment();
   const toggleReaction = useToggleMessageReaction();
   const { user } = useAuthStore();
+  const { isOnline } = usePresenceStore();
   const {
     messages: storeMessages,
     conversations,
@@ -250,6 +255,39 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950">
+      {/* Who the thread is with. The details pane only exists from xl up, so
+          without this a phone or a laptop showed a thread with no name on it,
+          and on a phone there was no way back to the list. */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <Link
+          href="/dashboard/messages"
+          className="md:hidden -ml-1 p-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+          aria-label="Back to conversations"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </Link>
+        {counterpart ? (
+          <Link href={`/profile/${counterpart.id}`} className="flex items-center gap-3 min-w-0">
+            <Avatar
+              src={counterpart.avatar}
+              alt={counterpart.name}
+              fallback={(counterpart.name || 'U').slice(0, 2).toUpperCase()}
+              size="sm"
+            />
+            <span className="min-w-0">
+              <span className="block truncate font-semibold text-slate-900 dark:text-white">
+                {counterpart.name}
+              </span>
+              <span className="block text-xs text-slate-500 dark:text-slate-400">
+                {isCounterpartTyping ? 'Typing...' : isOnline(counterpart.id) ? 'Active now' : 'Offline'}
+              </span>
+            </span>
+          </Link>
+        ) : (
+          <span className="font-semibold text-slate-900 dark:text-white">Conversation</span>
+        )}
+      </div>
+
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {currentMessages.map((message) => {

@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { useExportMyData, useDeleteAccount } from '@/lib/hooks';
 import { userApi } from '@/lib/api';
 import { getStoredPreference } from '@/lib/utils';
+import { BlockedMembers } from '@/components/safety/BlockedMembers';
 
 export default function PrivacySettingsPage() {
   const exportMyData = useExportMyData();
@@ -235,6 +236,8 @@ export default function PrivacySettingsPage() {
           </div>
         </div>
       )}
+
+      <BlockedMembers />
 
       <div className="card">
         <div className="flex items-start space-x-4">

@@ -544,6 +544,8 @@ export const groupsApi = {
   leave: (id: string) => api.post(`/groups/${id}/leave`),
   listPosts: (id: string) => api.get(`/groups/${id}/posts`),
   createPost: (id: string, content: string) => api.post(`/groups/${id}/posts`, { content }),
+  // The author, or a group admin or moderator.
+  deletePost: (id: string, postId: string) => api.delete(`/groups/${id}/posts/${postId}`),
 };
 
 // ============================================

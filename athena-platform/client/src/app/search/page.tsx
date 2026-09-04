@@ -105,8 +105,10 @@ const GROUPS: {
   { type: 'video', title: 'Videos', icon: Play },
 ];
 
-/* Where each result actually goes. Only routes that exist are used — a search
-   result that 404s is worse than one that lands on the list it came from. */
+/* Where each result actually goes. A post opens its own page and a reel opens
+   in the player, now that both routes exist; earlier every post result dropped
+   the reader at the top of the feed and every reel at the top of Reels, with
+   the thing they clicked nowhere in sight. */
 function hrefFor(hit: SearchHit): string {
   const meta = hit.metadata ?? {};
   switch (hit.type) {
@@ -115,17 +117,20 @@ function hrefFor(hit: SearchHit): string {
     case 'course':
       return `/dashboard/learn/${hit.id}`;
     case 'user':
-      return `/dashboard/profile/${hit.id}`;
+      return `/profile/${hit.id}`;
     case 'mentor':
-      return meta.userId ? `/dashboard/profile/${meta.userId}` : '/mentors';
+      return meta.userId ? `/profile/${meta.userId}` : '/mentors';
     case 'post':
-      return '/feed';
+      return `/posts/${hit.id}`;
     case 'video':
-      return '/explore';
+      return `/explore?video=${hit.id}`;
     default:
       return '/search';
   }
 }
+
+/* "#welding" typed into the box, or a hashtag clicked in a caption. */
+const HASHTAG_QUERY = /^#([\p{L}\p{N}_]{2,64})$/u;
 
 const money = (n: number) =>
   n >= 1000 ? `$${Math.round(n / 1000)}k` : `$${new Intl.NumberFormat('en-AU').format(n)}`;
@@ -346,6 +351,7 @@ function SearchContent() {
 
   const trimmed = query.trim();
   const hasQuery = trimmed.length > 0;
+  const hashtag = HASHTAG_QUERY.exec(trimmed)?.[1]?.toLowerCase() ?? null;
 
   /* "Clear filters" is only offered when a category filter is actually on.
      Someone who searched everything and found nothing set no filters, and
@@ -405,6 +411,24 @@ function SearchContent() {
             </div>
           )}
         </section>
+
+        {hashtag && (
+          /* Reels are browsed by topic, so a hashtag search also offers the
+             topic itself, which lists every reel carrying the tag rather than
+             the handful the ranked search returns. */
+          <Link
+            href={`/explore?topic=${encodeURIComponent(hashtag)}`}
+            className="tile-soft focusable flex items-center justify-between gap-4 p-4"
+          >
+            <span className="flex items-center gap-3">
+              <Play className="h-5 w-5 text-rose-500" aria-hidden="true" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">
+                Reels tagged <span className="font-semibold">#{hashtag}</span>
+              </span>
+            </span>
+            <span className="text-sm font-medium text-rose-600 dark:text-rose-400">Open in Reels</span>
+          </Link>
+        )}
 
         {!hasQuery ? (
           <Section

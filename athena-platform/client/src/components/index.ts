@@ -1,6 +1,5 @@
 // Layout Components
 export { default as DashboardHeader } from './DashboardHeader';
-export { default as DashboardSidebar } from './DashboardSidebar';
 
 // Feature Components
 export { default as NotificationDropdown } from './NotificationDropdown';

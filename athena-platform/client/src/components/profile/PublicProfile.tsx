@@ -2,30 +2,43 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import {
   ArrowLeft,
+  Ban,
   BookOpen,
   Briefcase,
   Calendar,
   Edit,
   ExternalLink,
+  Flag,
   Heart,
   Link as LinkIcon,
   Lock,
   MapPin,
   MessageCircle,
   MessageSquare,
+  MoreHorizontal,
   Play,
   UserPlus,
 } from 'lucide-react';
 import { useAuth, useFollow, useProfile, useUnfollow } from '@/lib/hooks';
-import { postApi } from '@/lib/api';
+import { postApi, safetyApi } from '@/lib/api';
 import { videoApi } from '@/lib/api-extensions';
 import { formatDate, PERSONA_LABELS, cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
 import { ProfileSkeleton } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 
 /**
  * A member's public profile, built on what GET /users/:id actually returns.
@@ -145,6 +158,9 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
   };
   const follow = useFollow();
   const unfollow = useUnfollow();
+  const router = useRouter();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [blocking, setBlocking] = useState(false);
 
   const { data: posts = [] } = useQuery({
     queryKey: ['user-posts', userId],
@@ -224,6 +240,30 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
     { href: profile.profile?.linkedinUrl, label: 'LinkedIn' },
   ].filter((l): l is { href: string; label: string } => Boolean(l.href));
 
+  // Blocking goes through the safety route, which also stops either side
+  // messaging the other. The list of blocks, with undo, is in Settings >
+  // Privacy, so the toast says where to look.
+  const blockMember = async () => {
+    if (
+      !window.confirm(
+        `Block ${name}? They will not be able to message you, and you will not see each other's posts. You can undo this in Settings > Privacy.`
+      )
+    ) {
+      return;
+    }
+    setBlocking(true);
+    try {
+      await safetyApi.blockUser({ blockedUserId: userId });
+      toast.success(`${name} is blocked. Undo it any time in Settings > Privacy.`);
+      router.push(backHref);
+    } catch (blockError) {
+      const message = (blockError as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message || 'Could not block this member');
+    } finally {
+      setBlocking(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       <Link
@@ -293,6 +333,36 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                       <MessageCircle className="h-4 w-4" />
                       <span>Message</span>
                     </Link>
+                    <DropdownMenu as="div" className="relative">
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="btn-outline flex items-center px-3 py-2"
+                          aria-label="More options"
+                          disabled={blocking}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onClick={() => setReportOpen(true)}>
+                          <Flag className="mr-2 h-4 w-4" />
+                          Report member
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={blockMember} className="text-red-600 dark:text-red-400">
+                          <Ban className="mr-2 h-4 w-4" />
+                          Block member
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <ReportDialog
+                      open={reportOpen}
+                      onClose={() => setReportOpen(false)}
+                      targetType="user"
+                      targetId={userId}
+                      targetLabel={name}
+                    />
                   </>
                 ) : (
                   <Link

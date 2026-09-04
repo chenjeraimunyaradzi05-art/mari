@@ -2,13 +2,19 @@
 
 import { use, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useStartConversation } from '@/lib/hooks';
+import { useAuth, useStartConversation } from '@/lib/hooks';
 import { Loading } from '@/components/ui/loading';
 
 /**
  * The conversation index. "Message" buttons elsewhere in the app link here with
  * ?user=<id> rather than a conversation id, because the thread may not exist
  * yet — so this page resolves that id into a conversation and hands over to it.
+ *
+ * The hand-over reads the mutation's own result rather than a callback passed
+ * to mutate(): those callbacks are dropped if the page re-mounts while the
+ * request is in flight, which is exactly what happens here while the session
+ * is being restored, and the reader was left on "Opening conversation..."
+ * for ever with the thread already created behind them.
  */
 export default function MessagesPage({
   searchParams,
@@ -19,25 +25,26 @@ export default function MessagesPage({
   const targetUserId = Array.isArray(user) ? user[0] : user;
 
   const router = useRouter();
+  const { isLoading: authLoading } = useAuth();
   const startConversation = useStartConversation();
+  const { mutate: openConversation } = startConversation;
   // Guards against React re-running the effect and opening the thread twice.
   const requestedFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!targetUserId || requestedFor.current === targetUserId) return;
+    // Wait for the session: fired earlier this is a 401, a refresh and a retry.
+    if (!targetUserId || authLoading || requestedFor.current === targetUserId) return;
     requestedFor.current = targetUserId;
+    openConversation(targetUserId);
+  }, [targetUserId, authLoading, openConversation]);
 
-    startConversation.mutate(targetUserId, {
-      onSuccess: (response) => {
-        const conversationId = response.data?.data?.id;
-        if (conversationId) {
-          // replace, not push: backing out should return to the profile the
-          // reader came from, not bounce through this resolver again.
-          router.replace(`/dashboard/messages/${conversationId}`);
-        }
-      },
-    });
-  }, [targetUserId, router, startConversation]);
+  const conversationId: string | undefined = startConversation.data?.data?.data?.id;
+  useEffect(() => {
+    if (!conversationId) return;
+    // replace, not push: backing out should return to the profile the reader
+    // came from, not bounce through this resolver again.
+    router.replace(`/dashboard/messages/${conversationId}`);
+  }, [conversationId, router]);
 
   if (targetUserId && !startConversation.isError) {
     return (

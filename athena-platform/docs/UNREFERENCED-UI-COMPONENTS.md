@@ -48,22 +48,24 @@ duplicate `CookieConsentBanner` under `components/gdpr/` that is also unused.
 | 609 | `studios/organization/OrganizationPage.tsx` |
 | 585 | `studios/learner/BadgeWallet.tsx` |
 | 581 | super-app/UserProfileHeader.tsx (deleted 2026-09-04; the profile header lives in components/profile) |
-| 522 | `chat/MessageBubbles.tsx` |
+| 522 | chat/MessageBubbles.tsx (deleted 2026-09-04; bubbles are rendered by chat/ChatWindow) |
 | 514 | super-app/CommentThread.tsx (deleted 2026-09-04; threads are in components/video and components/community) |
-| 510 | `chat/ChatInput.tsx` |
-| 466 | `chat/MediaAttachmentUpload.tsx` |
+| 510 | chat/ChatInput.tsx (deleted 2026-09-04; the composer lives in chat/ChatWindow) |
+| 466 | chat/MediaAttachmentUpload.tsx (deleted 2026-09-04; attachments upload through chat/ChatWindow) |
 | 412 | `super-app/GlobalSearch.tsx` |
 | 411 | super-app/NotificationCenter.tsx (deleted 2026-09-04; NotificationDropdown is the mounted one) |
 | 404 | super-app/FeedInteraction.tsx (deleted 2026-09-04; the overlay is in VideoPlayer) |
 | 364 | `privacy/GranularCookieBanner.tsx` |
-| 341 | `chat/ChatLayout.tsx` |
+| 341 | chat/ChatLayout.tsx (deleted 2026-09-04; the layout is app/dashboard/messages/layout.tsx) |
 | 204 | `ai/FloatingAIButton.tsx` |
 | 187 | `layout/PageShell.tsx` |
 | 175 | `ui/share-dialog.tsx` |
 | 127 | `privacy/CookieBanner.tsx` |
 
-The whole `chat/` directory (1,839 lines across four files) is unmounted — the
-messaging UI in use lives elsewhere.
+The four unmounted drafts under chat/ (ChatLayout, MessageBubbles, ChatInput
+and MediaAttachmentUpload, 1,839 lines) were deleted on 2026-09-04. The three
+files that remain there (ConversationList, ChatWindow, ConversationDetails)
+are the messaging UI in use.
 
 ## This is now checked
 

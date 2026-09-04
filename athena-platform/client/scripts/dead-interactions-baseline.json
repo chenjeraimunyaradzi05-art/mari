@@ -1,7 +1,7 @@
 {
   "comment": "Known dead interactions, recorded so CI fails only on new ones. Burn this list down; do not add to it. Regenerate with: node scripts/check-dead-interactions.js --update-baseline",
   "generated": "2026-09-04",
-  "count": 18,
+  "count": 15,
   "known": [
     "app/certifications/page.tsx|button with no handler|<button className=\"w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition font-medium\">",
     "app/dashboard/ai/mentors/page.tsx|button with no handler|<button className=\"flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 flex items-cente",
@@ -15,9 +15,6 @@
     "app/dashboard/learn/page.tsx|button with no handler|<button",
     "app/waitlist/page.tsx|button with no handler|<button className=\"px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600\">",
     "app/waitlist/page.tsx|button with no handler|<button className=\"px-4 py-2 bg-blue-700 text-white rounded-lg text-sm hover:bg-blue-800\">",
-    "components/channels/ChatArea.tsx|button with no handler|<Button variant=\"ghost\" size=\"icon\">",
-    "components/channels/ChatArea.tsx|button with no handler|<Button variant=\"ghost\" size=\"icon\">",
-    "components/channels/ChatArea.tsx|button with no handler|<button className=\"p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded\">",
     "components/studios/mentor/EarningsDashboard.tsx|button with no handler|<Button variant=\"outline\">Cancel</Button>",
     "components/ui/button.tsx|button with no handler|// attribute and the link rendered inside a real <button>, which is invalid",
     "components/ui/button.tsx|button with no handler|// of wrapping it in a <button>. Ten call sites already pass it for a Link or an"

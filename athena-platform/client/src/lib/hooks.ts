@@ -879,6 +879,22 @@ export function useCreateGroupPost() {
   });
 }
 
+export function useDeleteGroupPost() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ groupId, postId }: { groupId: string; postId: string }) =>
+      groupsApi.deletePost(groupId, postId),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['group-posts', vars.groupId] });
+      toast.success('Post removed');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to remove the post');
+    },
+  });
+}
+
 // ============================================
 // STATUS / STORIES HOOKS
 // ============================================
@@ -1094,14 +1110,21 @@ export function useUploadChatAttachment() {
   });
 }
 
+// The unread count on the Messages nav items. Summed from the same
+// conversations query the inbox renders, so the badge and the list it opens
+// cannot disagree. It waits for the session to be restored: fired before that
+// it answers 401 and the header shows a count for nobody.
 export function useUnreadMessageCount() {
+  const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
     queryKey: ['conversations'],
     queryFn: messageApi.getConversations,
     select: (response) => {
       const conversations = response.data.data as Array<{ unreadCount?: number }>;
+      if (!Array.isArray(conversations)) return 0;
       return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
     },
+    enabled: isAuthenticated && !isLoading,
     refetchInterval: 30000,
   });
 }

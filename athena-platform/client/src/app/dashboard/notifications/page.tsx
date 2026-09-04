@@ -88,6 +88,8 @@ const filterOptions = [
   { value: 'APPLICATION_UPDATE', label: 'Applications' },
   { value: 'MESSAGE', label: 'Messages' },
   { value: 'MENTOR_SESSION', label: 'Mentoring' },
+  { value: 'LIKE', label: 'Likes' },
+  { value: 'COMMENT', label: 'Comments' },
   { value: 'FOLLOW', label: 'Followers' },
   { value: 'ACHIEVEMENT', label: 'Achievements' },
   { value: 'SYSTEM', label: 'System' },

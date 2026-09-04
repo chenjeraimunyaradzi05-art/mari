@@ -102,13 +102,16 @@ const mapResult = (result: any): ResultItem => {
   const title = result.title || metadata?.name || result.content || 'Result';
   const subtitle = metadata?.company?.name || metadata?.headline || metadata?.location || result.highlight;
 
+  // A post opens its page and a reel opens in the player. The community page
+  // never read ?post= or ?video=, so those results used to land on the feed
+  // with the chosen item nowhere in sight.
   const urlMap: Record<ResultType, string> = {
-    user: `/dashboard/profile/${result.id}`,
+    user: `/profile/${result.id}`,
     job: `/dashboard/jobs/${result.id}`,
     course: `/dashboard/learn/${result.id}`,
-    video: `/dashboard/community?video=${result.id}`,
+    video: `/explore?video=${result.id}`,
     mentor: `/dashboard/mentors/${result.id}`,
-    post: `/dashboard/community?post=${result.id}`,
+    post: `/posts/${result.id}`,
     company: '/dashboard/companies',
     unknown: '/dashboard/search',
   };

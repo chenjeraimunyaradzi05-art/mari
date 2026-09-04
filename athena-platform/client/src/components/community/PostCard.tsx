@@ -3,10 +3,22 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, Share2, MoreHorizontal, Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  Bookmark,
+  Flag,
+  Heart,
+  Link2,
+  MessageCircle,
+  MoreHorizontal,
+  Share2,
+  Trash2,
+} from 'lucide-react';
 import { useLikePost, useUnlikePost, useDeletePost, useAuthStore } from '@/lib/hooks';
+import { postApi } from '@/lib/api';
 import { Avatar } from '@/components/ui/avatar';
 import { renderSocialText } from '@/lib/social-text';
+import { ReportDialog } from '@/components/safety/ReportDialog';
 import CommentSection from './CommentSection';
 import toast from 'react-hot-toast';
 
@@ -16,15 +28,27 @@ interface PostCardProps {
   defaultShowComments?: boolean;
 }
 
+const errorMessage = (error: unknown) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+
 export default function PostCard({ post, defaultShowComments = false }: PostCardProps) {
   const { user } = useAuthStore();
+  const queryClient = useQueryClient();
   const likePost = useLikePost();
   const unlikePost = useUnlikePost();
   const deletePost = useDeletePost();
   const [showComments, setShowComments] = useState(defaultShowComments);
   const [showMenu, setShowMenu] = useState(false);
   const [mediaError, setMediaError] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Saved state is optimistic: seeded from the server, flipped on tap and put
+  // back only if the request fails.
+  const [saved, setSaved] = useState<boolean>(Boolean(post.isSaved));
+  useEffect(() => {
+    setSaved(Boolean(post.isSaved));
+  }, [post.isSaved, post.id]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -60,11 +84,41 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
     }
   };
 
+  const handleSave = async () => {
+    setShowMenu(false);
+    if (!user) {
+      toast.error('Sign in to save posts');
+      return;
+    }
+    const next = !saved;
+    setSaved(next);
+    try {
+      await (next ? postApi.save(post.id) : postApi.unsave(post.id));
+      toast.success(next ? 'Saved' : 'Removed from saved');
+      queryClient.invalidateQueries({ queryKey: ['saved-posts'] });
+    } catch (error) {
+      setSaved(!next);
+      toast.error(errorMessage(error) || 'Could not update your saved posts');
+    }
+  };
+
+  const postUrl = () => `${window.location.origin}/posts/${post.id}`;
+
+  const copyLink = async () => {
+    setShowMenu(false);
+    try {
+      await navigator.clipboard.writeText(postUrl());
+      toast.success('Link copied');
+    } catch {
+      toast.error('Could not copy the link');
+    }
+  };
+
   // Same behaviour as the feed's share: the system sheet on mobile, a copied
   // link everywhere else. The link is the public post page, so it opens for
   // whoever it is sent to.
   const handleShare = async () => {
-    const url = `${window.location.origin}/posts/${post.id}`;
+    const url = postUrl();
 
     if (navigator.share) {
       try {
@@ -75,12 +129,7 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
       }
     }
 
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success('Link copied');
-    } catch {
-      toast.error('Could not copy the link');
-    }
+    await copyLink();
   };
 
   return (
@@ -105,32 +154,77 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
             </Link>
             <p className="text-xs text-slate-500 line-clamp-1">{post.author?.headline || 'Member'}</p>
             <p className="text-xs text-slate-400 mt-0.5">
-              {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })} • 
+              {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })} •
               <span className="ml-1">Public</span>
             </p>
           </div>
         </div>
-        {isOwner && (
-          <div className="relative" ref={menuRef}>
-            <button 
-              onClick={() => setShowMenu(!showMenu)}
-              className="text-slate-400 hover:text-slate-600 p-1"
+        {/* The menu used to exist only for the author, so nobody else could
+            save, copy a link to, or report a post from here. */}
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setShowMenu(!showMenu)}
+            className="text-slate-400 hover:text-slate-600 p-1"
+            aria-haspopup="menu"
+            aria-expanded={showMenu}
+            aria-label="Post options"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          {showMenu && (
+            <div
+              role="menu"
+              className="absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-10 min-w-[160px]"
             >
-              <MoreHorizontal size={20} />
-            </button>
-            {showMenu && (
-              <div className="absolute right-0 top-8 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-10 min-w-[120px]">
+              {user && (
                 <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleSave}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <Bookmark size={16} className={saved ? 'fill-current' : ''} />
+                  {saved ? 'Unsave' : 'Save'}
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={copyLink}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Link2 size={16} />
+                Copy link
+              </button>
+              {user && !isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowMenu(false);
+                    setReportOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <Flag size={16} />
+                  Report
+                </button>
+              )}
+              {isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
                   onClick={handleDelete}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
                 >
                   <Trash2 size={16} />
                   Delete
                 </button>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -164,8 +258,8 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
               'grid-cols-2'
             }`}>
               {post.mediaUrls.slice(0, 4).map((url: string, idx: number) => (
-                <div 
-                  key={idx} 
+                <div
+                  key={idx}
                   className={`relative ${
                     post.mediaUrls.length === 3 && idx === 0 ? 'row-span-2' : ''
                   }`}
@@ -212,31 +306,42 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
       </div>
 
       {/* Actions */}
-      <div className="px-4 py-1 flex items-center justify-between">
-        <button 
+      <div className="px-2 py-1 flex items-center justify-between">
+        <button
             onClick={handleLike}
-            className={`flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium ${
-                post.isLiked 
-                ? 'text-blue-600 hover:bg-blue-50' 
+            className={`flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium ${
+                post.isLiked
+                ? 'text-blue-600 hover:bg-blue-50'
                 : 'text-slate-500 hover:bg-slate-100'
             }`}
         >
           <Heart size={20} className={post.isLiked ? 'fill-blue-600' : ''} />
           <span>Like</span>
         </button>
-        <button 
+        <button
           onClick={() => setShowComments(!showComments)}
-          className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
+          className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
         >
           <MessageCircle size={20} />
           <span>Comment</span>
         </button>
         <button
           onClick={handleShare}
-          className="flex items-center gap-2 px-4 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
+          className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
         >
           <Share2 size={20} />
           <span>Share</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          aria-pressed={saved}
+          className={`flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium ${
+            saved ? 'text-blue-600 hover:bg-blue-50' : 'text-slate-500 hover:bg-slate-100'
+          }`}
+        >
+          <Bookmark size={20} className={saved ? 'fill-blue-600' : ''} />
+          <span>{saved ? 'Saved' : 'Save'}</span>
         </button>
       </div>
 
@@ -244,6 +349,14 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
       {showComments && (
         <CommentSection postId={post.id} />
       )}
+
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetType="post"
+        targetId={post.id}
+        targetLabel={`${authorName}'s post`}
+      />
     </div>
   );
 }

@@ -157,7 +157,7 @@ function SearchContent() {
         subtitle: result.metadata?.author?.displayName ? `Video • ${result.metadata.author.displayName}` : 'Video',
         description: result.content,
         image: result.metadata?.thumbnailUrl || undefined,
-        url: `/dashboard/community?video=${result.id}`,
+        url: `/explore?video=${result.id}`,
         metadata: {
           ...(result.metadata?.viewCount && { views: `${result.metadata.viewCount} views` }),
           ...(result.metadata?.duration && { duration: `${result.metadata.duration} sec` }),
@@ -188,7 +188,7 @@ function SearchContent() {
         title: result.title || 'Community post',
         subtitle: result.metadata?.author?.displayName ? `Posted by ${result.metadata.author.displayName}` : 'Community post',
         description: result.content,
-        url: `/dashboard/community?post=${result.id}`,
+        url: `/posts/${result.id}`,
         metadata: {
           ...(result.metadata?.likeCount && { likes: `${result.metadata.likeCount} likes` }),
           ...(result.metadata?.commentCount && { comments: `${result.metadata.commentCount} comments` }),
