@@ -363,6 +363,7 @@ router.post(
     body('isPublic').optional().isBoolean(),
     body('poll').optional().isObject(),
     body('scheduledFor').optional({ values: 'null' }).isString(),
+    body('isSensitive').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -414,6 +415,7 @@ router.post(
           // A scheduled post waits hidden until the publisher flips it visible.
           ...(scheduledFor ? { scheduledFor, isHidden: true } : {}),
           mentionedUserIds,
+          isSensitive: req.body.isSensitive === true,
         },
         include: {
           author: {
@@ -579,6 +581,7 @@ router.patch(
   [
     body('content').optional().isString().isLength({ max: CONTENT_LIMITS.post }),
     body('isPublic').optional().isBoolean(),
+    body('isSensitive').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -602,7 +605,7 @@ router.patch(
       throw new ApiError(403, 'Not authorized to edit this post');
     }
 
-    const data: { content?: string; isPublic?: boolean } = {};
+    const data: { content?: string; isPublic?: boolean; isSensitive?: boolean } = {};
     if (req.body.content !== undefined) {
       data.content = normalizeUserText(req.body.content, {
         field: 'content',
@@ -611,6 +614,9 @@ router.patch(
     }
     if (req.body.isPublic !== undefined) {
       data.isPublic = req.body.isPublic;
+    }
+    if (req.body.isSensitive !== undefined) {
+      data.isSensitive = req.body.isSensitive === true;
     }
 
     if (Object.keys(data).length === 0) {

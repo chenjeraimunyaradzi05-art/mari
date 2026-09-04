@@ -57,14 +57,32 @@ function mergeHashtags(explicit: string[], implied: string[]): string[] {
 // the reels player only knew what it had persisted in the browser, so a like
 // made on a phone showed as un-liked on a laptop and pressing the heart there
 // was answered with "Already liked this video".
+// A duet names the reel it answers: the player shows "Duet with @name" and
+// links to it. One query for the page, like sounds.
+async function attachDuets<T extends { id: string; duetOfVideoId?: string | null }>(videos: T[]) {
+  const ids = Array.from(
+    new Set(videos.map((v) => v.duetOfVideoId).filter((id): id is string => typeof id === 'string' && id.length > 0))
+  );
+  if (ids.length === 0) return videos.map((video) => ({ ...video, duetOf: null as null }));
+  const originals = await prisma.video.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, title: true, thumbnailUrl: true, author: { select: { id: true, displayName: true } } },
+  });
+  const byId = new Map(originals.map((o) => [o.id, o]));
+  return videos.map((video) => ({
+    ...video,
+    duetOf: video.duetOfVideoId ? byId.get(video.duetOfVideoId) ?? null : null,
+  }));
+}
+
 // Every list also carries the reel's sound (`sound`), looked up in one query,
 // so the player can show and link it.
-async function withViewerState<T extends { id: string; audioTrackId?: string | null }>(
+async function withViewerState<T extends { id: string; audioTrackId?: string | null; duetOfVideoId?: string | null }>(
   videos: T[],
   userId?: string
 ) {
   if (!userId || videos.length === 0) {
-    return attachSounds(videos.map((video) => ({ ...video, isLiked: false, isSaved: false })));
+    return attachDuets(await attachSounds(videos.map((video) => ({ ...video, isLiked: false, isSaved: false }))));
   }
 
   const ids = videos.map((video) => video.id);
@@ -81,12 +99,14 @@ async function withViewerState<T extends { id: string; audioTrackId?: string | n
   const liked = new Set(likes.map((like) => like.videoId));
   const saved = new Set(saves.map((save) => save.videoId));
 
-  return attachSounds(
-    videos.map((video) => ({
-      ...video,
-      isLiked: liked.has(video.id),
-      isSaved: saved.has(video.id),
-    }))
+  return attachDuets(
+    await attachSounds(
+      videos.map((video) => ({
+        ...video,
+        isLiked: liked.has(video.id),
+        isSaved: saved.has(video.id),
+      }))
+    )
   );
 }
 
@@ -396,6 +416,8 @@ router.post(
     body('mentionedUserIds').optional().isArray(),
     body('location').optional().isString(),
     body('audioTrackId').optional({ values: 'null' }).isString().isLength({ max: 64 }),
+    body('duetOfVideoId').optional({ values: 'null' }).isString().isLength({ max: 64 }),
+    body('captionsUrl').optional({ values: 'null' }).isString().isLength({ max: 2048 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -420,6 +442,23 @@ router.post(
         await assertSoundExists(audioTrackId);
       }
 
+      // A duet answers a published reel; the pipeline composes the two side
+      // by side. The original has to be one anyone could watch.
+      const duetOfVideoId: string | undefined = req.body.duetOfVideoId || undefined;
+      if (duetOfVideoId) {
+        const original = await prisma.video.findUnique({
+          where: { id: duetOfVideoId },
+          select: { id: true, status: true, isHidden: true },
+        });
+        if (!original || original.isHidden || original.status !== 'PUBLISHED') {
+          throw new ApiError(400, 'That reel cannot be duetted');
+        }
+      }
+
+      const captionsUrl = req.body.captionsUrl
+        ? normalizeSafeUrl(req.body.captionsUrl, { field: 'captionsUrl', allowRelativeUploads: true })
+        : undefined;
+
       const videoUrl = normalizeSafeUrl(req.body.videoUrl, {
         field: 'videoUrl',
         allowRelativeUploads: true,
@@ -440,6 +479,9 @@ router.post(
           duration: req.body.duration,
           aspectRatio: req.body.aspectRatio,
           audioTrackId,
+          duetOfVideoId,
+          captionsUrl,
+          hasAutoCaption: false,
           hashtags: mergeHashtags(
             normalizeStringList(req.body.hashtags, 'hashtags', 20, 64),
             hashtagsIn(title, description)
@@ -455,6 +497,9 @@ router.post(
 
       if (audioTrackId) {
         await recordSoundUse(audioTrackId);
+      }
+      if (duetOfVideoId) {
+        await prisma.video.update({ where: { id: duetOfVideoId }, data: { duetCount: { increment: 1 } } });
       }
       enqueueVideoProcessing(created.id, req.user!.id);
 

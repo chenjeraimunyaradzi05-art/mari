@@ -59,6 +59,7 @@ import trustRoutes from './routes/trust.routes';
 import regionRoutes from './routes/region.routes';
 import videoRoutes from './routes/video.routes';
 import soundRoutes from './routes/sound.routes';
+import topicRoutes from './routes/topic.routes';
 import livestreamRoutes from './routes/livestream.routes';
 import channelRoutes from './routes/channel.routes';
 import { startMessageExpirySweeper } from './services/message-expiry.service';
@@ -593,6 +594,7 @@ app.use('/api/groups', groupChatRoutes); // Group chat specific routes
 app.use('/api/gdpr', gdprRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/sounds', soundRoutes);
+app.use('/api/topics', topicRoutes);
 app.use('/api/livestream', livestreamRoutes);
 
 // Health routes (comprehensive health checks)

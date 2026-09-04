@@ -196,10 +196,14 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
       });
     }
 
+    // ?q= searches the thread's text instead of paging it.
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+
     const messages = await prisma.message.findMany({
       where: {
         conversationId: id,
         ...(before ? { createdAt: { lt: before } } : {}),
+        ...(q ? { content: { contains: q, mode: 'insensitive' } } : {}),
         ...unexpiredMessageWhere(),
       },
       orderBy: { createdAt: 'desc' },

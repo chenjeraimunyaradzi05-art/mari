@@ -38,6 +38,8 @@ export interface FeedPost {
   // A poll's options and close time, decorated with votes by the route.
   poll?: unknown;
   isPinned?: boolean;
+  // Blurred until the reader chooses to see it.
+  isSensitive?: boolean;
   // Why this post is in front of the viewer, in plain words. Every ranked
   // post has at least one; the client shows them behind "Why this?". The
   // chronological video feed carries none: it is not ranked.
@@ -62,6 +64,15 @@ interface ReasonContext {
   userPersona?: string;
   source?: FeedSource;
   now?: number;
+  /** Topics the viewer follows (lowercase, no #). */
+  followedHashtags?: string[];
+}
+
+/** The first followed topic a post carries, if any. */
+function followedTopicIn(post: any, followedHashtags: string[] | undefined): string | null {
+  if (!followedHashtags || followedHashtags.length === 0) return null;
+  const text = String(post.content ?? '').toLowerCase();
+  return followedHashtags.find((tag) => text.includes(`#${tag}`)) ?? null;
 }
 
 /**
@@ -81,6 +92,9 @@ export function reasonsFor(post: any, context: ReasonContext): string[] {
     reasons.push(`You follow ${authorName}`);
   }
 
+  const topic = followedTopicIn(post, context.followedHashtags);
+  if (topic) reasons.push(`You follow #${topic}`);
+
   if (context.source === 'trending') reasons.push('Trending in the community');
   else if (context.source === 'discovery') reasons.push('Popular with members like you');
 
@@ -95,20 +109,32 @@ export function reasonsFor(post: any, context: ReasonContext): string[] {
   return reasons.slice(0, 2);
 }
 
-/** Feed preferences that keep things out: "see fewer from" creators and muted topics. */
-async function loadFeedExclusions(userId?: string): Promise<{ creators: Set<string>; hashtags: string[] }> {
-  if (!userId) return { creators: new Set(), hashtags: [] };
+interface FeedPreferences {
+  creators: Set<string>;
+  hashtags: string[];
+  followedHashtags: string[];
+}
+
+/**
+ * Feed preferences: "see fewer from" creators and muted topics keep things
+ * out; followed topics are boosted and named in the reasons.
+ */
+async function loadFeedExclusions(userId?: string): Promise<FeedPreferences> {
+  if (!userId) return { creators: new Set(), hashtags: [], followedHashtags: [] };
   try {
     const prefs = await prisma.userFeedPreferences.findUnique({
       where: { userId },
-      select: { blockedCreators: true, blockedHashtags: true },
+      select: { blockedCreators: true, blockedHashtags: true, followedHashtags: true },
     });
+    const clean = (tags: string[] | undefined) =>
+      (tags ?? []).map((tag) => tag.replace(/^#+/, '').toLowerCase()).filter(Boolean);
     return {
       creators: new Set(prefs?.blockedCreators ?? []),
-      hashtags: (prefs?.blockedHashtags ?? []).map((tag) => tag.replace(/^#+/, '').toLowerCase()).filter(Boolean),
+      hashtags: clean(prefs?.blockedHashtags),
+      followedHashtags: clean(prefs?.followedHashtags),
     };
   } catch {
-    return { creators: new Set(), hashtags: [] };
+    return { creators: new Set(), hashtags: [], followedHashtags: [] };
   }
 }
 
@@ -166,6 +192,7 @@ const WEIGHTS = {
   FOLLOWING: 2.0,
   SAME_PERSONA: 1.3,
   SAME_INDUSTRY: 1.2,
+  FOLLOWED_TOPIC: 1.4,
 
   // Freshness bonus for new posts (< 1 hour)
   FRESHNESS_BONUS: 1.5,
@@ -278,6 +305,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
         userId,
         followingIds,
         userPersona: userContext?.persona,
+        followedHashtags: exclusions.followedHashtags,
       });
       return { ...post, engagementScore: score.engagement, decayedScore: score.final, __source: 'network' as const };
     }).sort((a, b) => b.decayedScore - a.decayedScore);
@@ -409,6 +437,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
           userId,
           followingIds,
           userPersona: userContext?.persona,
+          followedHashtags: exclusions.followedHashtags,
         });
 
         return {
@@ -472,11 +501,13 @@ export async function generateFeed(options: FeedOptions): Promise<{
     decayedScore: post.decayedScore,
     poll: post.poll ?? null,
     isPinned: Boolean(post.isPinned),
+    isSensitive: Boolean(post.isSensitive),
     reasons: reasonsFor(post, {
       userId,
       followingIds,
       userPersona: userContext?.persona,
       source: post.__source ?? (algorithm === 'chronological' ? 'recent' : undefined),
+      followedHashtags: exclusions.followedHashtags,
     }),
   }));
 
@@ -495,6 +526,7 @@ interface ScoreContext {
   userId?: string;
   followingIds: string[];
   userPersona?: string;
+  followedHashtags?: string[];
 }
 
 function calculatePostScore(
@@ -521,6 +553,11 @@ function calculatePostScore(
   // Same persona bonus
   if (context.userPersona && post.author.persona === context.userPersona) {
     engagement *= WEIGHTS.SAME_PERSONA;
+  }
+
+  // A topic the viewer follows
+  if (followedTopicIn(post, context.followedHashtags)) {
+    engagement *= WEIGHTS.FOLLOWED_TOPIC;
   }
 
   // Creator tier bonus
@@ -612,6 +649,7 @@ export async function getTrendingPosts(
         decayedScore: post.decayedScore,
         poll: post.poll ?? null,
         isPinned: Boolean(post.isPinned),
+        isSensitive: Boolean(post.isSensitive),
         reasons: ['Trending in the community'],
       }));
     },
@@ -816,6 +854,7 @@ export async function getForYouFeed(
     decayedScore: post.decayedScore,
     poll: post.poll ?? null,
     isPinned: Boolean(post.isPinned),
+    isSensitive: Boolean(post.isSensitive),
     reasons: reasonsFor(post, { userId, followingIds, userPersona: user.persona ?? undefined, source: 'discovery' }),
   }));
 

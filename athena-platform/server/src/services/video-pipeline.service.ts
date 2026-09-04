@@ -150,6 +150,26 @@ export function isWebReady(probe: Probe): boolean {
 // frame is turned; -2 keeps the other dimension proportional and even.
 const RENDITION_SCALE = "scale='if(gt(iw,ih),min(iw,1920),min(iw,1080))':-2";
 
+/**
+ * The ffmpeg filter for a duet: the reply on the left, the original on the
+ * right, each fitted into a 540x960 portrait half, and the two soundtracks
+ * mixed when both exist. Input 0 is the reply, input 1 the original.
+ */
+export function duetFilter(replyHasAudio: boolean, originalHasAudio: boolean): { filter: string; maps: string[] } {
+  const fit = 'scale=540:960:force_original_aspect_ratio=increase,crop=540:960,setsar=1';
+  let filter = `[0:v]${fit}[l];[1:v]${fit}[r];[l][r]hstack=inputs=2[v]`;
+  const maps = ['-map', '[v]'];
+  if (replyHasAudio && originalHasAudio) {
+    filter += ';[0:a][1:a]amix=inputs=2:duration=shortest:dropout_transition=0[a]';
+    maps.push('-map', '[a]');
+  } else if (replyHasAudio) {
+    maps.push('-map', '0:a');
+  } else if (originalHasAudio) {
+    maps.push('-map', '1:a');
+  }
+  return { filter, maps };
+}
+
 async function downloadToTemp(url: string, dir: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not fetch the upload (${response.status})`);
@@ -207,6 +227,7 @@ export async function processVideo(videoId: string): Promise<void> {
       thumbnailUrl: true,
       duration: true,
       audioTrackId: true,
+      duetOfVideoId: true,
       author: { select: { displayName: true, firstName: true, lastName: true } },
     },
   });
@@ -228,7 +249,57 @@ export async function processVideo(videoId: string): Promise<void> {
     await prisma.video.update({ where: { id: videoId }, data: { status: 'PROCESSING', processingError: null } });
     await setProgress(videoId, video.authorId, 5, 'fetching');
 
-    const inputPath = localPathForUrl(inputUrl) ?? (await downloadToTemp(inputUrl, workDir));
+    let inputPath = localPathForUrl(inputUrl) ?? (await downloadToTemp(inputUrl, workDir));
+    let composedDuet = false;
+
+    // 0. duet: compose the reply beside the original before anything else,
+    //    so the poster, the rendition and the probe all describe the result.
+    if (video.duetOfVideoId) {
+      const original = await prisma.video.findUnique({
+        where: { id: video.duetOfVideoId },
+        select: { videoUrl: true },
+      });
+      if (original?.videoUrl) {
+        const originalDir = fs.mkdtempSync(path.join(workDir, 'original-'));
+        const originalPath = localPathForUrl(original.videoUrl) ?? (await downloadToTemp(original.videoUrl, originalDir));
+        const [replyInfo, originalInfo] = await Promise.all([probe(inputPath), probe(originalPath)]);
+        const { filter, maps } = duetFilter(replyInfo.hasAudio, originalInfo.hasAudio);
+        const duetPath = path.join(workDir, 'duet.mp4');
+        const duet = await runFfmpeg([
+          '-hide_banner',
+          '-y',
+          '-i',
+          inputPath,
+          '-i',
+          originalPath,
+          '-filter_complex',
+          filter,
+          ...maps,
+          '-c:v',
+          'libx264',
+          '-preset',
+          'veryfast',
+          '-crf',
+          '23',
+          '-pix_fmt',
+          'yuv420p',
+          ...(replyInfo.hasAudio || originalInfo.hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : []),
+          '-shortest',
+          '-movflags',
+          '+faststart',
+          duetPath,
+        ]);
+        if (duet.code === 0 && fs.existsSync(duetPath)) {
+          inputPath = duetPath;
+          composedDuet = true;
+          outputs.sourceUrl = inputUrl;
+        } else {
+          failure = `Duet could not be composed; the reply was published on its own (${duet.stderr.trim().split('\n').pop() ?? 'no detail'})`;
+          logger.warn('Duet compose failed', { videoId, tail: duet.stderr.slice(-300) });
+        }
+      }
+    }
+    await setProgress(videoId, video.authorId, 12, composedDuet ? 'duet' : 'fetching');
 
     // 1. probe
     const info = await probe(inputPath);
@@ -256,8 +327,10 @@ export async function processVideo(videoId: string): Promise<void> {
     }
     await setProgress(videoId, video.authorId, 45, 'poster');
 
-    // 3. web rendition
-    if (!isWebReady(info)) {
+    // 3. web rendition. A composed duet already is one; it just needs storing.
+    if (composedDuet) {
+      outputs.videoUrl = await storeFile(`videos/${video.authorId}/${videoId}-web.mp4`, inputPath, 'video/mp4');
+    } else if (!isWebReady(info)) {
       const renditionPath = path.join(workDir, 'web.mp4');
       const rendition = await runFfmpeg([
         '-hide_banner',
@@ -289,8 +362,8 @@ export async function processVideo(videoId: string): Promise<void> {
     }
     await setProgress(videoId, video.authorId, 85, 'rendition');
 
-    // 4. original sound
-    if (info.hasAudio && !video.audioTrackId) {
+    // 4. original sound. A duet's mix is not a sound of its own.
+    if (info.hasAudio && !video.audioTrackId && !composedDuet) {
       const audioPath = path.join(workDir, 'sound.m4a');
       const audio = await runFfmpeg(
         ['-hide_banner', '-y', '-i', inputPath, '-vn', '-c:a', 'aac', '-b:a', '128k', audioPath],

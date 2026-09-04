@@ -71,6 +71,14 @@ const FILE_CONFIGS = {
     resize: null,
     visibility: 'public' as const,
   },
+  // Captions for a reel, as WebVTT. Public because the player fetches them.
+  captions: {
+    maxSize: 1024 * 1024, // 1MB
+    allowedTypes: ['text/vtt', 'text/plain'],
+    folder: 'captions',
+    resize: null,
+    visibility: 'public' as const,
+  },
   // Sounds a reel can be set to. The pipeline writes extracted original
   // sounds into the same folder.
   audio: {
@@ -121,6 +129,8 @@ const CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
   'audio/wav': '.wav',
   'audio/ogg': '.ogg',
   'audio/webm': '.weba',
+  'text/vtt': '.vtt',
+  'text/plain': '.vtt',
   'application/pdf': '.pdf',
   'application/msword': '.doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',

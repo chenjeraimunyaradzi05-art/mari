@@ -88,7 +88,7 @@ describe('Video browse routes are not swallowed by /:id', () => {
     const res = await request(app).get('/api/video/bookmarked').set(as(VIEWER)).expect(200);
 
     expect(res.body.data).toEqual([
-      { id: 'v1', title: 'Saved one', author: { id: AUTHOR }, isLiked: false, isSaved: true, sound: null },
+      { id: 'v1', title: 'Saved one', author: { id: AUTHOR }, isLiked: false, isSaved: true, sound: null, duetOf: null },
     ]);
     expect(prisma.video.findUnique).not.toHaveBeenCalled();
   });
