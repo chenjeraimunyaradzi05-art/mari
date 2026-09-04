@@ -686,6 +686,7 @@ model User {
   followRequestsReceived FollowRequest[] @relation("FollowRequestsReceived")
   closeFriends           CloseFriend[]   @relation("CloseFriendsOwner")
   closeFriendOf          CloseFriend[]   @relation("CloseFriendsMember")
+  postDrafts             PostDraft[]
 
   // Gamification
   xp                   Int               @default(0)
@@ -1494,6 +1495,25 @@ model PostSave {
   @@unique([postId, userId])
   @@index([userId])
   @@index([collectionId])
+}
+
+// A post being written, kept across devices until it is published or thrown
+// away. The composer saves it as the member types.
+model PostDraft {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String   @default("TEXT") // TEXT, POLL, WIN
+  content   String
+  mediaUrls Json?
+  mediaAlt  Json?
+  poll      Json?
+  isPublic  Boolean  @default(true)
+  isSensitive Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
 }
 
 // A named folder for saved posts, private to its owner.
