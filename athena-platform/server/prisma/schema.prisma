@@ -1399,6 +1399,9 @@ model Post {
   scheduledFor DateTime?
   // Members named with @[Name](id) in the content, for "posts mentioning me".
   mentionedUserIds String[] @default([])
+  // Blurred in the feed until the reader chooses to see it: for posts about
+  // harassment, loss, medical detail and the like, marked by the author.
+  isSensitive Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1711,6 +1714,11 @@ model Video {
   processingError    String?
   processedAt        DateTime?
 
+  // A duet is a reel recorded in response to another and composed beside it
+  // by the pipeline. The original counts how many were made with it.
+  duetOfVideoId String?
+  duetCount     Int     @default(0)
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   publishedAt DateTime?
@@ -1727,6 +1735,7 @@ model Video {
   @@index([createdAt])
   @@index([engagementScore])
   @@index([audioTrackId])
+  @@index([duetOfVideoId])
 }
 
 model VideoLike {
