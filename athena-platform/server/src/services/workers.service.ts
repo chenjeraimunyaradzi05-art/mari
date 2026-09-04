@@ -25,6 +25,7 @@ import { indexDocument, deleteDocument, isOpenSearchEnabled } from '../utils/ope
 import { mlService } from './ml.service';
 import { sendEmail } from '../utils/email';
 import { resolveWorkerRedisUrl } from '../utils/worker-config';
+import { processVideo } from './video-pipeline.service';
 
 const isProductionRuntime =
   process.env.NODE_ENV === 'production' ||
@@ -135,31 +136,14 @@ export const videoWorker = new Worker<VideoProcessingJob>(
         return { success: true, outputs: result.outputs };
       }
 
-      // Update progress
+      // No external processor: run the ffmpeg pipeline on this worker. It
+      // publishes the reel itself and never throws.
       await job.updateProgress(10);
-
-      // In production, this would call FFmpeg or a video processing service
-      // For now, simulate processing
-      await simulateProcessing(2000);
-      await job.updateProgress(50);
-
-      // Generate outputs
-      const outputs: Record<string, string> = {};
-
-      if (options.formats?.includes('720p')) {
-        outputs.mp4_720p = `https://cdn.athena.com/videos/${videoId}/720p.mp4`;
-      }
-      if (options.formats?.includes('hls')) {
-        outputs.hls = `https://cdn.athena.com/videos/${videoId}/master.m3u8`;
-      }
-      if (options.generateThumbnail) {
-        outputs.thumbnail = `https://cdn.athena.com/videos/${videoId}/thumb.jpg`;
-      }
-
+      await processVideo(videoId);
       await job.updateProgress(100);
-      logger.info('Video processing completed', { jobId: job.id, videoId, outputs });
+      logger.info('Video processing completed', { jobId: job.id, videoId });
 
-      return { success: true, outputs };
+      return { success: true };
     } catch (error: any) {
       logger.error('Video processing failed', { jobId: job.id, videoId, error: error.message });
       throw error;

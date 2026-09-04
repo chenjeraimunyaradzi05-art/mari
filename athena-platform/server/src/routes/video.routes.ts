@@ -11,6 +11,8 @@ import {
   normalizeUserText,
 } from '../utils/contentSafety';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
+import { assertSoundExists, attachSounds, recordSoundUse } from '../services/sound.service';
+import { enqueueVideoProcessing } from '../services/video-pipeline.service';
 
 const router = Router();
 
@@ -55,12 +57,14 @@ function mergeHashtags(explicit: string[], implied: string[]): string[] {
 // the reels player only knew what it had persisted in the browser, so a like
 // made on a phone showed as un-liked on a laptop and pressing the heart there
 // was answered with "Already liked this video".
-async function withViewerState<T extends { id: string }>(
+// Every list also carries the reel's sound (`sound`), looked up in one query,
+// so the player can show and link it.
+async function withViewerState<T extends { id: string; audioTrackId?: string | null }>(
   videos: T[],
   userId?: string
-): Promise<Array<T & { isLiked: boolean; isSaved: boolean }>> {
+) {
   if (!userId || videos.length === 0) {
-    return videos.map((video) => ({ ...video, isLiked: false, isSaved: false }));
+    return attachSounds(videos.map((video) => ({ ...video, isLiked: false, isSaved: false })));
   }
 
   const ids = videos.map((video) => video.id);
@@ -77,11 +81,13 @@ async function withViewerState<T extends { id: string }>(
   const liked = new Set(likes.map((like) => like.videoId));
   const saved = new Set(saves.map((save) => save.videoId));
 
-  return videos.map((video) => ({
-    ...video,
-    isLiked: liked.has(video.id),
-    isSaved: saved.has(video.id),
-  }));
+  return attachSounds(
+    videos.map((video) => ({
+      ...video,
+      isLiked: liked.has(video.id),
+      isSaved: saved.has(video.id),
+    }))
+  );
 }
 
 const PUBLIC_VIDEO_WHERE = { status: 'PUBLISHED' as const, isHidden: false };
@@ -108,6 +114,8 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const feed = typeof req.query.feed === 'string' ? req.query.feed : undefined;
     // The homepage topic circles open a slice of the feed by tag.
     const hashtag = normalizeHashtag(req.query.hashtag);
+    // A sound's page opens the feed sliced to every reel that uses it.
+    const sound = typeof req.query.sound === 'string' ? req.query.sound.trim() : '';
 
     const where: any = {
       status: 'PUBLISHED',
@@ -120,6 +128,10 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
     if (hashtag) {
       where.hashtags = { has: hashtag };
+    }
+
+    if (sound) {
+      where.audioTrackId = sound;
     }
 
     if (feed === 'following') {
@@ -328,8 +340,47 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 });
 
 // ===========================================
+// PROCESSING STATUS
+// ===========================================
+// The creator studio polls this after publishing (and listens for
+// video:progress / video:processed on the socket) until the reel is live.
+router.get('/:id/processing', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const video = await prisma.video.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        authorId: true,
+        status: true,
+        processingProgress: true,
+        processingError: true,
+        processedAt: true,
+        thumbnailUrl: true,
+        videoUrl: true,
+        duration: true,
+        width: true,
+        height: true,
+        aspectRatio: true,
+        audioTrackId: true,
+      },
+    });
+    if (!video || (video.authorId !== req.user!.id && req.user!.role !== 'ADMIN')) {
+      throw new ApiError(404, 'Video not found');
+    }
+    const { authorId, ...status } = video;
+    res.json({ success: true, data: status });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // CREATE VIDEO
 // ===========================================
+// The reel is created PROCESSING and handed to the pipeline, which probes it,
+// makes a poster frame and a web rendition, registers its original sound and
+// publishes it. See video-pipeline.service for what happens when ffmpeg is
+// not available: the reel is still published, as uploaded.
 router.post(
   '/',
   authenticate,
@@ -344,6 +395,7 @@ router.post(
     body('hashtags').optional().isArray(),
     body('mentionedUserIds').optional().isArray(),
     body('location').optional().isString(),
+    body('audioTrackId').optional({ values: 'null' }).isString().isLength({ max: 64 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -363,22 +415,31 @@ router.post(
         allowEmpty: true,
       });
 
+      const audioTrackId: string | undefined = req.body.audioTrackId || undefined;
+      if (audioTrackId) {
+        await assertSoundExists(audioTrackId);
+      }
+
+      const videoUrl = normalizeSafeUrl(req.body.videoUrl, {
+        field: 'videoUrl',
+        allowRelativeUploads: true,
+      });
+
       const created = await prisma.video.create({
         data: {
           authorId: req.user!.id,
           title,
           description,
           type: req.body.type,
-          status: 'PUBLISHED',
-          videoUrl: normalizeSafeUrl(req.body.videoUrl, {
-            field: 'videoUrl',
-            allowRelativeUploads: true,
-          }),
+          status: 'PROCESSING',
+          videoUrl,
+          sourceUrl: videoUrl,
           thumbnailUrl: req.body.thumbnailUrl
             ? normalizeSafeUrl(req.body.thumbnailUrl, { field: 'thumbnailUrl', allowRelativeUploads: true })
             : undefined,
           duration: req.body.duration,
           aspectRatio: req.body.aspectRatio,
+          audioTrackId,
           hashtags: mergeHashtags(
             normalizeStringList(req.body.hashtags, 'hashtags', 20, 64),
             hashtagsIn(title, description)
@@ -389,9 +450,13 @@ router.post(
             maxLength: 120,
             allowEmpty: true,
           }),
-          publishedAt: new Date(),
         },
       });
+
+      if (audioTrackId) {
+        await recordSoundUse(audioTrackId);
+      }
+      enqueueVideoProcessing(created.id, req.user!.id);
 
       res.status(201).json({ success: true, data: created });
     } catch (error) {

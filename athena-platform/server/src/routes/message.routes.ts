@@ -18,6 +18,13 @@ import {
 } from '../services/direct-message.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { isBlockedRelationship } from '../utils/safety-store';
+import {
+  conversationTtl,
+  expiryFor,
+  isAllowedTtl,
+  setDisappearingTtl,
+  unexpiredMessageWhere,
+} from '../services/message-expiry.service';
 
 const router = Router();
 
@@ -98,6 +105,9 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
               },
             },
             messages: {
+              // A message past its expiry is gone as far as the reader is
+              // concerned, even if the sweep has not deleted the row yet.
+              where: unexpiredMessageWhere(),
               orderBy: { createdAt: 'desc' },
               take: 1,
             },
@@ -114,6 +124,7 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
 
       return {
         id: conv.id,
+        disappearingTtlSeconds: conv.disappearingTtlSeconds ?? null,
         participant: otherParticipant || {
           id: 'deleted',
           firstName: 'Deleted',
@@ -188,6 +199,7 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
       where: {
         conversationId: id,
         ...(before ? { createdAt: { lt: before } } : {}),
+        ...unexpiredMessageWhere(),
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -316,6 +328,10 @@ router.post(
         await assertContentAllowed(content, { kind: 'message', userId });
       }
 
+      // Disappearing messages: stamped at send time from the thread's setting,
+      // so changing the setting later never touches what was already sent.
+      const expiresAt = expiryFor(await conversationTtl(id));
+
       const [message] = await prisma.$transaction([
         prisma.message.create({
           data: {
@@ -325,6 +341,7 @@ router.post(
             content,
             type: messageTypeFor(attachments),
             replyToId,
+            expiresAt,
             ...(attachments ? { metadata: { attachments } } : {}),
           },
           include: {
@@ -361,6 +378,34 @@ router.post(
         success: true,
         data: message,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// DISAPPEARING MESSAGES
+// ===========================================
+// Either participant sets the thread's timer: null turns it off, otherwise one
+// of the allowed TTLs. A system message records the change for both sides.
+router.patch(
+  '/conversations/:id/settings',
+  authenticate,
+  [body('disappearingTtlSeconds').custom((value) => value === null || Number.isInteger(value))],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'disappearingTtlSeconds must be null or a number of seconds');
+      }
+      const ttl = req.body.disappearingTtlSeconds;
+      if (!isAllowedTtl(ttl)) {
+        throw new ApiError(400, 'Choose off, 1 hour, 24 hours, 7 days or 90 days');
+      }
+
+      const result = await setDisappearingTtl(req.params.id, req.user!.id, ttl);
+      res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }

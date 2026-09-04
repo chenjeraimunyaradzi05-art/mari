@@ -11,6 +11,8 @@ import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service'
 import { getLocaleForUser } from '../utils/region';
 import { CONTENT_LIMITS, normalizeUserText } from '../utils/contentSafety';
 import { findDirectConversation, getOrCreateDirectConversation } from './direct-message.service';
+import { conversationTtl, expiryFor } from './message-expiry.service';
+import { LIVE_CHAT_MAX_LENGTH, postChatMessage, recordViewerCount } from './livestream.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -124,6 +126,8 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         });
 
         const conversation = await getOrCreateDirectConversation(userId, receiverId);
+        // Disappearing messages: stamped at send time from the thread's setting.
+        const expiresAt = expiryFor(await conversationTtl(conversation.id));
 
         const [message] = await prisma.$transaction([
           prisma.message.create({
@@ -133,6 +137,7 @@ export function initializeSocketHandlers(io: SocketIOServer) {
               receiverId,
               content,
               type: 'TEXT',
+              expiresAt,
             },
             include: {
               sender: {
@@ -291,6 +296,72 @@ export function initializeSocketHandlers(io: SocketIOServer) {
     });
 
     // ==========================================
+    // LIVE STREAM HANDLERS
+    // ==========================================
+    // A viewer joins the stream's room for chat, gifts and the viewer count;
+    // the count is simply the room's size, so leaving (or dropping) is
+    // reflected the moment it happens. The index room carries "someone went
+    // live / ended" for the list page.
+
+    const joinedLiveRooms = new Set<string>();
+
+    const broadcastViewerCount = (streamId: string) => {
+      const count = liveRoomSize(streamId);
+      io.to(getLiveRoomId(streamId)).emit('live:viewers', { streamId, count });
+      void recordViewerCount(streamId, count);
+    };
+
+    socket.on('live:join', async (streamId: string) => {
+      try {
+        if (typeof streamId !== 'string' || !streamId) return;
+        const stream = await prisma.liveStream.findUnique({
+          where: { id: streamId },
+          select: { id: true, status: true, hostId: true },
+        });
+        if (!stream) {
+          socket.emit('live:error', { streamId, message: 'Stream not found' });
+          return;
+        }
+        // The host may sit in the room before going live to watch chat fill up.
+        if (stream.status !== 'LIVE' && stream.hostId !== userId) {
+          socket.emit('live:error', { streamId, message: 'This stream is not live' });
+          return;
+        }
+        socket.join(getLiveRoomId(streamId));
+        joinedLiveRooms.add(streamId);
+        broadcastViewerCount(streamId);
+      } catch (error) {
+        logger.error('Failed to join live room', { error, streamId });
+      }
+    });
+
+    socket.on('live:leave', (streamId: string) => {
+      if (typeof streamId !== 'string' || !streamId) return;
+      socket.leave(getLiveRoomId(streamId));
+      joinedLiveRooms.delete(streamId);
+      broadcastViewerCount(streamId);
+    });
+
+    socket.on('live:join_index', () => socket.join(getLiveRoomId('index')));
+    socket.on('live:leave_index', () => socket.leave(getLiveRoomId('index')));
+
+    socket.on('live:chat', async (data: { streamId?: string; content?: string }) => {
+      const streamId = typeof data?.streamId === 'string' ? data.streamId : '';
+      try {
+        if (!streamId) return;
+        const content = normalizeUserText(data?.content, {
+          field: 'content',
+          maxLength: LIVE_CHAT_MAX_LENGTH,
+        });
+        // postChatMessage broadcasts live:message to the room itself.
+        await postChatMessage(streamId, userId, content);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Message not sent';
+        socket.emit('live:error', { streamId, message });
+      }
+    });
+
+    // ==========================================
     // PRESENCE HANDLERS
     // ==========================================
 
@@ -303,6 +374,13 @@ export function initializeSocketHandlers(io: SocketIOServer) {
     // ==========================================
 
     socket.on('disconnect', () => {
+      // The socket has already left its rooms; recount for the streams it was
+      // watching so the number viewers see drops with it.
+      for (const streamId of joinedLiveRooms) {
+        broadcastViewerCount(streamId);
+      }
+      joinedLiveRooms.clear();
+
       if (userId) {
         const sockets = userSockets.get(userId);
         if (sockets) {
@@ -354,6 +432,26 @@ function parseTypingPayload(payload: TypingPayload): {
 
 export function getChannelRoomId(channelId: string): string {
   return `channel:${channelId}`;
+}
+
+export function getLiveRoomId(streamId: string): string {
+  return `live:${streamId}`;
+}
+
+/** How many sockets are watching a stream right now. */
+export function liveRoomSize(streamId: string): number {
+  if (!ioInstance) return 0;
+  return ioInstance.sockets.adapter.rooms.get(getLiveRoomId(streamId))?.size ?? 0;
+}
+
+// The live stream routes and service push chat, gifts and status changes to
+// the room without importing `io` from index.ts (same reason as emitToChannel).
+export function emitToLiveRoom(streamId: string, event: string, payload: unknown): void {
+  if (!ioInstance) {
+    logger.debug('Socket.IO not initialized, skipping live broadcast', { streamId, event });
+    return;
+  }
+  ioInstance.to(getLiveRoomId(streamId)).emit(event, payload);
 }
 
 // Lets the REST channel routes broadcast without importing `io` from index.ts,

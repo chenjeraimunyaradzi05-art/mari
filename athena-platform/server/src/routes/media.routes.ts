@@ -61,6 +61,25 @@ const FILE_CONFIGS = {
     resize: null,
     visibility: 'public' as const,
   },
+  // A poster frame the creator studio captures in the browser before the
+  // pipeline makes its own. Stored as sent: cropping it square would cut the
+  // head off a portrait reel.
+  thumbnail: {
+    maxSize: 5 * 1024 * 1024, // 5MB
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
+    folder: 'thumbnails',
+    resize: null,
+    visibility: 'public' as const,
+  },
+  // Sounds a reel can be set to. The pipeline writes extracted original
+  // sounds into the same folder.
+  audio: {
+    maxSize: 20 * 1024 * 1024, // 20MB
+    allowedTypes: ['audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/wav', 'audio/ogg', 'audio/webm'],
+    folder: 'sounds',
+    resize: null,
+    visibility: 'public' as const,
+  },
   document: {
     maxSize: 25 * 1024 * 1024, // 25MB
     allowedTypes: [
@@ -95,6 +114,13 @@ const CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
   'video/mp4': '.mp4',
   'video/quicktime': '.mov',
   'video/webm': '.webm',
+  'audio/mpeg': '.mp3',
+  'audio/mp4': '.m4a',
+  'audio/x-m4a': '.m4a',
+  'audio/aac': '.aac',
+  'audio/wav': '.wav',
+  'audio/ogg': '.ogg',
+  'audio/webm': '.weba',
   'application/pdf': '.pdf',
   'application/msword': '.doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',

@@ -56,7 +56,10 @@ import appealRoutes from './routes/appeal.routes';
 import trustRoutes from './routes/trust.routes';
 import regionRoutes from './routes/region.routes';
 import videoRoutes from './routes/video.routes';
+import soundRoutes from './routes/sound.routes';
+import livestreamRoutes from './routes/livestream.routes';
 import channelRoutes from './routes/channel.routes';
+import { startMessageExpirySweeper } from './services/message-expiry.service';
 import apprenticeshipRoutes from './routes/apprenticeship.routes';
 import skillsMarketplaceRoutes from './routes/skills-marketplace.routes';
 import safetyRoutes from './routes/safety.routes';
@@ -584,7 +587,8 @@ app.use('/api/feed', feedRoutes);
 app.use('/api/groups', groupChatRoutes); // Group chat specific routes
 app.use('/api/gdpr', gdprRoutes);
 app.use('/api/compliance', complianceRoutes);
-// app.use('/api/livestream', livestreamRoutes); // Needs schema additions first
+app.use('/api/sounds', soundRoutes);
+app.use('/api/livestream', livestreamRoutes);
 
 // Health routes (comprehensive health checks)
 app.use('/health', healthRoutes);
@@ -694,6 +698,9 @@ export async function startServer() {
     }, SIX_HOURS);
     // Run once at startup too
     sessionService.cleanupExpiredSessions().catch(() => {});
+
+    // Disappearing messages: delete what has expired, once a minute.
+    startMessageExpirySweeper();
   });
 
   // ===========================================
