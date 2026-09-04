@@ -450,10 +450,15 @@ router.get('/:id/posts', optionalAuth, async (req: AuthRequest, res, next) => {
       throw new ApiError(401, 'Authentication required');
     }
 
+    // The page shows who wrote each post; without the author every post
+    // rendered as anonymous text.
     const posts = await (prisma as any).groupPost.findMany({
       where: { groupId: group.id },
       orderBy: { createdAt: 'desc' },
       take: 100,
+      include: {
+        author: { select: { id: true, displayName: true, avatar: true, headline: true } },
+      },
     });
     res.json({ success: true, data: posts });
   } catch (err) {

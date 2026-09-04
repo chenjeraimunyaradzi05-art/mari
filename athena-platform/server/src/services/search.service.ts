@@ -516,10 +516,18 @@ async function searchVideos(
       status: 'PUBLISHED',
       isHidden: false,
       OR: [
-        ...keywords.flatMap((kw) => [
-          { title: { contains: kw, mode: 'insensitive' as const } },
-          { description: { contains: kw, mode: 'insensitive' as const } },
-        ]),
+        ...keywords.flatMap((kw) => {
+          // A "#welding" query is a tag lookup. Reel hashtags are stored
+          // lower-cased without the hash, so the tag has to be matched against
+          // that column; the title/description checks would only find reels
+          // that happened to spell the tag out in their caption.
+          const tag = kw.startsWith('#') ? kw.slice(1) : null;
+          return [
+            { title: { contains: kw, mode: 'insensitive' as const } },
+            { description: { contains: kw, mode: 'insensitive' as const } },
+            ...(tag ? [{ hashtags: { has: tag } }] : []),
+          ];
+        }),
       ],
     },
     include: {
@@ -529,7 +537,7 @@ async function searchVideos(
   });
 
   return videos.map((video) => {
-    const searchableText = [video.title, video.description, video.hashtags?.join(' ')].filter(Boolean).join(' ');
+    const searchableText = [video.title, video.description, video.hashtags?.map((h) => `#${h}`).join(' ')].filter(Boolean).join(' ');
     const popularity = video.viewCount + video.likeCount * 5 + video.commentCount * 10 + video.shareCount * 6;
     const score = calculateRelevanceScore(searchableText, keywords, { isTitle: true, popularity });
 

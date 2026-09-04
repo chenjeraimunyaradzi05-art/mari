@@ -756,7 +756,7 @@ router.post(
   '/:id/messages',
   authenticate,
   [
-    body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.channelMessage }),
+    body('content').optional().isString().isLength({ max: CONTENT_LIMITS.channelMessage }),
     body('mediaUrls').optional().isArray({ max: 10 }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -767,6 +767,20 @@ router.post(
       }
 
       const { id } = req.params;
+
+      // A photo on its own is a legitimate message, so the text may be empty
+      // when something is attached. Empty with nothing attached is still
+      // refused, the same rule direct messages apply.
+      const content = normalizeUserText(req.body.content ?? '', {
+        field: 'content',
+        maxLength: CONTENT_LIMITS.channelMessage,
+        allowEmpty: true,
+      });
+      const mediaUrls = normalizeMediaUrls(req.body.mediaUrls);
+      if (!content && (!mediaUrls || mediaUrls.length === 0)) {
+        throw new ApiError(400, 'Content or attachments required');
+      }
+
       const channel = await prisma.channel.findUnique({ where: { id } });
       if (!channel) {
         throw new ApiError(404, 'Channel not found');
@@ -789,11 +803,8 @@ router.post(
         data: {
           channelId: id,
           authorId: req.user!.id,
-          content: normalizeUserText(req.body.content, {
-            field: 'content',
-            maxLength: CONTENT_LIMITS.channelMessage,
-          }),
-          mediaUrls: normalizeMediaUrls(req.body.mediaUrls),
+          content,
+          mediaUrls,
         },
         include: {
           author: { select: { id: true, displayName: true, avatar: true } },
