@@ -604,11 +604,19 @@ export const groupsApi = {
 // ============================================
 export const statusApi = {
   feed: () => api.get('/status/feed'),
-  create: (data: { type: 'image' | 'video'; mediaUrl: string; caption?: string }) => api.post('/status', data),
+  create: (data: { type: 'image' | 'video'; mediaUrl: string; caption?: string; audience?: 'everyone' | 'close_friends' }) =>
+    api.post('/status', data),
   // Marks a story watched: its ring goes quiet for you, its count goes up for the author.
   view: (id: string) => api.post(`/status/${id}/view`),
   viewers: (id: string) => api.get(`/status/${id}/viewers`),
   delete: (id: string) => api.delete(`/status/${id}`),
+};
+
+// The short list close-friends stories go to.
+export const closeFriendApi = {
+  list: () => api.get('/users/me/close-friends'),
+  add: (userId: string) => api.post(`/users/me/close-friends/${userId}`),
+  remove: (userId: string) => api.delete(`/users/me/close-friends/${userId}`),
 };
 
 // Folders for saved posts.
@@ -645,6 +653,8 @@ export const topicApi = {
   trending: (params?: { days?: number; limit?: number }) => api.get('/topics/trending', { params }),
   get: (tag: string) => api.get(`/topics/${encodeURIComponent(tag)}`),
   following: () => api.get('/topics/me/following'),
+  // The composer's # autocomplete.
+  suggest: (q: string) => api.get('/topics/suggest', { params: { q } }),
   follow: (tag: string) => api.post(`/topics/${encodeURIComponent(tag)}/follow`),
   unfollow: (tag: string) => api.delete(`/topics/${encodeURIComponent(tag)}/follow`),
 };

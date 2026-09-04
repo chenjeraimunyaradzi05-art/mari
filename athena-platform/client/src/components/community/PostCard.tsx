@@ -15,9 +15,11 @@ import {
   MoreHorizontal,
   Pencil,
   Pin,
+  Send,
   Share2,
   Trash2,
 } from 'lucide-react';
+import { SharePostDialog } from './SharePostDialog';
 import { useImpression } from '@/lib/impressions';
 import { RepostButton, formatCount } from './RepostButton';
 import { RepostEmbed, RepostedBy, type RepostOriginal } from './RepostEmbed';
@@ -81,6 +83,19 @@ export default function PostCard({ post, defaultShowComments = false, source = '
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
   const impressionRef = useImpression(post.id, source);
+
+  // Share: copy, send to someone here, or the system sheet.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const shareRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!shareOpen) return;
+    const onClick = (event: MouseEvent) => {
+      if (shareRef.current && !shareRef.current.contains(event.target as Node)) setShareOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [shareOpen]);
 
   // The author can close the thread; existing comments stay readable.
   const [commentsOff, setCommentsOff] = useState<boolean>(Boolean(post.commentsOff));
@@ -592,13 +607,59 @@ export default function PostCard({ post, defaultShowComments = false, source = '
           repostCount={Number(post.repostCount ?? 0)}
           disabled={!user}
         />
-        <button
-          onClick={handleShare}
-          className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
-        >
-          <Share2 size={20} />
-          <span>Share</span>
-        </button>
+        <div className="relative" ref={shareRef}>
+          <button
+            onClick={() => setShareOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={shareOpen}
+            className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
+          >
+            <Share2 size={20} />
+            <span>Share</span>
+          </button>
+          {shareOpen && (
+            <div
+              role="menu"
+              className="absolute bottom-full left-0 z-20 mb-1 min-w-[190px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            >
+              {user && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShareOpen(false);
+                    setSendOpen(true);
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <Send size={16} /> Send in a message
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setShareOpen(false);
+                  void copyLink();
+                }}
+                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Link2 size={16} /> Copy link
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setShareOpen(false);
+                  void handleShare();
+                }}
+                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Share2 size={16} /> Share elsewhere
+              </button>
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={handleSave}
@@ -618,6 +679,9 @@ export default function PostCard({ post, defaultShowComments = false, source = '
       )}
 
       {isOwner && insightsOpen && <PostInsightsDialog postId={post.id} open onClose={() => setInsightsOpen(false)} />}
+      {user && sendOpen && (
+        <SharePostDialog postId={post.id} excerpt={`${authorName}: ${mentionsToPlainText(content).slice(0, 140)}`} open onClose={() => setSendOpen(false)} />
+      )}
       {user && collectionOpen && (
         <SaveToCollection
           postId={post.id}

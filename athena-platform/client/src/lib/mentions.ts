@@ -48,3 +48,14 @@ export function activeMentionQuery(text: string, caret: number): { query: string
   if (query.length > 40 || /[\n\]]/.test(query)) return null;
   return { query, start: at };
 }
+
+/** The "#top" being typed at the caret, for topic suggestions. */
+export function activeHashtagQuery(text: string, caret: number): { query: string; start: number } | null {
+  const before = text.slice(0, caret);
+  const hash = before.lastIndexOf('#');
+  if (hash < 0) return null;
+  if (hash > 0 && /[\p{L}\p{N}_#]/u.test(before[hash - 1])) return null;
+  const query = before.slice(hash + 1);
+  if (query.length > 40 || !/^[\p{L}\p{N}_]*$/u.test(query)) return null;
+  return { query, start: hash };
+}

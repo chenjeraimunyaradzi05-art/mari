@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { disappearingLabel } from '@/lib/api';
+import { renderSocialText } from '@/lib/social-text';
 import { VoiceRecorder } from './VoiceRecorder';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -415,7 +416,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                   )}
 
                   {message.content && (
-                    <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm">{renderSocialText(message.content)}</p>
                   )}
 
                   <div

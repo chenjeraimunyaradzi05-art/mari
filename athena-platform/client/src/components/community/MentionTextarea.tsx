@@ -1,14 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { mentionApi } from '@/lib/api';
-import { activeMentionQuery, type MentionPick } from '@/lib/mentions';
+import { Hash } from 'lucide-react';
+import { mentionApi, topicApi } from '@/lib/api';
+import { activeHashtagQuery, activeMentionQuery, type MentionPick } from '@/lib/mentions';
 import { cn } from '@/lib/utils';
 
 /**
- * A textarea (or single-line input) with @ autocomplete. Typing "@me" opens a
- * list of members; picking one inserts "@Mei Chen " and records the pick, so
- * the caller can serialise the mention on submit.
+ * A textarea (or single-line input) with @ and # autocomplete. Typing "@me"
+ * opens a list of members; picking one inserts "@Mei Chen " and records the
+ * pick, so the caller can serialise the mention on submit. Typing "#lea"
+ * offers topics in use, busiest first, and inserts "#leadership ".
  */
 interface MentionTextareaProps {
   value: string;
@@ -25,7 +27,19 @@ interface MentionTextareaProps {
   onSubmitShortcut?: () => void;
 }
 
-type Suggestion = { id: string; name: string; avatar: string | null; headline: string | null };
+type MemberSuggestion = { kind: 'member'; id: string; name: string; avatar: string | null; headline: string | null };
+type TopicSuggestion = { kind: 'topic'; id: string; tag: string; count: number };
+type Suggestion = MemberSuggestion | TopicSuggestion;
+
+type Query = { kind: 'member' | 'topic'; query: string; start: number };
+
+function activeQuery(text: string, caret: number): Query | null {
+  const mention = activeMentionQuery(text, caret);
+  if (mention) return { kind: 'member', ...mention };
+  const topic = activeHashtagQuery(text, caret);
+  if (topic) return { kind: 'topic', ...topic };
+  return null;
+}
 
 export function MentionTextarea({
   value,
@@ -42,26 +56,38 @@ export function MentionTextarea({
   onSubmitShortcut,
 }: MentionTextareaProps) {
   const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
-  const [query, setQuery] = useState<{ query: string; start: number } | null>(null);
+  const [query, setQuery] = useState<Query | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [active, setActive] = useState(0);
 
   const refresh = useCallback((text: string, caret: number) => {
-    setQuery(activeMentionQuery(text, caret));
+    setQuery(activeQuery(text, caret));
   }, []);
 
   useEffect(() => {
-    if (!query || query.query.length < 1) {
+    // Members need a letter to search by; topics can be browsed from "#".
+    if (!query || (query.kind === 'member' && query.query.length < 1)) {
       setSuggestions([]);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      mentionApi
-        .suggest(query.query)
-        .then((res) => {
+      const request =
+        query.kind === 'member'
+          ? mentionApi.suggest(query.query).then((res) =>
+              (Array.isArray(res.data?.data) ? res.data.data : []).map(
+                (m: Omit<MemberSuggestion, 'kind'>): Suggestion => ({ kind: 'member', ...m })
+              )
+            )
+          : topicApi.suggest(query.query).then((res) =>
+              (Array.isArray(res.data?.data) ? res.data.data : []).map(
+                (t: { tag: string; count: number }): Suggestion => ({ kind: 'topic', id: `#${t.tag}`, tag: t.tag, count: t.count })
+              )
+            );
+      request
+        .then((list) => {
           if (cancelled) return;
-          setSuggestions(Array.isArray(res.data?.data) ? res.data.data : []);
+          setSuggestions(list);
           setActive(0);
         })
         .catch(() => {
@@ -79,10 +105,10 @@ export function MentionTextarea({
     const caret = ref.current?.selectionStart ?? value.length;
     const before = value.slice(0, query.start);
     const after = value.slice(caret);
-    const inserted = `@${suggestion.name} `;
+    const inserted = suggestion.kind === 'member' ? `@${suggestion.name} ` : `#${suggestion.tag} `;
     const next = `${before}${inserted}${after}`;
     onChange(next);
-    if (!picks.some((p) => p.id === suggestion.id)) {
+    if (suggestion.kind === 'member' && !picks.some((p) => p.id === suggestion.id)) {
       onPicksChange([...picks, { id: suggestion.id, name: suggestion.name }]);
     }
     setQuery(null);
@@ -150,7 +176,7 @@ export function MentionTextarea({
       {suggestions.length > 0 && (
         <ul
           role="listbox"
-          aria-label="Members"
+          aria-label={query?.kind === 'topic' ? 'Topics' : 'Members'}
           className="absolute left-0 z-20 mt-1 max-h-60 w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
         >
           {suggestions.map((suggestion, index) => (
@@ -164,18 +190,34 @@ export function MentionTextarea({
                   index === active ? 'bg-rose-50 dark:bg-rose-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-800'
                 )}
               >
-                {suggestion.avatar ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- media CDN
-                  <img src={suggestion.avatar} alt="" className="h-7 w-7 rounded-full object-cover" />
+                {suggestion.kind === 'topic' ? (
+                  <>
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                      <Hash className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-900 dark:text-white">#{suggestion.tag}</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {suggestion.count > 0 ? `${suggestion.count} ${suggestion.count === 1 ? 'post' : 'posts'} this month` : 'New topic'}
+                      </span>
+                    </span>
+                  </>
                 ) : (
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                    {suggestion.name.slice(0, 2).toUpperCase()}
-                  </span>
+                  <>
+                    {suggestion.avatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- media CDN
+                      <img src={suggestion.avatar} alt="" className="h-7 w-7 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                        {suggestion.name.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-900 dark:text-white">{suggestion.name}</span>
+                      {suggestion.headline && <span className="block truncate text-xs text-slate-500">{suggestion.headline}</span>}
+                    </span>
+                  </>
                 )}
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-slate-900 dark:text-white">{suggestion.name}</span>
-                  {suggestion.headline && <span className="block truncate text-xs text-slate-500">{suggestion.headline}</span>}
-                </span>
               </button>
             </li>
           ))}

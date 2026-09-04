@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Eye, ImagePlus, Loader2, Video as VideoIcon, X } from 'lucide-react';
+import { Eye, ImagePlus, Loader2, Star, Video as VideoIcon, X } from 'lucide-react';
+import { CloseFriendsDialog } from './CloseFriendsDialog';
 import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,9 @@ export default function StoriesStrip() {
   const [caption, setCaption] = useState('');
   const [viewers, setViewers] = useState<{ story: Story; list: Array<{ id: string; displayName: string; avatar: string | null }> } | null>(null);
   const [highlightFor, setHighlightFor] = useState<Story | null>(null);
+  // Who the next story goes to, and the list itself.
+  const [audience, setAudience] = useState<'everyone' | 'close_friends'>('everyone');
+  const [closeFriendsOpen, setCloseFriendsOpen] = useState(false);
 
   const buckets: StoryBucket[] = Array.isArray(data) ? data : [];
 
@@ -54,7 +58,7 @@ export default function StoriesStrip() {
       const res = await mediaApi.upload(draft.kind === 'video' ? 'video' : 'post', draft.file);
       const url = res.data?.data?.url as string | undefined;
       if (!url) throw new Error('Upload returned no file');
-      await createStatus.mutateAsync({ type: draft.kind, mediaUrl: url, caption: caption.trim() || undefined });
+      await createStatus.mutateAsync({ type: draft.kind, mediaUrl: url, caption: caption.trim() || undefined, audience });
       URL.revokeObjectURL(draft.previewUrl);
       setDraft(null);
       setCaption('');
@@ -120,6 +124,15 @@ export default function StoriesStrip() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setCloseFriendsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 px-3 py-1.5 text-xs text-emerald-700 transition hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+              title="Who sees your close-friends stories"
+            >
+              <Star className="h-3.5 w-3.5" />
+              Close friends
+            </button>
+            <button
+              type="button"
               disabled={busy}
               onClick={() => pickFile('image/*')}
               className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
@@ -158,6 +171,23 @@ export default function StoriesStrip() {
             className="input flex-1 text-sm"
             disabled={busy}
           />
+          {/* Everyone, or the close-friends list only. */}
+          <button
+            type="button"
+            onClick={() => setAudience((a) => (a === 'everyone' ? 'close_friends' : 'everyone'))}
+            disabled={busy}
+            aria-pressed={audience === 'close_friends'}
+            title={audience === 'close_friends' ? 'Close friends only. Tap for everyone.' : 'Everyone. Tap for close friends only.'}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition',
+              audience === 'close_friends'
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300'
+            )}
+          >
+            <Star className={cn('h-3.5 w-3.5', audience === 'close_friends' && 'fill-current')} />
+            {audience === 'close_friends' ? 'Close friends' : 'Everyone'}
+          </button>
           <button type="button" onClick={() => void publish()} disabled={busy} className="btn-primary px-3 py-1.5 text-xs">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Share'}
           </button>
@@ -191,6 +221,8 @@ export default function StoriesStrip() {
           {buckets.map((bucket, index) => {
             const own = bucket.user.id === user?.id;
             const unseen = bucket.hasUnseen ?? true;
+            // A green ring: something here was shared with close friends only.
+            const closeOnly = bucket.stories.some((s) => s.audience === 'close_friends');
             return (
               <button
                 key={bucket.user.id}
@@ -200,7 +232,11 @@ export default function StoriesStrip() {
                 className="flex min-w-[68px] flex-col items-center gap-2"
               >
                 {/* Gradient ring: something to watch. Grey: all seen. */}
-                <span className={cn(unseen ? 'story-ring' : 'rounded-full bg-slate-300 p-[2px] dark:bg-slate-600')}>
+                <span
+                  className={cn(
+                    closeOnly ? 'rounded-full bg-emerald-500 p-[2px]' : unseen ? 'story-ring' : 'rounded-full bg-slate-300 p-[2px] dark:bg-slate-600'
+                  )}
+                >
                   <span className="block rounded-full border-2 border-white dark:border-slate-800">
                     <span className="block h-14 w-14 overflow-hidden rounded-full">
                       {bucket.user.avatar ? (
@@ -246,6 +282,7 @@ export default function StoriesStrip() {
       )}
 
       <AddToHighlightDialog story={highlightFor} open={Boolean(highlightFor)} onClose={() => setHighlightFor(null)} />
+      <CloseFriendsDialog open={closeFriendsOpen} onClose={() => setCloseFriendsOpen(false)} />
 
       {viewers && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center" role="dialog" aria-modal="true" aria-label="Who watched">

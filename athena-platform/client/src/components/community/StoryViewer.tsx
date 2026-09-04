@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Trash2, BookmarkPlus } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Trash2, BookmarkPlus, Star } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +15,8 @@ export type Story = {
   // Absent for a highlight, which does not expire.
   expiresAt?: string;
   caption?: string | null;
+  // Who it went to; "close_friends" gets a green badge.
+  audience?: 'everyone' | 'close_friends';
   viewed?: boolean;
   // Only present on your own stories.
   viewCount?: number;
@@ -189,7 +191,14 @@ export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, on
             )}
           </Link>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{bucket.user.displayName}</p>
+            <p className="flex items-center gap-2 truncate text-sm font-medium text-white">
+              {bucket.user.displayName}
+              {story.audience === 'close_friends' && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                  <Star className="h-3 w-3 fill-current" /> Close friends
+                </span>
+              )}
+            </p>
             {posted && <p className="text-xs text-white/60">{posted}</p>}
           </div>
           {isOwn && onHighlight && (

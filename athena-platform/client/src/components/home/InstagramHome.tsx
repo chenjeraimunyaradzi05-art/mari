@@ -34,6 +34,7 @@ import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPr
 import { RepostButton } from '@/components/community/RepostButton';
 import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/community/RepostEmbed';
 import { useImpression } from '@/lib/impressions';
+import { SharePostDialog } from '@/components/community/SharePostDialog';
 import { altFor } from '@/components/community/PostCard';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
 
@@ -153,6 +154,8 @@ function PostCard({
   const [hidden, setHidden] = useState(false);
   const [saved, setSaved] = useState(post.isSaved ?? false);
   const [following, setFollowing] = useState(post.author.isFollowing ?? false);
+  // The paper plane sends the post to someone here; signed out it shares elsewhere.
+  const [sendOpen, setSendOpen] = useState(false);
   const [shareLabel, setShareLabel] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [draft, setDraft] = useState('');
@@ -380,7 +383,7 @@ function PostCard({
           disabled={!isAuthenticated}
           compact
         />
-        <button type="button" onClick={share} aria-label="Share">
+        <button type="button" onClick={() => (isAuthenticated ? setSendOpen(true) : void share())} aria-label={isAuthenticated ? 'Send in a message' : 'Share'}>
           <Send className="h-6 w-6 text-slate-900 hover:opacity-60 lg:h-5 lg:w-5 dark:text-white" />
         </button>
         {shareLabel && (
@@ -478,6 +481,9 @@ function PostCard({
 
       {commentError && (
         <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">{commentError}</p>
+      )}
+      {isAuthenticated && sendOpen && (
+        <SharePostDialog postId={post.id} excerpt={`${authorName(post.author)}: ${post.content.slice(0, 140)}`} open onClose={() => setSendOpen(false)} />
       )}
     </article>
   );
