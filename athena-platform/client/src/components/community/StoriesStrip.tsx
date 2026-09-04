@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { useAuthStore, useStatusFeed, useCreateStatus } from '@/lib/hooks';
 import { mediaApi, messageApi, statusApi } from '@/lib/api';
 import { StoryViewer, type Story, type StoryBucket } from './StoryViewer';
+import { AddToHighlightDialog } from '@/components/profile/StoryHighlights';
 
 /**
  * The stories rail. A gradient ring means there is something you have not
@@ -28,6 +29,7 @@ export default function StoriesStrip() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [caption, setCaption] = useState('');
   const [viewers, setViewers] = useState<{ story: Story; list: Array<{ id: string; displayName: string; avatar: string | null }> } | null>(null);
+  const [highlightFor, setHighlightFor] = useState<Story | null>(null);
 
   const buckets: StoryBucket[] = Array.isArray(data) ? data : [];
 
@@ -236,8 +238,14 @@ export default function StoriesStrip() {
           onViewers={(story) => void showViewers(story)}
           onDelete={(story) => void deleteStory(story)}
           onReact={(story, emoji) => void reactToStory(story, emoji)}
+          onHighlight={(story) => {
+            setOpenAt(null);
+            setHighlightFor(story);
+          }}
         />
       )}
+
+      <AddToHighlightDialog story={highlightFor} open={Boolean(highlightFor)} onClose={() => setHighlightFor(null)} />
 
       {viewers && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center" role="dialog" aria-modal="true" aria-label="Who watched">

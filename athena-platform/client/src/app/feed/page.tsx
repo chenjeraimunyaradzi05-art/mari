@@ -36,6 +36,9 @@ import { PollCard, type PollResults } from '@/components/community/PollCard';
 import { WhyThis } from '@/components/community/WhyThis';
 import { SensitiveGate } from '@/components/community/SensitiveGate';
 import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPreviewCard';
+import { RepostButton } from '@/components/community/RepostButton';
+import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/community/RepostEmbed';
+import { useImpression } from '@/lib/impressions';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
@@ -81,6 +84,11 @@ interface Post {
   isPinned?: boolean;
   isSensitive?: boolean;
   linkPreview?: LinkPreview | null;
+  repostOfId?: string | null;
+  repostOf?: (Post & RepostOriginal) | null;
+  repostUnavailable?: boolean;
+  repostCount?: number;
+  isReposted?: boolean;
   _count?: {
     likes: number;
     comments: number;
@@ -114,7 +122,10 @@ function authorInitials(author: Post['author']): string {
   );
 }
 
-function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string }) {
+function PostCard({ post, currentUserId, repostedBy }: { post: Post; currentUserId?: string; repostedBy?: string }) {
+  const impressionRef = useImpression(post.id, 'feed');
+  const original = post.repostOf ?? null;
+  const isPlainRepost = Boolean(post.repostOfId) && !post.content.trim();
   const react = useReactToPost();
   const savePost = useSavePost();
   const unsavePost = useUnsavePost();
@@ -218,8 +229,14 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
 
   if (hidden) return null;
 
+  // A plain repost is the original, with a line saying who reposted it.
+  if (isPlainRepost && original) {
+    return <PostCard post={original} currentUserId={currentUserId} repostedBy={authorName(post.author)} />;
+  }
+
   return (
-    <article className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition">
+    <article ref={impressionRef} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition">
+      {repostedBy && <RepostedBy name={repostedBy} className="mb-3" />}
       {post.type === 'WIN' && (
         <p className="mb-3 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
           🏆 Win
@@ -319,6 +336,9 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       )}
 
       <LinkPreviewCard preview={post.linkPreview} className="mb-4" />
+      {(original || post.repostUnavailable) && (
+        <RepostEmbed original={original} unavailable={Boolean(post.repostUnavailable)} className="mb-4" />
+      )}
 
       {/* Media. The API returns mediaUrls: string[] alongside a post type; an
           earlier shape (post.media) never existed on the wire, so image posts
@@ -373,6 +393,13 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
       {/* Actions */}
       <div className="flex items-center justify-between pt-3">
         <ReactionButton value={reaction} onChange={changeReaction} disabled={!currentUserId} />
+        <RepostButton
+          targetId={post.id}
+          original={{ id: post.id, content: post.content, type: post.type, mediaUrls: post.mediaUrls, createdAt: post.createdAt, author: post.author }}
+          isReposted={Boolean(post.isReposted)}
+          repostCount={post.repostCount ?? 0}
+          disabled={!currentUserId}
+        />
         <Link 
           href={`/posts/${post.id}`}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition"

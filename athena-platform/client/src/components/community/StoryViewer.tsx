@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Trash2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Trash2, BookmarkPlus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -12,7 +12,8 @@ export type Story = {
   type: 'image' | 'video';
   mediaUrl: string;
   createdAt: string;
-  expiresAt: string;
+  // Absent for a highlight, which does not expire.
+  expiresAt?: string;
   caption?: string | null;
   viewed?: boolean;
   // Only present on your own stories.
@@ -42,6 +43,8 @@ interface StoryViewerProps {
   onDelete?: (story: Story) => void;
   /** A one-tap emoji reaction, delivered to the author as a message. */
   onReact?: (story: Story, emoji: string) => void;
+  /** Keep one of your own stories on your profile. */
+  onHighlight?: (story: Story) => void;
 }
 
 const QUICK_REACTIONS = ['❤️', '🔥', '👏', '😂', '😮', '💪'];
@@ -49,7 +52,7 @@ const QUICK_REACTIONS = ['❤️', '🔥', '👏', '😂', '😮', '💪'];
 const IMAGE_DURATION_MS = 5000;
 const TICK_MS = 50;
 
-export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, onView, onViewers, onDelete, onReact }: StoryViewerProps) {
+export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, onView, onViewers, onDelete, onReact, onHighlight }: StoryViewerProps) {
   const [reacted, setReacted] = useState<Record<string, string>>({});
   const [bucketIndex, setBucketIndex] = useState(initialBucket);
   const [storyIndex, setStoryIndex] = useState(0);
@@ -189,6 +192,16 @@ export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, on
             <p className="truncate text-sm font-medium text-white">{bucket.user.displayName}</p>
             {posted && <p className="text-xs text-white/60">{posted}</p>}
           </div>
+          {isOwn && onHighlight && (
+            <button
+              type="button"
+              onClick={() => onHighlight(story)}
+              aria-label="Add to a highlight"
+              className="rounded-full p-1.5 text-white/80 transition hover:bg-white/10 hover:text-white"
+            >
+              <BookmarkPlus className="h-4 w-4" />
+            </button>
+          )}
           {isOwn && onDelete && (
             <button
               type="button"

@@ -31,6 +31,9 @@ import { PollCard, type PollResults } from '@/components/community/PollCard';
 import { WhyThis } from '@/components/community/WhyThis';
 import { SensitiveGate } from '@/components/community/SensitiveGate';
 import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPreviewCard';
+import { RepostButton } from '@/components/community/RepostButton';
+import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/community/RepostEmbed';
+import { useImpression } from '@/lib/impressions';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
 
 type FeedAuthor = {
@@ -59,6 +62,11 @@ type FeedPost = {
   reasons?: string[];
   isSensitive?: boolean;
   linkPreview?: LinkPreview | null;
+  repostOfId?: string | null;
+  repostOf?: (FeedPost & RepostOriginal) | null;
+  repostUnavailable?: boolean;
+  repostCount?: number;
+  isReposted?: boolean;
   author: FeedAuthor;
 };
 
@@ -126,11 +134,16 @@ function PostCard({
   post,
   isAuthenticated,
   currentUserId,
+  repostedBy,
 }: {
   post: FeedPost;
   isAuthenticated: boolean;
   currentUserId?: string;
+  repostedBy?: string;
 }) {
+  const impressionRef = useImpression(post.id, 'home');
+  const original = post.repostOf ?? null;
+  const isPlainRepost = Boolean(post.repostOfId) && !post.content.trim();
   const react = useReactToPost();
   const [reaction, setReaction] = useState<ReactionType | null>(post.myReaction ?? (post.isLiked ? 'LIKE' : null));
   const [counts, setCounts] = useState<ReactionCounts>(post.reactionCounts ?? (post.likeCount ? { LIKE: post.likeCount } : {}));
@@ -236,8 +249,14 @@ function PostCard({
 
   if (hidden) return null;
 
+  // A plain repost is the original, with a line saying who reposted it.
+  if (isPlainRepost && original) {
+    return <PostCard post={original} isAuthenticated={isAuthenticated} currentUserId={currentUserId} repostedBy={authorName(post.author)} />;
+  }
+
   return (
-    <article className="border-b border-slate-200 pb-4 dark:border-slate-800">
+    <article ref={impressionRef} className="border-b border-slate-200 pb-4 dark:border-slate-800">
+      {repostedBy && <RepostedBy name={repostedBy} className="pt-3" />}
       {post.type === 'WIN' && (
         <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
           🏆 Win
@@ -324,6 +343,9 @@ function PostCard({
       )}
 
       <LinkPreviewCard preview={post.linkPreview} className="mt-3" />
+      {(original || post.repostUnavailable) && (
+        <RepostEmbed original={original} unavailable={Boolean(post.repostUnavailable)} className="mt-3" />
+      )}
 
       {/* The caption sits inside the gate too, so a sensitive post shows
           nothing of itself until asked; the actions stay usable. */}
@@ -348,6 +370,14 @@ function PostCard({
         <Link href={`/posts/${post.id}`} aria-label="Comments">
           <MessageCircle className="h-6 w-6 text-slate-900 hover:opacity-60 lg:h-5 lg:w-5 dark:text-white" />
         </Link>
+        <RepostButton
+          targetId={post.id}
+          original={{ id: post.id, content: post.content, type: post.type, mediaUrls: post.mediaUrls, createdAt: post.createdAt, author: post.author }}
+          isReposted={Boolean(post.isReposted)}
+          repostCount={post.repostCount ?? 0}
+          disabled={!isAuthenticated}
+          compact
+        />
         <button type="button" onClick={share} aria-label="Share">
           <Send className="h-6 w-6 text-slate-900 hover:opacity-60 lg:h-5 lg:w-5 dark:text-white" />
         </button>

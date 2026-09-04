@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Settings,
   Gift,
+  Repeat2,
 } from 'lucide-react';
 import {
   useNotifications,
@@ -38,6 +39,7 @@ type NotificationType =
   | 'LIKE'
   | 'COMMENT'
   | 'FOLLOW'
+  | 'REPOST'
   | 'ACHIEVEMENT'
   | 'LEVEL_UP'
   | 'GIFT_RECEIVED';
@@ -64,6 +66,7 @@ const notificationIcons: Record<NotificationType, React.ElementType> = {
   LIKE: Heart,
   COMMENT: MessageCircle,
   FOLLOW: UserPlus,
+  REPOST: Repeat2,
   ACHIEVEMENT: Award,
   LEVEL_UP: Award,
   GIFT_RECEIVED: Gift,
@@ -79,6 +82,7 @@ const notificationColors: Record<NotificationType, string> = {
   LIKE: 'bg-red-100 dark:bg-red-900/30 text-red-500',
   COMMENT: 'bg-pink-100 dark:bg-pink-900/30 text-pink-500',
   FOLLOW: 'bg-purple-100 dark:bg-purple-900/30 text-purple-500',
+  REPOST: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
   ACHIEVEMENT: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500',
   LEVEL_UP: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-500',
   GIFT_RECEIVED: 'bg-amber-100 dark:bg-amber-900/30 text-amber-500',

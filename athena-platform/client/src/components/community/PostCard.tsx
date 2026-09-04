@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  BarChart3,
   Bookmark,
   Flag,
+  FolderPlus,
   Link2,
   MessageCircle,
   MoreHorizontal,
@@ -15,6 +17,11 @@ import {
   Share2,
   Trash2,
 } from 'lucide-react';
+import { useImpression } from '@/lib/impressions';
+import { RepostButton, formatCount } from './RepostButton';
+import { RepostEmbed, RepostedBy, type RepostOriginal } from './RepostEmbed';
+import { PostInsightsDialog } from './PostInsightsDialog';
+import { SaveToCollection } from './SaveToCollection';
 import { useDeletePost, useAuthStore } from '@/lib/hooks';
 import { usePinPost, useReactToPost } from '@/lib/social-hooks';
 import { postApi, type ReactionType } from '@/lib/api';
@@ -44,12 +51,16 @@ interface PostCardProps {
   post: any;
   // The post page opens with the thread showing; the feed keeps it folded.
   defaultShowComments?: boolean;
+  // Where the card is shown, for the author's insights: feed, profile, saved, post.
+  source?: string;
+  // Set when this card is the original inside someone's plain repost.
+  repostedBy?: string;
 }
 
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
-export default function PostCard({ post, defaultShowComments = false }: PostCardProps) {
+export default function PostCard({ post, defaultShowComments = false, source = 'feed', repostedBy }: PostCardProps) {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const react = useReactToPost();
@@ -61,6 +72,23 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
   const [reportOpen, setReportOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [collectionOpen, setCollectionOpen] = useState(false);
+  const impressionRef = useImpression(post.id, source);
+
+  // Reposts: the original this post points at, and whether this is a plain
+  // repost (no words of its own) that should render as the original.
+  const original = (post.repostOf ?? null) as RepostOriginal | null;
+  const isPlainRepost = Boolean(post.repostOfId) && !String(post.content ?? '').trim();
+  const selfAsOriginal: RepostOriginal = {
+    id: post.id,
+    content: String(post.content ?? ''),
+    type: post.type,
+    mediaUrls: post.mediaUrls,
+    createdAt: post.createdAt,
+    isSensitive: post.isSensitive,
+    author: post.author,
+  };
 
   // Editing in place: the readable form in the box, mentions kept resolvable.
   const [editing, setEditing] = useState(false);
@@ -220,8 +248,15 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
 
   if (hidden) return null;
 
+  // A plain repost is the original, with a line saying who reposted it, and
+  // the original's own live counts and buttons.
+  if (isPlainRepost && original) {
+    return <PostCard post={original} defaultShowComments={defaultShowComments} source={source} repostedBy={authorName} />;
+  }
+
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div ref={impressionRef} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+      {repostedBy && <RepostedBy name={repostedBy} className="px-4 pt-3" />}
       {(post.isPinned || post.type === 'WIN') && (
         <div className="flex items-center gap-2 px-4 pt-3 text-[11px] font-semibold uppercase tracking-wide">
           {post.isPinned && (
@@ -299,6 +334,34 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
                 <Link2 size={16} />
                 Copy link
               </button>
+              {user && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowMenu(false);
+                    setCollectionOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <FolderPlus size={16} />
+                  {saved ? 'Move to collection' : 'Save to collection'}
+                </button>
+              )}
+              {isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowMenu(false);
+                    setInsightsOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <BarChart3 size={16} />
+                  View insights
+                </button>
+              )}
               {user && !isOwner && (
                 <button
                   type="button"
@@ -388,6 +451,9 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
           </div>
         )}
         {!editing && <LinkPreviewCard preview={post.linkPreview} className="mt-3" />}
+        {!editing && (original || post.repostUnavailable) && (
+          <RepostEmbed original={original} unavailable={Boolean(post.repostUnavailable)} className="mt-3" />
+        )}
       </div>
 
       {/* Media */}
@@ -452,6 +518,16 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
             isOwn={isOwner}
             onHidden={() => setHidden(true)}
           />
+          {isOwner && typeof post.impressionCount === 'number' && (
+            <button
+              type="button"
+              onClick={() => setInsightsOpen(true)}
+              className="hover:text-blue-600 hover:underline"
+              aria-label="View insights"
+            >
+              {formatCount(post.impressionCount)} {post.impressionCount === 1 ? 'view' : 'views'}
+            </button>
+          )}
           {Number(post.commentCount) > 0 && (
             <button
               type="button"
@@ -474,6 +550,13 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
           <MessageCircle size={20} />
           <span>Comment</span>
         </button>
+        <RepostButton
+          targetId={post.id}
+          original={selfAsOriginal}
+          isReposted={Boolean(post.isReposted)}
+          repostCount={Number(post.repostCount ?? 0)}
+          disabled={!user}
+        />
         <button
           onClick={handleShare}
           className="flex items-center gap-2 px-3 py-3 rounded-md transition-colors text-sm font-medium text-slate-500 hover:bg-slate-100"
@@ -499,6 +582,16 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
         <CommentSection postId={post.id} />
       )}
 
+      {isOwner && insightsOpen && <PostInsightsDialog postId={post.id} open onClose={() => setInsightsOpen(false)} />}
+      {user && collectionOpen && (
+        <SaveToCollection
+          postId={post.id}
+          currentCollectionId={post.collectionId ?? null}
+          open
+          onClose={() => setCollectionOpen(false)}
+          onFiled={() => setSaved(true)}
+        />
+      )}
       <ReportDialog
         open={reportOpen}
         onClose={() => setReportOpen(false)}

@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import {
   ArrowLeft,
   Ban,
+  BarChart3,
   BookOpen,
   Briefcase,
   Calendar,
@@ -22,6 +23,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Play,
+  Repeat2,
   UserPlus,
 } from 'lucide-react';
 import { useAuth, useFollow, useProfile, useUnfollow } from '@/lib/hooks';
@@ -39,6 +41,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ReportDialog } from '@/components/safety/ReportDialog';
+import { StoryHighlights } from '@/components/profile/StoryHighlights';
+import { originalAuthorName } from '@/components/community/RepostEmbed';
 
 /**
  * A member's public profile, built on what GET /users/:id actually returns.
@@ -104,6 +108,12 @@ type ProfilePost = {
   likeCount?: number;
   commentCount?: number;
   _count?: { likes?: number; comments?: number };
+  // Set on a repost or quote; the original is null once it is gone.
+  repostOfId?: string | null;
+  repostOf?: {
+    content: string;
+    author?: { displayName?: string | null; firstName?: string | null; lastName?: string | null } | null;
+  } | null;
 };
 
 type ProfileVideo = {
@@ -311,10 +321,16 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
 
               <div className="flex items-center gap-2">
                 {isOwnProfile ? (
-                  <Link href="/dashboard/settings/profile" className="btn-outline flex items-center gap-2 px-4 py-2">
-                    <Edit className="h-4 w-4" />
-                    <span>Edit profile</span>
-                  </Link>
+                  <>
+                    <Link href="/dashboard/insights" className="btn-outline flex items-center gap-2 px-4 py-2">
+                      <BarChart3 className="h-4 w-4" />
+                      <span>Insights</span>
+                    </Link>
+                    <Link href="/dashboard/settings/profile" className="btn-outline flex items-center gap-2 px-4 py-2">
+                      <Edit className="h-4 w-4" />
+                      <span>Edit profile</span>
+                    </Link>
+                  </>
                 ) : isAuthenticated ? (
                   <>
                     <button
@@ -400,6 +416,8 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
         </div>
       </section>
 
+      <StoryHighlights userId={userId} isOwn={isOwnProfile} displayName={name} avatar={profile.avatar ?? null} />
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {about && (
@@ -444,9 +462,25 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                     href={`/posts/${post.id}`}
                     className="block rounded-lg bg-slate-50 p-4 transition hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800"
                   >
-                    <p className="line-clamp-3 whitespace-pre-line text-slate-900 dark:text-white">
-                      {renderSocialText(post.content)}
-                    </p>
+                    {post.repostOfId ? (
+                      <>
+                        <p className="mb-1 flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                          <Repeat2 className="h-3.5 w-3.5" />
+                          {post.content.trim() ? 'Quoted' : 'Reposted'}
+                          {post.repostOf?.author ? ` from ${originalAuthorName(post.repostOf.author)}` : ''}
+                        </p>
+                        {post.content.trim() && (
+                          <p className="line-clamp-2 whitespace-pre-line text-slate-900 dark:text-white">{renderSocialText(post.content)}</p>
+                        )}
+                        <p className="line-clamp-2 whitespace-pre-line text-sm text-slate-600 dark:text-slate-300">
+                          {post.repostOf ? renderSocialText(post.repostOf.content) : 'The original post is no longer available.'}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="line-clamp-3 whitespace-pre-line text-slate-900 dark:text-white">
+                        {renderSocialText(post.content)}
+                      </p>
+                    )}
                     <div className="mt-2 flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
                       <span className="inline-flex items-center gap-1">
                         <Heart className="h-3.5 w-3.5" /> {post.likeCount ?? post._count?.likes ?? 0}

@@ -283,6 +283,21 @@ export const postApi = {
 
   getUserPosts: (userId: string) => api.get(`/posts/user/${userId}`),
 
+  // Reposts: as-is (idempotent) or with your own words.
+  repost: (id: string, content?: string) => api.post(`/posts/${id}/repost`, content ? { content } : {}),
+  unrepost: (id: string) => api.delete(`/posts/${id}/repost`),
+  getReposts: (id: string) => api.get(`/posts/${id}/reposts`),
+
+  // What was on screen, batched by the impression tracker.
+  recordImpressions: (data: { ids: string[]; source?: string; anonId?: string }) =>
+    api.post('/posts/impressions', data),
+  getInsights: (id: string) => api.get(`/posts/${id}/insights`),
+  getMyInsights: (days = 30) => api.get('/posts/me/insights', { params: { days } }),
+
+  // Saved-post folders.
+  saveTo: (id: string, collectionId: string | null) => api.patch(`/posts/${id}/save`, { collectionId }),
+  getSavedIn: (collectionId: string) => api.get('/posts/me/saved', { params: { collectionId } }),
+
   shareToFeed: (data: {
     title: string;
     url: string;
@@ -584,6 +599,25 @@ export const statusApi = {
   view: (id: string) => api.post(`/status/${id}/view`),
   viewers: (id: string) => api.get(`/status/${id}/viewers`),
   delete: (id: string) => api.delete(`/status/${id}`),
+};
+
+// Folders for saved posts.
+export const collectionApi = {
+  list: () => api.get('/posts/collections'),
+  create: (data: { name: string; description?: string }) => api.post('/posts/collections', data),
+  update: (id: string, data: { name?: string; description?: string }) => api.patch(`/posts/collections/${id}`, data),
+  remove: (id: string) => api.delete(`/posts/collections/${id}`),
+};
+
+// Stories kept on a profile after their 24 hours.
+export const highlightApi = {
+  archive: () => api.get('/status/highlights/archive'),
+  forUser: (userId: string) => api.get(`/status/highlights/user/${userId}`),
+  create: (data: { title: string; statusIds: string[] }) => api.post('/status/highlights', data),
+  update: (id: string, data: { title?: string; coverUrl?: string | null }) => api.patch(`/status/highlights/${id}`, data),
+  remove: (id: string) => api.delete(`/status/highlights/${id}`),
+  addItem: (id: string, statusId: string) => api.post(`/status/highlights/${id}/items`, { statusId }),
+  removeItem: (id: string, itemId: string) => api.delete(`/status/highlights/${id}/items/${itemId}`),
 };
 
 // The composer's @ autocomplete.
