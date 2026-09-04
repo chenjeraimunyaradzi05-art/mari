@@ -19,6 +19,7 @@ import {
 import { assertContentAllowed } from '../services/moderation.service';
 import { isBlockedRelationship } from '../utils/safety-store';
 import { canOpenConversation } from '../services/message-permissions.service';
+import { conversationLimiter } from '../middleware/socialLimits';
 import {
   conversationTtl,
   expiryFor,
@@ -245,6 +246,7 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
 router.post(
   '/conversations',
   authenticate,
+  conversationLimiter,
   [body('userId').isString().notEmpty().withMessage('Target user ID is required')],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {

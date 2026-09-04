@@ -32,6 +32,7 @@ import { resolveMentionedUserIds } from '../utils/mentions';
 import { authorAudienceWhere, canViewAuthor } from '../services/audience.service';
 import { mutedWordMatcher } from '../utils/muted-words';
 import { emitToUserRoom, isUserOnline } from '../services/socket.service';
+import { commentLimiter, postLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -417,6 +418,7 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 router.post(
   '/',
   authenticate,
+  postLimiter,
   [
     body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.post }),
     body('type').optional().isIn(POST_TYPES),
@@ -879,6 +881,7 @@ router.delete('/:id/like', authenticate, async (req: AuthRequest, res, next) => 
 router.post(
   '/:id/comments',
   authenticate,
+  commentLimiter,
   [
     body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.comment }),
     body('parentId').optional().isString().isLength({ max: 100 }),

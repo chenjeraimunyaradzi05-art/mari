@@ -18,6 +18,7 @@
 import { NotificationType } from '@prisma/client';
 import { prisma } from './prisma';
 import { logger } from './logger';
+import { memberWantsSocialNotification } from '../services/notification-preferences.service';
 
 export async function actorDisplayName(userId: string): Promise<string> {
   const user = await prisma.user.findUnique({
@@ -43,6 +44,9 @@ export async function notifySocial(input: SocialNotificationInput): Promise<void
 
   try {
     const name = await actorDisplayName(input.actorId);
+
+    // The recipient may have switched this kind off.
+    if (!(await memberWantsSocialNotification(input.recipientId, input.type))) return;
     await prisma.notification.create({
       data: {
         userId: input.recipientId,

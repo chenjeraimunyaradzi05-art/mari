@@ -19,7 +19,9 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { reactionLimiter } from '../middleware/socialLimits';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
@@ -60,6 +62,7 @@ async function loadVisiblePost(id: string, viewerId: string) {
 router.post(
   '/:id/react',
   authenticate,
+  reactionLimiter,
   [body('type').isString()],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -444,6 +447,116 @@ router.patch('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
     }
 
     res.json({ success: true, message: collectionId ? 'Saved to collection' : 'Moved to Unsorted', data: { collectionId } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// DRAFTS
+// ===========================================
+// What a member is writing, saved as they type and kept across devices until
+// it is published or thrown away.
+
+const MAX_DRAFTS = 25;
+const DRAFT_KINDS = new Set(['TEXT', 'POLL', 'WIN']);
+
+function draftView(row: {
+  id: string;
+  kind: string;
+  content: string;
+  mediaUrls: unknown;
+  mediaAlt: unknown;
+  poll: unknown;
+  isPublic: boolean;
+  isSensitive: boolean;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    content: row.content,
+    mediaUrls: Array.isArray(row.mediaUrls) ? row.mediaUrls : [],
+    mediaAlt: Array.isArray(row.mediaAlt) ? row.mediaAlt : [],
+    poll: row.poll ?? null,
+    isPublic: row.isPublic,
+    isSensitive: row.isSensitive,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function draftData(body: Record<string, unknown>) {
+  const kind = typeof body.kind === 'string' && DRAFT_KINDS.has(body.kind) ? body.kind : 'TEXT';
+  const content = typeof body.content === 'string' ? body.content.slice(0, 5000) : '';
+  const mediaUrls = Array.isArray(body.mediaUrls) ? body.mediaUrls.filter((u) => typeof u === 'string').slice(0, 10) : [];
+  const mediaAlt = Array.isArray(body.mediaAlt) ? body.mediaAlt.filter((a) => typeof a === 'string').slice(0, 10) : [];
+  const poll = body.poll && typeof body.poll === 'object' ? (body.poll as Prisma.InputJsonValue) : Prisma.JsonNull;
+  return {
+    kind,
+    content,
+    mediaUrls: mediaUrls as Prisma.InputJsonValue,
+    mediaAlt: mediaAlt as Prisma.InputJsonValue,
+    poll,
+    isPublic: body.isPublic !== false,
+    isSensitive: body.isSensitive === true,
+  };
+}
+
+router.get('/me/drafts', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const rows = await prisma.postDraft.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { updatedAt: 'desc' },
+      take: MAX_DRAFTS,
+    });
+    res.json({ success: true, data: rows.map(draftView) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Creates a draft, or updates one by id. An empty draft is not kept.
+router.put('/me/drafts', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const data = draftData(body);
+    const id = typeof body.id === 'string' && body.id ? body.id : null;
+    const empty = !data.content.trim() && (data.mediaUrls as unknown[]).length === 0;
+
+    if (id) {
+      const existing = await prisma.postDraft.findUnique({ where: { id }, select: { userId: true } });
+      if (!existing || existing.userId !== req.user!.id) {
+        throw new ApiError(404, 'Draft not found');
+      }
+      if (empty) {
+        await prisma.postDraft.delete({ where: { id } });
+        res.json({ success: true, data: null });
+        return;
+      }
+      const updated = await prisma.postDraft.update({ where: { id }, data });
+      res.json({ success: true, data: draftView(updated) });
+      return;
+    }
+
+    if (empty) {
+      res.json({ success: true, data: null });
+      return;
+    }
+    const count = await prisma.postDraft.count({ where: { userId: req.user!.id } });
+    if (count >= MAX_DRAFTS) {
+      throw new ApiError(400, `You can keep up to ${MAX_DRAFTS} drafts`);
+    }
+    const created = await prisma.postDraft.create({ data: { userId: req.user!.id, ...data } });
+    res.status(201).json({ success: true, data: draftView(created) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/me/drafts/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    await prisma.postDraft.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
+    res.json({ success: true, message: 'Draft discarded' });
   } catch (error) {
     next(error);
   }

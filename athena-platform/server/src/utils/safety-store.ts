@@ -100,7 +100,36 @@ export async function blockUser(userId: string, blockedUserId: string): Promise<
     });
   }
 
+  await severTies(userId, blockedUserId);
+
   return { created: true };
+}
+
+/**
+ * Blocking ends the relationship in both directions: neither follows the
+ * other, no follow request stays pending, and neither is on the other's
+ * close-friends list. Best-effort, so a failure here never undoes the block.
+ */
+export async function severTies(userId: string, otherUserId: string): Promise<void> {
+  const pair = [
+    { a: userId, b: otherUserId },
+    { a: otherUserId, b: userId },
+  ];
+  try {
+    await Promise.all([
+      prisma.follow.deleteMany({
+        where: { OR: pair.map(({ a, b }) => ({ followerId: a, followingId: b })) },
+      }),
+      prisma.followRequest.deleteMany({
+        where: { OR: pair.map(({ a, b }) => ({ requesterId: a, targetId: b })) },
+      }),
+      prisma.closeFriend.deleteMany({
+        where: { OR: pair.map(({ a, b }) => ({ userId: a, friendId: b })) },
+      }),
+    ]);
+  } catch {
+    // The block itself is already recorded; the rest is hygiene.
+  }
 }
 
 export async function unblockUser(userId: string, blockedUserId: string): Promise<void> {

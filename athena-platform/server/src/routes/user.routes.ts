@@ -16,6 +16,7 @@ import { parsePagination } from '../utils/pagination';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { getBlockedRelationshipIds } from '../utils/safety-store';
 import { approvesFollowers, profileAccess } from '../services/audience.service';
+import { followLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -1311,7 +1312,7 @@ router.post(
 // ===========================================
 // FOLLOW USER
 // ===========================================
-router.post('/:id/follow', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/:id/follow', authenticate, followLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
 

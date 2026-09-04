@@ -7,10 +7,12 @@ import { handleUserBlock, handleUserReport } from '../services/safety-score.serv
 import { recordSafetyReport, recordUserBlock } from '../services/trust.service';
 import { prisma } from '../utils/prisma';
 import { blockUser, listBlockedUsers, unblockUser } from '../utils/safety-store';
+import { reviewReportedContent } from '../services/moderation-threshold.service';
+import { reportLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
-type ReportTargetType = 'post' | 'video' | 'user' | 'message' | 'channel' | 'other';
+type ReportTargetType = 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel' | 'other';
 
 // ContentReport speaks the moderation queue's vocabulary; the Safety Center
 // speaks the reporter's. Translate on the way out so a reporter still sees
@@ -42,6 +44,10 @@ async function resolveReportedUserId(
     case 'post': {
       const post = await prisma.post.findUnique({ where: { id: targetId }, select: { authorId: true } });
       return post?.authorId ?? null;
+    }
+    case 'comment': {
+      const comment = await prisma.comment.findUnique({ where: { id: targetId }, select: { authorId: true } });
+      return comment?.authorId ?? null;
     }
     case 'video': {
       const video = await prisma.video.findUnique({ where: { id: targetId }, select: { authorId: true } });
@@ -115,8 +121,9 @@ router.get('/reports', authenticate, async (req: AuthRequest, res: Response, nex
 router.post(
   '/reports',
   authenticate,
+  reportLimiter,
   [
-    body('targetType').notEmpty().isIn(['post', 'video', 'user', 'message', 'channel', 'other']),
+    body('targetType').notEmpty().isIn(['post', 'comment', 'video', 'user', 'message', 'channel', 'other']),
     body('reason').notEmpty().isString(),
     body('targetId').optional().isString(),
     body('details').optional().isString(),
@@ -156,6 +163,12 @@ router.post(
           data: { reportCount: { increment: 1 } },
         });
       }
+      if (targetType === 'comment' && targetId) {
+        await prisma.comment.update({
+          where: { id: targetId },
+          data: { reportCount: { increment: 1 } },
+        });
+      }
 
       const report = await prisma.contentReport.create({
         data: {
@@ -171,6 +184,10 @@ router.post(
 
       await recordSafetyReport(req.user!.id, reportedUserId);
       await handleUserReport(reportedUserId, req.user!.id, reason, targetId, targetType);
+      // Enough different reporters take the content down while it is reviewed.
+      if ((targetType === 'post' || targetType === 'comment' || targetType === 'video') && targetId) {
+        await reviewReportedContent(targetType, targetId);
+      }
 
       res.status(201).json({
         success: true,

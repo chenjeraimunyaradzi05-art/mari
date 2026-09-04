@@ -22,6 +22,7 @@ import { CONTENT_LIMITS, normalizeOptionalUserText } from '../utils/contentSafet
 import { resolveMentionedUserIds } from '../utils/mentions';
 import { decoratePosts, REPOST_OF_INCLUDE } from '../services/post-decoration.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
+import { repostLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -54,7 +55,7 @@ async function loadRepostTarget(id: string, viewerId: string, depth = 0): Promis
   return post;
 }
 
-router.post('/:id/repost', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/:id/repost', authenticate, repostLimiter, async (req: AuthRequest, res, next) => {
   try {
     const viewerId = req.user!.id;
     const original = await loadRepostTarget(req.params.id, viewerId);

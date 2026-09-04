@@ -22,12 +22,18 @@ type NotificationPreferencesFull = {
   };
   inApp: {
     all: boolean;
+    // The social kinds, each switchable on its own once "all" is on.
+    likes: boolean;
+    comments: boolean;
+    follows: boolean;
+    reposts: boolean;
+    mentions: boolean;
   };
 };
 
 type NotificationPreferences = Partial<NotificationPreferencesFull>;
 
-const defaultNotificationPreferences: NotificationPreferencesFull = {
+export const defaultNotificationPreferences: NotificationPreferencesFull = {
   email: {
     jobMatches: true,
     applications: true,
@@ -43,6 +49,11 @@ const defaultNotificationPreferences: NotificationPreferencesFull = {
   },
   inApp: {
     all: true,
+    likes: true,
+    comments: true,
+    follows: true,
+    reposts: true,
+    mentions: true,
   },
 };
 
@@ -72,7 +83,7 @@ function validatePreferences(input: unknown): NotificationPreferences {
 
   const email = coerceSection(input.email, ['jobMatches', 'applications', 'messages', 'mentions', 'newsletter']);
   const push = coerceSection(input.push, ['jobMatches', 'applications', 'messages', 'mentions']);
-  const inApp = coerceSection(input.inApp, ['all']);
+  const inApp = coerceSection(input.inApp, ['all', 'likes', 'comments', 'follows', 'reposts', 'mentions']);
 
   if (email) result.email = email as NotificationPreferencesFull['email'];
   if (push) result.push = push as NotificationPreferencesFull['push'];
