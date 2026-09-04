@@ -684,6 +684,8 @@ model User {
   storyHighlights      StoryHighlight[]
   followRequestsSent     FollowRequest[] @relation("FollowRequestsSent")
   followRequestsReceived FollowRequest[] @relation("FollowRequestsReceived")
+  closeFriends           CloseFriend[]   @relation("CloseFriendsOwner")
+  closeFriendOf          CloseFriend[]   @relation("CloseFriendsMember")
 
   // Gamification
   xp                   Int               @default(0)
@@ -2086,6 +2088,8 @@ model Status {
   type     StatusType @default(IMAGE)
   mediaUrl String
   caption  String?
+  // Everyone, or only the author's close friends.
+  audience StatusAudience @default(EVERYONE)
   // Distinct viewers; each is also a StatusView row so a story can be marked
   // seen for the person who saw it.
   viewCount Int @default(0)
@@ -2098,6 +2102,25 @@ model Status {
   @@index([userId])
   @@index([expiresAt])
   @@index([createdAt])
+}
+
+enum StatusAudience {
+  EVERYONE
+  CLOSE_FRIENDS
+}
+
+// The short list a member shares close-friends stories with. One-directional:
+// being on someone's list says nothing about yours.
+model CloseFriend {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("CloseFriendsOwner", fields: [userId], references: [id], onDelete: Cascade)
+  friendId  String
+  friend    User     @relation("CloseFriendsMember", fields: [friendId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, friendId])
+  @@index([friendId])
 }
 
 model StatusView {
