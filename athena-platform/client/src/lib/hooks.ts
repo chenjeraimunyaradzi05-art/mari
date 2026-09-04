@@ -962,6 +962,18 @@ export function useMarkNotificationRead() {
   });
 }
 
+// A grouped row folds several notifications; reading it reads all of them.
+export function useMarkNotificationsRead() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: notificationApi.markManyRead,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
 export function useMarkAllNotificationsRead() {
   const queryClient = useQueryClient();
 

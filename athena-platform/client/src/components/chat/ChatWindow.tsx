@@ -78,6 +78,9 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
     applyReaction,
     setActiveConversation,
     markConversationAsRead,
+    drafts,
+    setDraft,
+    clearDraft,
   } = useChatStore();
 
   const [newMessage, setNewMessage] = useState('');
@@ -88,8 +91,11 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
   // the sender can add to it before sending.
   const searchParams = useSearchParams();
   const prefill = searchParams?.get('text') ?? '';
+  // An unsent draft survives switching threads: restored on open, kept in the
+  // store on every keystroke, cleared once it is sent.
   useEffect(() => {
-    if (prefill) setNewMessage((current) => current || prefill);
+    const saved = drafts[conversationId] ?? '';
+    setNewMessage(prefill || saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill, conversationId]);
   const [replyTo, setReplyTo] = useState<StoreMessage | null>(null);
@@ -175,6 +181,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
 
   const handleTyping = (value: string) => {
     setNewMessage(value);
+    setDraft(conversationId, value);
     if (!counterpartId) return;
 
     if (!value.trim()) {
@@ -224,6 +231,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
       }
 
       setNewMessage('');
+      clearDraft(conversationId);
       setAttachments([]);
       setReplyTo(null);
       stopTyping();

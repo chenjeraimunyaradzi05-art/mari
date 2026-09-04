@@ -591,6 +591,11 @@ export const mentionApi = {
   suggest: (q: string) => api.get('/users/suggest', { params: { q } }),
 };
 
+// People you may know, each with the reason they are suggested.
+export const peopleApi = {
+  suggested: (limit = 6) => api.get('/users/suggested', { params: { limit } }),
+};
+
 // Topics: hashtags as places, with follow state the ranked feed honours.
 export const topicApi = {
   trending: (params?: { days?: number; limit?: number }) => api.get('/topics/trending', { params }),
@@ -633,6 +638,9 @@ export const notificationApi = {
     api.get('/notifications', { params }),
 
   markRead: (id: string) => api.patch(`/notifications/${id}/read`),
+
+  // A grouped row ("Mei and 3 others reacted") carries every id it folded.
+  markManyRead: (ids: string[]) => api.patch('/notifications/read-many', { ids }),
 
   markAllRead: () => api.patch('/notifications/read-all'),
 

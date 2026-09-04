@@ -30,6 +30,7 @@ import { ReactionButton, ReactionSummary, type ReactionCounts } from '@/componen
 import { PollCard, type PollResults } from '@/components/community/PollCard';
 import { WhyThis } from '@/components/community/WhyThis';
 import { SensitiveGate } from '@/components/community/SensitiveGate';
+import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPreviewCard';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
 
 type FeedAuthor = {
@@ -57,6 +58,7 @@ type FeedPost = {
   poll?: PollResults | null;
   reasons?: string[];
   isSensitive?: boolean;
+  linkPreview?: LinkPreview | null;
   author: FeedAuthor;
 };
 
@@ -320,6 +322,8 @@ function PostCard({
           <PollCard postId={post.id} poll={post.poll} canVote={isAuthenticated} compact />
         </div>
       )}
+
+      <LinkPreviewCard preview={post.linkPreview} className="mt-3" />
 
       {/* The caption sits inside the gate too, so a sensitive post shows
           nothing of itself until asked; the actions stay usable. */}

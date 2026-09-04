@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { cn } from '@/lib/utils';
 
 export type Story = {
   id: string;
@@ -39,12 +40,17 @@ interface StoryViewerProps {
   /** Called when the viewer asks who watched one of their own stories. */
   onViewers?: (story: Story) => void;
   onDelete?: (story: Story) => void;
+  /** A one-tap emoji reaction, delivered to the author as a message. */
+  onReact?: (story: Story, emoji: string) => void;
 }
+
+const QUICK_REACTIONS = ['❤️', '🔥', '👏', '😂', '😮', '💪'];
 
 const IMAGE_DURATION_MS = 5000;
 const TICK_MS = 50;
 
-export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, onView, onViewers, onDelete }: StoryViewerProps) {
+export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, onView, onViewers, onDelete, onReact }: StoryViewerProps) {
+  const [reacted, setReacted] = useState<Record<string, string>>({});
   const [bucketIndex, setBucketIndex] = useState(initialBucket);
   const [storyIndex, setStoryIndex] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -265,12 +271,35 @@ export function StoryViewer({ buckets, initialBucket, onClose, currentUserId, on
               {story.viewCount ?? 0} {story.viewCount === 1 ? 'view' : 'views'}
             </button>
           ) : currentUserId ? (
-            <Link
-              href={replyHref}
-              className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/40 px-4 py-1.5 text-sm text-white hover:bg-white/10"
-            >
-              <MessageCircle className="h-4 w-4" /> Reply to {bucket.user.displayName.split(' ')[0]}
-            </Link>
+            <>
+              {onReact && (
+                <div className="flex items-center justify-center gap-2" aria-label="Quick reactions">
+                  {QUICK_REACTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => {
+                        setReacted((current) => ({ ...current, [story.id]: emoji }));
+                        onReact(story, emoji);
+                      }}
+                      aria-label={`React ${emoji}`}
+                      className={cn(
+                        'h-9 w-9 rounded-full text-lg leading-none transition-transform hover:scale-125',
+                        reacted[story.id] === emoji ? 'bg-white/30 scale-110' : 'bg-white/10'
+                      )}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Link
+                href={replyHref}
+                className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/40 px-4 py-1.5 text-sm text-white hover:bg-white/10"
+              >
+                <MessageCircle className="h-4 w-4" /> Reply to {bucket.user.displayName.split(' ')[0]}
+              </Link>
+            </>
           ) : null}
         </footer>
       </div>

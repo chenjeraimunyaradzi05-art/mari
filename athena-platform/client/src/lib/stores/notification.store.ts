@@ -26,6 +26,9 @@ export interface Notification {
   actionUrl?: string;
   isRead: boolean;
   createdAt: string;
+  // A grouped row folds several rows: every id, so all can be marked read.
+  ids?: string[];
+  count?: number;
   // Actor info for social notifications
   actorId?: string;
   actorName?: string;

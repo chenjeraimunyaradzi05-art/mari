@@ -20,7 +20,13 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotificationStore, Notification as StoreNotification } from '@/lib/stores/notification.store';
-import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, useDeleteNotification } from '@/lib/hooks';
+import {
+  useNotifications,
+  useMarkNotificationRead,
+  useMarkNotificationsRead,
+  useMarkAllNotificationsRead,
+  useDeleteNotification,
+} from '@/lib/hooks';
 
 const notificationIcons: Record<StoreNotification['type'], React.ElementType> = {
   JOB_MATCH: Briefcase,
@@ -56,6 +62,7 @@ export default function NotificationDropdown() {
   const { notifications, unreadCount, isOpen, setNotifications, markAsRead, markAllAsRead, setPanelOpen, togglePanel, removeNotification } = useNotificationStore();
   const { data: apiNotifications } = useNotifications({ limit: 50 });
   const markRead = useMarkNotificationRead();
+  const markManyRead = useMarkNotificationsRead();
   const markAllRead = useMarkAllNotificationsRead();
   const deleteNotification = useDeleteNotification();
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -88,6 +95,8 @@ export default function NotificationDropdown() {
           link: n.link || undefined,
           isRead: typeof n.isRead === 'boolean' ? n.isRead : Boolean(n.readAt),
           createdAt: n.createdAt,
+          ids: Array.isArray(n.ids) ? n.ids : undefined,
+          count: typeof n.count === 'number' ? n.count : undefined,
         };
       });
       setNotifications(mapped);
@@ -178,7 +187,11 @@ export default function NotificationDropdown() {
                         href={notification.link || '#'}
                         onClick={() => {
                           markAsRead(notification.id);
-                          markRead.mutate(notification.id);
+                          if (notification.ids && notification.ids.length > 1) {
+                            markManyRead.mutate(notification.ids);
+                          } else {
+                            markRead.mutate(notification.id);
+                          }
                           setPanelOpen(false);
                         }}
                         className="flex items-start space-x-3"
@@ -216,7 +229,11 @@ export default function NotificationDropdown() {
                             onClick={(e) => {
                               e.stopPropagation();
                               markAsRead(notification.id);
-                              markRead.mutate(notification.id);
+                              if (notification.ids && notification.ids.length > 1) {
+                                markManyRead.mutate(notification.ids);
+                              } else {
+                                markRead.mutate(notification.id);
+                              }
                             }}
                             className="p-1 text-slate-400 hover:text-primary-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                             title="Mark as read"

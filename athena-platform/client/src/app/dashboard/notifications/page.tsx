@@ -22,6 +22,7 @@ import {
 import {
   useNotifications,
   useMarkNotificationRead,
+  useMarkNotificationsRead,
   useMarkAllNotificationsRead,
   useDeleteNotification,
 } from '@/lib/hooks';
@@ -49,6 +50,8 @@ interface NotificationItem {
   isRead: boolean;
   createdAt: string;
   link?: string;
+  // Every notification this row stands for; more than one when grouped.
+  ids?: string[];
 }
 
 const notificationIcons: Record<NotificationType, React.ElementType> = {
@@ -103,6 +106,7 @@ function normalizeType(rawType: unknown): NotificationType {
 export default function NotificationsPage() {
   const { data, isLoading } = useNotifications({ limit: 100 });
   const markRead = useMarkNotificationRead();
+  const markManyRead = useMarkNotificationsRead();
   const markAllRead = useMarkAllNotificationsRead();
   const deleteNotification = useDeleteNotification();
 
@@ -126,6 +130,7 @@ export default function NotificationsPage() {
         : Boolean(notification.readAt),
     createdAt: notification.createdAt,
     link: notification.link || undefined,
+    ids: Array.isArray(notification.ids) ? (notification.ids as string[]) : [notification.id],
   }));
 
   const unreadCount = notifications.filter((notification) => !notification.isRead).length;
@@ -165,8 +170,12 @@ export default function NotificationsPage() {
     setSelectedIds(filteredNotifications.map((notification) => notification.id));
   };
 
+  // Rows may be groups; read every id each one folds.
+  const idsBehind = (rowIds: string[]) =>
+    notifications.filter((n) => rowIds.includes(n.id)).flatMap((n) => n.ids ?? [n.id]);
+
   const markSelectedAsRead = async () => {
-    await Promise.all(selectedIds.map((id) => markRead.mutateAsync(id)));
+    await markManyRead.mutateAsync(idsBehind(selectedIds));
     setSelectedIds([]);
   };
 
@@ -181,7 +190,9 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAsRead = (id: string) => {
-    markRead.mutate(id);
+    const ids = idsBehind([id]);
+    if (ids.length > 1) markManyRead.mutate(ids);
+    else markRead.mutate(id);
   };
 
   const handleDelete = (id: string) => {

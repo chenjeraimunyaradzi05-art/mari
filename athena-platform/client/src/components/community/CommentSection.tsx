@@ -47,6 +47,7 @@ export default function CommentSection({ postId }: CommentSectionProps) {
   const [content, setContent] = useState('');
   const [picks, setPicks] = useState<MentionPick[]>([]);
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
+  const [sort, setSort] = useState<'top' | 'newest'>('top');
   // Optimistic like state per comment, keyed by id, on top of what the API said.
   const [likes, setLikes] = useState<Record<string, { liked: boolean; count: number }>>({});
 
@@ -134,7 +135,13 @@ export default function CommentSection({ postId }: CommentSectionProps) {
     return roots;
   };
 
-  const threadedComments = buildThread(comments);
+  const likesOf = (comment: PostComment) =>
+    likes[comment.id]?.count ?? comment.likeCount ?? 0;
+  const threadedComments = buildThread(comments).sort((a, b) => {
+    if (sort === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    const byLikes = likesOf(b) - likesOf(a);
+    return byLikes !== 0 ? byLikes : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
 
   const CommentItem = ({ comment, depth = 0 }: { comment: PostComment; depth?: number }) => {
     const state = likeStateOf(comment);
@@ -231,6 +238,26 @@ export default function CommentSection({ postId }: CommentSectionProps) {
             </button>
           </div>
         </form>
+      )}
+
+      {threadedComments.length > 1 && (
+        <div className="flex items-center gap-1 text-xs" role="tablist" aria-label="Sort comments">
+          {(['top', 'newest'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={sort === option}
+              onClick={() => setSort(option)}
+              className={cn(
+                'rounded-full px-2.5 py-1 font-medium',
+                sort === option ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+              )}
+            >
+              {option === 'top' ? 'Top' : 'Newest'}
+            </button>
+          ))}
+        </div>
       )}
 
       {/* List */}

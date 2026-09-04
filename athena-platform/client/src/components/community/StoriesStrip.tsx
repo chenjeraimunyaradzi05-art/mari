@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useStatusFeed, useCreateStatus } from '@/lib/hooks';
-import { mediaApi, statusApi } from '@/lib/api';
+import { mediaApi, messageApi, statusApi } from '@/lib/api';
 import { StoryViewer, type Story, type StoryBucket } from './StoryViewer';
 
 /**
@@ -76,6 +76,23 @@ export default function StoriesStrip() {
       setViewers({ story, list: Array.isArray(res.data?.data?.viewers) ? res.data.data.viewers : [] });
     } catch {
       toast.error('Could not load who watched');
+    }
+  };
+
+  // A quick reaction lands in the author's inbox as a short message, the way
+  // story reactions do everywhere else, so nothing new has to be checked.
+  const reactToStory = async (story: Story, emoji: string) => {
+    const owner = buckets.find((b) => b.stories.some((s) => s.id === story.id))?.user;
+    if (!owner) return;
+    try {
+      const conversation = await messageApi.startConversation(owner.id);
+      const conversationId = conversation.data?.data?.id ?? conversation.data?.id;
+      if (!conversationId) throw new Error('No conversation');
+      const caption = story.caption ? ` "${story.caption.slice(0, 60)}"` : '';
+      await messageApi.send(conversationId, `${emoji} Reacted to your story${caption}`);
+      toast.success(`Sent ${emoji} to ${owner.displayName.split(' ')[0]}`);
+    } catch {
+      toast.error('Could not send the reaction');
     }
   };
 
@@ -218,6 +235,7 @@ export default function StoriesStrip() {
           onView={markViewed}
           onViewers={(story) => void showViewers(story)}
           onDelete={(story) => void deleteStory(story)}
+          onReact={(story, emoji) => void reactToStory(story, emoji)}
         />
       )}
 

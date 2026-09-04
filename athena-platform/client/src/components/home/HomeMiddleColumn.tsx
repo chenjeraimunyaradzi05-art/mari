@@ -13,6 +13,7 @@ import { ReelTopicCircles } from './ReelTopicCircles';
 import { JobSpotlight } from './JobSpotlight';
 import { LearningRail, CommunityRail } from './HomeContentRails';
 import { PlatformDirectory } from './PlatformDirectory';
+import { SuggestedPeople } from '@/components/community/SuggestedPeople';
 
 /**
  * A paid placement. The advertiser pitch that used to live here has moved to
@@ -104,6 +105,10 @@ export function HomeMiddleColumn() {
       <LearningRail />
 
       <CommunityRail />
+
+      {/* Members worth following, with the reason each is here. Renders
+          nothing for a visitor. */}
+      <SuggestedPeople limit={5} />
 
       {/* Reels rail keeps short video in the marketing flow too. */}
       <HomeReelsRail compact />

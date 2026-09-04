@@ -22,6 +22,7 @@ import Feed from '@/components/community/Feed';
 import CreatePostWidget from '@/components/community/CreatePostWidget';
 import AchievementsPanel from '@/components/community/AchievementsPanel';
 import StoriesStrip from '@/components/community/StoriesStrip';
+import { SuggestedPeople } from '@/components/community/SuggestedPeople';
 
 const tabs = [
   { id: 'for-you', name: 'For You', icon: TrendingUp },
@@ -340,6 +341,8 @@ export default function CommunityPage() {
               </div>
             )}
           </div>
+
+          <SuggestedPeople limit={4} compact />
 
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">

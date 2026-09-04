@@ -35,6 +35,7 @@ import { ReactionButton, ReactionSummary, type ReactionCounts } from '@/componen
 import { PollCard, type PollResults } from '@/components/community/PollCard';
 import { WhyThis } from '@/components/community/WhyThis';
 import { SensitiveGate } from '@/components/community/SensitiveGate';
+import { LinkPreviewCard, type LinkPreview } from '@/components/community/LinkPreviewCard';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
@@ -79,6 +80,7 @@ interface Post {
   reasons?: string[];
   isPinned?: boolean;
   isSensitive?: boolean;
+  linkPreview?: LinkPreview | null;
   _count?: {
     likes: number;
     comments: number;
@@ -315,6 +317,8 @@ function PostCard({ post, currentUserId }: { post: Post; currentUserId?: string 
           <PollCard postId={post.id} poll={post.poll} canVote={Boolean(currentUserId)} />
         </div>
       )}
+
+      <LinkPreviewCard preview={post.linkPreview} className="mb-4" />
 
       {/* Media. The API returns mediaUrls: string[] alongside a post type; an
           earlier shape (post.media) never existed on the wire, so image posts

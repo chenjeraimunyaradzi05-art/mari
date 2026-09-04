@@ -10,6 +10,7 @@ import {
   Link2,
   MessageCircle,
   MoreHorizontal,
+  Pencil,
   Pin,
   Share2,
   Trash2,
@@ -19,12 +20,24 @@ import { usePinPost, useReactToPost } from '@/lib/social-hooks';
 import { postApi, type ReactionType } from '@/lib/api';
 import { Avatar } from '@/components/ui/avatar';
 import { renderSocialText } from '@/lib/social-text';
+import { MENTION_MARKUP, mentionsToPlainText, serializeMentions, type MentionPick } from '@/lib/mentions';
 import { ReportDialog } from '@/components/safety/ReportDialog';
 import { ReactionButton, ReactionSummary, type ReactionCounts } from './ReactionBar';
 import { PollCard } from './PollCard';
 import { WhyThis } from './WhyThis';
 import { SensitiveGate } from './SensitiveGate';
+import { LinkPreviewCard } from './LinkPreviewCard';
+import { MentionTextarea } from './MentionTextarea';
 import CommentSection from './CommentSection';
+
+// The mentions already in a post, so editing keeps them resolvable.
+function picksIn(content: string): MentionPick[] {
+  const picks: MentionPick[] = [];
+  for (const match of content.matchAll(MENTION_MARKUP)) {
+    if (!picks.some((p) => p.id === match[2])) picks.push({ name: match[1], id: match[2] });
+  }
+  return picks;
+}
 import toast from 'react-hot-toast';
 
 interface PostCardProps {
@@ -48,6 +61,43 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
   const [reportOpen, setReportOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Editing in place: the readable form in the box, mentions kept resolvable.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [picks, setPicks] = useState<MentionPick[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [content, setContent] = useState<string>(String(post.content ?? ''));
+  useEffect(() => {
+    setContent(String(post.content ?? ''));
+  }, [post.content, post.id]);
+  const wasEdited =
+    post.updatedAt && post.createdAt && new Date(post.updatedAt).getTime() - new Date(post.createdAt).getTime() > 60_000;
+
+  const startEditing = () => {
+    setShowMenu(false);
+    setDraft(mentionsToPlainText(content));
+    setPicks(picksIn(content));
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    const next = serializeMentions(draft.trim(), picks);
+    if (!next) return;
+    setSaving(true);
+    try {
+      await postApi.update(post.id, { content: next });
+      setContent(next);
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ['post'] });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      toast.success('Post updated');
+    } catch (error) {
+      toast.error(errorMessage(error) || 'Could not save the edit');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Reactions are optimistic: the emoji and the counts move at once and a
   // failed write puts both back. Seeded from the server on every refetch.
@@ -267,6 +317,17 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
                 <button
                   type="button"
                   role="menuitem"
+                  onClick={startEditing}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <Pencil size={16} />
+                  Edit
+                </button>
+              )}
+              {isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
                   onClick={togglePin}
                   disabled={pinPost.isPending}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
@@ -291,17 +352,42 @@ export default function PostCard({ post, defaultShowComments = false }: PostCard
         </div>
       </div>
 
-      <SensitiveGate active={Boolean(post.isSensitive)} className="mx-4 mb-2">
+      <SensitiveGate active={Boolean(post.isSensitive) && !editing} className="mx-4 mb-2">
       {/* Content */}
       <div className="px-4 pb-2">
-        <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
-          {renderSocialText(String(post.content ?? ''))}
-        </p>
+        {editing ? (
+          <div className="space-y-2">
+            <MentionTextarea
+              value={draft}
+              onChange={setDraft}
+              picks={picks}
+              onPicksChange={setPicks}
+              rows={4}
+              maxLength={5000}
+              onSubmitShortcut={() => void saveEdit()}
+              className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setEditing(false)} disabled={saving} className="btn-outline px-3 py-1.5 text-xs">
+                Cancel
+              </button>
+              <button type="button" onClick={() => void saveEdit()} disabled={saving || !draft.trim()} className="btn-primary px-3 py-1.5 text-xs">
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
+            {renderSocialText(content)}
+            {wasEdited && <span className="ml-1 text-xs text-slate-400">(edited)</span>}
+          </p>
+        )}
         {post.poll && (
           <div className="mt-3">
             <PollCard postId={post.id} poll={post.poll} canVote={Boolean(user)} />
           </div>
         )}
+        {!editing && <LinkPreviewCard preview={post.linkPreview} className="mt-3" />}
       </div>
 
       {/* Media */}

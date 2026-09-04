@@ -9,6 +9,9 @@ import { Loader2 } from 'lucide-react';
 import { useVideoFeedStore, VideoItem } from '@/lib/stores/video.store';
 import { useAuthStore } from '@/lib/store';
 import { Skeleton } from '@/components/ui/loading';
+import toast from 'react-hot-toast';
+import { ReportDialog } from '@/components/safety/ReportDialog';
+import { useSeeFewerFrom } from '@/lib/social-hooks';
 
 // Maps a Video row from GET /video/feed onto the store interface. The field names
 // here follow the Prisma model the endpoint returns (likeCount, author.displayName,
@@ -82,6 +85,8 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
   const [loadingLocal, setLoadingLocal] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  const [reportFor, setReportFor] = useState<string | null>(null);
+  const seeFewer = useSeeFewerFrom();
 
   // A ref, not `loadingLocal`, guards re-entry. Reading the state here would put
   // it in fetchVideos' dependency list, and because it flips on every call the
@@ -231,6 +236,26 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
     router.push(isAuthenticated ? `/dashboard/creator-studio?duet=${id}` : `/login?redirect=${encodeURIComponent(`/dashboard/creator-studio?duet=${id}`)}`);
   }, [router, isAuthenticated]);
 
+  const handleCopyLink = useCallback(async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/explore?video=${id}`);
+      toast.success('Link copied');
+    } catch {
+      toast.error('Could not copy the link');
+    }
+  }, []);
+
+  // Hiding a creator removes their reels from this session at once and from
+  // every ranked feed after the preference saves.
+  const handleSeeFewer = useCallback((authorId: string) => {
+    if (!isAuthenticated) {
+      router.push('/login?redirect=/explore');
+      return;
+    }
+    seeFewer.mutate(authorId);
+    setFeed(feed.filter((v) => v.creator.id !== authorId));
+  }, [isAuthenticated, router, seeFewer, setFeed, feed]);
+
   const handleView = useCallback((id: string, watchDuration: number, completionPct: number) => {
     addToHistory(id, completionPct / 100, completionPct >= 90);
     void videoApi
@@ -345,6 +370,9 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
             onAuthorClick={handleAuthorClick}
             onDuet={handleDuet}
             onView={handleView}
+            onCopyLink={handleCopyLink}
+            onSeeFewer={handleSeeFewer}
+            onReport={isAuthenticated ? setReportFor : undefined}
           />
         </div>
       ))}
@@ -361,6 +389,14 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
       creatorId={commentsVideo?.creator.id}
       onClose={() => setCommentsFor(null)}
       onCountChange={setCommentCount}
+    />
+
+    <ReportDialog
+      open={Boolean(reportFor)}
+      onClose={() => setReportFor(null)}
+      targetType="video"
+      targetId={reportFor ?? ''}
+      targetLabel="this reel"
     />
     </>
   );
