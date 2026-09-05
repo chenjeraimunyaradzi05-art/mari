@@ -21,6 +21,7 @@ import { mentorApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { Avatar } from '@/components/ui/avatar';
 import { cn, formatCurrency } from '@/lib/utils';
+import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 
 type Role = 'mentee' | 'mentor';
 type Status = 'REQUESTED' | 'CONFIRMED' | 'CANCELED' | 'COMPLETED';
@@ -33,6 +34,7 @@ type Session = {
   note: string | null;
   currency?: string;
   sessionAmount?: string | number;
+  paymentStatus?: 'PENDING' | 'AUTHORIZED' | 'CAPTURED' | 'REFUNDED' | 'FAILED' | 'CANCELED';
   mentee?: { id: string; displayName: string | null; avatar: string | null };
   mentorProfile?: { id: string; user: { id: string; displayName: string | null; avatar: string | null } };
 };
@@ -46,6 +48,15 @@ const STATUS: Record<Status, { label: string; className: string }> = {
 
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+
+const PAYMENT: Record<string, string> = {
+  PENDING: 'Payment not authorised yet',
+  AUTHORIZED: 'Payment held on your card',
+  CAPTURED: 'Paid',
+  REFUNDED: 'Refunded',
+  FAILED: 'Payment failed',
+  CANCELED: 'Payment released',
+};
 
 function counterpartOf(session: Session, role: Role) {
   const person = role === 'mentee' ? session.mentorProfile?.user : session.mentee;
@@ -67,6 +78,7 @@ export default function MentorSessionsPage() {
   const [role, setRole] = useState<Role>('mentee');
   const [rescheduling, setRescheduling] = useState<string | null>(null);
   const [newTime, setNewTime] = useState('');
+  const [paying, setPaying] = useState<{ sessionId: string; clientSecret: string; amount: number } | null>(null);
   const highlightRef = useRef<HTMLLIElement | null>(null);
 
   const profile = useQuery({
@@ -109,6 +121,20 @@ export default function MentorSessionsPage() {
       toast.success(status === 'CONFIRMED' ? 'Session confirmed' : status === 'COMPLETED' ? 'Session marked complete' : 'Session cancelled');
     },
     onError: (error) => toast.error(errorMessage(error) || 'Could not update the session'),
+  });
+
+  const startPayment = useMutation({
+    mutationFn: (sessionId: string) => mentorApi.paymentIntent(sessionId),
+    onSuccess: (response, sessionId) => {
+      const data = response.data?.data ?? {};
+      if (!data.clientSecret) {
+        toast.success(PAYMENT[data.paymentStatus] ?? 'Nothing to pay right now');
+        refresh();
+        return;
+      }
+      setPaying({ sessionId, clientSecret: data.clientSecret, amount: Number(data.amount ?? 0) });
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not start the payment'),
   });
 
   const reschedule = useMutation({
@@ -178,6 +204,28 @@ export default function MentorSessionsPage() {
 
         {session.note && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">{session.note}</p>}
 
+        {session.paymentStatus && amount !== null && amount > 0 && (
+          <p className={cn('text-xs', session.paymentStatus === 'PENDING' && open ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500')}>
+            {PAYMENT[session.paymentStatus] ?? session.paymentStatus}
+          </p>
+        )}
+
+        {paying?.sessionId === session.id && (
+          <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <PaymentIntentForm
+              clientSecret={paying.clientSecret}
+              amountLabel={formatCurrency(paying.amount)}
+              onAuthorised={() => {
+                setPaying(null);
+                refresh();
+                toast.success('Payment authorised. It is charged when the session is completed.');
+              }}
+              onSkip={() => setPaying(null)}
+              skipLabel="Not now"
+            />
+          </div>
+        )}
+
         {open && (
           <div className="flex flex-wrap items-center gap-2">
             {role === 'mentor' && session.status === 'REQUESTED' && (
@@ -203,6 +251,16 @@ export default function MentorSessionsPage() {
                 className="btn-primary px-3 py-1.5 text-sm"
               >
                 Mark complete
+              </button>
+            )}
+            {role === 'mentee' && session.paymentStatus === 'PENDING' && amount !== null && amount > 0 && paying?.sessionId !== session.id && (
+              <button
+                type="button"
+                onClick={() => startPayment.mutate(session.id)}
+                disabled={startPayment.isPending}
+                className="btn-primary px-3 py-1.5 text-sm"
+              >
+                Authorise payment
               </button>
             )}
             {(role === 'mentee' || session.status === 'CONFIRMED') && (

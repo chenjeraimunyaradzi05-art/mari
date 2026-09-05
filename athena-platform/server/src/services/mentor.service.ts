@@ -616,6 +616,33 @@ export async function getSession(sessionId: string) {
 }
 
 /**
+ * The client secret for authorising a session's payment, for the mentee,
+ * while the payment is still pending. The booking response carried it once;
+ * a mentee who closed that page needs it again from the sessions list.
+ */
+export async function getSessionPaymentSecret(sessionId: string, menteeId: string) {
+  const session = await prisma.mentorSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true, menteeId: true, status: true, paymentStatus: true, stripePaymentIntentId: true, sessionAmount: true, currency: true },
+  });
+  if (!session || session.menteeId !== menteeId) {
+    throw new ApiError(404, 'Session not found');
+  }
+  if (session.status === 'CANCELED' || session.status === 'COMPLETED') {
+    throw new ApiError(409, 'This session is finished');
+  }
+  const base = { paymentStatus: session.paymentStatus, amount: Number(session.sessionAmount), currency: session.currency };
+  if (session.paymentStatus !== 'PENDING') {
+    return { ...base, clientSecret: null };
+  }
+  if (!session.stripePaymentIntentId) {
+    throw new ApiError(409, 'No payment has been set up for this session');
+  }
+  const intent = await stripe.paymentIntents.retrieve(session.stripePaymentIntentId);
+  return { ...base, clientSecret: intent.client_secret };
+}
+
+/**
  * Get sessions for a user (as mentor or mentee)
  */
 export async function getUserSessions(

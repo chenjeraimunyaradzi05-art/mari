@@ -18,6 +18,7 @@ import { ArrowLeft, Award, CalendarDays, Clock, Loader2, Star, Users } from 'luc
 import { useAuthStore, useBookMentor, useMentor } from '@/lib/hooks';
 import { formatCurrency } from '@/lib/utils';
 import { Avatar } from '@/components/ui/avatar';
+import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 
 const DURATIONS = [30, 60, 90] as const;
 
@@ -49,6 +50,8 @@ export default function MentorProfilePage() {
   const [time, setTime] = useState('10:00');
   const [duration, setDuration] = useState<(typeof DURATIONS)[number]>(60);
   const [note, setNote] = useState('');
+  // After booking: the payment to authorise, held until the session completes.
+  const [payment, setPayment] = useState<{ clientSecret: string; amount: number } | null>(null);
 
   const hourlyRate = mentor?.hourlyRate !== null && mentor?.hourlyRate !== undefined ? Number(mentor.hourlyRate) : null;
   const rating = mentor?.rating !== null && mentor?.rating !== undefined ? Number(mentor.rating) : null;
@@ -69,7 +72,14 @@ export default function MentorProfilePage() {
     if (!scheduledAt || inPast || !mentor) return;
     book.mutate(
       { mentorId: mentor.id, scheduledAt: scheduledAt.toISOString(), durationMinutes: duration, note: note.trim() || undefined },
-      { onSuccess: () => router.push('/dashboard/mentors/sessions') }
+      {
+        onSuccess: (response) => {
+          const secret: string | undefined = response.data?.paymentIntentClientSecret;
+          const amount = Number(response.data?.session?.sessionAmount ?? estimate ?? 0);
+          if (secret) setPayment({ clientSecret: secret, amount });
+          else router.push('/dashboard/mentors/sessions');
+        },
+      }
     );
   };
 
@@ -155,7 +165,19 @@ export default function MentorProfilePage() {
             </span>
           </div>
 
-          {isOwnProfile ? (
+          {payment ? (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-700 dark:text-slate-200">
+                Session requested. Authorise the payment now so the mentor can confirm; it is only charged once the session is completed.
+              </p>
+              <PaymentIntentForm
+                clientSecret={payment.clientSecret}
+                amountLabel={formatCurrency(payment.amount)}
+                onAuthorised={() => router.push('/dashboard/mentors/sessions?paid=1')}
+                onSkip={() => router.push('/dashboard/mentors/sessions')}
+              />
+            </div>
+          ) : isOwnProfile ? (
             <p className="text-sm text-slate-500 dark:text-slate-400">
               This is your mentor profile. Requests from mentees appear on{' '}
               <Link href="/dashboard/mentors/sessions" className="text-primary-600 hover:underline">

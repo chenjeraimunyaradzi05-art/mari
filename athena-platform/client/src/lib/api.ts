@@ -426,6 +426,8 @@ export const mentorApi = {
     api.patch(`/mentors/sessions/${sessionId}/status`, { status }),
   reschedule: (sessionId: string, scheduledAt: string, durationMinutes?: number) =>
     api.patch(`/mentors/sessions/${sessionId}`, { scheduledAt, ...(durationMinutes ? { durationMinutes } : {}) }),
+  // The client secret to authorise a pending session payment, for the mentee.
+  paymentIntent: (sessionId: string) => api.post(`/mentors/sessions/${sessionId}/payment-intent`),
 };
 
 // ============================================

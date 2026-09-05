@@ -235,6 +235,19 @@ router.patch(
 );
 
 /**
+ * POST /api/mentors/sessions/:sessionId/payment-intent
+ * The client secret to authorise a pending session payment (mentee only).
+ */
+router.post('/sessions/:sessionId/payment-intent', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await mentorService.getSessionPaymentSecret(req.params.sessionId, req.user!.id);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * PATCH /api/mentors/sessions/:sessionId
  * Reschedule a session
  */
