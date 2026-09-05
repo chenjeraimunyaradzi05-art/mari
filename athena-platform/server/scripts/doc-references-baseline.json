@@ -1,7 +1,7 @@
 {
   "comment": "Broken documentation references, recorded so CI fails only on new ones. Burn this list down; do not add to it. Regenerate with: node scripts/check-doc-references.js --update-baseline",
-  "generated": "2026-09-01",
-  "count": 30,
+  "generated": "2026-09-05",
+  "count": 29,
   "known": [
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/.github/workflows/security-audit.yml",
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/.github/workflows/web.yml",
@@ -10,7 +10,6 @@
     "AUTH_FIX_SUMMARY.md|athena-platform/server/.env",
     "MOBILE_BUILD_GUIDE.md|athena-platform/mobile/google-service-account.json",
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|athena-platform/.github/workflows/web.yml",
-    "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|dashboard/mentors/[id]/page.tsx",
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|docs/strategy/",
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|src/__tests__/validation.test.ts",
     "athena-platform/docs/UNREFERENCED-UI-COMPONENTS.md|components/gdpr/",
