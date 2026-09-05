@@ -10,6 +10,17 @@ export const metadata: Metadata = {
 // to only publishing claims we can evidence.
 const entries = [
   {
+    date: 'September 2026',
+    title: 'Your own words, and a safer live connection',
+    points: [
+      'Edit your own comments and messages, and unsend a message for everyone in the thread; edited posts, comments and messages say so.',
+      'See who reacted to a post, and how, by opening the reaction count.',
+      'New-device sign-in alerts, in-app and by email, and an accurate "this device" label on the sessions list in Security settings.',
+      'The live connection (WebSocket) now honours logout, session revocation and account suspension, and applies the same blocks, message permissions, content moderation and rate limits as the API.',
+      'Link previews check every redirect against private-network rules, and post interactions share one visibility rule for blocks, private groups and connections-only members.',
+    ],
+  },
+  {
     date: 'August 2026',
     title: 'Security hardening pass',
     points: [

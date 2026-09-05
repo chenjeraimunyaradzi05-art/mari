@@ -17,7 +17,7 @@ export default function ConversationList() {
       const mappedConversations: StoreConversation[] = apiConversations.map((c: {
         id: string;
         participant: { id: string; firstName: string; lastName: string; avatar?: string; isVerified?: boolean };
-        lastMessage?: { senderId: string; content: string; createdAt: string };
+        lastMessage?: { senderId: string; content: string; createdAt: string; deletedAt?: string | null };
         unreadCount: number;
         updatedAt: string;
         disappearingTtlSeconds?: number | null;
@@ -35,6 +35,7 @@ export default function ConversationList() {
           senderId: c.lastMessage.senderId,
           content: c.lastMessage.content,
           createdAt: c.lastMessage.createdAt,
+          deletedAt: c.lastMessage.deletedAt ?? undefined,
           type: 'text', // simplification
         } : undefined,
         unreadCount: c.unreadCount,
@@ -115,7 +116,11 @@ export default function ConversationList() {
                   </div>
                   <div className="flex justify-between items-center mt-1">
                     <p className={`text-sm truncate ${conversation.unreadCount > 0 ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
-                        {conversation.lastMessage ? conversation.lastMessage.content : 'Started a conversation'}
+                        {conversation.lastMessage
+                          ? conversation.lastMessage.deletedAt
+                            ? 'Message unsent'
+                            : conversation.lastMessage.content || 'Sent an attachment'
+                          : 'Started a conversation'}
                     </p>
                     {conversation.unreadCount > 0 && (
                         <span className="ml-2 bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">

@@ -286,6 +286,14 @@ export const postApi = {
   deleteComment: (postId: string, commentId: string) =>
     api.delete(`/posts/${postId}/comments/${commentId}`),
 
+  // Your own comment, with new words; the server stamps editedAt.
+  updateComment: (postId: string, commentId: string, content: string) =>
+    api.patch(`/posts/${postId}/comments/${commentId}`, { content }),
+
+  // Who reacted, newest first; type narrows to one reaction.
+  getReactions: (id: string, params?: { type?: ReactionType; page?: number; limit?: number }) =>
+    api.get(`/posts/${id}/reactions`, { params }),
+
   getUserPosts: (userId: string) => api.get(`/posts/user/${userId}`),
 
   // Reposts: as-is (idempotent) or with your own words.
@@ -758,6 +766,11 @@ export const messageApi = {
     api.post(`/messages/conversations/${conversationId}/messages`, { content }),
 
   startConversation: (userId: string) => api.post('/messages/conversations', { userId }),
+
+  // Take back or change your own message. Unsending leaves a marker in the
+  // thread for both people; editing is allowed for 15 minutes after sending.
+  unsend: (messageId: string) => api.delete(`/messages/${messageId}`),
+  edit: (messageId: string, content: string) => api.patch(`/messages/${messageId}`, { content }),
 
   // Disappearing messages: null turns the timer off; otherwise one of the
   // allowed TTLs in seconds (1 hour, 24 hours, 7 days, 90 days).

@@ -14,7 +14,7 @@ import { postApi } from '@/lib/api';
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 import { renderSocialText } from '@/lib/social-text';
-import { serializeMentions, type MentionPick } from '@/lib/mentions';
+import { MENTION_MARKUP, mentionsToPlainText, serializeMentions, type MentionPick } from '@/lib/mentions';
 import { MentionTextarea } from './MentionTextarea';
 import { ReportDialog } from '@/components/safety/ReportDialog';
 import { cn } from '@/lib/utils';
@@ -46,7 +46,18 @@ type PostComment = {
   isLiked?: boolean;
   // Kept at the top of the thread by the post's author.
   isPinned?: boolean;
+  // When the commenter last changed the words; null for never.
+  editedAt?: string | Date | null;
 };
+
+// The mentions already in a comment, so editing keeps them resolvable.
+function picksIn(content: string): MentionPick[] {
+  const picks: MentionPick[] = [];
+  for (const match of content.matchAll(MENTION_MARKUP)) {
+    if (!picks.some((p) => p.id === match[2])) picks.push({ name: match[1], id: match[2] });
+  }
+  return picks;
+}
 
 export default function CommentSection({ postId }: CommentSectionProps) {
   const { data: post, isLoading } = usePost(postId);
@@ -59,6 +70,12 @@ export default function CommentSection({ postId }: CommentSectionProps) {
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
   const [sort, setSort] = useState<'top' | 'newest'>('top');
   const [reportFor, setReportFor] = useState<PostComment | null>(null);
+  // Editing one of your own comments in place: the readable form in the box,
+  // mentions kept resolvable.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [editPicks, setEditPicks] = useState<MentionPick[]>([]);
+  const [savingEdit, setSavingEdit] = useState(false);
   // Optimistic like state per comment, keyed by id, on top of what the API said.
   const [likes, setLikes] = useState<Record<string, { liked: boolean; count: number }>>({});
 
@@ -172,6 +189,29 @@ export default function CommentSection({ postId }: CommentSectionProps) {
     }
   };
 
+  const startEdit = (comment: PostComment) => {
+    setEditingId(comment.id);
+    setEditDraft(mentionsToPlainText(comment.content));
+    setEditPicks(picksIn(comment.content));
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const next = serializeMentions(editDraft.trim(), editPicks);
+    if (!next) return;
+    setSavingEdit(true);
+    try {
+      await postApi.updateComment(postId, editingId, next);
+      toast.success('Comment updated');
+      setEditingId(null);
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+    } catch (error) {
+      toast.error(errorMessage(error) || 'Could not save the edit');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const remove = async (comment: PostComment) => {
     if (!window.confirm('Delete this comment?')) return;
     try {
@@ -220,9 +260,34 @@ export default function CommentSection({ postId }: CommentSectionProps) {
                 {formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true })}
               </span>
             </div>
-            <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">
-              {renderSocialText(comment.content)}
-            </p>
+            {editingId === comment.id ? (
+              <div className="space-y-2">
+                <MentionTextarea
+                  value={editDraft}
+                  onChange={setEditDraft}
+                  picks={editPicks}
+                  onPicksChange={setEditPicks}
+                  rows={2}
+                  maxLength={2000}
+                  onSubmitShortcut={() => void saveEdit()}
+                  disabled={savingEdit}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setEditingId(null)} disabled={savingEdit} className="btn-outline px-2.5 py-1 text-xs">
+                    Cancel
+                  </button>
+                  <button type="button" onClick={() => void saveEdit()} disabled={savingEdit || !editDraft.trim()} className="btn-primary px-2.5 py-1 text-xs">
+                    {savingEdit ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">
+                {renderSocialText(comment.content)}
+                {comment.editedAt && <span className="ml-1 text-xs text-slate-400">(edited)</span>}
+              </p>
+            )}
           </div>
           <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
             <button
@@ -244,6 +309,11 @@ export default function CommentSection({ postId }: CommentSectionProps) {
             {isPostAuthor && depth === 0 && (
               <button type="button" className="hover:text-rose-600" onClick={() => void pin(comment)}>
                 {comment.isPinned ? 'Unpin' : 'Pin'}
+              </button>
+            )}
+            {user && comment.author.id === user.id && editingId !== comment.id && (
+              <button type="button" className="hover:text-purple-600" onClick={() => startEdit(comment)}>
+                Edit
               </button>
             )}
             {user && (isPostAuthor || comment.author.id === user.id) && (

@@ -4,6 +4,8 @@ export interface ChatMessageReply {
   id: string;
   senderId: string;
   content: string;
+  // The quoted message was unsent after being replied to.
+  deletedAt?: string;
 }
 
 export interface ChatMessageAttachment {
@@ -34,6 +36,10 @@ export interface ChatMessage {
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'system';
   // Disappearing messages: when this passes the row is gone on both sides.
   expiresAt?: string;
+  // Unsent by the sender: the words are gone and a marker stands in their place.
+  deletedAt?: string;
+  // The sender changed the words after sending.
+  editedAt?: string;
   mediaUrl?: string;
   status?: ChatMessageStatus;
   replyTo?: ChatMessageReply;
@@ -76,11 +82,18 @@ export function toChatMessage(raw: any, viewerId?: string): ChatMessage {
     content: raw.content ?? '',
     createdAt: raw.createdAt,
     type: mapMessageType(raw?.type),
-    expiresAt: typeof raw?.expiresAt === 'string' ? raw.expiresAt : undefined,
+    expiresAt: isoOf(raw?.expiresAt),
+    deletedAt: isoOf(raw?.deletedAt),
+    editedAt: isoOf(raw?.editedAt),
     // Only the sender has a receipt to show; an inbound message is simply here.
     status: isMine ? (raw?.isRead ? 'read' : 'sent') : undefined,
     replyTo: raw?.replyTo
-      ? { id: raw.replyTo.id, senderId: raw.replyTo.senderId, content: raw.replyTo.content }
+      ? {
+          id: raw.replyTo.id,
+          senderId: raw.replyTo.senderId,
+          content: raw.replyTo.content,
+          deletedAt: isoOf(raw.replyTo.deletedAt),
+        }
       : undefined,
     attachments: attachments.length
       ? attachments.map((attachment: any, index: number) => ({
@@ -94,6 +107,14 @@ export function toChatMessage(raw: any, viewerId?: string): ChatMessage {
       : undefined,
     reactions: Array.isArray(raw?.reactions) ? raw.reactions : undefined,
   };
+}
+
+// Dates arrive as ISO strings over the wire and as Date objects from a few
+// in-process callers; the store keeps strings.
+function isoOf(value: unknown): string | undefined {
+  if (typeof value === 'string' && value) return value;
+  if (value instanceof Date) return value.toISOString();
+  return undefined;
 }
 
 function mapMessageType(type: unknown): ChatMessage['type'] {
@@ -173,6 +194,11 @@ interface ChatState {
   removeMessage: (conversationId: string, messageId: string) => void;
   // Several at once, for the expiry sweep.
   removeMessages: (conversationId: string, messageIds: string[]) => void;
+  // The sender took a message back: the words, attachments and reactions go,
+  // a marker stays so the gap is explained.
+  markMessageUnsent: (conversationId: string, messageId: string, deletedAt: string) => void;
+  // The sender changed the words.
+  applyMessageEdit: (conversationId: string, messageId: string, content: string, editedAt: string) => void;
   setDisappearingTtl: (conversationId: string, ttl: number | null) => void;
 
   // Draft actions
@@ -545,6 +571,58 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [conversationId]: (state.messages[conversationId] || []).filter((msg) => !gone.has(msg.id)),
       },
     }));
+  },
+
+  markMessageUnsent: (conversationId, messageId, deletedAt) => {
+    set((state) => {
+      const current = state.messages[conversationId];
+      if (!current) return state;
+      const unsent = (msg: ChatMessage): ChatMessage => ({
+        ...msg,
+        content: '',
+        deletedAt,
+        editedAt: undefined,
+        attachments: undefined,
+        reactions: undefined,
+        mediaUrl: undefined,
+      });
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: current.map((msg) => {
+            if (msg.id === messageId) return unsent(msg);
+            // A reply quoting the unsent message shows the marker too.
+            if (msg.replyTo?.id === messageId) return { ...msg, replyTo: { ...msg.replyTo, content: '', deletedAt } };
+            return msg;
+          }),
+        },
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId && c.lastMessage?.id === messageId ? { ...c, lastMessage: unsent(c.lastMessage) } : c
+        ),
+      };
+    });
+  },
+
+  applyMessageEdit: (conversationId, messageId, content, editedAt) => {
+    set((state) => {
+      const current = state.messages[conversationId];
+      if (!current) return state;
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: current.map((msg) => {
+            if (msg.id === messageId) return { ...msg, content, editedAt };
+            if (msg.replyTo?.id === messageId) return { ...msg, replyTo: { ...msg.replyTo, content } };
+            return msg;
+          }),
+        },
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId && c.lastMessage?.id === messageId
+            ? { ...c, lastMessage: { ...c.lastMessage, content, editedAt } }
+            : c
+        ),
+      };
+    });
   },
 
   setDisappearingTtl: (conversationId, ttl) => {

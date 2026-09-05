@@ -28,14 +28,16 @@ import {
   FileText,
   Mic,
   Paperclip,
+  Pencil,
   Reply,
   Smile,
   Square,
   Timer,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { disappearingLabel } from '@/lib/api';
+import { disappearingLabel, messageApi } from '@/lib/api';
 import { renderSocialText } from '@/lib/social-text';
 import { VoiceRecorder } from './VoiceRecorder';
 import { Avatar } from '@/components/ui/avatar';
@@ -52,6 +54,10 @@ const ATTACHMENT_ACCEPT = 'image/*,video/*';
 const MAX_ATTACHMENTS = 4;
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏'];
 const TYPING_IDLE_MS = 2500;
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+const apiErrorMessage = (error: unknown) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
 // "Disappears in 3h", for the timer badge on a message with an expiry.
 function timeUntil(iso: string): string {
@@ -82,6 +88,8 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
     drafts,
     setDraft,
     clearDraft,
+    markMessageUnsent,
+    applyMessageEdit,
   } = useChatStore();
 
   const [newMessage, setNewMessage] = useState('');
@@ -101,6 +109,10 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
   }, [prefill, conversationId]);
   const [replyTo, setReplyTo] = useState<StoreMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  // Editing one of your own messages in place.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -282,6 +294,54 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
     );
   };
 
+  // Your own message can be taken back at any time, and its words changed
+  // for a short while after sending, the same window the server enforces.
+  const canEdit = (message: StoreMessage) =>
+    message.senderId === user?.id &&
+    !message.deletedAt &&
+    message.type === 'text' &&
+    Date.now() - new Date(message.createdAt).getTime() < EDIT_WINDOW_MS;
+
+  const unsend = async (message: StoreMessage) => {
+    if (!window.confirm('Unsend this message? It is removed for everyone in the conversation.')) return;
+    try {
+      const response = await messageApi.unsend(message.id);
+      const deletedAt: string = response.data?.data?.deletedAt ?? new Date().toISOString();
+      markMessageUnsent(conversationId, message.id, deletedAt);
+      if (editingId === message.id) setEditingId(null);
+      toast.success('Message unsent');
+    } catch (error) {
+      toast.error(apiErrorMessage(error) || 'Could not unsend that message');
+    }
+  };
+
+  const startEdit = (message: StoreMessage) => {
+    setEditingId(message.id);
+    setEditDraft(message.content);
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const content = editDraft.trim();
+    if (!content) return;
+    setSavingEdit(true);
+    try {
+      const response = await messageApi.edit(editingId, content);
+      applyMessageEdit(
+        conversationId,
+        editingId,
+        response.data?.data?.content ?? content,
+        response.data?.data?.editedAt ?? new Date().toISOString()
+      );
+      setEditingId(null);
+      toast.success('Message edited');
+    } catch (error) {
+      toast.error(apiErrorMessage(error) || 'Could not edit that message');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const senderName = (senderId: string) =>
     senderId === user?.id ? 'You' : counterpart?.name || 'Them';
 
@@ -349,7 +409,9 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
           return (
             <div key={message.id} id={`msg-${message.id}`} className={`flex group rounded-lg ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex items-center gap-1 max-w-[80%] ${isMe ? 'flex-row' : 'flex-row-reverse'}`}>
-                {/* Per-message actions, revealed on hover/focus */}
+                {/* Per-message actions, revealed on hover/focus. A message that
+                    was unsent has nothing left to reply to or react to. */}
+                {!message.deletedAt && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                   <button
                     type="button"
@@ -359,6 +421,26 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                   >
                     <Reply className="w-4 h-4" />
                   </button>
+                  {isMe && canEdit(message) && (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(message)}
+                      className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      aria-label="Edit message"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                  {isMe && (
+                    <button
+                      type="button"
+                      onClick={() => void unsend(message)}
+                      className="p-1 text-slate-400 hover:text-red-600"
+                      aria-label="Unsend message"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                   <div className="relative">
                     <button
                       type="button"
@@ -388,6 +470,7 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                     )}
                   </div>
                 </div>
+                )}
 
                 <div
                   className={`px-4 py-2 rounded-lg shadow-sm ${
@@ -403,7 +486,9 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                       }`}
                     >
                       <p className="font-medium">{senderName(message.replyTo.senderId)}</p>
-                      <p className="line-clamp-2 break-words">{message.replyTo.content}</p>
+                      <p className="line-clamp-2 break-words">
+                        {message.replyTo.deletedAt ? <em>Message unsent</em> : message.replyTo.content || 'Attachment'}
+                      </p>
                     </div>
                   )}
 
@@ -415,8 +500,45 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                     </div>
                   )}
 
-                  {message.content && (
-                    <p className="whitespace-pre-wrap break-words text-sm">{renderSocialText(message.content)}</p>
+                  {message.deletedAt ? (
+                    <p className={`text-sm italic ${isMe ? 'text-blue-100' : 'text-slate-400'}`}>This message was unsent</p>
+                  ) : editingId === message.id ? (
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveEdit();
+                      }}
+                      className="space-y-2"
+                    >
+                      <textarea
+                        value={editDraft}
+                        onChange={(event) => setEditDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setEditingId(null);
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            void saveEdit();
+                          }
+                        }}
+                        rows={2}
+                        maxLength={4000}
+                        autoFocus
+                        aria-label="Edit message"
+                        className="w-full min-w-[220px] rounded-md border border-blue-300 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-white"
+                      />
+                      <div className="flex justify-end gap-2 text-xs">
+                        <button type="button" onClick={() => setEditingId(null)} disabled={savingEdit} className="rounded px-2 py-1 hover:bg-white/10">
+                          Cancel
+                        </button>
+                        <button type="submit" disabled={savingEdit || !editDraft.trim()} className="rounded bg-white/20 px-2 py-1 font-medium hover:bg-white/30 disabled:opacity-50">
+                          {savingEdit ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    message.content && (
+                      <p className="whitespace-pre-wrap break-words text-sm">{renderSocialText(message.content)}</p>
+                    )
                   )}
 
                   <div
@@ -425,6 +547,9 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
                     }`}
                   >
                     <span>{format(new Date(message.createdAt), 'h:mm a')}</span>
+                    {message.editedAt && !message.deletedAt && (
+                      <span title={`Edited ${format(new Date(message.editedAt), 'h:mm a')}`}>Edited</span>
+                    )}
                     {message.expiresAt && (
                       <span
                         className="inline-flex items-center gap-0.5"

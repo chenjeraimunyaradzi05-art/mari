@@ -205,6 +205,24 @@ class SocketClient {
       useChatStore.getState().removeMessages(conversationId, messageIds);
     });
 
+    // Unsent and edited messages: the thread shows the marker or the new
+    // words the moment the sender acts, on their other devices too.
+    this.socket.on('messages:deleted', (payload) => {
+      const { conversationId, messageId, deletedAt } = payload || {};
+      if (!conversationId || !messageId) return;
+      useChatStore
+        .getState()
+        .markMessageUnsent(conversationId, messageId, typeof deletedAt === 'string' ? deletedAt : new Date().toISOString());
+    });
+
+    this.socket.on('messages:edited', (payload) => {
+      const { conversationId, messageId, content, editedAt } = payload || {};
+      if (!conversationId || !messageId || typeof content !== 'string') return;
+      useChatStore
+        .getState()
+        .applyMessageEdit(conversationId, messageId, content, typeof editedAt === 'string' ? editedAt : new Date().toISOString());
+    });
+
     this.socket.on('messages:settings', (payload) => {
       const { conversationId, disappearingTtlSeconds } = payload || {};
       if (!conversationId) return;

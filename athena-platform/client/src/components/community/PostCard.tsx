@@ -32,7 +32,8 @@ import { Avatar } from '@/components/ui/avatar';
 import { renderSocialText } from '@/lib/social-text';
 import { MENTION_MARKUP, mentionsToPlainText, serializeMentions, type MentionPick } from '@/lib/mentions';
 import { ReportDialog } from '@/components/safety/ReportDialog';
-import { ReactionButton, ReactionSummary, type ReactionCounts } from './ReactionBar';
+import { ReactionButton, ReactionSummary, totalReactions, type ReactionCounts } from './ReactionBar';
+import { ReactionsDialog } from './ReactionsDialog';
 import { PollCard } from './PollCard';
 import { WhyThis } from './WhyThis';
 import { SensitiveGate } from './SensitiveGate';
@@ -84,6 +85,7 @@ export default function PostCard({ post, defaultShowComments = false, source = '
   const menuRef = useRef<HTMLDivElement>(null);
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   const impressionRef = useImpression(post.id, source);
 
   // Share: copy, send to someone here, or the system sheet.
@@ -139,8 +141,9 @@ export default function PostCard({ post, defaultShowComments = false, source = '
   useEffect(() => {
     setContent(String(post.content ?? ''));
   }, [post.content, post.id]);
-  const wasEdited =
-    post.updatedAt && post.createdAt && new Date(post.updatedAt).getTime() - new Date(post.createdAt).getTime() > 60_000;
+  // Stamped by the server when the words change; updatedAt moves on every
+  // like and so used to mark posts nobody had touched as edited.
+  const wasEdited = Boolean(post.editedAt);
 
   const startEditing = () => {
     setShowMenu(false);
@@ -574,7 +577,14 @@ export default function PostCard({ post, defaultShowComments = false, source = '
 
       {/* Stats/Counts */}
       <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2 text-xs text-slate-500">
-        <ReactionSummary counts={counts} />
+        {/* The counts open the list of who reacted, for a signed-in reader. */}
+        {user && totalReactions(counts) > 0 ? (
+          <button type="button" onClick={() => setReactionsOpen(true)} className="rounded hover:underline" aria-label="See who reacted">
+            <ReactionSummary counts={counts} />
+          </button>
+        ) : (
+          <ReactionSummary counts={counts} />
+        )}
         <div className="flex items-center gap-3">
           <WhyThis
             reasons={post.reasons}
@@ -698,6 +708,7 @@ export default function PostCard({ post, defaultShowComments = false, source = '
       )}
 
       {isOwner && insightsOpen && <PostInsightsDialog postId={post.id} open onClose={() => setInsightsOpen(false)} />}
+      {user && reactionsOpen && <ReactionsDialog postId={post.id} counts={counts} open onClose={() => setReactionsOpen(false)} />}
       {user && sendOpen && (
         <SharePostDialog postId={post.id} excerpt={`${authorName}: ${mentionsToPlainText(content).slice(0, 140)}`} open onClose={() => setSendOpen(false)} />
       )}
