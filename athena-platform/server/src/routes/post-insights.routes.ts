@@ -50,6 +50,39 @@ function rate(engagements: number, impressions: number): number {
   return impressions > 0 ? Math.round((engagements / impressions) * 1000) / 10 : 0;
 }
 
+/**
+ * Reach milestones. Each batch adds exactly one impression per post, so a
+ * count that now equals a milestone has just crossed it. One notification
+ * per milestone, pointing at the post's insights.
+ */
+export const REACH_MILESTONES = [100, 1000, 10000, 100000];
+
+export async function announceMilestones(postIds: string[]): Promise<void> {
+  try {
+    const crossed = await prisma.post.findMany({
+      where: { id: { in: postIds }, impressionCount: { in: REACH_MILESTONES }, isHidden: false },
+      select: { id: true, authorId: true, impressionCount: true, content: true, groupId: true },
+    });
+    for (const post of crossed) {
+      const excerpt = post.content.trim().slice(0, 60);
+      await prisma.notification.create({
+        data: {
+          userId: post.authorId,
+          type: 'SYSTEM',
+          title: `Your post reached ${post.impressionCount.toLocaleString('en-AU')} people`,
+          message: excerpt
+            ? `"${excerpt}${post.content.trim().length > 60 ? '…' : ''}" has been seen ${post.impressionCount.toLocaleString('en-AU')} times. Open its insights to see who it reached.`
+            : `One of your posts has been seen ${post.impressionCount.toLocaleString('en-AU')} times. Open its insights to see who it reached.`,
+          link: `/posts/${post.id}`,
+          data: { milestone: post.impressionCount, postId: post.id, kind: 'reach' },
+        },
+      });
+    }
+  } catch {
+    // A missed milestone note is not worth a failed request.
+  }
+}
+
 router.post('/impressions', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const ids = Array.isArray(req.body?.ids)
@@ -84,6 +117,9 @@ router.post('/impressions', optionalAuth, async (req: AuthRequest, res, next) =>
     await prisma.post.updateMany({ where: { id: { in: postIds } }, data: { impressionCount: { increment: 1 } } });
 
     res.status(204).end();
+
+    // After answering: a post that just crossed a round number tells its author.
+    void announceMilestones(postIds);
   } catch (error) {
     next(error);
   }

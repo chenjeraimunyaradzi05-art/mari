@@ -621,7 +621,22 @@ router.get('/feed-preferences', async (req: Request, res: Response, next: NextFu
       });
     }
 
-    res.json({ data: prefs });
+    // The feed settings page shows who is muted by name, not by id.
+    const blockedCreatorProfiles = prefs.blockedCreators.length
+      ? (
+          await prisma.user.findMany({
+            where: { id: { in: prefs.blockedCreators } },
+            select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true, headline: true },
+          })
+        ).map((u) => ({
+          id: u.id,
+          name: u.displayName?.trim() || [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Member',
+          avatar: u.avatar,
+          headline: u.headline,
+        }))
+      : [];
+
+    res.json({ data: { ...prefs, blockedCreatorProfiles } });
   } catch (error) {
     next(error);
   }
@@ -654,7 +669,8 @@ router.patch('/feed-preferences', async (req: Request, res: Response, next: Next
         ...(followedHashtags && { followedHashtags }),
         ...(blockedHashtags && { blockedHashtags }),
         ...(blockedCreators && { blockedCreators }),
-        ...(inNetworkRatio !== undefined && { inNetworkRatio }),
+        // How much of the feed comes from people you follow; the rest is discovery.
+        ...(inNetworkRatio !== undefined && { inNetworkRatio: Math.min(0.9, Math.max(0.1, Number(inNetworkRatio) || 0.3)) }),
         ...(outNetworkRatio !== undefined && { outNetworkRatio }),
         ...(trendingRatio !== undefined && { trendingRatio }),
         ...(preferredDuration && { preferredDuration }),

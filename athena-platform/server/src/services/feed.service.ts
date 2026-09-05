@@ -121,6 +121,8 @@ interface FeedPreferences {
   followedHashtags: string[];
   // The viewer's muted words, as a matcher; null when they have none.
   muted: ((text: string | null | undefined) => boolean) | null;
+  // How much of the ranked feed comes from people the viewer follows (0.1 to 0.9).
+  inNetworkRatio: number;
 }
 
 /**
@@ -128,12 +130,12 @@ interface FeedPreferences {
  * out; followed topics are boosted and named in the reasons.
  */
 async function loadFeedExclusions(userId?: string): Promise<FeedPreferences> {
-  const none: FeedPreferences = { creators: new Set(), hashtags: [], followedHashtags: [], muted: null };
+  const none: FeedPreferences = { creators: new Set(), hashtags: [], followedHashtags: [], muted: null, inNetworkRatio: 0.3 };
   if (!userId) return none;
   try {
     const prefs = await prisma.userFeedPreferences.findUnique({
       where: { userId },
-      select: { blockedCreators: true, blockedHashtags: true, followedHashtags: true },
+      select: { blockedCreators: true, blockedHashtags: true, followedHashtags: true, inNetworkRatio: true },
     });
     const clean = (tags: string[] | undefined) =>
       (tags ?? []).map((tag) => tag.replace(/^#+/, '').toLowerCase()).filter(Boolean);
@@ -150,6 +152,7 @@ async function loadFeedExclusions(userId?: string): Promise<FeedPreferences> {
       hashtags: clean(prefs?.blockedHashtags),
       followedHashtags: clean(prefs?.followedHashtags),
       muted,
+      inNetworkRatio: Math.min(0.9, Math.max(0.1, Number(prefs?.inNetworkRatio) || 0.3)),
     };
   } catch {
     return none;
@@ -292,8 +295,11 @@ export async function generateFeed(options: FeedOptions): Promise<{
   // Personalized: OpportunityVerse-style sourcing with diversity enforcement.
   if (algorithm === 'personalized' && userId) {
     const target = page * limit;
-    const inNetworkTarget = Math.ceil(target * 0.3);
-    const outNetworkTarget = Math.ceil(target * 0.5);
+    // The member's own mix: how much comes from people they follow. What is
+    // left is split between discovery and trending as before (5:2).
+    const ratio = exclusions.inNetworkRatio;
+    const inNetworkTarget = Math.ceil(target * ratio);
+    const outNetworkTarget = Math.ceil(target * (1 - ratio) * (5 / 7));
     const trendingTarget = Math.max(0, target - inNetworkTarget - outNetworkTarget);
 
     // 1) In-network (following + own)
