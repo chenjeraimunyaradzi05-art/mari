@@ -11,6 +11,7 @@ import { useAuthStore } from '@/lib/store';
 import { Skeleton } from '@/components/ui/loading';
 import toast from 'react-hot-toast';
 import { ReportDialog } from '@/components/safety/ReportDialog';
+import { SharePostDialog } from '@/components/community/SharePostDialog';
 import { useSeeFewerFrom } from '@/lib/social-hooks';
 
 // Maps a Video row from GET /video/feed onto the store interface. The field names
@@ -86,6 +87,7 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
   const [loadError, setLoadError] = useState<string | null>(null);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   const [reportFor, setReportFor] = useState<string | null>(null);
+  const [sendFor, setSendFor] = useState<string | null>(null);
   const seeFewer = useSeeFewerFrom();
 
   // A ref, not `loadingLocal`, guards re-entry. Reading the state here would put
@@ -373,6 +375,7 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
             onCopyLink={handleCopyLink}
             onSeeFewer={handleSeeFewer}
             onReport={isAuthenticated ? setReportFor : undefined}
+            onSend={isAuthenticated ? setSendFor : undefined}
           />
         </div>
       ))}
@@ -391,6 +394,16 @@ export function VideoFeed({ initialVideos = [], category, hashtag, soundId, init
       onCountChange={setCommentCount}
     />
 
+    {sendFor && (
+      <SharePostDialog
+        postId={sendFor}
+        link={`${typeof window !== 'undefined' ? window.location.origin : ''}/explore?video=${sendFor}`}
+        excerpt={feed.find((v) => v.id === sendFor)?.description || 'A reel'}
+        title="Send this reel"
+        open
+        onClose={() => setSendFor(null)}
+      />
+    )}
     <ReportDialog
       open={Boolean(reportFor)}
       onClose={() => setReportFor(null)}

@@ -677,7 +677,7 @@ export const topicApi = {
 // "See fewer posts from" and muted topics, honoured by the ranked feeds.
 export const feedPreferencesApi = {
   get: () => api.get('/ai-algorithms/feed-preferences'),
-  update: (data: { blockedCreators?: string[]; blockedHashtags?: string[] }) =>
+  update: (data: { blockedCreators?: string[]; blockedHashtags?: string[]; followedHashtags?: string[]; inNetworkRatio?: number }) =>
     api.patch('/ai-algorithms/feed-preferences', data),
 };
 

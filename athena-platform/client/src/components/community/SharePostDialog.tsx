@@ -26,11 +26,16 @@ export function SharePostDialog({
   excerpt,
   open,
   onClose,
+  link,
+  title = 'Send in a message',
 }: {
   postId: string;
   excerpt?: string;
   open: boolean;
   onClose: () => void;
+  /** What to send; defaults to the post's page. A reel passes its own link. */
+  link?: string;
+  title?: string;
 }) {
   const { user } = useAuthStore();
   const { data: conversations } = useConversations();
@@ -74,8 +79,8 @@ export function SharePostDialog({
   const send = async () => {
     if (chosen.length === 0) return;
     setSending(true);
-    const link = `${window.location.origin}/posts/${postId}`;
-    const content = `${note.trim() ? `${note.trim()}\n` : ''}${link}`;
+    const target = link ?? `${window.location.origin}/posts/${postId}`;
+    const content = `${note.trim() ? `${note.trim()}\n` : ''}${target}`;
     let sent = 0;
     let failure: string | null = null;
     for (const person of chosen) {
@@ -96,7 +101,7 @@ export function SharePostDialog({
   };
 
   return (
-    <Modal isOpen={open} onClose={() => !sending && onClose()} title="Send in a message" size="sm">
+    <Modal isOpen={open} onClose={() => !sending && onClose()} title={title} size="sm">
       <div className="space-y-3">
         {excerpt && <p className="line-clamp-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{excerpt}</p>}
 

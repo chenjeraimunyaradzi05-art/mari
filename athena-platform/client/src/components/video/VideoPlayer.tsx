@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause, Music, Copy, Subtitles, MoreHorizontal, EyeOff, Flag, Link2 } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Bookmark, Volume2, VolumeX, Play, Pause, Music, Copy, Subtitles, MoreHorizontal, EyeOff, Flag, Link2, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { handleFromName } from '@/lib/social-text';
 import { Avatar } from '@/components/ui/avatar';
@@ -53,6 +53,7 @@ interface VideoPlayerProps {
   onSeeFewer?: (authorId: string) => void;
   onReport?: (id: string) => void;
   onCopyLink?: (id: string) => void;
+  onSend?: (id: string) => void;
 }
 
 export function VideoPlayer({
@@ -68,6 +69,7 @@ export function VideoPlayer({
   onSeeFewer,
   onReport,
   onCopyLink,
+  onSend,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -324,7 +326,7 @@ export function VideoPlayer({
         )}
 
         {/* More: the controls a viewer reaches for when a reel is not for them. */}
-        {(onSeeFewer || onReport || onCopyLink) && (
+        {(onSeeFewer || onReport || onCopyLink || onSend) && (
           <div className="relative">
             <button
               onClick={(e) => {
@@ -344,6 +346,19 @@ export function VideoPlayer({
                 className="absolute bottom-full right-0 mb-1 w-52 overflow-hidden rounded-xl bg-slate-900/95 py-1 text-left shadow-xl backdrop-blur"
                 onClick={(e) => e.stopPropagation()}
               >
+                {onSend && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onSend(video.id);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-white hover:bg-white/10"
+                  >
+                    <Send className="w-4 h-4" /> Send in a message
+                  </button>
+                )}
                 {onCopyLink && (
                   <button
                     type="button"

@@ -12,6 +12,7 @@ import {
   HelpCircle,
   ChevronRight,
   LogOut,
+  Rss,
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -43,6 +44,12 @@ const settingsGroups = [
   {
     title: 'Preferences',
     items: [
+      {
+        name: 'Your feed',
+        description: 'Feed mix, topics you follow, and who you see less of',
+        href: '/dashboard/settings/feed',
+        icon: Rss,
+      },
       {
         name: 'Notifications',
         description: 'Configure email and push notification preferences',
