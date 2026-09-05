@@ -115,6 +115,45 @@ export function parseOpenGraph(html: string, url: string): LinkPreview | null {
   };
 }
 
+const MAX_REDIRECTS = 3;
+
+/**
+ * Fetches a page, following at most MAX_REDIRECTS redirects and checking
+ * every hop against the private-host rules. Letting fetch follow redirects
+ * itself would check only the first URL: a public page could answer with a
+ * 302 to an address on this server's own network and be fetched anyway.
+ */
+async function fetchPublicPage(start: URL, signal: AbortSignal): Promise<Response | null> {
+  let current = start;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    if (!/^https?:$/.test(current.protocol)) return null;
+    if (!(await isFetchableHost(current.hostname))) return null;
+
+    const response = await fetch(current.toString(), {
+      signal,
+      redirect: 'manual',
+      headers: {
+        'user-agent': 'ATHENA-LinkPreview/1.0 (+https://athena-empress.netlify.app)',
+        accept: 'text/html,application/xhtml+xml',
+      },
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      response.body?.cancel().catch(() => {});
+      if (!location) return null;
+      try {
+        current = new URL(location, current);
+      } catch {
+        return null;
+      }
+      continue;
+    }
+    return response;
+  }
+  return null;
+}
+
 export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {
   let parsed: URL;
   try {
@@ -128,15 +167,8 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(parsed.toString(), {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: {
-        'user-agent': 'ATHENA-LinkPreview/1.0 (+https://athena-empress.netlify.app)',
-        accept: 'text/html,application/xhtml+xml',
-      },
-    });
-    if (!response.ok) return null;
+    const response = await fetchPublicPage(parsed, controller.signal);
+    if (!response || !response.ok) return null;
     const type = response.headers.get('content-type') ?? '';
     if (!type.includes('html')) return null;
 

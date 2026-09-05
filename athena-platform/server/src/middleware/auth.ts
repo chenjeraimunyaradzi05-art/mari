@@ -54,6 +54,23 @@ async function resolveAuthenticatedUser(token: string) {
   return user;
 }
 
+/**
+ * The same rules the HTTP middleware applies, for a Socket.IO handshake: the
+ * token must verify, its session must still be live (not logged out, not
+ * revoked, not expired) and the account must not be suspended. Before this
+ * the socket trusted any well-formed token, so logging out or being revoked
+ * ended the HTTP session but left the live connection open.
+ */
+export type AuthenticatedPrincipal = NonNullable<AuthRequest['user']>;
+
+export async function authenticateSocketToken(token: string): Promise<AuthenticatedPrincipal> {
+  const user = await resolveAuthenticatedUser(token);
+  if (user.isSuspended) {
+    throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
+  }
+  return { id: user.id, email: user.email, role: user.role, persona: user.persona };
+}
+
 export const authenticate = async (
   req: AuthRequest,
   _res: Response,

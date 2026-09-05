@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { logger } from '../utils/logger';
 import { ERROR_KEYS, i18nService, SupportedLocale } from '../services/i18n.service';
 
@@ -7,6 +8,19 @@ export interface AppError extends Error {
   isOperational?: boolean;
   i18nKey?: string;
   i18nParams?: Record<string, unknown>;
+}
+
+/**
+ * Whether the request carries the debug secret. Compared in constant time so
+ * the response timing of a wrong guess says nothing about how much of it was
+ * right.
+ */
+export function debugHeaderMatches(header: string | string[] | undefined, secret: string | undefined): boolean {
+  if (!secret || typeof header !== 'string') return false;
+  const a = Buffer.from(header);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 export const errorHandler = (
@@ -39,9 +53,7 @@ export const errorHandler = (
     stack: err.stack,
   });
 
-  const hasDebugAccess =
-    !!process.env.DEBUG_SECRET &&
-    req.headers['x-debug-auth'] === process.env.DEBUG_SECRET;
+  const hasDebugAccess = debugHeaderMatches(req.headers['x-debug-auth'], process.env.DEBUG_SECRET);
 
   const showDebug =
     process.env.NODE_ENV !== 'production' || hasDebugAccess;

@@ -4,8 +4,12 @@
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import { verifyToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
+import { authenticateSocketToken } from '../middleware/auth';
+import { socketMessageThrottle } from '../middleware/socialLimits';
+import { isBlockedRelationship } from '../utils/safety-store';
+import { canOpenConversation } from './message-permissions.service';
+import { assertContentAllowed } from './moderation.service';
 import { prisma } from '../utils/prisma';
 import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
@@ -38,12 +42,12 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         return next(new Error('Authentication required'));
       }
 
-      const payload = verifyToken(token);
-      if (!payload || typeof payload === 'string') {
-        return next(new Error('Invalid token'));
-      }
-
-      socket.userId = payload.userId;
+      // The same checks as the HTTP middleware: a token whose session was
+      // logged out or revoked, or whose account is suspended, is refused
+      // here too rather than keeping a live connection the REST API would
+      // already have turned away.
+      const principal = await authenticateSocketToken(token);
+      socket.userId = principal.id;
       next();
     } catch (error) {
       next(new Error('Authentication failed'));
@@ -125,6 +129,31 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           maxLength: CONTENT_LIMITS.directMessage,
         });
 
+        // The socket is a second door into someone's inbox, so it is held to
+        // exactly what the REST route enforces: a ceiling on how fast one
+        // account can send, no thread across a block, the recipient's "who
+        // can message me" choice, and the same content moderation.
+        if (!socketMessageThrottle.allow(userId)) {
+          socket.emit('messages:error', {
+            message: 'You are sending messages very quickly. Take a short break and try again.',
+          });
+          return;
+        }
+        if (!receiverId || receiverId === userId) {
+          socket.emit('messages:error', { message: 'Choose someone to message' });
+          return;
+        }
+        if (await isBlockedRelationship(userId, receiverId)) {
+          socket.emit('messages:error', { message: 'You cannot message this user' });
+          return;
+        }
+        const verdict = await canOpenConversation(userId, receiverId);
+        if (!verdict.allowed) {
+          socket.emit('messages:error', { message: verdict.reason });
+          return;
+        }
+        await assertContentAllowed(content, { kind: 'message', userId });
+
         const conversation = await getOrCreateDirectConversation(userId, receiverId);
         // Disappearing messages: stamped at send time from the thread's setting.
         const expiresAt = expiryFor(await conversationTtl(conversation.id));
@@ -193,8 +222,14 @@ export function initializeSocketHandlers(io: SocketIOServer) {
 
         logger.debug('Message sent', { from: userId, to: receiverId, messageId: message.id });
       } catch (error) {
-        logger.error('Failed to send message', { error });
-        socket.emit('messages:error', { message: 'Failed to send message' });
+        // A refusal the sender can act on (moderation, permissions) is said
+        // plainly; anything else stays generic so internals never leak.
+        const status = (error as { statusCode?: number })?.statusCode;
+        const operational = typeof status === 'number' && status >= 400 && status < 500;
+        if (!operational) logger.error('Failed to send message', { error });
+        socket.emit('messages:error', {
+          message: operational && error instanceof Error ? error.message : 'Failed to send message',
+        });
       }
     });
 

@@ -46,6 +46,9 @@ export const SOCIAL_LIMITS = {
   repost: { max: 30, windowMs: 10 * MINUTE },
   reaction: { max: 200, windowMs: 5 * MINUTE },
   report: { max: 15, windowMs: HOUR },
+  // Direct messages: generous for a real conversation, a wall for a spammer
+  // pasting the same line into every thread they can open.
+  message: { max: 60, windowMs: 5 * MINUTE },
 } as const;
 
 export const postLimiter = limiter('post', SOCIAL_LIMITS.post.max, SOCIAL_LIMITS.post.windowMs);
@@ -55,3 +58,34 @@ export const conversationLimiter = limiter('conversation', SOCIAL_LIMITS.convers
 export const repostLimiter = limiter('repost', SOCIAL_LIMITS.repost.max, SOCIAL_LIMITS.repost.windowMs);
 export const reactionLimiter = limiter('reaction', SOCIAL_LIMITS.reaction.max, SOCIAL_LIMITS.reaction.windowMs);
 export const reportLimiter = limiter('report', SOCIAL_LIMITS.report.max, SOCIAL_LIMITS.report.windowMs);
+export const messageLimiter = limiter('message', SOCIAL_LIMITS.message.max, SOCIAL_LIMITS.message.windowMs);
+
+/**
+ * The same ceiling for a path that has no Express middleware chain: the
+ * socket. In memory and per process, which is enough to stop one account
+ * flooding a thread; the HTTP path keeps the Redis-backed limiter.
+ */
+export function createMemoryThrottle(max: number, windowMs: number) {
+  const hits = new Map<string, number[]>();
+  return {
+    allow(key: string, now = Date.now()): boolean {
+      const since = now - windowMs;
+      const recent = (hits.get(key) ?? []).filter((at) => at > since);
+      if (recent.length >= max) {
+        hits.set(key, recent);
+        return false;
+      }
+      recent.push(now);
+      hits.set(key, recent);
+      // Keep the map from growing with every account that ever sent one message.
+      if (hits.size > 10_000) {
+        for (const [k, stamps] of hits) {
+          if (stamps.every((at) => at <= since)) hits.delete(k);
+        }
+      }
+      return true;
+    },
+  };
+}
+
+export const socketMessageThrottle = createMemoryThrottle(SOCIAL_LIMITS.message.max, SOCIAL_LIMITS.message.windowMs);

@@ -56,6 +56,10 @@ describe('Post saves', () => {
     jest.clearAllMocks();
     (prisma.postSave.upsert as any).mockResolvedValue({});
     (prisma.postSave.deleteMany as any).mockResolvedValue({ count: 1 });
+    // Saving now checks blocks and the author's audience like every other
+    // interaction; nobody here is blocked or private.
+    (prisma.userSafetySettings.findMany as any).mockResolvedValue([]);
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValue(null);
   });
 
   it('saves a post idempotently via upsert', async () => {

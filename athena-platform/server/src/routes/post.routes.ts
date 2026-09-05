@@ -674,7 +674,7 @@ router.patch(
 
     const existingPost = await prisma.post.findUnique({
       where: { id },
-      select: { authorId: true },
+      select: { authorId: true, content: true, mentionedUserIds: true, isHidden: true, scheduledFor: true },
     });
 
     if (!existingPost) {
@@ -685,12 +685,29 @@ router.patch(
       throw new ApiError(403, 'Not authorized to edit this post');
     }
 
-    const data: { content?: string; isPublic?: boolean; isSensitive?: boolean; commentsOff?: boolean } = {};
+    const data: {
+      content?: string;
+      isPublic?: boolean;
+      isSensitive?: boolean;
+      commentsOff?: boolean;
+      editedAt?: Date;
+      mentionedUserIds?: string[];
+    } = {};
+    // People named for the first time in the edit; told once the update lands.
+    let newlyMentioned: string[] = [];
     if (req.body.content !== undefined) {
       data.content = normalizeUserText(req.body.content, {
         field: 'content',
         maxLength: CONTENT_LIMITS.post,
       });
+      if (data.content !== existingPost.content) {
+        // The label an edit earns, and the mentions the new words carry.
+        data.editedAt = new Date();
+        const mentioned = (await resolveMentionedUserIds(data.content)).filter((userId) => userId !== req.user!.id);
+        data.mentionedUserIds = mentioned;
+        const before = new Set(existingPost.mentionedUserIds ?? []);
+        newlyMentioned = mentioned.filter((userId) => !before.has(userId));
+      }
     }
     if (req.body.isPublic !== undefined) {
       data.isPublic = req.body.isPublic;
@@ -717,6 +734,10 @@ router.patch(
 
     if (data.content) {
       enrichPostLinkPreview(id, data.content);
+    }
+    // A scheduled post tells its mentions when it publishes, not now.
+    if (newlyMentioned.length > 0 && !existingPost.isHidden && !existingPost.scheduledFor) {
+      await notifyMentions(req.user!.id, newlyMentioned, 'post', id);
     }
 
     res.json({
@@ -781,14 +802,9 @@ router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
 
-    const post = await prisma.post.findUnique({ where: { id } });
-    if (!post) {
-      throw new ApiError(404, 'Post not found');
-    }
-
-    if (post.isHidden || (!post.isPublic && post.authorId !== req.user!.id)) {
-      throw new ApiError(404, 'Post not found');
-    }
+    // Blocks, private groups and connections-only authors all apply here as
+    // they do to commenting; a like used to need only the post's id.
+    const post = await loadVisiblePost(id, req.user!.id);
 
     // A plain like, or a reaction with a meaning when `type` names one.
     const requested = typeof req.body?.type === 'string' ? req.body.type.toUpperCase() : 'LIKE';
@@ -923,6 +939,11 @@ router.post(
         throw new ApiError(404, 'Post not found');
       }
 
+      // A connections-only author's thread is for their followers.
+      if (!(await canViewAuthor(req.user!.id, post.authorId))) {
+        throw new ApiError(404, 'Post not found');
+      }
+
       // The author can close the thread; their own replies still go through.
       if (post.commentsOff && post.authorId !== req.user!.id) {
         throw new ApiError(403, 'Comments are off for this post');
@@ -1021,10 +1042,12 @@ router.delete('/:postId/comments/:commentId', authenticate, async (req: AuthRequ
 
     const comment = await prisma.comment.findUnique({
       where: { id: commentId },
-      select: { authorId: true, post: { select: { authorId: true } } },
+      select: { authorId: true, postId: true, post: { select: { authorId: true } } },
     });
 
-    if (!comment) {
+    // A comment id paired with the wrong post id used to take one off that
+    // other post's comment count.
+    if (!comment || comment.postId !== postId) {
       throw new ApiError(404, 'Comment not found');
     }
 
@@ -1135,14 +1158,22 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
 // SAVE / UNSAVE A POST
 // ===========================================
 
-// Mirrors the visibility rule the like routes use: a hidden post, or a private
-// post belonging to someone else, is treated as absent rather than forbidden.
+// The one rule for acting on a post (like, save): a hidden post, a private
+// post belonging to someone else, a post across a block, a private group's
+// post to a non-member, or a connections-only author's post to a stranger is
+// treated as absent rather than forbidden, so nothing about it is confirmed.
 async function loadVisiblePost(id: string, userId: string) {
   const post = await prisma.post.findUnique({ where: { id } });
   if (!post || post.isHidden || (!post.isPublic && post.authorId !== userId)) {
     throw new ApiError(404, 'Post not found');
   }
+  if (post.authorId !== userId && (await isBlockedRelationship(userId, post.authorId))) {
+    throw new ApiError(404, 'Post not found');
+  }
   if (!(await canViewGroupPosts(userId, post.groupId))) {
+    throw new ApiError(404, 'Post not found');
+  }
+  if (!(await canViewAuthor(userId, post.authorId))) {
     throw new ApiError(404, 'Post not found');
   }
   return post;

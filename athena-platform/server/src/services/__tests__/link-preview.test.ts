@@ -1,6 +1,12 @@
-import { describe, it, expect, jest } from '@jest/globals';
+import { afterEach, describe, it, expect, jest } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({ prisma: { post: { update: jest.fn() } } }));
+// Hostnames in these tests are made up, so name resolution is answered here
+// with a public address; the private-range checks are on literal IPs.
+jest.mock('dns/promises', () => {
+  const api = { lookup: jest.fn(async () => [{ address: '93.184.216.34', family: 4 }]) };
+  return { __esModule: true, default: api, ...api };
+});
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
@@ -47,6 +53,60 @@ describe('parseOpenGraph', () => {
 });
 
 describe('fetchLinkPreview', () => {
+  const PAGE = '<html><head><meta property="og:title" content="Public page"></head></html>';
+
+  // A stand-in for fetch: each call answers from the queue in order.
+  function mockFetch(responses: Array<{ status: number; headers?: Record<string, string>; body?: string; url?: string }>) {
+    const calls: string[] = [];
+    const impl = jest.fn(async (input: string | URL) => {
+      calls.push(String(input));
+      const next = responses.shift();
+      if (!next) throw new Error('no more responses');
+      return new Response(next.body ?? '', {
+        status: next.status,
+        headers: { 'content-type': 'text/html; charset=utf-8', ...(next.headers ?? {}) },
+      });
+    });
+    (globalThis as any).fetch = impl;
+    return { calls };
+  }
+
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it('follows a redirect to another public host and reads the card there', async () => {
+    const { calls } = mockFetch([
+      { status: 301, headers: { location: 'https://cdn.example.org/article' } },
+      { status: 200, body: PAGE },
+    ]);
+    const preview = await fetchLinkPreview('https://example.com/short');
+    expect(preview?.title).toBe('Public page');
+    expect(calls).toEqual(['https://example.com/short', 'https://cdn.example.org/article']);
+  });
+
+  it('refuses a redirect that lands on a private address', async () => {
+    const { calls } = mockFetch([
+      { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } },
+      { status: 200, body: PAGE },
+    ]);
+    await expect(fetchLinkPreview('https://example.com/evil')).resolves.toBeNull();
+    // The private hop was never requested.
+    expect(calls).toEqual(['https://example.com/evil']);
+  });
+
+  it('gives up after too many redirects', async () => {
+    mockFetch([
+      { status: 302, headers: { location: 'https://a.example/1' } },
+      { status: 302, headers: { location: 'https://a.example/2' } },
+      { status: 302, headers: { location: 'https://a.example/3' } },
+      { status: 302, headers: { location: 'https://a.example/4' } },
+      { status: 200, body: PAGE },
+    ]);
+    await expect(fetchLinkPreview('https://example.com/loop')).resolves.toBeNull();
+  });
+
   it('refuses private and local hosts without fetching', async () => {
     await expect(fetchLinkPreview('http://localhost:5000/admin')).resolves.toBeNull();
     await expect(fetchLinkPreview('http://127.0.0.1/')).resolves.toBeNull();

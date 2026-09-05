@@ -80,7 +80,7 @@ describe('Comment controls', () => {
   });
 
   it('the post’s author can delete anyone’s comment on it; a stranger cannot', async () => {
-    prisma.comment.findUnique.mockResolvedValue({ authorId: 'commenter', post: { authorId: AUTHOR } });
+    prisma.comment.findUnique.mockResolvedValue({ authorId: 'commenter', postId: 'p1', post: { authorId: AUTHOR } });
     prisma.comment.delete.mockResolvedValue({});
     prisma.post.update.mockResolvedValue({});
 
