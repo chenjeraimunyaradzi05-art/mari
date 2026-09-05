@@ -6,6 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../stores';
 import { api, unwrapApiData } from '../services/api';
+import { unsyncPushToken } from '../services/pushNotifications';
 import * as SecureStore from 'expo-secure-store';
 
 // ============================================
@@ -194,6 +195,8 @@ export function useLogout() {
 
   return useMutation({
     mutationFn: async () => {
+      // While still signed in: this device stops receiving this member's push.
+      await unsyncPushToken();
       await api.post('/auth/logout');
     },
     onSuccess: async () => {

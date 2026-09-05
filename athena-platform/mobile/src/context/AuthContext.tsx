@@ -6,6 +6,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import * as SecureStore from 'expo-secure-store';
 import { api, setAuthTokens, unwrapApiData } from '../services/api';
 import { resolvePreferences, setLocalPreferences } from '../utils/preferences';
+import { syncPushToken, unsyncPushToken } from '../services/pushNotifications';
 
 interface User {
   id: string;
@@ -105,6 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setAuthTokens(accessToken, refreshToken || null);
     setUser(userData);
+    // A fresh sign-in registers this phone for push straight away.
+    void syncPushToken();
     const preferences = await resolvePreferences({
       preferredLocale: userData?.preferredLocale,
       preferredCurrency: userData?.preferredCurrency,
@@ -138,6 +141,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setAuthTokens(accessToken, refreshToken || null);
     setUser(userData);
+    // A fresh sign-in registers this phone for push straight away.
+    void syncPushToken();
     const preferences = await resolvePreferences({
       preferredLocale: userData?.preferredLocale,
       preferredCurrency: userData?.preferredCurrency,
@@ -150,6 +155,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
+      // While still signed in: this device stops receiving this member's push.
+      await unsyncPushToken();
       await api.post('/auth/logout');
     } catch {
       // Ignore logout errors

@@ -39,13 +39,33 @@ export async function registerForPushNotifications() {
   return token.data;
 }
 
+// The token this device registered, so sign-out can take it back.
+let registeredToken: string | null = null;
+
 export async function syncPushToken() {
   const token = await registerForPushNotifications();
   if (!token) return;
 
   try {
-    await api.post('/notifications/push-token', { token, provider: 'expo' });
+    await api.post('/notifications/push-token', { token, provider: 'expo', platform: Platform.OS });
+    registeredToken = token;
   } catch (error) {
     // Silently fail; token sync can retry later
+  }
+}
+
+/**
+ * Forgets this device on the server. Called before sign-out, so the next
+ * person to sign in on the phone does not receive the previous member's
+ * messages.
+ */
+export async function unsyncPushToken() {
+  const token = registeredToken;
+  if (!token) return;
+  registeredToken = null;
+  try {
+    await api.delete('/notifications/push-token', { data: { token } });
+  } catch (error) {
+    // The server also moves a token to whoever signs in next, so this is belt and braces.
   }
 }
