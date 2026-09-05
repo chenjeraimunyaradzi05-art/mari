@@ -74,13 +74,9 @@ export function validateWorkerStartupConfiguration(
     errors.push('VIDEO_PROCESSOR_URL is required for production video worker processing');
   }
 
-  if (isProductionRuntime() && !canSimulateWorker('PUSH_NOTIFICATION') && !isConfiguredEnv('PUSH_NOTIFICATION_PROVIDER_URL')) {
-    errors.push('PUSH_NOTIFICATION_PROVIDER_URL is required for production push notification worker processing');
-  }
-
-  if (isProductionRuntime() && !canSimulateWorker('DATA_EXPORT') && !isConfiguredEnv('DATA_EXPORT_PROCESSOR_URL')) {
-    errors.push('DATA_EXPORT_PROCESSOR_URL is required for production data export worker processing');
-  }
+  // Push and data export run in this process (push.service, data-export.service).
+  // PUSH_NOTIFICATION_PROVIDER_URL and DATA_EXPORT_PROCESSOR_URL are optional
+  // overrides for deployments with an external service, never requirements.
 
   return { ok: errors.length === 0, errors };
 }

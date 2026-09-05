@@ -31,8 +31,18 @@ export function validateLaunchReadinessDocs(): LaunchReadinessDocValidationResul
   const workerContent = fs.existsSync(workerConfigFile) ? fs.readFileSync(workerConfigFile, 'utf8') : '';
   checks.push({
     name: 'worker-env-config',
-    ok: workerContent.includes('REDIS_URL') && workerContent.includes('VIDEO_PROCESSOR_URL') && workerContent.includes('PUSH_NOTIFICATION_PROVIDER_URL') && workerContent.includes('DATA_EXPORT_PROCESSOR_URL'),
-    details: 'Worker startup validation should cover Redis and provider URLs',
+    ok: workerContent.includes('REDIS_URL') && workerContent.includes('VIDEO_PROCESSOR_URL'),
+    details: 'Worker startup validation should cover Redis and the video processor URL',
+  });
+
+  // Push and data export must run in process, so a production queue never
+  // waits on a service that was never built.
+  const workersServiceFile = path.join(root, 'src', 'services', 'workers.service.ts');
+  const workersServiceContent = fs.existsSync(workersServiceFile) ? fs.readFileSync(workersServiceFile, 'utf8') : '';
+  checks.push({
+    name: 'in-process-push-and-export',
+    ok: workersServiceContent.includes('pushToUser(') && workersServiceContent.includes('runDataExport('),
+    details: 'Push and data export workers should deliver in process rather than require external processors',
   });
 
   const workerEntryContent = fs.existsSync(workerEntryFile) ? fs.readFileSync(workerEntryFile, 'utf8') : '';
@@ -53,9 +63,8 @@ export function validateLaunchReadinessDocs(): LaunchReadinessDocValidationResul
     ok:
       productionEnvTemplateContent.includes('ENABLE_WORKERS=true') &&
       productionEnvTemplateContent.includes('VIDEO_PROCESSOR_URL') &&
-      productionEnvTemplateContent.includes('PUSH_NOTIFICATION_PROVIDER_URL') &&
-      productionEnvTemplateContent.includes('DATA_EXPORT_PROCESSOR_URL'),
-    details: 'Production env template should document explicit worker enablement and provider URLs',
+      productionEnvTemplateContent.includes('EXPO_ACCESS_TOKEN'),
+    details: 'Production env template should document explicit worker enablement, the video processor and Expo push',
   });
 
   return {

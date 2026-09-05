@@ -19,6 +19,10 @@ import { NotificationType } from '@prisma/client';
 import { prisma } from './prisma';
 import { logger } from './logger';
 import { memberWantsSocialNotification } from '../services/notification-preferences.service';
+import { pushToUser } from '../services/push.service';
+
+// The kinds worth waking a phone for. A like is shown in the app, not pushed.
+const PUSHED_KINDS = new Set<NotificationType>(['COMMENT', 'MENTION', 'FOLLOW', 'FOLLOW_REQUEST', 'REPOST']);
 
 export async function actorDisplayName(userId: string): Promise<string> {
   const user = await prisma.user.findUnique({
@@ -58,6 +62,17 @@ export async function notifySocial(input: SocialNotificationInput): Promise<void
         data: { actorId: input.actorId, actorName: name },
       },
     });
+
+    // After the row exists: the same news on the recipient's phone, subject
+    // to their push preferences. Never awaited into the request.
+    if (PUSHED_KINDS.has(input.type)) {
+      void pushToUser(input.recipientId, input.type, {
+        title: input.title,
+        body: input.message(name),
+        link: input.link,
+        data: { type: input.type, actorId: input.actorId },
+      });
+    }
   } catch (error) {
     logger.warn('Social notification not written', {
       type: input.type,

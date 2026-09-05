@@ -270,12 +270,6 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
   const workerSimulationAllowed =
     process.env.WORKER_ALLOW_SIMULATION === 'true' ||
     process.env.VIDEO_PROCESSING_ALLOW_SIMULATION === 'true';
-  const pushSimulationAllowed =
-    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
-    process.env.PUSH_NOTIFICATION_ALLOW_SIMULATION === 'true';
-  const dataExportSimulationAllowed =
-    process.env.WORKER_ALLOW_SIMULATION === 'true' ||
-    process.env.DATA_EXPORT_ALLOW_SIMULATION === 'true';
   const openSearchEnabled = process.env.OPENSEARCH_ENABLED === 'true' || isConfiguredEnv('OPENSEARCH_NODE');
 
   const checks: LaunchReadinessCheck[] = [
@@ -315,18 +309,9 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
       workersEnabled && production && !workerSimulationAllowed,
       'Video worker needs VIDEO_PROCESSOR_URL when simulation is disabled'
     ),
-    envCheck(
-      'PUSH_NOTIFICATION_PROVIDER_URL',
-      'workers',
-      workersEnabled && production && !pushSimulationAllowed,
-      'Push worker needs PUSH_NOTIFICATION_PROVIDER_URL when simulation is disabled'
-    ),
-    envCheck(
-      'DATA_EXPORT_PROCESSOR_URL',
-      'workers',
-      workersEnabled && production && !dataExportSimulationAllowed,
-      'Data export worker needs DATA_EXPORT_PROCESSOR_URL when simulation is disabled'
-    ),
+    // Push runs in process through Expo's API; the token only matters when the
+    // Expo project has enhanced push security turned on.
+    envCheck('EXPO_ACCESS_TOKEN', 'workers', false, 'Expo push access token is not set (only needed with enhanced push security)'),
   ];
 
   const requiredFailures = checks.filter((check) => check.required && !check.ok);

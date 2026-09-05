@@ -11,6 +11,7 @@ import { prisma } from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
 import { i18nService, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
+import { pushToUser } from './push.service';
 
 export type NotificationChannel = 'in-app' | 'email' | 'push' | 'sms';
 
@@ -128,9 +129,26 @@ export class NotificationService {
   }
 
   /**
-   * Send push notification via FCM/APNS
+   * Push, through push.service: Expo tokens over Expo's API, FCM tokens
+   * through firebase-admin when configured. Preferences were already checked
+   * by the caller for this channel.
    */
   private async sendPushNotification(userId: string, options: DispatchOptions): Promise<void> {
+    const { title, message, link, data, pushOptions, priority } = options;
+    await pushToUser(userId, options.type, {
+      title,
+      body: message || '',
+      link,
+      data: { type: options.type, ...(data || {}) },
+      badge: pushOptions?.badge,
+      priority: priority === 'critical' || priority === 'high' ? 'high' : 'default',
+    });
+  }
+
+  // The Firebase-only sender this replaced is kept below for reference of the
+  // payload shape it built; it is no longer called.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async legacyFirebasePush(userId: string, options: DispatchOptions): Promise<void> {
     // Get user's push tokens
     const tokens = await prisma.pushToken.findMany({
       where: { userId, isActive: true },

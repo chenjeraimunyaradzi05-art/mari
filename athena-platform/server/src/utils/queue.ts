@@ -116,6 +116,8 @@ export interface PushNotificationJob {
   body: string;
   data?: Record<string, any>;
   deviceTokens?: string[];
+  /** The notification kind, so the member's push preferences can be honoured. */
+  type?: string;
 }
 
 export interface SearchIndexingJob {
@@ -137,6 +139,8 @@ export interface DataExportJob {
   exportType: 'gdpr' | 'analytics' | 'full';
   format: 'json' | 'csv' | 'zip';
   callbackUrl?: string;
+  /** An existing DSAR request to complete; opened when absent. */
+  dsarId?: string;
 }
 
 export interface AnalyticsJob {

@@ -9,6 +9,7 @@ describe('validateLaunchReadinessDocs', () => {
       expect.arrayContaining([
         expect.objectContaining({ name: 'launch-readiness-route' }),
         expect.objectContaining({ name: 'worker-env-config' }),
+        expect.objectContaining({ name: 'in-process-push-and-export' }),
         expect.objectContaining({ name: 'dedicated-worker-startup' }),
         expect.objectContaining({ name: 'production-worker-env-template' }),
       ])

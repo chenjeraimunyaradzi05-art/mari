@@ -10,6 +10,19 @@ import { socketMessageThrottle } from '../middleware/socialLimits';
 import { isBlockedRelationship } from '../utils/safety-store';
 import { canOpenConversation } from './message-permissions.service';
 import { assertContentAllowed } from './moderation.service';
+import { pushPreview, pushToUser } from './push.service';
+
+/** A direct message reaches the recipient's phone when no client of theirs is connected. */
+function pushMessageIfAway(receiverId: string, message: { id?: string; conversationId?: string | null; senderId?: string; content?: string | null; sender?: { firstName?: string | null; lastName?: string | null } | null }) {
+  if (isUserOnline(receiverId)) return;
+  const name = [message.sender?.firstName, message.sender?.lastName].filter(Boolean).join(' ').trim() || 'New message';
+  void pushToUser(receiverId, 'MESSAGE', {
+    title: name,
+    body: pushPreview(message.content),
+    link: message.senderId ? `/dashboard/messages?user=${message.senderId}` : '/dashboard/messages',
+    data: { type: 'MESSAGE', conversationId: message.conversationId ?? undefined, messageId: message.id },
+  });
+}
 import { prisma } from '../utils/prisma';
 import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
@@ -49,7 +62,7 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       const principal = await authenticateSocketToken(token);
       socket.userId = principal.id;
       next();
-    } catch (error) {
+    } catch {
       next(new Error('Authentication failed'));
     }
   });
@@ -209,6 +222,8 @@ export function initializeSocketHandlers(io: SocketIOServer) {
             receiverId,
           });
         }
+
+        pushMessageIfAway(receiverId, message);
 
         // Create notification for receiver
         await createNotification(io, {
@@ -543,6 +558,9 @@ export async function sendRealTimeMessage(receiverId: string, message: any) {
   
   // 2. Emit to `user:${receiverId}` with the full message
   ioInstance.to(`user:${receiverId}`).emit('messages:new', message);
+
+  // A recipient with nothing connected hears about it on their phone instead.
+  pushMessageIfAway(receiverId, message);
 
   // 3. Tell the sender it actually reached a live client. This is the only
   // honest "delivered" signal we have — anything stronger would need an ack

@@ -6,6 +6,78 @@ import { groupNotifications, type NotificationRow } from '../services/notificati
 
 const router = Router();
 
+// ===========================================
+// PUSH TOKENS
+// ===========================================
+// The mobile app hands over its Expo push token after sign-in and takes it
+// back on sign-out. A token is a device, not a person: one already known is
+// moved to whoever is signed in on that device now. Declared ahead of the
+// /:id routes so DELETE /push-token is never read as a notification id.
+
+const TOKEN_MAX = 4096;
+const PLATFORMS = new Set(['ios', 'android', 'web']);
+
+function tokenFrom(body: unknown, query: unknown): string | null {
+  const raw =
+    (body && typeof body === 'object' && typeof (body as { token?: unknown }).token === 'string'
+      ? (body as { token: string }).token
+      : undefined) ??
+    (query && typeof query === 'object' && typeof (query as { token?: unknown }).token === 'string'
+      ? (query as { token: string }).token
+      : undefined);
+  const token = raw?.trim();
+  if (!token || token.length > TOKEN_MAX) return null;
+  return token;
+}
+
+router.post('/push-token', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const token = tokenFrom(req.body, undefined);
+    if (!token) throw new ApiError(400, 'A push token is required');
+
+    const provider = typeof req.body?.provider === 'string' ? req.body.provider.toLowerCase() : 'expo';
+    const isExpo = /^Expo(nent)?PushToken\[[^\]\s]+\]$/.test(token);
+    if (provider === 'expo' && !isExpo) {
+      throw new ApiError(400, 'That is not an Expo push token');
+    }
+    const requestedPlatform = typeof req.body?.platform === 'string' ? req.body.platform.toLowerCase() : '';
+    const platform = PLATFORMS.has(requestedPlatform) ? requestedPlatform : provider === 'web' ? 'web' : 'android';
+    const deviceId = typeof req.body?.deviceId === 'string' && req.body.deviceId.trim() ? req.body.deviceId.trim().slice(0, 200) : null;
+
+    const existing = await prisma.pushToken.findFirst({ where: { token }, select: { id: true, userId: true } });
+    if (existing) {
+      await prisma.pushToken.update({
+        where: { id: existing.id },
+        data: { userId: req.user!.id, platform, deviceId, isActive: true },
+      });
+      res.json({ success: true, message: 'Device updated', data: { id: existing.id, platform } });
+      return;
+    }
+
+    const created = await prisma.pushToken.create({
+      data: { userId: req.user!.id, token, platform, deviceId, isActive: true },
+      select: { id: true, platform: true },
+    });
+    res.status(201).json({ success: true, message: 'Device registered', data: created });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/push-token', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const token = tokenFrom(req.body, req.query);
+    if (!token) throw new ApiError(400, 'A push token is required');
+    const result = await prisma.pushToken.updateMany({
+      where: { token, userId: req.user!.id },
+      data: { isActive: false },
+    });
+    res.json({ success: true, message: result.count > 0 ? 'Device forgotten' : 'Device was not registered', data: { removed: result.count } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 type NotificationPreferencesFull = {
   email: {
     jobMatches: boolean;

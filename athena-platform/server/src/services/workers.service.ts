@@ -26,12 +26,18 @@ import { mlService } from './ml.service';
 import { sendEmail } from '../utils/email';
 import { resolveWorkerRedisUrl } from '../utils/worker-config';
 import { processVideo } from './video-pipeline.service';
+import type { NotificationType } from '@prisma/client';
+import { pushToUser } from './push.service';
+import { runDataExport } from './data-export.service';
 
 const isProductionRuntime =
   process.env.NODE_ENV === 'production' ||
   process.env.VERCEL_ENV === 'production' ||
   process.env.RENDER_ENV === 'production';
 const VIDEO_PROCESSOR_URL = process.env.VIDEO_PROCESSOR_URL;
+// Optional overrides. Push and data export run in this process (see
+// push.service and data-export.service); a URL here hands the job to an
+// external service instead, for deployments that already have one.
 const PUSH_NOTIFICATION_PROVIDER_URL = process.env.PUSH_NOTIFICATION_PROVIDER_URL;
 const DATA_EXPORT_PROCESSOR_URL = process.env.DATA_EXPORT_PROCESSOR_URL;
 const WORKER_STARTUP_TIMEOUT_MS = parseInt(process.env.WORKER_STARTUP_TIMEOUT_MS || '10000', 10);
@@ -195,11 +201,23 @@ export const emailWorker = new Worker<EmailJob>(
 export const pushWorker = new Worker<PushNotificationJob>(
   QUEUE_NAMES.PUSH_NOTIFICATIONS,
   async (job: Job<PushNotificationJob>) => {
-    const { userId, title, body, data, deviceTokens } = job.data;
+    const { userId, title, body, data, deviceTokens, type } = job.data;
     logger.info('Sending push notification', { jobId: job.id, userId });
 
     try {
-      if (!canSimulateWorker('PUSH_NOTIFICATION')) {
+      if (!PUSH_NOTIFICATION_PROVIDER_URL) {
+        // In process: Expo tokens through Expo, FCM tokens through Firebase.
+        const delivery = await pushToUser(userId, (type as NotificationType) ?? 'SYSTEM', {
+          title,
+          body,
+          data,
+          link: typeof data?.link === 'string' ? data.link : undefined,
+        });
+        logger.info('Push notification delivered in process', { jobId: job.id, userId, ...delivery });
+        return { success: true, sentAt: new Date().toISOString(), ...delivery };
+      }
+
+      {
         const result = await callPushProvider<{
           sentCount?: number;
           failureCount?: number;
@@ -221,9 +239,6 @@ export const pushWorker = new Worker<PushNotificationJob>(
         });
         return { success: true, sentAt: new Date().toISOString(), ...result };
       }
-
-      logger.info('Push notification simulated', { jobId: job.id, userId, title });
-      return { success: true, simulated: true, sentAt: new Date().toISOString() };
     } catch (error: any) {
       logger.error('Push notification failed', { jobId: job.id, userId, error: error.message });
       throw error;
@@ -334,13 +349,22 @@ export const mlInferenceWorker = new Worker<MLInferenceJob>(
 export const dataExportWorker = new Worker<DataExportJob>(
   QUEUE_NAMES.DATA_EXPORT,
   async (job: Job<DataExportJob>) => {
-    const { userId, exportType, format } = job.data;
+    const { userId, exportType, format, dsarId } = job.data;
     logger.info('Data export job', { jobId: job.id, userId, exportType });
 
     try {
       await job.updateProgress(10);
 
-      if (!canSimulateWorker('DATA_EXPORT')) {
+      if (!DATA_EXPORT_PROCESSOR_URL) {
+        // In process: the same export the API route produces, minting a
+        // single-use download path the member fetches from the privacy centre.
+        const result = await runDataExport({ userId, dsarId, exportType, format });
+        await job.updateProgress(100);
+        logger.info('Data export completed in process', { jobId: job.id, userId, requestId: result.requestId });
+        return { success: true, requestId: result.requestId, exportUrl: result.exportUrl, expiresAt: result.expiresAt.toISOString() };
+      }
+
+      {
         const result = await callDataExportProcessor<{ exportUrl: string; expiresAt?: string }>({
           jobId: job.id,
           userId,
@@ -356,16 +380,6 @@ export const dataExportWorker = new Worker<DataExportJob>(
         logger.info('Data export completed by processor', { jobId: job.id, userId, exportUrl: result.exportUrl });
         return { success: true, exportUrl: result.exportUrl, expiresAt: result.expiresAt };
       }
-
-      await simulateProcessing(5000);
-      await job.updateProgress(80);
-
-      const exportUrl = `https://exports.athena.com/${userId}/${exportType}-${Date.now()}.${format}`;
-
-      await job.updateProgress(100);
-      logger.info('Data export simulated', { jobId: job.id, userId, exportUrl });
-
-      return { success: true, simulated: true, exportUrl };
     } catch (error: any) {
       logger.error('Data export failed', { jobId: job.id, userId, error: error.message });
       throw error;
@@ -475,10 +489,6 @@ workers.forEach((worker) => {
 // ===========================================
 // HELPERS
 // ===========================================
-
-function simulateProcessing(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 // ===========================================
 // WORKER LIFECYCLE
