@@ -608,7 +608,8 @@ export const groupsApi = {
   cancelMyJoinRequest: (id: string) => api.delete(`/groups/${id}/join-request`),
   leave: (id: string) => api.post(`/groups/${id}/leave`),
   listPosts: (id: string) => api.get(`/groups/${id}/posts`),
-  createPost: (id: string, content: string) => api.post(`/groups/${id}/posts`, { content }),
+  createPost: (id: string, data: { content: string; mediaUrls?: string[]; mediaAlt?: string[]; isSensitive?: boolean }) =>
+    api.post(`/groups/${id}/posts`, data),
   // The author, or a group admin or moderator.
   deletePost: (id: string, postId: string) => api.delete(`/groups/${id}/posts/${postId}`),
 };

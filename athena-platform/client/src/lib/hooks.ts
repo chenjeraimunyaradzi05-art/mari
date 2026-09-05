@@ -768,10 +768,13 @@ export function useGroups(params?: { q?: string }) {
 }
 
 export function useGroup(id?: string) {
+  // Membership and role are per viewer, so the group waits for the session to
+  // settle and refetches when it changes; otherwise a member saw "Join".
+  const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
-    queryKey: ['group', id],
+    queryKey: ['group', id, isAuthenticated],
     queryFn: () => groupsApi.getById(id!),
-    enabled: !!id,
+    enabled: !!id && !isLoading,
     select: (response) => response.data.data,
   });
 }
@@ -856,10 +859,13 @@ export function useCancelMyGroupJoinRequest() {
 }
 
 export function useGroupPosts(groupId?: string) {
+  // Reactions and saves are per viewer, and a private group's posts need the
+  // session, so this waits for it and refetches when it changes.
+  const { isAuthenticated, isLoading } = useAuthStore();
   return useQuery({
-    queryKey: ['group-posts', groupId],
+    queryKey: ['group-posts', groupId, isAuthenticated],
     queryFn: () => groupsApi.listPosts(groupId!),
-    enabled: !!groupId,
+    enabled: !!groupId && !isLoading,
     select: (response) => response.data.data,
   });
 }
@@ -868,8 +874,16 @@ export function useCreateGroupPost() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ groupId, content }: { groupId: string; content: string }) =>
-      groupsApi.createPost(groupId, content),
+    mutationFn: ({
+      groupId,
+      ...data
+    }: {
+      groupId: string;
+      content: string;
+      mediaUrls?: string[];
+      mediaAlt?: string[];
+      isSensitive?: boolean;
+    }) => groupsApi.createPost(groupId, data),
     onSuccess: (_res, vars) => {
       queryClient.invalidateQueries({ queryKey: ['group-posts', vars.groupId] });
       toast.success('Posted');

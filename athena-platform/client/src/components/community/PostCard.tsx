@@ -63,12 +63,14 @@ interface PostCardProps {
   source?: string;
   // Set when this card is the original inside someone's plain repost.
   repostedBy?: string;
+  // A group admin or moderator removing someone else's post from the group.
+  onModeratorRemove?: () => void;
 }
 
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
-export default function PostCard({ post, defaultShowComments = false, source = 'feed', repostedBy }: PostCardProps) {
+export default function PostCard({ post, defaultShowComments = false, source = 'feed', repostedBy, onModeratorRemove }: PostCardProps) {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const react = useReactToPost();
@@ -414,6 +416,20 @@ export default function PostCard({ post, defaultShowComments = false, source = '
                   Report
                 </button>
               )}
+              {onModeratorRemove && !isOwner && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowMenu(false);
+                    onModeratorRemove();
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={16} />
+                  Remove from group
+                </button>
+              )}
               {isOwner && (
                 <button
                   type="button"
@@ -600,13 +616,16 @@ export default function PostCard({ post, defaultShowComments = false, source = '
           {commentsOff ? <MessageCircleOff size={20} /> : <MessageCircle size={20} />}
           <span>{commentsOff ? 'Comments off' : 'Comment'}</span>
         </button>
-        <RepostButton
-          targetId={post.id}
-          original={selfAsOriginal}
-          isReposted={Boolean(post.isReposted)}
-          repostCount={Number(post.repostCount ?? 0)}
-          disabled={!user}
-        />
+        {/* What is said in a group stays in the group. */}
+        {!post.groupId && (
+          <RepostButton
+            targetId={post.id}
+            original={selfAsOriginal}
+            isReposted={Boolean(post.isReposted)}
+            repostCount={Number(post.repostCount ?? 0)}
+            disabled={!user}
+          />
+        )}
         <div className="relative" ref={shareRef}>
           <button
             onClick={() => setShareOpen((open) => !open)}
