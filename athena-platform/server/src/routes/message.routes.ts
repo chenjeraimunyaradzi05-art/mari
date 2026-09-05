@@ -15,6 +15,7 @@ import {
 import {
   assertCanSendInConversation,
   getOrCreateDirectConversation,
+  requestStateFor,
 } from '../services/direct-message.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { isBlockedRelationship } from '../utils/safety-store';
@@ -89,7 +90,9 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
 
     // Use the new efficient Conversation model
     const conversations = await prisma.conversationParticipant.findMany({
-      where: { userId },
+      // A request this person declined is gone from their side; the opener
+      // still sees it, closed.
+      where: { userId, conversation: { OR: [{ requestDeclinedAt: null }, { requestedById: userId }] } },
       include: {
         conversation: {
           include: {
@@ -118,7 +121,7 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
           },
         },
       },
-      orderBy: { conversation: { lastMessageAt: 'desc' } },
+      orderBy: [{ isPinned: 'desc' }, { conversation: { lastMessageAt: 'desc' } }],
     });
 
     const formatted = conversations.map((cp) => {
@@ -129,6 +132,10 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
       return {
         id: conv.id,
         disappearingTtlSeconds: conv.disappearingTtlSeconds ?? null,
+        isPinned: cp.isPinned,
+        isMuted: cp.isMuted,
+        isArchived: cp.isArchived,
+        ...requestStateFor(conv, userId),
         participant: otherParticipant || {
           id: 'deleted',
           firstName: 'Deleted',
@@ -323,7 +330,7 @@ router.post(
         throw new ApiError(400, 'Content or attachments required');
       }
 
-      const { receiverId } = await assertCanSendInConversation(id, userId);
+      const { conversation: thread, receiverId } = await assertCanSendInConversation(id, userId);
 
       if (await isBlockedRelationship(userId, receiverId)) {
         throw new ApiError(403, 'You cannot message this user');
@@ -350,6 +357,17 @@ router.post(
       // so changing the setting later never touches what was already sent.
       const expiresAt = expiryFor(await conversationTtl(id));
 
+      // The person who was asked replying is the acceptance. A muted thread, or
+      // a request they have not accepted, reaches them without a push or a badge
+      // bump; the very first request message does knock once, so they know
+      // someone is waiting.
+      const pendingRequest = Boolean(thread.requestedById) && !thread.requestAcceptedAt && !thread.requestDeclinedAt;
+      const acceptsRequest = pendingRequest && thread.requestedById !== userId;
+      const receiverMuted = thread.participants.some((p) => p.userId === receiverId && p.isMuted);
+      const quiet =
+        receiverMuted ||
+        (pendingRequest && !acceptsRequest && (await prisma.message.count({ where: { conversationId: id, senderId: userId } })) > 0);
+
       const [message] = await prisma.$transaction([
         prisma.message.create({
           data: {
@@ -375,6 +393,7 @@ router.post(
           where: { id },
           data: {
             lastMessageAt: new Date(),
+            ...(acceptsRequest ? { requestAcceptedAt: new Date(), requestDeclinedAt: null } : {}),
           },
         }),
         prisma.conversationParticipant.updateMany({
@@ -390,7 +409,7 @@ router.post(
       ]);
 
       // Emit Socket Event
-      await sendRealTimeMessage(receiverId, message);
+      await sendRealTimeMessage(receiverId, message, { quiet, request: pendingRequest && !acceptsRequest });
 
       res.status(201).json({
         success: true,
@@ -401,6 +420,116 @@ router.post(
     }
   }
 );
+
+// ===========================================
+// PREFERENCES: PIN, MUTE, ARCHIVE
+// ===========================================
+// Each person's own view of a thread. Pinning holds it at the top of their
+// list, muting stops pushes and the badge, archiving takes it out of the inbox
+// until it is unarchived.
+router.patch(
+  '/conversations/:id/preferences',
+  authenticate,
+  [
+    body('isPinned').optional().isBoolean(),
+    body('isMuted').optional().isBoolean(),
+    body('isArchived').optional().isBoolean(),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { id } = req.params;
+      const userId = req.user!.id;
+
+      const data: { isPinned?: boolean; isMuted?: boolean; isArchived?: boolean } = {};
+      for (const key of ['isPinned', 'isMuted', 'isArchived'] as const) {
+        if (typeof req.body[key] === 'boolean') data[key] = req.body[key];
+      }
+      if (Object.keys(data).length === 0) {
+        throw new ApiError(400, 'Nothing to change');
+      }
+
+      const participation = await prisma.conversationParticipant.findUnique({
+        where: { conversationId_userId: { conversationId: id, userId } },
+        select: { id: true },
+      });
+      if (!participation) {
+        throw new ApiError(404, 'Conversation not found');
+      }
+
+      const updated = await prisma.conversationParticipant.update({
+        where: { id: participation.id },
+        data,
+        select: { isPinned: true, isMuted: true, isArchived: true },
+      });
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// MESSAGE REQUESTS
+// ===========================================
+// Only the person who was asked decides. Accepting opens the thread for good;
+// declining keeps the row so the same person cannot simply ask again, and
+// hides it from the decliner.
+async function loadRequestFor(conversationId: string, userId: string) {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      id: true,
+      requestedById: true,
+      requestAcceptedAt: true,
+      requestDeclinedAt: true,
+      participants: { select: { userId: true } },
+    },
+  });
+  if (!conversation || !conversation.participants.some((p) => p.userId === userId)) {
+    throw new ApiError(404, 'Conversation not found');
+  }
+  if (!conversation.requestedById || conversation.requestedById === userId) {
+    throw new ApiError(400, 'There is no message request here for you to decide');
+  }
+  if (conversation.requestAcceptedAt) {
+    throw new ApiError(409, 'This request was already accepted');
+  }
+  return conversation;
+}
+
+router.post('/conversations/:id/request/accept', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const conversation = await loadRequestFor(req.params.id, userId);
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { requestAcceptedAt: new Date(), requestDeclinedAt: null },
+    });
+    emitToUserRoom(conversation.requestedById!, 'messages:request_accepted', { conversationId: conversation.id, by: userId });
+    res.json({ success: true, data: { conversationId: conversation.id, accepted: true } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/conversations/:id/request/decline', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const conversation = await loadRequestFor(req.params.id, userId);
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { requestDeclinedAt: new Date() },
+    });
+    res.json({ success: true, data: { conversationId: conversation.id, accepted: false } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ===========================================
 // DISAPPEARING MESSAGES

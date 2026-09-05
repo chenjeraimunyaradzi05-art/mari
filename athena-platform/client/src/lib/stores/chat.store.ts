@@ -152,8 +152,22 @@ export interface Conversation {
   isPinned?: boolean;
   isMuted?: boolean;
   isArchived?: boolean;
+  // Message requests: isRequest means this person is asking you; requestPending
+  // means you asked and are waiting; requestDeclined means they said no.
+  isRequest?: boolean;
+  requestPending?: boolean;
+  requestDeclined?: boolean;
   // Disappearing messages timer in seconds; null or undefined is off.
   disappearingTtlSeconds?: number | null;
+}
+
+// The badge counts what the reader would want to be told about: not threads
+// they muted or archived, and not requests they have not accepted.
+export function countUnread(conversations: Conversation[]): number {
+  return conversations.reduce(
+    (acc, c) => (c.isMuted || c.isArchived || c.isRequest ? acc : acc + (c.unreadCount || 0)),
+    0
+  );
 }
 
 interface ChatState {
@@ -171,6 +185,7 @@ interface ChatState {
   // Actions
   setActiveConversation: (id: string | null) => void;
   setConversations: (conversations: Conversation[]) => void;
+  patchConversation: (conversationId: string, patch: Partial<Conversation>) => void;
   addMessage: (conversationId: string, message: ChatMessage, options?: { countAsUnread?: boolean }) => void;
   setMessages: (conversationId: string, messages: ChatMessage[]) => void;
   updateMessageStatus: (conversationId: string, messageId: string, status: ChatMessage['status']) => void;
@@ -228,8 +243,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     return {
       conversations: conversations.map((c) => (typing.has(c.id) ? { ...c, isTyping: true } : c)),
-      totalUnread: conversations.reduce((acc, c) => acc + c.unreadCount, 0),
+      totalUnread: countUnread(conversations),
     };
+  }),
+
+  patchConversation: (conversationId, patch) => set((state) => {
+    const conversations = state.conversations.map((c) => (c.id === conversationId ? { ...c, ...patch } : c));
+    return { conversations, totalUnread: countUnread(conversations) };
   }),
 
   // `countAsUnread` is false for messages the viewer sent themselves — those

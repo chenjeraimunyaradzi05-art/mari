@@ -891,7 +891,8 @@ model EscrowPayment {
   paymentIntentId       String?   @unique // Alias for lookup
   description           String?
   metadata              Json?
-  sessionType           String? // 'mentor_session' | 'course_purchase' | 'creator_content'
+  sessionType           String? // 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order'
+  serviceOrder          ServiceOrder?
   releasedAt            DateTime?
   capturedAt            DateTime?
   canceledAt            DateTime?
@@ -2208,6 +2209,13 @@ model Conversation {
   // off. Either participant may change it; a system message records who did.
   disappearingTtlSeconds Int?
 
+  // Message requests. A thread opened by someone the recipient does not follow
+  // waits in their Requests tab until they accept it. requestedById is the
+  // opener; declining keeps the row so the opener cannot simply ask again.
+  requestedById     String?
+  requestAcceptedAt DateTime?
+  requestDeclinedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -2223,6 +2231,12 @@ model ConversationParticipant {
   unreadCount       Int      @default(0)
   lastReadAt        DateTime @default(now())
   lastReadMessageId String? // ID of the last read message
+
+  // The reader's own view of the thread: pinned to the top, muted (no push, no
+  // badge), or archived out of the inbox. Each side sets their own.
+  isPinned   Boolean @default(false)
+  isMuted    Boolean @default(false)
+  isArchived Boolean @default(false)
 
   joinedAt DateTime @default(now())
 
@@ -2712,6 +2726,12 @@ model ServiceOrder {
 
   service SkillService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   client  User         @relation("ServiceOrdersClient", fields: [clientId], references: [id], onDelete: Cascade)
+
+  // The buyer's money: held on their card when the order is placed and taken
+  // only when they approve the delivery. Null only for orders that predate
+  // escrow.
+  escrowPaymentId String?        @unique
+  escrow          EscrowPayment? @relation(fields: [escrowPaymentId], references: [id])
 
   @@index([serviceId])
   @@index([clientId])

@@ -36,7 +36,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { disappearingLabel, messageApi } from '@/lib/api';
 import { renderSocialText } from '@/lib/social-text';
 import { VoiceRecorder } from './VoiceRecorder';
@@ -130,6 +130,34 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
     ?? conversation?.participants[0];
   const counterpartId = counterpart?.id;
   const isCounterpartTyping = conversation?.isTyping ?? false;
+
+  // Only the person asked decides a message request. Accepting opens the
+  // thread; declining hides it and stops the other person from asking again.
+  const router = useRouter();
+  const { patchConversation } = useChatStore();
+  const decideRequest = async (accept: boolean) => {
+    if (
+      !accept &&
+      !window.confirm(`Decline ${counterpart?.name ?? 'this'}'s message request? They cannot message you again unless you message them first.`)
+    ) {
+      return;
+    }
+    try {
+      if (accept) {
+        await messageApi.acceptRequest(conversationId);
+        patchConversation(conversationId, { isRequest: false });
+        toast.success('Request accepted');
+      } else {
+        await messageApi.declineRequest(conversationId);
+        patchConversation(conversationId, { isRequest: false, isArchived: true, requestDeclined: true });
+        toast.success('Request declined');
+        router.push('/dashboard/messages');
+      }
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message || 'Could not update the request');
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -384,6 +412,25 @@ export default function ChatWindow({ conversationId }: ChatWindowProps) {
         )}
       </div>
 
+      {conversation?.isRequest && counterpart ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-900/40 dark:bg-indigo-900/20 dark:text-indigo-100">
+          <span>
+            <strong>{counterpart.name}</strong> wants to message you. They can send a few messages until you accept, and cannot see when you read them.
+          </span>
+          <span className="flex gap-2">
+            <Button size="sm" onClick={() => void decideRequest(true)}>Accept</Button>
+            <Button size="sm" variant="outline" onClick={() => void decideRequest(false)}>Decline</Button>
+          </span>
+        </div>
+      ) : conversation?.requestPending ? (
+        <div className="border-b border-slate-100 px-4 py-1.5 text-center text-xs text-slate-500 dark:border-slate-800">
+          Message request sent. They can reply once they accept.
+        </div>
+      ) : conversation?.requestDeclined ? (
+        <div className="border-b border-slate-100 px-4 py-1.5 text-center text-xs text-slate-500 dark:border-slate-800">
+          They declined your message request.
+        </div>
+      ) : null}
       {conversation?.disappearingTtlSeconds ? (
         <div className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs text-amber-800 bg-amber-50 border-b border-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900/40">
           <Timer className="w-3.5 h-3.5" />

@@ -13,13 +13,20 @@ import { assertContentAllowed } from './moderation.service';
 import { pushPreview, pushToUser } from './push.service';
 
 /** A direct message reaches the recipient's phone when no client of theirs is connected. */
-function pushMessageIfAway(receiverId: string, message: { id?: string; conversationId?: string | null; senderId?: string; content?: string | null; sender?: { firstName?: string | null; lastName?: string | null } | null }) {
+function pushMessageIfAway(
+  receiverId: string,
+  message: { id?: string; conversationId?: string | null; senderId?: string; content?: string | null; sender?: { firstName?: string | null; lastName?: string | null } | null },
+  options: { request?: boolean } = {}
+) {
   if (isUserOnline(receiverId)) return;
   const name = [message.sender?.firstName, message.sender?.lastName].filter(Boolean).join(' ').trim() || 'New message';
   void pushToUser(receiverId, 'MESSAGE', {
-    title: name,
-    body: pushPreview(message.content),
-    link: message.senderId ? `/dashboard/messages?user=${message.senderId}` : '/dashboard/messages',
+    // A request knocks once and says so; the preview waits until they accept.
+    title: options.request ? `${name} wants to message you` : name,
+    body: options.request ? 'Open your message requests to accept or decline.' : pushPreview(message.content),
+    link: options.request
+      ? '/dashboard/messages?tab=requests'
+      : message.senderId ? `/dashboard/messages?user=${message.senderId}` : '/dashboard/messages',
     data: { type: 'MESSAGE', conversationId: message.conversationId ?? undefined, messageId: message.id },
   });
 }
@@ -547,20 +554,25 @@ interface NotificationData {
   i18nParams?: Record<string, string | number>;
 }
 
-export async function sendRealTimeMessage(receiverId: string, message: any) {
+// quiet: the recipient muted this thread, or has not accepted the request it
+// belongs to. The message still arrives; nothing buzzes or lights up for it.
+export async function sendRealTimeMessage(
+  receiverId: string,
+  message: any,
+  options: { quiet?: boolean; request?: boolean } = {}
+) {
   if (!ioInstance) return;
   
   // 1. Emit to main "user:ID" room (for notifications badge)
-  ioInstance.to(`user:${receiverId}`).emit('messages:new_count', { 
-    userId: receiverId, 
-    increment: 1 
-  });
+  if (!options.quiet) {
+    ioInstance.to(`user:${receiverId}`).emit('messages:new_count', { userId: receiverId, increment: 1 });
+  }
   
   // 2. Emit to `user:${receiverId}` with the full message
   ioInstance.to(`user:${receiverId}`).emit('messages:new', message);
 
   // A recipient with nothing connected hears about it on their phone instead.
-  pushMessageIfAway(receiverId, message);
+  if (!options.quiet) pushMessageIfAway(receiverId, message, { request: options.request });
 
   // 3. Tell the sender it actually reached a live client. This is the only
   // honest "delivered" signal we have — anything stronger would need an ack

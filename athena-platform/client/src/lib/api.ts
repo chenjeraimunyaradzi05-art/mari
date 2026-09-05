@@ -832,6 +832,14 @@ export const messageApi = {
   // allowed TTLs in seconds (1 hour, 24 hours, 7 days, 90 days).
   updateConversationSettings: (conversationId: string, disappearingTtlSeconds: number | null) =>
     api.patch(`/messages/conversations/${conversationId}/settings`, { disappearingTtlSeconds }),
+
+  // Your own view of a thread: pinned to the top, muted, or archived.
+  updatePreferences: (conversationId: string, prefs: { isPinned?: boolean; isMuted?: boolean; isArchived?: boolean }) =>
+    api.patch(`/messages/conversations/${conversationId}/preferences`, prefs),
+
+  // Message requests: only the person who was asked can decide.
+  acceptRequest: (conversationId: string) => api.post(`/messages/conversations/${conversationId}/request/accept`),
+  declineRequest: (conversationId: string) => api.post(`/messages/conversations/${conversationId}/request/decline`),
 };
 
 export const DISAPPEARING_MESSAGE_OPTIONS: { value: number | null; label: string }[] = [

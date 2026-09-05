@@ -157,10 +157,13 @@ class SocketClient {
       if (!conversationId) return;
 
       const isMine = raw.senderId === this.userId;
+      // A muted thread or an unaccepted request still receives the message; it
+      // just does not bump the badge.
+      const thread = useChatStore.getState().conversations.find((c) => c.id === conversationId);
       useChatStore
         .getState()
         .addMessage(conversationId, toChatMessage(raw, this.userId || undefined), {
-          countAsUnread: !isMine,
+          countAsUnread: !isMine && !thread?.isMuted && !thread?.isRequest,
         });
     });
 

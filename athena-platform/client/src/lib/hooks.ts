@@ -1151,9 +1151,13 @@ export function useUnreadMessageCount() {
     queryKey: ['conversations'],
     queryFn: messageApi.getConversations,
     select: (response) => {
-      const conversations = response.data.data as Array<{ unreadCount?: number }>;
+      const conversations = response.data.data as Array<{ unreadCount?: number; isMuted?: boolean; isArchived?: boolean; isRequest?: boolean }>;
       if (!Array.isArray(conversations)) return 0;
-      return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+      // Muted and archived threads, and requests not yet accepted, stay off the badge.
+      return conversations.reduce(
+        (sum, c) => (c.isMuted || c.isArchived || c.isRequest ? sum : sum + (c.unreadCount || 0)),
+        0
+      );
     },
     enabled: isAuthenticated && !isLoading,
     refetchInterval: 30000,
