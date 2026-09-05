@@ -27,6 +27,7 @@
     "validate:auth-sessions": "node -r ts-node/register src/scripts/validate-auth-session-routes.ts",
     "db:guard": "node scripts/guard-destructive-migration.js",
     "check:api-contract": "node scripts/check-api-contract.js",
+    "check:env": "node scripts/check-env.js",
     "db:seed:apprenticeships": "ts-node src/services/seed/apprenticeships.seed.ts"
   },
   "dependencies": {
