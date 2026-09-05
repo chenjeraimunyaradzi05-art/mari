@@ -1,441 +1,485 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams } from 'next/navigation';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  FileText,
-  Search,
-  Filter,
-  Eye,
-  MessageSquare,
-  Calendar,
-  ArrowLeft,
-  User,
-  Briefcase,
-  ChevronDown,
-  Star,
-  Check,
-  X,
-  Clock,
-  Download,
-} from 'lucide-react';
+/**
+ * The applicant pipeline for an organisation's jobs.
+ *
+ * This page read a field the route never returned, so employers always saw
+ * "No applications", and it used stage names that are not in the enum. It now
+ * reads the list the route sends, uses the real stages, and adds a board:
+ * columns per stage, cards dragged between them (or moved from a menu), and a
+ * candidate panel with the cover letter, the resume, and the references that
+ * have come back.
+ */
+
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { api } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { formatDistanceToNow } from 'date-fns';
+import { useParams } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { formatDistanceToNow } from 'date-fns';
+import { ArrowLeft, Briefcase, Download, Eye, FileText, LayoutGrid, List, Mail, Search, Star, User, UserCheck, X } from 'lucide-react';
+import { api, referenceApi } from '@/lib/api';
+import { cn } from '@/lib/utils';
+
+type Stage = 'PENDING' | 'REVIEWED' | 'SHORTLISTED' | 'INTERVIEW' | 'OFFERED' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN';
 
 interface Application {
   id: string;
-  status: string;
-  coverLetter: string;
-  rating: number | null;
-  notes: string | null;
-  createdAt: string;
-  job: {
-    id: string;
-    title: string;
-  };
-  user: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    email: string;
-    profile: {
-      avatar: string | null;
-      headline: string;
-      resumeUrl: string | null;
-    } | null;
-  };
+  status: Stage;
+  coverLetter: string | null;
+  resumeUrl: string | null;
+  referenceStatus: string | null;
+  referencesReceived: number;
+  referencesTotal: number;
+  appliedAt: string;
+  job: { id: string; title: string; slug?: string };
+  user: { id: string; firstName: string; lastName: string; email: string; avatar: string | null; headline: string | null };
 }
 
-const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
-  PENDING: { label: 'Pending Review', color: 'bg-slate-100 text-slate-700', icon: Clock },
-  REVIEWING: { label: 'Under Review', color: 'bg-blue-100 text-blue-700', icon: Eye },
-  SHORTLISTED: { label: 'Shortlisted', color: 'bg-purple-100 text-purple-700', icon: Star },
-  INTERVIEW: { label: 'Interview Stage', color: 'bg-indigo-100 text-indigo-700', icon: MessageSquare },
-  OFFERED: { label: 'Offer Extended', color: 'bg-green-100 text-green-700', icon: Check },
-  HIRED: { label: 'Hired', color: 'bg-emerald-100 text-emerald-700', icon: Check },
-  REJECTED: { label: 'Rejected', color: 'bg-red-100 text-red-700', icon: X },
-  WITHDRAWN: { label: 'Withdrawn', color: 'bg-orange-100 text-orange-700', icon: X },
+type Reference = {
+  id: string;
+  refereeName: string;
+  refereeTitle?: string | null;
+  refereeCompany?: string | null;
+  relationship: string;
+  status: string;
+  completedAt?: string | null;
+  responses?: { overallRating?: number; wouldRecommend?: boolean; additionalComments?: string } | null;
 };
 
-const statusOrder = ['PENDING', 'REVIEWING', 'SHORTLISTED', 'INTERVIEW', 'OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN'];
+const STAGES: Record<Stage, { label: string; tone: string }> = {
+  PENDING: { label: 'New', tone: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200' },
+  REVIEWED: { label: 'Reviewed', tone: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' },
+  SHORTLISTED: { label: 'Shortlisted', tone: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-200' },
+  INTERVIEW: { label: 'Interview', tone: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' },
+  OFFERED: { label: 'Offered', tone: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' },
+  ACCEPTED: { label: 'Accepted', tone: 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-100' },
+  REJECTED: { label: 'Not selected', tone: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200' },
+  WITHDRAWN: { label: 'Withdrawn', tone: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200' },
+};
+
+// The stages an employer moves a candidate through, in order. Accepted is the
+// candidate's move; rejected and withdrawn close the file.
+const BOARD_COLUMNS: Stage[] = ['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED'];
+const EMPLOYER_STAGES: Stage[] = ['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED', 'REJECTED'];
+const CLOSED: Stage[] = ['ACCEPTED', 'REJECTED', 'WITHDRAWN'];
+
+const errorMessage = (error: unknown) =>
+  (error as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message ??
+  (error as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.error;
+
+function fullName(app: Application): string {
+  return `${app.user.firstName ?? ''} ${app.user.lastName ?? ''}`.trim() || app.user.email;
+}
 
 export default function ApplicationsPage() {
-  const params = useParams();
+  const params = useParams<{ orgId: string }>();
+  const orgId = params?.orgId ?? '';
   const queryClient = useQueryClient();
-  const orgId = params.orgId as string;
 
+  const [view, setView] = useState<'board' | 'list'>('board');
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [jobFilter, setJobFilter] = useState<string>('all');
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-  const [statusDropdownOpen, setStatusDropdownOpen] = useState<string | null>(null);
+  const [jobFilter, setJobFilter] = useState('all');
+  const [stageFilter, setStageFilter] = useState<'all' | Stage>('all');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<Stage | null>(null);
 
-  const { data: applicationsData, isLoading } = useQuery({
+  const { data: applications = [], isLoading, isError } = useQuery({
     queryKey: ['employer-applications', orgId],
-    queryFn: async () => {
-      const response = await api.get(`/employer/organizations/${orgId}/applications`, {
-        params: { limit: 100 },
-      });
-      return response.data;
-    },
+    queryFn: () => api.get(`/employer/organizations/${orgId}/applications`, { params: { limit: 100 } }),
+    enabled: Boolean(orgId),
+    select: (response) => (Array.isArray(response.data?.data) ? (response.data.data as Application[]) : []),
   });
 
-  const updateStatusMutation = useMutation({
-    mutationFn: async ({ applicationId, status }: { applicationId: string; status: string }) => {
-      const response = await api.patch(`/employer/applications/${applicationId}/status`, { status });
-      return response.data;
-    },
-    onSuccess: () => {
+  const move = useMutation({
+    mutationFn: ({ applicationId, status }: { applicationId: string; status: Stage }) =>
+      api.patch(`/employer/applications/${applicationId}/status`, { status }),
+    onSuccess: (_res, { status }) => {
       queryClient.invalidateQueries({ queryKey: ['employer-applications', orgId] });
-      toast.success('Application status updated');
-      setStatusDropdownOpen(null);
+      toast.success(`Moved to ${STAGES[status].label}`);
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to update status');
-    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not move the application'),
   });
 
-  const applications: Application[] = applicationsData?.data?.applications || [];
+  const jobs = useMemo(() => Array.from(new Map(applications.map((a) => [a.job.id, a.job])).values()), [applications]);
 
-  // Get unique jobs for filter
-  const uniqueJobs = Array.from(new Map(applications.map((app) => [app.job.id, app.job])).values());
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return applications.filter((a) => {
+      if (jobFilter !== 'all' && a.job.id !== jobFilter) return false;
+      if (stageFilter !== 'all' && a.status !== stageFilter) return false;
+      if (!q) return true;
+      return fullName(a).toLowerCase().includes(q) || a.job.title.toLowerCase().includes(q) || (a.user.headline ?? '').toLowerCase().includes(q);
+    });
+  }, [applications, jobFilter, stageFilter, search]);
 
-  // Filter applications
-  const filteredApplications = applications.filter((app) => {
-    const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
-    const matchesJob = jobFilter === 'all' || app.job.id === jobFilter;
-    const matchesSearch =
-      search === '' ||
-      `${app.user.firstName} ${app.user.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
-      app.job.title.toLowerCase().includes(search.toLowerCase());
-    return matchesStatus && matchesJob && matchesSearch;
-  });
+  const counts = useMemo(
+    () => applications.reduce((acc, a) => ({ ...acc, [a.status]: (acc[a.status] ?? 0) + 1 }), {} as Partial<Record<Stage, number>>),
+    [applications]
+  );
 
-  // Status counts for pipeline view
-  const statusCounts = applications.reduce((acc, app) => {
-    acc[app.status] = (acc[app.status] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const selected = applications.find((a) => a.id === selectedId) ?? null;
+
+  const drop = (stage: Stage) => {
+    if (!dragging) return;
+    const app = applications.find((a) => a.id === dragging);
+    setDragging(null);
+    setDropTarget(null);
+    if (!app || app.status === stage) return;
+    move.mutate({ applicationId: app.id, status: stage });
+  };
+
+  const Card = ({ app, compact = false }: { app: Application; compact?: boolean }) => {
+    const name = fullName(app);
+    const stage = STAGES[app.status] ?? STAGES.PENDING;
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        draggable={!CLOSED.includes(app.status)}
+        onDragStart={() => setDragging(app.id)}
+        onDragEnd={() => {
+          setDragging(null);
+          setDropTarget(null);
+        }}
+        onClick={() => setSelectedId(app.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setSelectedId(app.id);
+          }
+        }}
+        className={cn(
+          'cursor-pointer rounded-lg border bg-white p-3 text-left shadow-sm transition hover:shadow-md dark:bg-slate-900',
+          selectedId === app.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 dark:border-slate-700',
+          dragging === app.id && 'opacity-50'
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+            {app.user.avatar ? <img src={app.user.avatar} alt="" className="h-10 w-10 object-cover" /> : <User className="h-5 w-5 text-slate-400" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{name}</p>
+            <p className="truncate text-xs text-slate-500">{app.user.headline || app.user.email}</p>
+            {!compact && (
+              <p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500">
+                <Briefcase className="h-3 w-3" /> {app.job.title}
+              </p>
+            )}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+              <span>{formatDistanceToNow(new Date(app.appliedAt), { addSuffix: true })}</span>
+              {app.referencesTotal > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  <UserCheck className="h-3 w-3" /> {app.referencesReceived}/{app.referencesTotal} refs
+                </span>
+              )}
+              {compact && <span className={cn('rounded-full px-1.5 py-0.5 font-medium', stage.tone)}>{stage.label}</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      {/* Back Button */}
-      <Link
-        href={`/employer/organizations/${orgId}`}
-        className="inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-6"
-      >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back to Dashboard
+    <div className="mx-auto max-w-7xl p-6">
+      <Link href={`/employer/organizations/${orgId}`} className="mb-6 inline-flex items-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+        <ArrowLeft className="mr-2 h-4 w-4" /> Back to Dashboard
       </Link>
 
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <FileText className="h-7 w-7 text-blue-600" />
-          Applications
-        </h1>
-        <p className="text-slate-600 dark:text-slate-400 mt-1">
-          Review and manage candidate applications
-        </p>
-      </div>
-
-      {/* Pipeline Overview */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 mb-6 overflow-x-auto">
-        <div className="flex gap-2 min-w-max">
-          {statusOrder.slice(0, 6).map((status) => {
-            const config = statusConfig[status];
-            const Icon = config.icon;
-            return (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(statusFilter === status ? 'all' : status)}
-                className={`flex-1 min-w-[120px] p-3 rounded-lg border-2 transition ${
-                  statusFilter === status
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-center gap-2 mb-1">
-                  <Icon className="h-4 w-4 text-slate-500" />
-                  <span className="text-2xl font-bold text-slate-900 dark:text-white">
-                    {statusCounts[status] || 0}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 text-center">{config.label}</p>
-              </button>
-            );
-          })}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-white">
+            <FileText className="h-7 w-7 text-blue-600" /> Applications
+          </h1>
+          <p className="mt-1 text-slate-600 dark:text-slate-400">
+            {applications.length} {applications.length === 1 ? 'candidate' : 'candidates'} across {jobs.length} {jobs.length === 1 ? 'job' : 'jobs'}
+          </p>
+        </div>
+        <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800" role="tablist" aria-label="View">
+          {(
+            [
+              ['board', 'Board', LayoutGrid],
+              ['list', 'List', List],
+            ] as Array<['board' | 'list', string, typeof List]>
+          ).map(([value, label, Icon]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={view === value}
+              onClick={() => setView(value)}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium',
+                view === value ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'
+              )}
+            >
+              <Icon className="h-4 w-4" /> {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4 mb-6">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="input w-full pl-10"
-            placeholder="Search candidates or jobs..."
-          />
+      <div className="mb-6 flex flex-col gap-3 md:flex-row">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} className="input w-full pl-10" placeholder="Search candidates, headlines or jobs" aria-label="Search" />
         </div>
-        <select
-          value={jobFilter}
-          onChange={(e) => setJobFilter(e.target.value)}
-          className="input w-full md:w-48"
-        >
-          <option value="all">All Jobs</option>
-          {uniqueJobs.map((job) => (
+        <select value={jobFilter} onChange={(e) => setJobFilter(e.target.value)} className="input w-full md:w-56" aria-label="Job">
+          <option value="all">All jobs</option>
+          {jobs.map((job) => (
             <option key={job.id} value={job.id}>
               {job.title}
             </option>
           ))}
         </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="input w-full md:w-48"
-        >
-          <option value="all">All Status</option>
-          {statusOrder.map((status) => (
-            <option key={status} value={status}>
-              {statusConfig[status].label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Applications Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* List View */}
-        <div className={`${selectedApp ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
-          {isLoading ? (
-            <div className="text-center py-12">
-              <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-            </div>
-          ) : filteredApplications.length === 0 ? (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center">
-              <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
-                No applications found
-              </h3>
-              <p className="text-slate-500">
-                {applications.length === 0
-                  ? 'When candidates apply to your jobs, they will appear here'
-                  : 'Try adjusting your filters'}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {filteredApplications.map((app) => {
-                const config = statusConfig[app.status];
-                const Icon = config.icon;
-
-                return (
-                  <div
-                    key={app.id}
-                    onClick={() => setSelectedApp(app)}
-                    className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md transition ${
-                      selectedApp?.id === app.id ? 'ring-2 ring-blue-500' : ''
-                    }`}
-                  >
-                    <div className="flex items-start gap-4">
-                      {/* Avatar */}
-                      <div className="h-12 w-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
-                        {app.user.profile?.avatar ? (
-                          <img
-                            src={app.user.profile.avatar}
-                            alt=""
-                            className="h-12 w-12 rounded-full object-cover"
-                          />
-                        ) : (
-                          <User className="h-6 w-6 text-slate-400" />
-                        )}
-                      </div>
-
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-semibold text-slate-900 dark:text-white truncate">
-                            {app.user.firstName} {app.user.lastName}
-                          </h3>
-                          {app.rating && (
-                            <div className="flex items-center gap-1 text-yellow-500">
-                              <Star className="h-4 w-4 fill-current" />
-                              <span className="text-sm">{app.rating}</span>
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-sm text-slate-500 truncate">
-                          {app.user.profile?.headline || app.user.email}
-                        </p>
-                        <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
-                          <span className="flex items-center gap-1">
-                            <Briefcase className="h-3 w-3" />
-                            {app.job.title}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {formatDistanceToNow(new Date(app.createdAt), { addSuffix: true })}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Status */}
-                      <div className="relative">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setStatusDropdownOpen(statusDropdownOpen === app.id ? null : app.id);
-                          }}
-                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${config.color}`}
-                        >
-                          <Icon className="h-3 w-3" />
-                          {config.label}
-                          <ChevronDown className="h-3 w-3" />
-                        </button>
-
-                        {statusDropdownOpen === app.id && (
-                          <div className="absolute right-0 top-8 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-20">
-                            {statusOrder.map((status) => {
-                              const statusCfg = statusConfig[status];
-                              const StatusIcon = statusCfg.icon;
-                              return (
-                                <button
-                                  key={status}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    updateStatusMutation.mutate({ applicationId: app.id, status });
-                                  }}
-                                  disabled={app.status === status}
-                                  className={`flex items-center gap-2 px-4 py-2 text-sm w-full text-left hover:bg-slate-100 dark:hover:bg-slate-700 ${
-                                    app.status === status ? 'opacity-50' : ''
-                                  }`}
-                                >
-                                  <StatusIcon className="h-4 w-4" />
-                                  {statusCfg.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Detail Panel */}
-        {selectedApp && (
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 h-fit sticky top-6">
-            <button
-              onClick={() => setSelectedApp(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 lg:hidden"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            {/* Candidate Info */}
-            <div className="text-center mb-6">
-              <div className="h-20 w-20 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center mx-auto mb-3">
-                {selectedApp.user.profile?.avatar ? (
-                  <img
-                    src={selectedApp.user.profile.avatar}
-                    alt=""
-                    className="h-20 w-20 rounded-full object-cover"
-                  />
-                ) : (
-                  <User className="h-10 w-10 text-slate-400" />
-                )}
-              </div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                {selectedApp.user.firstName} {selectedApp.user.lastName}
-              </h2>
-              <p className="text-slate-500">{selectedApp.user.profile?.headline}</p>
-            </div>
-
-            {/* Quick Actions */}
-            <div className="flex gap-2 mb-6">
-              <Link href={`/profile/${selectedApp.user.id}`} className="flex-1">
-                <Button variant="outline" className="w-full">
-                  <Eye className="h-4 w-4 mr-2" />
-                  View Profile
-                </Button>
-              </Link>
-              {selectedApp.user.profile?.resumeUrl && (
-                // asChild so the anchor IS the control: a nested button inside
-                // an anchor is invalid HTML, and the click was reaching the
-                // link only by accident of bubbling. It is also icon-only, so
-                // it needs a name for screen readers.
-                <Button asChild variant="outline">
-                  <a
-                    href={selectedApp.user.profile.resumeUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Open ${selectedApp.user.firstName}'s resume`}
-                    title="Open resume"
-                  >
-                    <Download className="h-4 w-4" />
-                  </a>
-                </Button>
-              )}
-            </div>
-
-            {/* Application Details */}
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Applied For
-                </h4>
-                <p className="text-slate-900 dark:text-white">{selectedApp.job.title}</p>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Applied
-                </h4>
-                <p className="text-slate-900 dark:text-white">
-                  {new Date(selectedApp.createdAt).toLocaleDateString('en-AU', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </p>
-              </div>
-
-              {selectedApp.coverLetter && (
-                <div>
-                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Cover Letter
-                  </h4>
-                  <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
-                    {selectedApp.coverLetter}
-                  </p>
-                </div>
-              )}
-
-              {selectedApp.notes && (
-                <div>
-                  <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Notes
-                  </h4>
-                  <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
-                    {selectedApp.notes}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+        {view === 'list' && (
+          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value as 'all' | Stage)} className="input w-full md:w-48" aria-label="Stage">
+            <option value="all">All stages</option>
+            {(Object.keys(STAGES) as Stage[]).map((s) => (
+              <option key={s} value={s}>
+                {STAGES[s].label} ({counts[s] ?? 0})
+              </option>
+            ))}
+          </select>
         )}
       </div>
+
+      {isLoading ? (
+        <div className="py-12 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+        </div>
+      ) : isError ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-800">Could not load applications.</div>
+      ) : applications.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center dark:border-slate-700 dark:bg-slate-800">
+          <FileText className="mx-auto mb-4 h-12 w-12 text-slate-400" />
+          <h3 className="mb-2 text-lg font-medium text-slate-900 dark:text-white">No applications yet</h3>
+          <p className="text-slate-500">When candidates apply to your jobs, they appear here.</p>
+        </div>
+      ) : (
+        <div className={cn('grid gap-6', selected ? 'lg:grid-cols-[minmax(0,1fr)_360px]' : 'grid-cols-1')}>
+          {view === 'board' ? (
+            <div className="overflow-x-auto pb-2">
+              <div className="flex min-w-max gap-3">
+                {BOARD_COLUMNS.map((stage) => {
+                  const cards = visible.filter((a) => a.status === stage);
+                  return (
+                    <section
+                      key={stage}
+                      aria-label={STAGES[stage].label}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (dropTarget !== stage) setDropTarget(stage);
+                      }}
+                      onDragLeave={() => dropTarget === stage && setDropTarget(null)}
+                      onDrop={() => drop(stage)}
+                      className={cn(
+                        'w-64 flex-shrink-0 rounded-xl border-2 bg-slate-50 p-2 dark:bg-slate-900/40',
+                        dropTarget === stage ? 'border-blue-500' : 'border-transparent'
+                      )}
+                    >
+                      <header className="mb-2 flex items-center justify-between px-1">
+                        <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', STAGES[stage].tone)}>{STAGES[stage].label}</span>
+                        <span className="text-xs text-slate-500">{cards.length}</span>
+                      </header>
+                      <div className="space-y-2">
+                        {cards.length === 0 ? (
+                          <p className="px-2 py-6 text-center text-xs text-slate-400">Drop here</p>
+                        ) : (
+                          cards.map((app) => <Card key={app.id} app={app} />)
+                        )}
+                      </div>
+                    </section>
+                  );
+                })}
+                <section aria-label="Closed" className="w-64 flex-shrink-0 rounded-xl border-2 border-transparent bg-slate-50 p-2 dark:bg-slate-900/40">
+                  <header className="mb-2 flex items-center justify-between px-1">
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">Closed</span>
+                    <span className="text-xs text-slate-500">{visible.filter((a) => CLOSED.includes(a.status)).length}</span>
+                  </header>
+                  <div className="space-y-2">
+                    {visible
+                      .filter((a) => CLOSED.includes(a.status))
+                      .map((app) => (
+                        <Card key={app.id} app={app} compact />
+                      ))}
+                  </div>
+                </section>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {visible.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-800">Nothing matches those filters.</div>
+              ) : (
+                visible.map((app) => (
+                  <div key={app.id} className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <Card app={app} compact />
+                    </div>
+                    {!CLOSED.includes(app.status) && (
+                      <select
+                        value={app.status}
+                        onChange={(e) => move.mutate({ applicationId: app.id, status: e.target.value as Stage })}
+                        disabled={move.isPending}
+                        aria-label={`Stage for ${fullName(app)}`}
+                        className="input w-40 py-1.5 text-sm"
+                      >
+                        {EMPLOYER_STAGES.map((s) => (
+                          <option key={s} value={s}>
+                            {STAGES[s].label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {selected && (
+            <CandidatePanel
+              app={selected}
+              onClose={() => setSelectedId(null)}
+              onMove={(status) => move.mutate({ applicationId: selected.id, status })}
+              moving={move.isPending}
+            />
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function CandidatePanel({ app, onClose, onMove, moving }: { app: Application; onClose: () => void; onMove: (status: Stage) => void; moving: boolean }) {
+  const name = fullName(app);
+  const stage = STAGES[app.status] ?? STAGES.PENDING;
+  const closed = CLOSED.includes(app.status);
+
+  const references = useQuery({
+    queryKey: ['application-references', app.id],
+    queryFn: () => referenceApi.forApplication(app.id),
+    select: (response) => (Array.isArray(response.data?.data) ? (response.data.data as Reference[]) : []),
+  });
+
+  const nextSteps: Array<[Stage, string]> = (
+    {
+      PENDING: [['REVIEWED', 'Mark reviewed'], ['SHORTLISTED', 'Shortlist']],
+      REVIEWED: [['SHORTLISTED', 'Shortlist'], ['INTERVIEW', 'Invite to interview']],
+      SHORTLISTED: [['INTERVIEW', 'Invite to interview'], ['OFFERED', 'Make an offer']],
+      INTERVIEW: [['OFFERED', 'Make an offer']],
+      OFFERED: [],
+      ACCEPTED: [],
+      REJECTED: [],
+      WITHDRAWN: [],
+    } as Record<Stage, Array<[Stage, string]>>
+  )[app.status];
+
+  return (
+    <aside className="h-fit rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800 lg:sticky lg:top-6">
+      <button type="button" onClick={onClose} className="absolute right-4 top-4 text-slate-400 hover:text-slate-600" aria-label="Close">
+        <X className="h-5 w-5" />
+      </button>
+
+      <div className="mb-5 text-center">
+        <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          {app.user.avatar ? <img src={app.user.avatar} alt="" className="h-20 w-20 object-cover" /> : <User className="h-10 w-10 text-slate-400" />}
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white">{name}</h2>
+        {app.user.headline && <p className="text-slate-500">{app.user.headline}</p>}
+        <span className={cn('mt-2 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium', stage.tone)}>{stage.label}</span>
+      </div>
+
+      <div className="mb-5 flex flex-wrap gap-2">
+        <Link href={`/profile/${app.user.id}`} className="btn-outline inline-flex flex-1 items-center justify-center gap-1 px-3 py-2 text-sm">
+          <Eye className="h-4 w-4" /> Profile
+        </Link>
+        <a href={`mailto:${app.user.email}`} className="btn-outline inline-flex items-center justify-center gap-1 px-3 py-2 text-sm" aria-label={`Email ${name}`}>
+          <Mail className="h-4 w-4" />
+        </a>
+        {app.resumeUrl && (
+          <a href={app.resumeUrl} target="_blank" rel="noopener noreferrer" className="btn-outline inline-flex items-center justify-center gap-1 px-3 py-2 text-sm" aria-label={`Open ${name}'s resume`}>
+            <Download className="h-4 w-4" /> Resume
+          </a>
+        )}
+      </div>
+
+      {!closed && (
+        <div className="mb-5 flex flex-wrap gap-2">
+          {nextSteps.map(([status, label]) => (
+            <button key={status} type="button" onClick={() => onMove(status)} disabled={moving} className="btn-primary px-3 py-1.5 text-sm">
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm(`Mark ${name} as not selected? They are told.`)) onMove('REJECTED');
+            }}
+            disabled={moving}
+            className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700"
+          >
+            Not selected
+          </button>
+        </div>
+      )}
+
+      <dl className="space-y-4 text-sm">
+        <div>
+          <dt className="font-medium text-slate-700 dark:text-slate-300">Applied for</dt>
+          <dd className="text-slate-900 dark:text-white">{app.job.title}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-slate-700 dark:text-slate-300">Applied</dt>
+          <dd className="text-slate-900 dark:text-white">{new Date(app.appliedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</dd>
+        </div>
+        {app.coverLetter && (
+          <div>
+            <dt className="font-medium text-slate-700 dark:text-slate-300">Cover letter</dt>
+            <dd className="max-h-64 overflow-y-auto whitespace-pre-wrap text-slate-600 dark:text-slate-400">{app.coverLetter}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="mb-1 flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
+            <UserCheck className="h-4 w-4" /> References
+          </dt>
+          <dd>
+            {references.isLoading ? (
+              <span className="text-slate-500">Loading…</span>
+            ) : (references.data?.length ?? 0) === 0 ? (
+              <span className="text-slate-500">None requested yet.</span>
+            ) : (
+              <ul className="space-y-2">
+                {references.data!.map((ref) => (
+                  <li key={ref.id} className="rounded-lg bg-slate-50 p-2 dark:bg-slate-900/40">
+                    <p className="font-medium text-slate-900 dark:text-white">
+                      {ref.refereeName}
+                      <span className="font-normal text-slate-500"> · {[ref.refereeTitle, ref.refereeCompany].filter(Boolean).join(', ') || ref.relationship}</span>
+                    </p>
+                    {ref.status === 'COMPLETED' && ref.responses ? (
+                      <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                        {typeof ref.responses.overallRating === 'number' && (
+                          <span className="inline-flex items-center gap-1">
+                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" /> {ref.responses.overallRating}/5
+                          </span>
+                        )}
+                        {typeof ref.responses.wouldRecommend === 'boolean' && <span>{ref.responses.wouldRecommend ? 'Would recommend' : 'Would not recommend'}</span>}
+                        {ref.responses.additionalComments && <span className="block w-full text-slate-500">“{ref.responses.additionalComments}”</span>}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-500">{ref.status === 'DECLINED' ? 'Declined' : 'Waiting for their answer'}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </aside>
   );
 }

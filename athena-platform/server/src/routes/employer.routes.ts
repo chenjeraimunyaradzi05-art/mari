@@ -476,6 +476,7 @@ router.get(
       if (jobId) where.jobId = jobId;
       if (status) where.status = status;
 
+      // The pipeline shows a face and a headline, not a bare name.
       const [applications, total] = await Promise.all([
         prisma.jobApplication.findMany({
           where,
@@ -486,6 +487,8 @@ router.get(
                 firstName: true,
                 lastName: true,
                 email: true,
+                avatar: true,
+                headline: true,
               },
             },
             job: {
@@ -527,8 +530,14 @@ router.patch(
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      // The validator was declared but never read, so any status reached Prisma.
+      // Accepting an offer is the candidate's move, not the employer's.
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'That is not a stage an employer can set');
+      }
       const { applicationId } = req.params;
-      const { status, notes } = req.body;
+      const { status } = req.body;
       const userId = req.user!.id;
 
       // Get application with job and org
