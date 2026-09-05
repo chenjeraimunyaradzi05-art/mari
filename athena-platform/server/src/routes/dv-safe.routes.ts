@@ -1,69 +1,65 @@
 /**
- * DV-Safe Routes
- * Safety-first features for users in vulnerable situations
- * 
- * Available service functions:
- * - getSafetySettings(userId)
- * - updateSafetySettings(userId, updates)
- * - enableSafeMode(userId)
- * - createSafeChat(userId, name, participants)
- * - getSafeChats(userId)
- * - accessSafeChat(userId, chatId, pin?)
- * - sendSafeChatMessage(userId, chatId, content, autoDeleteMinutes?)
- * - triggerPanicButton(userId)
- * - addEmergencyContact(userId, contact)
- * - removeEmergencyContact(userId, contactId)
- * - blockUser(userId, blockedUserId)
- * - isUserVisible(userId, viewerId)
- * - getSafeNotificationContent(userId, notification)
- * - clearActivityTraces(userId)
- * - getDVResources(region?)
+ * DV-Safe routes: settings, emergency contacts, safe chats, the panic button,
+ * trace clearing and support lines, for a member in a dangerous situation.
+ * Everything is the signed-in member's own; nothing here reads another
+ * person's data. Validation failures answer 400 with the reason, never 500.
  */
 
 import { Router, Response, NextFunction } from 'express';
+import { z, ZodError, type ZodTypeAny } from 'zod';
 import dvSafeService from '../services/dv-safe.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { z } from 'zod';
+import { ApiError } from '../middleware/errorHandler';
 
 const router = Router();
 
 router.use(authenticate);
 
-// Get safety settings
+function parse<T extends ZodTypeAny>(schema: T, input: unknown): z.infer<T> {
+  try {
+    return schema.parse(input ?? {});
+  } catch (error) {
+    if (error instanceof ZodError) {
+      const issue = error.issues[0];
+      throw new ApiError(400, issue ? `${issue.path.join('.') || 'input'}: ${issue.message}` : 'Invalid input');
+    }
+    throw error;
+  }
+}
+
+const PIN = z.string().regex(/^\d{4,10}$/, 'must be 4 to 10 digits');
+
+// ---------------------------------------------------------------- settings
+
 router.get('/settings', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const settings = await dvSafeService.getSafetySettings(req.user!.id);
-    res.json(settings);
+    res.json(await dvSafeService.getSafetySettings(req.user!.id));
   } catch (error) {
     next(error);
   }
 });
 
-// Update safety settings schema
 const updateSettingsSchema = z.object({
   isSafeMode: z.boolean().optional(),
   hideFromSearch: z.boolean().optional(),
   allowMessages: z.boolean().optional(),
   safeExitEnabled: z.boolean().optional(),
-  safeExitUrl: z.string().url().optional(),
+  safeExitUrl: z.string().url().max(2048).optional(),
   panicButtonEnabled: z.boolean().optional(),
   activityLogEnabled: z.boolean().optional(),
   disguisedAppIcon: z.boolean().optional(),
   notificationsSafe: z.boolean().optional(),
 });
 
-// Update safety settings
 router.put('/settings', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const updates = updateSettingsSchema.parse(req.body);
-    const settings = await dvSafeService.updateSafetySettings(req.user!.id, updates);
-    res.json(settings);
+    const updates = parse(updateSettingsSchema, req.body);
+    res.json(await dvSafeService.updateSafetySettings(req.user!.id, updates));
   } catch (error) {
     next(error);
   }
 });
 
-// Enable safe mode (enhanced privacy)
 router.post('/safe-mode', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const settings = await dvSafeService.enableSafeMode(req.user!.id);
@@ -73,47 +69,48 @@ router.post('/safe-mode', async (req: AuthRequest, res: Response, next: NextFunc
   }
 });
 
-// Trigger panic button (emergency alert)
+// ---------------------------------------------------------------- panic
+
 router.post('/panic', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const result = await dvSafeService.triggerPanicButton(req.user!.id);
-    res.json(result);
+    res.json(await dvSafeService.triggerPanicButton(req.user!.id));
   } catch (error) {
     next(error);
   }
 });
 
-// Emergency contacts schema
+// ---------------------------------------------------------------- contacts
+
 const emergencyContactSchema = z.object({
-  name: z.string().min(1).max(100),
-  phone: z.string().min(5).max(20),
-  email: z.string().email().optional(),
-  relationship: z.string().min(1).max(50),
+  name: z.string().trim().min(1).max(100),
+  phone: z.string().trim().min(5).max(20),
+  email: z.string().trim().email().max(254).optional().or(z.literal('').transform(() => undefined)),
+  relationship: z.string().trim().min(1).max(50),
   notifyOnPanic: z.boolean().default(true),
 });
 
-// Add emergency contact
 router.post('/emergency-contacts', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const contact = emergencyContactSchema.parse(req.body);
+    const contact = parse(emergencyContactSchema, req.body);
     const result = await dvSafeService.addEmergencyContact(req.user!.id, contact);
-    res.json({ message: 'Emergency contact added', contact: result });
+    res.status(201).json({ message: 'Emergency contact added', contact: result });
   } catch (error) {
     next(error);
   }
 });
 
-// Remove emergency contact
 router.delete('/emergency-contacts/:contactId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await dvSafeService.removeEmergencyContact(req.user!.id, req.params.contactId);
+    const removed = await dvSafeService.removeEmergencyContact(req.user!.id, req.params.contactId);
+    if (!removed) throw new ApiError(404, 'Contact not found');
     res.json({ message: 'Emergency contact removed' });
   } catch (error) {
     next(error);
   }
 });
 
-// Block a user
+// ---------------------------------------------------------------- blocks and visibility
+
 router.post('/block/:userId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await dvSafeService.blockUser(req.user!.id, req.params.userId);
@@ -123,7 +120,6 @@ router.post('/block/:userId', async (req: AuthRequest, res: Response, next: Next
   }
 });
 
-// Check if user is visible to another user
 router.get('/visibility/:viewerId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const isVisible = await dvSafeService.isUserVisible(req.user!.id, req.params.viewerId);
@@ -133,110 +129,105 @@ router.get('/visibility/:viewerId', async (req: AuthRequest, res: Response, next
   }
 });
 
-// Safe chats schema
+// ---------------------------------------------------------------- safe chats
+
 const safeChatSchema = z.object({
-  name: z.string().min(1).max(100),
-  participants: z.array(z.string()).min(1),
+  name: z.string().trim().min(1).max(100),
+  disguisedName: z.string().trim().min(1).max(60).optional(),
+  participants: z.array(z.string().max(64)).max(20).optional(),
+  accessPin: PIN.optional(),
 });
 
-// Create safe chat (encrypted, hidden)
 router.post('/chats', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { name, participants } = safeChatSchema.parse(req.body);
-    const chat = await dvSafeService.createSafeChat(req.user!.id, { name, participants });
-    res.json(chat);
+    const input = parse(safeChatSchema, req.body);
+    res.status(201).json(await dvSafeService.createSafeChat(req.user!.id, input));
   } catch (error) {
     next(error);
   }
 });
 
-// Get all safe chats
 router.get('/chats', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const chats = await dvSafeService.getSafeChats(req.user!.id);
-    res.json(chats);
+    res.json(await dvSafeService.getSafeChats(req.user!.id));
   } catch (error) {
     next(error);
   }
 });
 
-const accessChatSchema = z.object({
-  pin: z.string().min(4).max(10).optional(),
-});
+const pinBodySchema = z.object({ pin: PIN.optional() });
 
-// Access a specific safe chat (with optional PIN)
 router.post('/chats/:chatId/access', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { pin } = accessChatSchema.parse(req.body);
-    const chat = await dvSafeService.accessSafeChat(req.user!.id, req.params.chatId, pin);
-    res.json(chat);
+    const { pin } = parse(pinBodySchema, req.body);
+    res.json(await dvSafeService.accessSafeChat(req.user!.id, req.params.chatId, pin));
   } catch (error) {
     next(error);
   }
 });
 
 const sendMessageSchema = z.object({
-  content: z.string().min(1).max(5000),
-  autoDeleteMinutes: z.number().min(1).max(10080).optional(), // max 1 week
+  content: z.string().trim().min(1).max(5000),
+  // Up to one week.
+  autoDeleteMinutes: z.number().int().min(1).max(10080).optional(),
+  pin: PIN.optional(),
 });
 
-// Send message in safe chat
 router.post('/chats/:chatId/messages', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { content, autoDeleteMinutes } = sendMessageSchema.parse(req.body);
-    const message = await dvSafeService.sendSafeChatMessage(
-      req.user!.id,
-      req.params.chatId,
-      content,
-      autoDeleteMinutes
-    );
-    res.json(message);
+    const { content, autoDeleteMinutes, pin } = parse(sendMessageSchema, req.body);
+    const message = await dvSafeService.sendSafeChatMessage(req.user!.id, req.params.chatId, content, autoDeleteMinutes, pin);
+    res.status(201).json(message);
   } catch (error) {
     next(error);
   }
 });
 
-// Clear activity traces (browser history, cache, etc. - client-side support)
+router.delete('/chats/:chatId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { pin } = parse(pinBodySchema, { ...(req.query ?? {}), ...(req.body ?? {}) });
+    await dvSafeService.deleteSafeChat(req.user!.id, req.params.chatId, pin);
+    res.json({ message: 'Chat deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------- traces and resources
+
 router.post('/clear-traces', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await dvSafeService.clearActivityTraces(req.user!.id);
-    res.json({ 
+    res.json({
       message: 'Activity traces cleared',
       clientInstructions: {
         clearLocalStorage: true,
         clearSessionStorage: true,
         clearCookies: ['athena_session', 'athena_user'],
         replaceHistory: true,
-      }
+      },
     });
   } catch (error) {
     next(error);
   }
 });
 
-// Get DV resources by region
 router.get('/resources', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const region = req.query.region as string | undefined;
-    const resources = dvSafeService.getDVResources(region);
-    res.json(resources);
+    const region = typeof req.query.region === 'string' ? req.query.region : undefined;
+    res.json(dvSafeService.getDVResources(region));
   } catch (error) {
     next(error);
   }
 });
 
-const safeNotificationSchema = z.object({
-  title: z.string(),
-  message: z.string(),
-});
+const safeNotificationSchema = z.object({ title: z.string().max(200), message: z.string().max(2000) });
 
-// Get safe notification content (for displaying sensitive notifications safely)
 router.post('/safe-notification', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { title, message } = safeNotificationSchema.parse(req.body);
+    const { title, message } = parse(safeNotificationSchema, req.body);
     const settings = await dvSafeService.getSafetySettings(req.user!.id);
-    const safeContent = dvSafeService.getSafeNotificationContent(settings, title, message);
-    res.json(safeContent);
+    res.json(dvSafeService.getSafeNotificationContent(settings, title, message));
   } catch (error) {
     next(error);
   }

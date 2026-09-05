@@ -756,6 +756,7 @@ model User {
 
   // Push notification tokens
   pushTokens PushToken[]
+  dvSafetyProfile DvSafetyProfile?
 
   // Stripe Connect (Creator/Mentor payouts)
   stripeConnectAccountId String?
@@ -5149,4 +5150,81 @@ model UserSafetySettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// DV Safe Mode. A member in a dangerous situation at home: her protective
+// switches, the people to tell, encrypted safe chats hidden behind a
+// disguised name and a PIN, and a record of every alert. Kept in the
+// database so nothing is lost on a restart.
+
+model DvSafetyProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  isSafeMode         Boolean @default(false)
+  hideFromSearch     Boolean @default(false)
+  allowMessages      Boolean @default(true)
+  safeExitEnabled    Boolean @default(false)
+  safeExitUrl        String  @default("https://www.google.com")
+  panicButtonEnabled Boolean @default(false)
+  activityLogEnabled Boolean @default(true)
+  disguisedAppIcon   Boolean @default(false)
+  notificationsSafe  Boolean @default(true)
+
+  // [{ id, name, phone, email?, relationship, notifyOnPanic }]
+  emergencyContacts Json     @default("[]")
+  blockedUserIds    String[] @default([])
+
+  chats       DvSafeChat[]
+  panicAlerts DvPanicAlert[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model DvSafeChat {
+  id        String          @id @default(uuid())
+  profileId String
+  profile   DvSafetyProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  name          String
+  // What the chat is called on screen, so a glance over the shoulder sees a shopping list.
+  disguisedName String   @default("Shopping List")
+  participants  String[] @default([])
+  // Salted scrypt hash of the PIN; null when the chat has none.
+  accessPinHash String?
+  lastActivity  DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  messages DvSafeMessage[]
+
+  @@index([profileId])
+}
+
+model DvSafeMessage {
+  id       String     @id @default(uuid())
+  chatId   String
+  chat     DvSafeChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId String
+  // AES-256-GCM under DV_ENCRYPTION_KEY: base64(iv + tag + ciphertext).
+  content      String
+  autoDeleteAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([chatId, createdAt])
+  @@index([autoDeleteAt])
+}
+
+model DvPanicAlert {
+  id        String          @id @default(uuid())
+  profileId String
+  profile   DvSafetyProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  triggeredAt      DateTime @default(now())
+  // Names of the contacts reached.
+  notifiedContacts Json     @default("[]")
+
+  @@index([profileId, triggeredAt])
 }

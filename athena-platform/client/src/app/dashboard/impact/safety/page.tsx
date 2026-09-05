@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shield, Loader2, Phone, MapPin, Lock, FileText, AlertTriangle } from 'lucide-react';
 import { impactApi } from '@/lib/api';
+import { SafeModeBanner } from '@/components/safety/SafeModeBanner';
 
 type SafetyPlan = {
   id: string;
@@ -106,6 +107,8 @@ export default function SafetyPage() {
           Safety planning tools and support services
         </p>
       </div>
+
+      <SafeModeBanner />
 
       {/* Emergency Banner */}
       <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">

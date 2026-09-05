@@ -13,6 +13,7 @@ import {
   ChevronRight,
   LogOut,
   Rss,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -49,6 +50,12 @@ const settingsGroups = [
         description: 'Feed mix, topics you follow, and who you see less of',
         href: '/dashboard/settings/feed',
         icon: Rss,
+      },
+      {
+        name: 'Safety',
+        description: 'Safe mode, quick exit, emergency contacts and private safe chats',
+        href: '/dashboard/safety',
+        icon: ShieldAlert,
       },
       {
         name: 'Notifications',

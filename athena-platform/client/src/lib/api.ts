@@ -481,6 +481,26 @@ export const safetyApi = {
   }) => api.patch('/safety/settings', data),
 };
 
+// DV Safe Mode: the member's own protective switches, emergency contacts,
+// encrypted safe chats, the panic button and support lines.
+export const dvSafeApi = {
+  getSettings: () => api.get('/safety/dv/settings'),
+  updateSettings: (data: Record<string, boolean | string>) => api.put('/safety/dv/settings', data),
+  enableSafeMode: () => api.post('/safety/dv/safe-mode'),
+  panic: () => api.post('/safety/dv/panic'),
+  addContact: (data: { name: string; phone: string; email?: string; relationship: string; notifyOnPanic: boolean }) =>
+    api.post('/safety/dv/emergency-contacts', data),
+  removeContact: (contactId: string) => api.delete(`/safety/dv/emergency-contacts/${contactId}`),
+  listChats: () => api.get('/safety/dv/chats'),
+  createChat: (data: { name: string; disguisedName?: string; accessPin?: string }) => api.post('/safety/dv/chats', data),
+  openChat: (chatId: string, pin?: string) => api.post(`/safety/dv/chats/${chatId}/access`, pin ? { pin } : {}),
+  sendChatMessage: (chatId: string, data: { content: string; autoDeleteMinutes?: number; pin?: string }) =>
+    api.post(`/safety/dv/chats/${chatId}/messages`, data),
+  deleteChat: (chatId: string, pin?: string) => api.delete(`/safety/dv/chats/${chatId}`, { data: pin ? { pin } : {} }),
+  clearTraces: () => api.post('/safety/dv/clear-traces'),
+  resources: (region?: string) => api.get('/safety/dv/resources', { params: region ? { region } : {} }),
+};
+
 // ============================================
 // SUBSCRIPTION API
 // ============================================
