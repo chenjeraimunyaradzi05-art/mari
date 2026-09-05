@@ -77,12 +77,12 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
 });
 
 // ===========================================
-// ADMIN LIST APPEALS
+// LIST APPEALS (admins and moderators)
 // ===========================================
 router.get(
   '/',
   authenticate,
-  requireRole('ADMIN'),
+  requireRole('ADMIN', 'MODERATOR'),
   [query('status').optional().isIn(['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED'])],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -118,7 +118,7 @@ router.get(
 router.patch(
   '/:id',
   authenticate,
-  requireRole('ADMIN'),
+  requireRole('ADMIN', 'MODERATOR'),
   [body('status').isIn(['UNDER_REVIEW', 'APPROVED', 'REJECTED']), body('decisionNote').optional().isString()],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {

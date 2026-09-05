@@ -22,6 +22,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/hooks';
 
 interface AdminStats {
   overview: {
@@ -45,6 +46,7 @@ interface AdminStats {
 }
 
 export default function AdminDashboardPage() {
+  const { user } = useAuthStore();
   const { data: stats, isLoading, error } = useQuery<AdminStats>({
     queryKey: ['admin-stats'],
     queryFn: async () => {
@@ -57,6 +59,24 @@ export default function AdminDashboardPage() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+      </div>
+    );
+  }
+
+  if (error && user?.role === 'MODERATOR') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 text-center">
+        <Shield className="h-16 w-16 text-indigo-500" />
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-white">Moderation</h1>
+        <p className="max-w-md text-slate-600 dark:text-slate-400">You work the report queue and appeals. The rest of admin belongs to the platform admins.</p>
+        <div className="flex flex-wrap justify-center gap-3">
+          <Button asChild>
+            <Link href="/admin/moderation">Report queue</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/admin/appeals">Appeals</Link>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -86,6 +106,8 @@ export default function AdminDashboardPage() {
   const adminLinks = [
     { href: '/admin/users', label: 'User Management', icon: Users, description: 'Manage users, roles, and suspensions' },
     { href: '/admin/women-gate', label: 'Women-only Gate', icon: Shield, description: 'Invite codes and verification approvals' },
+    { href: '/admin/moderation', label: 'Report Queue', icon: AlertTriangle, description: 'Work user reports: claim, decide, enforce' },
+    { href: '/admin/appeals', label: 'Appeals', icon: Shield, description: 'Review appeals against moderation decisions' },
     { href: '/admin/content', label: 'Content Moderation', icon: Shield, description: 'Review reported posts and comments' },
     { href: '/admin/groups', label: 'Group Moderation', icon: Users, description: 'Feature, pin, or hide groups' },
     { href: '/admin/events', label: 'Event Moderation', icon: Calendar, description: 'Feature, pin, or hide events' },

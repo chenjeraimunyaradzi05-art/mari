@@ -1,6 +1,8 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
+import { UserRole } from '@prisma/client';
+import { ApiError } from '../middleware/errorHandler';
 import { ModerationAction, processReportById } from '../services/content-report.service';
 import { logAudit } from '../utils/audit';
 import { logger } from '../utils/logger';
@@ -16,7 +18,14 @@ const generateInviteCode = (prefix?: string) => {
 
 // All admin routes require authentication and ADMIN role
 router.use(authenticate);
-router.use(requireRole('ADMIN'));
+
+// Moderators work the report queue and content moderation; everything else in
+// here (users, billing, settings, compliance) is the platform admin's alone.
+const MODERATOR_PREFIXES = ['/moderation', '/content'];
+router.use((req: AuthRequest, res: Response, next: NextFunction) => {
+  const moderatorAllowed = MODERATOR_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`));
+  return (moderatorAllowed ? requireRole('ADMIN', 'MODERATOR') : requireRole('ADMIN'))(req, res, next);
+});
 
 // ============================================================================
 // DASHBOARD STATS
@@ -286,6 +295,14 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
     const updateData: any = {};
 
     if (role !== undefined) {
+      // A role the enum does not know used to reach Prisma and come back as a 500.
+      if (!Object.values(UserRole).includes(role)) {
+        throw new ApiError(400, 'Unknown role');
+      }
+      // Nobody removes their own admin access by accident.
+      if (req.params.id === req.user!.id && role !== req.user!.role) {
+        throw new ApiError(400, 'You cannot change your own role');
+      }
       updateData.role = role;
     }
 

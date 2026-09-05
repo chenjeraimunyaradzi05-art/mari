@@ -51,6 +51,7 @@ export type UserRole =
   | 'MENTOR'
   | 'EMPLOYER'
   | 'EDUCATION_PROVIDER'
+  | 'MODERATOR'
   | 'ADMIN';
 
 export type Persona =

@@ -23,6 +23,8 @@ enum UserRole {
   MENTOR
   EMPLOYER
   EDUCATION_PROVIDER
+  // Works the report queue, content moderation and appeals; nothing else in admin.
+  MODERATOR
   ADMIN
 }
 

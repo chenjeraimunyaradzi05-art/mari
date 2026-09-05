@@ -16,6 +16,8 @@ import {
   Briefcase,
   BookOpen,
   MessageCircle,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/lib/store';
@@ -94,6 +96,12 @@ export default function UserMenuDropdown() {
       href: '/pricing',
       divider: true,
     },
+    // Admins run the platform; moderators work the report queue and appeals.
+    ...(user?.role === 'ADMIN'
+      ? [{ icon: ShieldCheck, label: 'Admin', href: '/admin' }]
+      : user?.role === 'MODERATOR'
+        ? [{ icon: ShieldAlert, label: 'Moderation', href: '/admin/moderation' }]
+        : []),
     {
       icon: Settings,
       label: 'Settings',
