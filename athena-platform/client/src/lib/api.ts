@@ -415,6 +415,17 @@ export const mentorApi = {
       note: data.note,
     });
   },
+
+  // The mentor profile behind a member, if they have one (404 otherwise).
+  getProfileByUser: (userId: string) => api.get(`/mentors/profile/${userId}`),
+
+  // Sessions from either side of the table.
+  getSessions: (role: 'mentor' | 'mentee') => api.get('/mentors/sessions', { params: { role } }),
+  // A mentor confirms, declines (CANCELED) or completes; a mentee cancels.
+  updateSessionStatus: (sessionId: string, status: 'CONFIRMED' | 'CANCELED' | 'COMPLETED') =>
+    api.patch(`/mentors/sessions/${sessionId}/status`, { status }),
+  reschedule: (sessionId: string, scheduledAt: string, durationMinutes?: number) =>
+    api.patch(`/mentors/sessions/${sessionId}`, { scheduledAt, ...(durationMinutes ? { durationMinutes } : {}) }),
 };
 
 // ============================================

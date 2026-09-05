@@ -388,7 +388,7 @@ export async function requestSession(
     type: 'MENTOR_SESSION',
     title: 'New Mentorship Request',
     message: `You have a new mentorship session request for ${data.scheduledAt.toLocaleDateString()}`,
-    link: `/dashboard/mentor/sessions/${session.id}`,
+    link: `/dashboard/mentors/sessions?session=${session.id}`,
     channels: ['in-app', 'email', 'push'],
     emailTemplate: {
       subject: 'New Mentorship Request',
@@ -397,7 +397,7 @@ export async function requestSession(
         <p>You have a new session request for ${data.scheduledAt.toLocaleString()}.</p>
         <p><strong>Note from mentee:</strong> ${data.note || 'No note provided'}</p>
         <div style="margin: 20px 0;">
-          <a href="${process.env.CLIENT_URL}/dashboard/mentor/sessions/${session.id}" style="background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Request</a>
+          <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${session.id}" style="background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Request</a>
         </div>
       `
     }
@@ -489,7 +489,7 @@ export async function updateSessionStatus(
     type: 'MENTOR_SESSION',
     title: 'Session Updated',
     message: `Your mentorship session status has been updated to ${status}`,
-    link: `/dashboard/mentor/sessions/${sessionId}`,
+    link: `/dashboard/mentors/sessions?session=${sessionId}`,
     channels: ['in-app', 'email'], // Less urgent than new request?
     emailTemplate: {
         subject: `Session ${
@@ -500,7 +500,7 @@ export async function updateSessionStatus(
         html: `
             <h2>Session Update</h2>
             <p>Your session scheduled for ${session.scheduledAt?.toLocaleDateString() ?? 'TBD'} is now <strong>${status}</strong>.</p>
-            <a href="${process.env.CLIENT_URL}/dashboard/mentor/sessions/${sessionId}">View Details</a>
+            <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}">View Details</a>
         `
     }
   });
@@ -590,14 +590,14 @@ export async function rescheduleSession(
     type: 'MENTOR_SESSION',
     title: 'Session Rescheduled',
     message: `Your mentorship session was rescheduled to ${scheduledAt.toLocaleString()}`,
-    link: `/dashboard/mentor/sessions/${sessionId}`,
+    link: `/dashboard/mentors/sessions?session=${sessionId}`,
     channels: ['in-app', 'email'],
     emailTemplate: {
       subject: 'Mentorship Session Rescheduled',
       html: `
         <h2>Session Rescheduled</h2>
         <p>Your mentorship session has been rescheduled to ${scheduledAt.toLocaleString()}.</p>
-        <a href="${process.env.CLIENT_URL}/dashboard/mentor/sessions/${sessionId}">View Details</a>
+        <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}">View Details</a>
       `,
     },
   });

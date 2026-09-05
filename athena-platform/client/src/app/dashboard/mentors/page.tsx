@@ -91,12 +91,17 @@ export default function MentorsPage() {
             Connect with experienced professionals who can guide your next move.
           </p>
         </div>
-        <Link
-          href="/dashboard/mentors/become-mentor"
-          className="btn-primary px-6 py-2.5 text-center"
-        >
-          Become a Mentor
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/mentors/sessions" className="btn-outline px-5 py-2.5 text-center">
+            My sessions
+          </Link>
+          <Link
+            href="/dashboard/mentors/become-mentor"
+            className="btn-primary px-6 py-2.5 text-center"
+          >
+            Become a Mentor
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">

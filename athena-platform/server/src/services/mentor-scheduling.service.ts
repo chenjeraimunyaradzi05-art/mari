@@ -438,7 +438,7 @@ export async function bookSession(request: BookingRequest): Promise<Booking | nu
       type: 'MENTOR_SESSION_REQUEST',
       title: 'New session request',
       message: 'You have a new mentoring session request',
-      link: `/dashboard/mentoring/sessions/${session.id}`,
+      link: `/dashboard/mentors/sessions?session=${session.id}`,
     });
 
     logger.info('Session booked', { sessionId: session.id, mentorProfileId, menteeId });
@@ -512,7 +512,7 @@ export async function respondToBooking(
       message: accept 
         ? `Your session has been confirmed for ${session.scheduledAt?.toLocaleDateString() || 'TBD'}`
         : 'Your mentoring session request was declined',
-      link: `/dashboard/mentoring/sessions/${sessionId}`,
+      link: `/dashboard/mentors/sessions?session=${sessionId}`,
     });
 
     logger.info('Session response recorded', { sessionId, accepted: accept });
@@ -657,7 +657,7 @@ export async function completeSession(
       type: 'MENTOR_SESSION_COMPLETED',
       title: 'Session completed',
       message: 'Your mentoring session has been completed. Please rate your experience!',
-      link: `/dashboard/mentoring/sessions/${sessionId}/rate`,
+      link: `/dashboard/mentors/sessions?session=${sessionId}/rate`,
     });
 
     logger.info('Session completed', { sessionId });
@@ -817,7 +817,7 @@ export async function sendSessionReminders(): Promise<number> {
         type: 'SESSION_REMINDER',
         title: 'Upcoming session reminder',
         message: `You have a mentoring session with ${fullSession.mentee.firstName} at ${timeStr}`,
-        link: `/dashboard/mentoring/sessions/${session.id}`,
+        link: `/dashboard/mentors/sessions?session=${session.id}`,
       });
 
       // Notify mentee
@@ -826,7 +826,7 @@ export async function sendSessionReminders(): Promise<number> {
         type: 'SESSION_REMINDER',
         title: 'Upcoming session reminder',
         message: `You have a mentoring session with ${fullSession.mentorProfile.user.firstName} at ${timeStr}`,
-        link: `/dashboard/mentoring/sessions/${session.id}`,
+        link: `/dashboard/mentors/sessions?session=${session.id}`,
       });
 
       sentCount += 2;
