@@ -19,7 +19,8 @@ import {
 import { assertContentAllowed } from '../services/moderation.service';
 import { isBlockedRelationship } from '../utils/safety-store';
 import { canOpenConversation } from '../services/message-permissions.service';
-import { conversationLimiter } from '../middleware/socialLimits';
+import { conversationLimiter, messageLimiter } from '../middleware/socialLimits';
+import { Prisma } from '@prisma/client';
 import {
   conversationTtl,
   expiryFor,
@@ -141,6 +142,7 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
               createdAt: lastMessage.createdAt,
               senderId: lastMessage.senderId,
               isRead: lastMessage.isRead,
+              deletedAt: lastMessage.deletedAt,
             }
           : null,
         unreadCount: cp.unreadCount,
@@ -220,7 +222,7 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
           },
         },
         replyTo: {
-          select: { id: true, senderId: true, content: true },
+          select: { id: true, senderId: true, content: true, deletedAt: true },
         },
         reactions: { select: { emoji: true, userId: true } },
       },
@@ -288,6 +290,7 @@ router.post(
 router.post(
   '/conversations/:id/messages',
   authenticate,
+  messageLimiter,
   [
     body('content').optional().isString().isLength({ max: CONTENT_LIMITS.directMessage }),
     body('attachments').optional().isArray({ max: 5 }),
@@ -421,6 +424,126 @@ router.patch(
 
       const result = await setDisappearingTtl(req.params.id, req.user!.id, ttl);
       res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// UNSEND AND EDIT
+// ===========================================
+// Only the sender, only their own words. Unsending leaves a marker where the
+// message was ("This message was unsent") rather than closing the gap, so
+// neither side is left wondering whether something was there; the text,
+// attachments and reactions are gone. Editing is allowed for a short while
+// after sending and stamps editedAt so the thread says the words changed.
+
+export const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+async function loadOwnMessage(messageId: string, userId: string) {
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      conversationId: true,
+      senderId: true,
+      type: true,
+      isRead: true,
+      deletedAt: true,
+      createdAt: true,
+      conversation: { select: { participants: { select: { userId: true } } } },
+    },
+  });
+  if (!message || !message.conversationId) {
+    throw new ApiError(404, 'Message not found');
+  }
+  const participantIds = message.conversation?.participants.map((p) => p.userId) ?? [];
+  if (!participantIds.includes(userId)) {
+    throw new ApiError(404, 'Message not found');
+  }
+  if (message.senderId !== userId) {
+    throw new ApiError(403, 'You can only change your own messages');
+  }
+  if (message.type === 'SYSTEM') {
+    throw new ApiError(400, 'That notice cannot be changed');
+  }
+  return { ...message, conversationId: message.conversationId, participantIds };
+}
+
+router.delete('/:messageId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const message = await loadOwnMessage(req.params.messageId, req.user!.id);
+    if (message.deletedAt) {
+      res.json({ success: true, message: 'Message unsent', data: { id: message.id, deletedAt: message.deletedAt } });
+      return;
+    }
+
+    const deletedAt = new Date();
+    await prisma.$transaction([
+      prisma.message.update({
+        where: { id: message.id },
+        data: { content: '', metadata: Prisma.DbNull, deletedAt, editedAt: null },
+      }),
+      prisma.messageReaction.deleteMany({ where: { messageId: message.id } }),
+      // An unread message that is taken back must not stay counted against
+      // the person who never read it.
+      ...(message.isRead
+        ? []
+        : [
+            prisma.conversationParticipant.updateMany({
+              where: { conversationId: message.conversationId, userId: { not: req.user!.id }, unreadCount: { gt: 0 } },
+              data: { unreadCount: { decrement: 1 } },
+            }),
+          ]),
+    ]);
+
+    const payload = { conversationId: message.conversationId, messageId: message.id, deletedAt: deletedAt.toISOString() };
+    for (const participantId of message.participantIds) {
+      emitToUserRoom(participantId, 'messages:deleted', payload);
+    }
+
+    res.json({ success: true, message: 'Message unsent', data: { id: message.id, deletedAt } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch(
+  '/:messageId',
+  authenticate,
+  [body('content').isString().isLength({ min: 1, max: CONTENT_LIMITS.directMessage })],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const content = normalizeUserText(req.body.content, { field: 'content', maxLength: CONTENT_LIMITS.directMessage });
+
+      const message = await loadOwnMessage(req.params.messageId, req.user!.id);
+      if (message.deletedAt) {
+        throw new ApiError(409, 'That message was unsent');
+      }
+      if (Date.now() - new Date(message.createdAt).getTime() > MESSAGE_EDIT_WINDOW_MS) {
+        throw new ApiError(409, 'Messages can be edited for 15 minutes after sending');
+      }
+
+      await assertContentAllowed(content, { kind: 'message', userId: req.user!.id });
+
+      const editedAt = new Date();
+      const updated = await prisma.message.update({
+        where: { id: message.id },
+        data: { content, editedAt },
+        select: { id: true, content: true, editedAt: true },
+      });
+
+      const payload = { conversationId: message.conversationId, messageId: message.id, content: updated.content, editedAt: editedAt.toISOString() };
+      for (const participantId of message.participantIds) {
+        emitToUserRoom(participantId, 'messages:edited', payload);
+      }
+
+      res.json({ success: true, message: 'Message edited', data: updated });
     } catch (error) {
       next(error);
     }

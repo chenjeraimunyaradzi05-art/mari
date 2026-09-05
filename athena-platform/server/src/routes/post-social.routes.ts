@@ -5,6 +5,8 @@
  *   POST   /api/posts/:id/vote                       vote in a poll (or change the vote)
  *   POST   /api/posts/:postId/comments/:commentId/like
  *   DELETE /api/posts/:postId/comments/:commentId/like
+ *   PATCH  /api/posts/:postId/comments/:commentId      { content }  edit your own comment
+ *   GET    /api/posts/:id/reactions?type=&page=&limit=  who reacted, and how
  *   PATCH  /api/posts/:id/pin                        pin one post to the top of your profile
  *   GET    /api/posts/me/scheduled                   what you have queued
  *   GET    /api/posts/me/mentions                    posts that name you
@@ -21,12 +23,17 @@ import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { reactionLimiter } from '../middleware/socialLimits';
+import { commentLimiter, reactionLimiter } from '../middleware/socialLimits';
+import { assertContentAllowed } from '../services/moderation.service';
+import { resolveMentionedUserIds } from '../utils/mentions';
+import { canViewAuthor, canViewGroupPosts } from '../services/audience.service';
+import { getBlockedRelationshipIds } from '../utils/safety-store';
+import { parsePagination } from '../utils/pagination';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { isBlockedRelationship } from '../utils/safety-store';
-import { normalizeOptionalUserText, normalizeUserText } from '../utils/contentSafety';
+import { CONTENT_LIMITS, normalizeOptionalUserText, normalizeUserText } from '../utils/contentSafety';
 import {
   decoratePosts,
   isPollClosed,
@@ -49,6 +56,14 @@ async function loadVisiblePost(id: string, viewerId: string) {
     throw new ApiError(404, 'Post not found');
   }
   if (await isBlockedRelationship(viewerId, post.authorId)) {
+    throw new ApiError(404, 'Post not found');
+  }
+  // A private group's posts are for its members; a connections-only
+  // author's for their followers. Reacting is seeing.
+  if (!(await canViewGroupPosts(viewerId, post.groupId))) {
+    throw new ApiError(404, 'Post not found');
+  }
+  if (!(await canViewAuthor(viewerId, post.authorId))) {
     throw new ApiError(404, 'Post not found');
   }
   return post;
@@ -106,6 +121,68 @@ router.post(
     }
   }
 );
+
+// ===========================================
+// WHO REACTED
+// ===========================================
+// The people behind the counts, newest first, optionally one reaction type.
+// Anyone who can see the post can see who reacted, less anyone on either side
+// of a block with the viewer; the viewer's follow state rides along so the
+// list doubles as a place to follow someone back.
+router.get('/:id/reactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const post = await loadVisiblePost(req.params.id, req.user!.id);
+    const { page, limit } = parsePagination(req.query as { page?: string; limit?: string }, 50);
+    const requested = typeof req.query.type === 'string' ? req.query.type.toUpperCase() : '';
+    const type = requested && isReactionType(requested) ? requested : undefined;
+    if (requested && !type) {
+      throw new ApiError(400, 'Unknown reaction');
+    }
+
+    const blocked = await getBlockedRelationshipIds(req.user!.id);
+    const where = {
+      postId: post.id,
+      ...(type ? { type } : {}),
+      ...(blocked.length ? { userId: { notIn: blocked } } : {}),
+    };
+
+    const [rows, total, following] = await Promise.all([
+      prisma.like.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          type: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true } },
+        },
+      }),
+      prisma.like.count({ where }),
+      prisma.follow.findMany({ where: { followerId: req.user!.id }, select: { followingId: true } }),
+    ]);
+    const followed = new Set(following.map((f) => f.followingId));
+
+    res.json({
+      success: true,
+      data: rows.map((row) => ({
+        type: isReactionType(row.type) ? row.type : 'LIKE',
+        reactedAt: row.createdAt,
+        user: {
+          id: row.user.id,
+          name: row.user.displayName?.trim() || [row.user.firstName, row.user.lastName].filter(Boolean).join(' ').trim() || 'Member',
+          avatar: row.user.avatar,
+          headline: row.user.headline,
+          isFollowing: followed.has(row.user.id),
+          isSelf: row.user.id === req.user!.id,
+        },
+      })),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ===========================================
 // VOTE
@@ -268,6 +345,72 @@ router.get('/me/mentions', authenticate, async (req: AuthRequest, res, next) => 
     next(error);
   }
 });
+
+// ===========================================
+// EDIT A COMMENT
+// ===========================================
+// The commenter changes their own words. The edit is moderated like a new
+// comment, anyone newly named is told, and editedAt lets the thread say
+// "edited" without guessing from updatedAt.
+router.patch(
+  '/:postId/comments/:commentId',
+  authenticate,
+  commentLimiter,
+  [body('content').isString().isLength({ min: 1, max: CONTENT_LIMITS.comment })],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) throw new ApiError(400, errors.array()[0].msg);
+      const { postId, commentId } = req.params;
+      const content = normalizeUserText(req.body.content, { field: 'content', maxLength: CONTENT_LIMITS.comment });
+
+      const comment = await prisma.comment.findUnique({
+        where: { id: commentId },
+        select: { id: true, postId: true, authorId: true, content: true, isHidden: true, post: { select: { authorId: true, commentsOff: true } } },
+      });
+      if (!comment || comment.postId !== postId || comment.isHidden) {
+        throw new ApiError(404, 'Comment not found');
+      }
+      if (comment.authorId !== req.user!.id) {
+        throw new ApiError(403, 'You can only edit your own comments');
+      }
+      if (content === comment.content) {
+        res.json({ success: true, message: 'No change', data: { id: comment.id, content, editedAt: null } });
+        return;
+      }
+
+      await assertContentAllowed(content, { kind: 'comment', userId: req.user!.id });
+
+      const updated = await prisma.comment.update({
+        where: { id: comment.id },
+        data: { content, editedAt: new Date() },
+        include: {
+          author: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true } },
+        },
+      });
+
+      // Only people the new words name and the old ones did not.
+      const before = new Set((await resolveMentionedUserIds(comment.content)));
+      const mentioned = (await resolveMentionedUserIds(content)).filter(
+        (userId) => userId !== req.user!.id && userId !== comment.post.authorId && !before.has(userId)
+      );
+      for (const userId of mentioned) {
+        await notifySocial({
+          recipientId: userId,
+          actorId: req.user!.id,
+          type: 'MENTION',
+          title: 'You were mentioned',
+          message: (name) => `${name} mentioned you in a comment`,
+          link: socialLinks.post(postId),
+        });
+      }
+
+      res.json({ success: true, message: 'Comment updated', data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // ===========================================
 // PIN A COMMENT
