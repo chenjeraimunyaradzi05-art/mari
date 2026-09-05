@@ -1430,6 +1430,12 @@ model Post {
 
   // The author turned comments off; existing ones stay, new ones are refused.
   commentsOff Boolean @default(false)
+
+  // A post written inside a group stays there: it is listed on the group's
+  // page, never in the public feeds, and a private group's posts are for its
+  // members. Null for everything posted to the community.
+  groupId String?
+  group   Group?  @relation("GroupFeedPosts", fields: [groupId], references: [id], onDelete: Cascade)
   // Alt text for each entry in mediaUrls, for screen readers: string[].
   mediaAlt Json?
 
@@ -1446,6 +1452,7 @@ model Post {
   @@index([createdAt])
   @@index([scheduledFor])
   @@index([repostOfId])
+  @@index([groupId, createdAt])
 }
 
 // One row per person (or anonymous browser) who has had the post on screen,
@@ -1679,7 +1686,10 @@ model Group {
   updatedAt          DateTime     @updatedAt
 
   members      GroupMember[]
+  // Legacy rows; group posts are Post rows with groupId since the migration
+  // that copied these across.
   posts        GroupPost[]
+  feedPosts    Post[]             @relation("GroupFeedPosts")
   joinRequests GroupJoinRequest[]
 
   @@index([privacy])
