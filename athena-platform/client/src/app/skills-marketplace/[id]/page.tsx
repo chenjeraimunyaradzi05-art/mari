@@ -117,9 +117,17 @@ export default function ServiceDetailPage() {
     }
   };
 
+  // The order comes back with the hold to authorise; the modal runs the card
+  // step and then hands the buyer to their order.
   const handleOrder = async (packageIndex: number, requirements: string) => {
     if (!service) return;
-    await skillsMarketplaceApi.placeOrder(service.id, { packageIndex, requirements });
+    const res = await skillsMarketplaceApi.placeOrder(service.id, { packageIndex, requirements });
+    const order = res.data?.data;
+    return {
+      orderId: String(order?.id ?? ''),
+      clientSecret: (order?.payment?.clientSecret as string | null | undefined) ?? null,
+      amount: Number(order?.payment?.amount ?? 0),
+    };
   };
 
   if (loading) {
@@ -380,6 +388,7 @@ export default function ServiceDetailPage() {
           onClose={() => setShowOrder(false)}
           service={service}
           onOrder={handleOrder}
+          onPaid={(orderId) => router.push(orderId ? `/skills-marketplace/orders/${orderId}` : '/skills-marketplace/orders')}
         />
       )}
     </div>

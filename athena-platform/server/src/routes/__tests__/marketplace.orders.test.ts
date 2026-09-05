@@ -30,6 +30,16 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+// Every order here is backed by an authorised hold; the escrow moves are
+// someone else's test.
+jest.mock('../../services/stripe-connect.service', () => ({
+  createEscrowPayment: jest.fn(),
+  captureEscrowPayment: jest.fn(async () => ({ status: 'captured', amountCaptured: 0 })),
+  cancelEscrowPayment: jest.fn(async () => ({ status: 'canceled' })),
+  getEscrowClientSecret: jest.fn(),
+  stripeConnectService: {},
+}));
+
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 
@@ -50,6 +60,7 @@ function mockOrder(overrides: Record<string, unknown> = {}) {
     attachments: [],
     service: { id: 's1', title: 'Logo design', providerId: PROVIDER },
     client: { id: CLIENT, displayName: 'Client', avatar: null },
+    escrow: { id: 'e1', status: 'AUTHORIZED', amount: 0, currency: 'aud', paymentIntentId: 'pi_1', capturedAt: null, canceledAt: null },
     ...overrides,
   });
 }

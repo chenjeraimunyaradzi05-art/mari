@@ -6,6 +6,7 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     stripeWebhookEvent: { create: jest.fn() },
     mentorSession: { findFirst: jest.fn(), update: jest.fn() },
+    escrowPayment: { updateMany: jest.fn(async () => ({ count: 0 })) },
     subscription: { findFirst: jest.fn(), update: jest.fn(), upsert: jest.fn() },
   },
 }));

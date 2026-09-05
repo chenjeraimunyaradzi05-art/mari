@@ -3,6 +3,12 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import {
+  cancelEscrowPayment,
+  captureEscrowPayment,
+  createEscrowPayment,
+  getEscrowClientSecret,
+} from '../services/stripe-connect.service';
 
 const router = Router();
 
@@ -679,14 +685,38 @@ router.post(
       }
 
       const totalAmount = Math.round(selected.price);
-      const platformFee = Math.round(totalAmount * 0.2);
+      // The platform's cut comes from the escrow hold, so the two never disagree.
       const deliveryDays =
         typeof selected.deliveryDays === 'number' ? selected.deliveryDays : null;
+
+      // The money is held on the buyer's card now and taken only when they
+      // approve the delivery. A provider who has not set up payouts cannot be
+      // paid, so cannot be ordered from yet. Prices are whole dollars; Stripe
+      // wants cents.
+      let hold: Awaited<ReturnType<typeof createEscrowPayment>>;
+      try {
+        hold = await createEscrowPayment({
+          buyerId: req.user!.id,
+          sellerId: service.providerId,
+          amount: totalAmount * 100,
+          currency: 'aud',
+          description: `${service.title}${selected.name ? ` — ${selected.name}` : ''}`,
+          sessionType: 'service_order',
+          metadata: { serviceId: id, packageIndex: String(packageIndex) },
+        });
+      } catch (error) {
+        if (error instanceof ApiError && error.statusCode === 400) {
+          throw new ApiError(409, 'This provider has not finished setting up payouts, so orders cannot be placed yet');
+        }
+        throw error;
+      }
+      const platformFee = Math.round(hold.platformFee / 100);
 
       const order = await prisma.serviceOrder.create({
         data: {
           serviceId: id,
           clientId: req.user!.id,
+          escrowPaymentId: hold.escrowId,
           packageIndex,
           packageName: selected.name ?? null,
           requirements: typeof req.body.requirements === 'string' ? req.body.requirements : null,
@@ -701,7 +731,19 @@ router.post(
         },
       });
 
-      res.status(201).json({ success: true, data: order });
+      res.status(201).json({
+        success: true,
+        data: {
+          ...order,
+          payment: {
+            paymentIntentId: hold.paymentIntentId,
+            clientSecret: hold.clientSecret,
+            amount: hold.amount,
+            platformFee: hold.platformFee,
+            currency: 'aud',
+          },
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -721,6 +763,7 @@ router.get('/orders/me', authenticate, async (req: AuthRequest, res, next) => {
             provider: { select: { id: true, displayName: true, avatar: true } },
           },
         },
+        escrow: { select: { status: true, amount: true, currency: true, paymentIntentId: true } },
       },
     });
 
@@ -747,6 +790,7 @@ router.get('/orders/received', authenticate, async (req: AuthRequest, res, next)
       include: {
         service: { select: { id: true, title: true, category: true } },
         client: { select: { id: true, displayName: true, avatar: true } },
+        escrow: { select: { status: true, amount: true, currency: true, paymentIntentId: true } },
       },
     });
 
@@ -763,6 +807,14 @@ router.get('/orders/received', authenticate, async (req: AuthRequest, res, next)
 // PENDING -> ACCEPTED -> DELIVERED -> COMPLETED, with REVISION_REQUESTED
 // looping back to ACCEPTED and CANCELLED terminating early. Every transition
 // route below checks against this table rather than trusting the caller.
+// A hold counts once Stripe has authorised it. The mock client (no Stripe key,
+// outside production) never gets a webhook, so its holds count as soon as made.
+function escrowHeld(escrow: { status: string; paymentIntentId: string | null } | null | undefined): boolean {
+  if (!escrow) return false;
+  if (escrow.status === 'AUTHORIZED' || escrow.status === 'CAPTURED') return true;
+  return escrow.status === 'PENDING' && Boolean(escrow.paymentIntentId?.startsWith('pi_mock_'));
+}
+
 const ORDER_TRANSITIONS: Record<string, { from: string[]; actor: 'client' | 'provider' | 'either' }> = {
   accept: { from: ['PENDING'], actor: 'provider' },
   deliver: { from: ['ACCEPTED', 'REVISION_REQUESTED'], actor: 'provider' },
@@ -780,6 +832,9 @@ async function loadOrderForActor(orderId: string, userId: string) {
     include: {
       service: { select: { id: true, title: true, providerId: true } },
       client: { select: { id: true, displayName: true, avatar: true } },
+      escrow: {
+        select: { id: true, status: true, amount: true, currency: true, paymentIntentId: true, capturedAt: true, canceledAt: true },
+      },
     },
   });
 
@@ -815,6 +870,31 @@ function assertTransition(
   }
 }
 
+// The buyer's way back into a checkout they left: the client secret for a hold
+// still waiting to be authorised, or just the state once it is past that.
+router.get('/orders/:id/payment', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { order, isClient } = await loadOrderForActor(req.params.id, req.user!.id);
+    if (!isClient) {
+      throw new ApiError(403, 'Only the buyer sees the payment');
+    }
+    if (!order.escrow) {
+      res.json({ success: true, data: { status: 'NONE', clientSecret: null, amount: order.totalAmount * 100, currency: 'aud' } });
+      return;
+    }
+    const clientSecret =
+      order.escrow.status === 'PENDING' && order.escrow.paymentIntentId
+        ? await getEscrowClientSecret(order.escrow.paymentIntentId)
+        : null;
+    res.json({
+      success: true,
+      data: { status: order.escrow.status, clientSecret, amount: order.escrow.amount, currency: order.escrow.currency },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/orders/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { order, isClient, isProvider } = await loadOrderForActor(req.params.id, req.user!.id);
@@ -828,6 +908,11 @@ router.post('/orders/:id/accept', authenticate, async (req: AuthRequest, res, ne
   try {
     const { order, isClient, isProvider } = await loadOrderForActor(req.params.id, req.user!.id);
     assertTransition('accept', order.status, isClient, isProvider);
+
+    // Nothing starts until the buyer's money is actually held.
+    if (!escrowHeld(order.escrow)) {
+      throw new ApiError(409, 'The buyer has not completed payment yet');
+    }
 
     // The clock starts when the provider accepts, not when the order was placed.
     const dueAt = order.deliveryDays
@@ -920,6 +1005,13 @@ router.post('/orders/:id/complete', authenticate, async (req: AuthRequest, res, 
     const { order, isClient, isProvider } = await loadOrderForActor(req.params.id, req.user!.id);
     assertTransition('complete', order.status, isClient, isProvider);
 
+    // Approval releases the hold to the provider. If Stripe refuses, the order
+    // stays delivered and the buyer sees why, rather than being marked complete
+    // with the money still sitting on their card.
+    if (order.escrow?.paymentIntentId && order.escrow.status !== 'CAPTURED') {
+      await captureEscrowPayment(order.escrow.paymentIntentId, { id: req.user!.id, role: req.user!.role });
+    }
+
     const [updated] = await prisma.$transaction([
       prisma.serviceOrder.update({
         where: { id: order.id },
@@ -950,6 +1042,15 @@ router.post(
 
       const { order, isClient, isProvider } = await loadOrderForActor(req.params.id, req.user!.id);
       assertTransition('cancel', order.status, isClient, isProvider);
+
+      // The hold goes back to the buyer's card, whoever cancelled.
+      if (order.escrow?.paymentIntentId && !['CANCELED', 'REFUNDED', 'FAILED'].includes(order.escrow.status)) {
+        await cancelEscrowPayment(
+          order.escrow.paymentIntentId,
+          { id: req.user!.id, role: req.user!.role },
+          typeof req.body.reason === 'string' ? req.body.reason : undefined
+        );
+      }
 
       const updated = await prisma.serviceOrder.update({
         where: { id: order.id },

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   ServiceCard,
   MarketplaceFiltersBar,
@@ -184,6 +185,12 @@ export default function SkillsMarketplacePage() {
         primaryAction={{ label: 'Browse services', href: '#all-services' }}
         secondaryAction={{ label: 'Offer your own', href: '/dashboard/creator' }}
       />
+      <div className="mt-3 text-sm">
+        <Link href="/skills-marketplace/orders" className="font-medium text-primary-600 hover:underline">
+          Your orders
+        </Link>
+        <span className="text-slate-400"> · what you have bought and what you are delivering</span>
+      </div>
 
       {/* Popular Categories */}
       <div className="mt-8">

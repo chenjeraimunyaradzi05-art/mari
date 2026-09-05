@@ -115,6 +115,30 @@ router.post(
                 },
               });
             }
+
+            // Escrow holds (marketplace orders) move to AUTHORIZED, and the
+            // provider hears that a paid order is waiting for them.
+            const held = await prisma.escrowPayment.updateMany({
+              where: { paymentIntentId: paymentIntent.id, status: 'PENDING' },
+              data: { status: 'AUTHORIZED' },
+            });
+            if (held.count > 0 && (paymentIntent.metadata as any)?.sessionType === 'service_order') {
+              const order = await prisma.serviceOrder.findFirst({
+                where: { escrow: { paymentIntentId: paymentIntent.id } },
+                select: { id: true, packageName: true, service: { select: { title: true, providerId: true } } },
+              });
+              if (order) {
+                await prisma.notification.create({
+                  data: {
+                    userId: order.service.providerId,
+                    type: 'SYSTEM',
+                    title: 'New order',
+                    message: `${order.packageName ? `${order.packageName} · ` : ''}${order.service.title}: payment is held. Accept to start the clock.`,
+                    link: `/skills-marketplace/orders/${order.id}`,
+                  },
+                });
+              }
+            }
             break;
           }
           case 'payment_intent.succeeded': {
@@ -151,6 +175,15 @@ router.post(
           case 'payment_intent.payment_failed':
           case 'payment_intent.canceled': {
             const paymentIntent = event.data.object as Stripe.PaymentIntent;
+
+            // An escrow hold that never authorised, or was cancelled at Stripe.
+            await prisma.escrowPayment.updateMany({
+              where: { paymentIntentId: paymentIntent.id, status: { in: ['PENDING', 'AUTHORIZED'] } },
+              data:
+                event.type === 'payment_intent.canceled'
+                  ? { status: 'CANCELED', canceledAt: new Date() }
+                  : { status: 'FAILED' },
+            });
             const type = (paymentIntent.metadata as any)?.type;
             const sessionId = (paymentIntent.metadata as any)?.sessionId;
 
@@ -287,6 +320,12 @@ router.post(
               if (session) {
                 await prisma.mentorSession.update({ where: { id: session.id }, data: { paymentStatus: 'REFUNDED' } });
               }
+            }
+            if (paymentIntentId) {
+              await prisma.escrowPayment.updateMany({
+                where: { paymentIntentId },
+                data: { status: 'REFUNDED', canceledAt: new Date() },
+              });
             }
             logger.info('Stripe charge refunded', { chargeId: charge.id, paymentIntentId, amountRefunded: charge.amount_refunded });
             break;

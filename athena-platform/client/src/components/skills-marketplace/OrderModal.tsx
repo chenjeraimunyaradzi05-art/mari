@@ -6,18 +6,31 @@ import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { SkillService, formatAud, providerName, readPackages } from './types';
 import { cn } from '@/lib/utils';
+import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
+import { stripeConfigured } from '@/lib/stripe';
+
+/** What placing an order gives back: the order, and the hold to authorise. */
+export interface PlacedOrder {
+  orderId: string;
+  clientSecret: string | null;
+  /** In cents. */
+  amount: number;
+}
 
 interface OrderModalProps {
   isOpen: boolean;
   onClose: () => void;
   service: SkillService;
-  onOrder: (packageIndex: number, requirements: string) => Promise<void>;
+  onOrder: (packageIndex: number, requirements: string) => Promise<PlacedOrder | void>;
+  /** Called once the order exists, whether or not the card step ran. */
+  onPaid?: (orderId: string) => void;
 }
 
-export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProps) {
+export function OrderModal({ isOpen, onClose, service, onOrder, onPaid }: OrderModalProps) {
   const [selectedPackage, setSelectedPackage] = useState(0);
   const [requirements, setRequirements] = useState('');
-  const [step, setStep] = useState<'select' | 'requirements' | 'confirm'>('select');
+  const [step, setStep] = useState<'select' | 'requirements' | 'confirm' | 'pay'>('select');
+  const [placed, setPlaced] = useState<PlacedOrder | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -34,10 +47,19 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
     setIsSubmitting(true);
     setError('');
     try {
-      await onOrder(selectedPackage, requirements);
-      handleClose();
+      const result = await onOrder(selectedPackage, requirements);
+      // A real Stripe hold needs the card authorised before the provider hears
+      // about the order; the mock client has nothing to authorise.
+      if (result && result.clientSecret && stripeConfigured && !result.clientSecret.endsWith('_secret_mock')) {
+        setPlaced(result);
+        setStep('pay');
+      } else {
+        if (result) onPaid?.(result.orderId);
+        handleClose();
+      }
     } catch (err) {
-      setError('Failed to place order. Please try again.');
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(message || 'Failed to place order. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -45,6 +67,7 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
 
   const handleClose = () => {
     setStep('select');
+    setPlaced(null);
     setSelectedPackage(0);
     setRequirements('');
     setError('');
@@ -239,10 +262,34 @@ export function OrderModal({ isOpen, onClose, service, onOrder }: OrderModalProp
                     Processing...
                   </>
                 ) : (
-                  `Order for ${formatPrice(pkg.price)}`
+                  `Hold ${formatPrice(pkg.price)} and order`
                 )}
               </Button>
             </div>
+          </div>
+        )}
+
+        {/* Step: Hold the payment */}
+        {step === 'pay' && placed && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Hold the payment</h3>
+            <p className="text-sm text-slate-500">
+              {formatPrice(placed.amount / 100)} is held on your card now and only taken when you approve the delivered work.
+              Cancel before delivery and the hold is released.
+            </p>
+            <PaymentIntentForm
+              clientSecret={placed.clientSecret!}
+              amountLabel={formatPrice(placed.amount / 100)}
+              onAuthorised={() => {
+                onPaid?.(placed.orderId);
+                handleClose();
+              }}
+              onSkip={() => {
+                onPaid?.(placed.orderId);
+                handleClose();
+              }}
+              skipLabel="Pay later from your orders"
+            />
           </div>
         )}
       </div>

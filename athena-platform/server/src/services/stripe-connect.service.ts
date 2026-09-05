@@ -64,7 +64,7 @@ export interface EscrowPaymentInput {
   currency: string;
   description: string;
   metadata?: Record<string, string>;
-  sessionType?: 'mentor_session' | 'course_purchase' | 'creator_content';
+  sessionType?: 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order';
 }
 
 /**
@@ -222,6 +222,7 @@ export async function getAccountStatus(userId: string): Promise<{
  * Uses PaymentIntents with manual capture for mentor sessions
  */
 export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
+  escrowId: string;
   paymentIntentId: string;
   clientSecret: string;
   amount: number;
@@ -246,7 +247,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     const mockId = `pi_mock_${Date.now()}`;
     
     // Store mock escrow record
-    await prisma.escrowPayment.create({
+    const mockRow = await prisma.escrowPayment.create({
       data: {
         paymentIntentId: mockId,
         buyerId: input.buyerId,
@@ -262,6 +263,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     });
 
     return {
+      escrowId: mockRow.id,
       paymentIntentId: mockId,
       clientSecret: `${mockId}_secret_mock`,
       amount: input.amount,
@@ -289,7 +291,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     });
 
     // Store escrow record in database
-    await prisma.escrowPayment.create({
+    const row = await prisma.escrowPayment.create({
       data: {
         paymentIntentId: paymentIntent.id,
         buyerId: input.buyerId,
@@ -312,6 +314,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     });
 
     return {
+      escrowId: row.id,
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret!,
       amount: input.amount,
@@ -321,6 +324,18 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     logger.error('Failed to create escrow payment', { error, input });
     throw new ApiError(500, 'Failed to create payment');
   }
+}
+
+/**
+ * The client secret the buyer needs to authorise a hold that is still pending,
+ * for a checkout they left and came back to. Nothing for a hold already
+ * authorised, captured or cancelled.
+ */
+export async function getEscrowClientSecret(paymentIntentId: string): Promise<string | null> {
+  if (paymentIntentId.startsWith('pi_mock_')) return `${paymentIntentId}_secret_mock`;
+  if (!stripe) return null;
+  const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  return intent.client_secret ?? null;
 }
 
 /**

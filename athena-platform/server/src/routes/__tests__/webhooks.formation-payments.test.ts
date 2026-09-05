@@ -8,6 +8,7 @@ jest.mock('../../utils/prisma', () => ({
       create: jest.fn(),
       delete: jest.fn(),
     },
+    escrowPayment: { updateMany: jest.fn(async () => ({ count: 0 })) },
     businessRegistration: {
       findUnique: jest.fn(),
       update: jest.fn(),

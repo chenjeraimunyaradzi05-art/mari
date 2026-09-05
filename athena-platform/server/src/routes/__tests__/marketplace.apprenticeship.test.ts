@@ -25,6 +25,21 @@ jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+// Orders are backed by an escrow hold; the hold's 15% fee is the platform fee.
+jest.mock('../../services/stripe-connect.service', () => ({
+  createEscrowPayment: jest.fn(async ({ amount }: { amount: number }) => ({
+    escrowId: 'e1',
+    paymentIntentId: 'pi_1',
+    clientSecret: 'pi_1_secret',
+    amount,
+    platformFee: Math.round(amount * 0.15),
+  })),
+  captureEscrowPayment: jest.fn(),
+  cancelEscrowPayment: jest.fn(),
+  getEscrowClientSecret: jest.fn(),
+  stripeConnectService: {},
+}));
+
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
 
@@ -66,8 +81,9 @@ describe('POST /api/skills-marketplace/services/:id/order', () => {
     expect(data.packageIndex).toBe(1);
     expect(data.packageName).toBe('Pro');
     expect(data.totalAmount).toBe(250);
-    expect(data.platformFee).toBe(50);
-    expect(data.providerPayout).toBe(200);
+    expect(data.escrowPaymentId).toBe('e1');
+    expect(data.platformFee).toBe(38);
+    expect(data.providerPayout).toBe(212);
     expect(data.deliveryDays).toBe(7);
     expect(data.dueAt).toBeInstanceOf(Date);
     expect(data.requirements).toBe('Please include source files');

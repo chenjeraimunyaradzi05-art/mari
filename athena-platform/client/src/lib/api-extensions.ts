@@ -499,6 +499,8 @@ export const skillsMarketplaceApi = {
 
   // Get order details
   getOrder: (id: string) => api.get(`/skills-marketplace/orders/${id}`),
+  // The hold's state, and the client secret while it still needs authorising.
+  getOrderPayment: (id: string) => api.get(`/skills-marketplace/orders/${id}/payment`),
 
   // Accept order (seller)
   acceptOrder: (id: string) => api.post(`/skills-marketplace/orders/${id}/accept`),
