@@ -22,6 +22,56 @@ import { prisma } from '../utils/prisma';
 const router = Router();
 
 /**
+ * Group chat messages are Message rows whose conversationId is the group's
+ * id. Message.conversationId is a foreign key to Conversation, so without a
+ * Conversation row of that id every send failed. The row is created on first
+ * use, keyed by the group id, so no other table needs to know about it.
+ */
+async function ensureGroupConversation(groupId: string): Promise<void> {
+  await prisma.conversation.upsert({
+    where: { id: groupId },
+    update: {},
+    create: { id: groupId },
+  });
+}
+
+/**
+ * @route GET /api/groups/:groupId/members
+ * @desc Who is in the group, with roles. Members only.
+ */
+router.get('/:groupId/members', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const members = await groupChatService.getGroupMembers(req.params.groupId, req.user!.id);
+    res.json({ success: true, data: members });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/groups/:groupId/chat/pinned
+ * @desc Messages pinned by a moderator, newest first. Members only.
+ */
+router.get('/:groupId/chat/pinned', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { groupId } = req.params;
+    const canRead = await validatePermission(groupId, req.user!.id, 'send_messages');
+    if (!canRead) {
+      throw new ApiError(403, 'You are not a member of this group');
+    }
+    const pinned = await prisma.message.findMany({
+      where: { conversationId: groupId, deletedAt: null, metadata: { path: ['pinned'], equals: true } },
+      include: { sender: { select: { id: true, displayName: true, avatar: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    res.json({ success: true, data: pinned });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route POST /api/groups/:groupId/chat/message
  * @desc Send a message to group chat
  * @access Private (Group members)
@@ -49,6 +99,8 @@ router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res
     if (!sendPolicy.allowed) {
       throw new ApiError(403, sendPolicy.reason || 'You are not allowed to send messages in this group');
     }
+
+    await ensureGroupConversation(groupId);
 
     if (replyToId) {
       const replyTo = await prisma.message.findUnique({
@@ -326,11 +378,13 @@ router.patch('/:groupId/chat/messages/:messageId/pin', authenticate, async (req:
       throw new ApiError(404, 'Message not found');
     }
 
-    await chatStorageService.pinMessage(messageId, req.user!.id, true);
+    // { pinned: false } takes a pin down; anything else pins.
+    const pinned = req.body?.pinned !== false;
+    await chatStorageService.pinMessage(messageId, req.user!.id, pinned);
 
     res.json({
       success: true,
-      message: 'Message pinned',
+      message: pinned ? 'Message pinned' : 'Message unpinned',
     });
   } catch (error) {
     next(error);

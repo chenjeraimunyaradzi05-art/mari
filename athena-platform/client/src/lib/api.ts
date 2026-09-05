@@ -631,6 +631,29 @@ export const groupsApi = {
     api.post(`/groups/${id}/posts`, data),
   // The author, or a group admin or moderator.
   deletePost: (id: string, postId: string) => api.delete(`/groups/${id}/posts/${postId}`),
+
+  // Admins and moderators of a private group decide who joins.
+  listJoinRequests: (id: string) => api.get(`/groups/${id}/join-requests`),
+  approveJoinRequest: (id: string, requestId: string) => api.post(`/groups/${id}/join-requests/${requestId}/approve`),
+  denyJoinRequest: (id: string, requestId: string) => api.post(`/groups/${id}/join-requests/${requestId}/deny`),
+
+  // Members, and what admins and moderators may do about them.
+  listMembers: (id: string) => api.get(`/groups/${id}/members`),
+  updateMemberRole: (id: string, userId: string, role: 'ADMIN' | 'MODERATOR' | 'MEMBER') =>
+    api.patch(`/groups/${id}/members/${userId}/role`, { role }),
+  removeMember: (id: string, userId: string) => api.delete(`/groups/${id}/members/${userId}`),
+  muteMember: (id: string, userId: string, durationMinutes?: number) =>
+    api.post(`/groups/${id}/members/${userId}/mute`, durationMinutes ? { duration: durationMinutes } : {}),
+  unmuteMember: (id: string, userId: string) => api.post(`/groups/${id}/members/${userId}/unmute`),
+  banMember: (id: string, userId: string, reason?: string) => api.post(`/groups/${id}/members/${userId}/ban`, reason ? { reason } : {}),
+
+  // Group chat: a room for members, separate from the group's posts.
+  chatMessages: (id: string, params?: { before?: string; limit?: number }) => api.get(`/groups/${id}/chat/messages`, { params }),
+  pinnedChatMessages: (id: string) => api.get(`/groups/${id}/chat/pinned`),
+  sendChatMessage: (id: string, data: { content: string; replyToId?: string }) => api.post(`/groups/${id}/chat/message`, data),
+  deleteChatMessage: (id: string, messageId: string) => api.delete(`/groups/${id}/chat/messages/${messageId}`),
+  pinChatMessage: (id: string, messageId: string, pinned: boolean) =>
+    api.patch(`/groups/${id}/chat/messages/${messageId}/pin`, { pinned }),
 };
 
 // ============================================

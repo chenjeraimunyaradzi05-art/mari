@@ -329,6 +329,7 @@ router.get('/:id/join-requests', authenticate, async (req: AuthRequest, res, nex
     const actorRole = await getMembershipRole(group.id, req.user!.id);
     if (!isDbModeratorOrAdmin(actorRole)) throw new ApiError(403, 'Insufficient permissions');
 
+    // The inbox shows who is asking, not a bare id.
     const requests = await (prisma as any).groupJoinRequest.findMany({
       where: { groupId: group.id, status: 'PENDING' },
       orderBy: { createdAt: 'asc' },
@@ -339,6 +340,7 @@ router.get('/:id/join-requests', authenticate, async (req: AuthRequest, res, nex
         userId: true,
         status: true,
         createdAt: true,
+        user: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true } },
       },
     });
 
