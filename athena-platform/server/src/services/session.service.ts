@@ -160,7 +160,7 @@ export const sessionService = {
   /**
    * Get all active sessions for a user
    */
-  async getUserActiveSessions(userId: string): Promise<SessionInfo[]> {
+  async getUserActiveSessions(userId: string, currentAccessToken?: string): Promise<SessionInfo[]> {
     const sessions = await prisma.session.findMany({
       where: {
         userId,
@@ -169,6 +169,7 @@ export const sessionService = {
       },
       select: {
         id: true,
+        token: true,
         userAgent: true,
         ipAddress: true,
         createdAt: true,
@@ -178,13 +179,20 @@ export const sessionService = {
       orderBy: { createdAt: 'desc' },
     });
 
-    // We'll assume the first session in the list is the current one if we know the current token
-    return sessions.map((s, idx) => ({
+    // "This device" is the session whose token the caller is using right now.
+    // The newest session used to be assumed current, which pointed the label
+    // at whichever device had signed in last, not the one looking at the list.
+    const currentHashes = currentAccessToken
+      ? new Set([hashOpaqueToken(currentAccessToken), currentAccessToken])
+      : null;
+    const anyMatch = currentHashes ? sessions.some((s) => currentHashes.has(s.token)) : false;
+
+    return sessions.map(({ token, ...s }, idx) => ({
       ...s,
       userAgent: s.userAgent || undefined,
       ipAddress: s.ipAddress || undefined,
       revokedAt: s.revokedAt,
-      isCurrent: idx === 0, // This is a simple heuristic; in practice, you'd pass the current token
+      isCurrent: currentHashes && anyMatch ? currentHashes.has(token) : !currentHashes && idx === 0,
     }));
   },
 

@@ -15,6 +15,7 @@ import { sendVerificationEmail, sendPasswordResetEmail, sendWelcomeEmail } from 
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
 import { sessionService } from '../services/session.service';
+import { noteSignIn } from '../services/login-alert.service';
 import { hashOpaqueToken } from '../utils/opaqueToken';
 import { getTrustedOriginFromHeaders, isCorsOriginAllowed } from '../utils/origins';
 import {
@@ -830,13 +831,16 @@ router.post(
       const cookieOptions = getRefreshTokenCookieOptions(refreshToken);
       res.cookie('refreshToken', refreshToken, cookieOptions);
 
-      await sessionService.createSession(
+      const session = await sessionService.createSession(
         user.id,
         accessToken,
         refreshToken,
         req.headers['user-agent'],
         req.ip
       );
+      // After answering: a sign-in from a device this account has not used
+      // before tells the owner, so a stolen password is noticed.
+      void noteSignIn({ userId: user.id, sessionId: session.id, userAgent: req.headers['user-agent'], ipAddress: req.ip, method: 'password' });
 
       const {
         passwordHash: _passwordHash,
@@ -1143,13 +1147,16 @@ router.post(
       const cookieOptions = getRefreshTokenCookieOptions(refreshToken);
       res.cookie('refreshToken', refreshToken, cookieOptions);
 
-      await sessionService.createSession(
+      const googleSession = await sessionService.createSession(
         user.id,
         accessToken,
         refreshToken,
         req.headers['user-agent'],
         req.ip
       );
+      if (!created) {
+        void noteSignIn({ userId: user.id, sessionId: googleSession.id, userAgent: req.headers['user-agent'], ipAddress: req.ip, method: 'Google' });
+      }
 
       res.status(created ? 201 : 200).json({
         success: true,
@@ -1444,13 +1451,16 @@ router.post(
       const fbCookieOptions = getRefreshTokenCookieOptions(fbRefreshToken);
       res.cookie('refreshToken', fbRefreshToken, fbCookieOptions);
 
-      await sessionService.createSession(
+      const fbSession = await sessionService.createSession(
         fbUser.id,
         fbAccessTokenJwt,
         fbRefreshToken,
         req.headers['user-agent'],
         req.ip
       );
+      if (!fbCreated) {
+        void noteSignIn({ userId: fbUser.id, sessionId: fbSession.id, userAgent: req.headers['user-agent'], ipAddress: req.ip, method: 'Facebook' });
+      }
 
       res.status(fbCreated ? 201 : 200).json({
         success: true,
@@ -2240,7 +2250,8 @@ router.post(
 // ===========================================
 router.get('/sessions', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const sessions = await sessionService.getUserActiveSessions(req.user!.id);
+    const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined;
+    const sessions = await sessionService.getUserActiveSessions(req.user!.id, bearer);
 
     res.json({
       success: true,
