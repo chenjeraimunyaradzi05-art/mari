@@ -5,7 +5,10 @@ import { api } from './api';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    // SDK 54 splits the old shouldShowAlert into banner and list.
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),

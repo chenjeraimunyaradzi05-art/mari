@@ -94,7 +94,8 @@ export function useLocalStorage<T>(
 // ==========================================
 
 export function usePrevious<T>(value: T): T | undefined {
-  const ref = useRef<T>();
+  // React 19's types want an initial value; undefined is the honest one.
+  const ref = useRef<T | undefined>(undefined);
   useEffect(() => {
     ref.current = value;
   });
