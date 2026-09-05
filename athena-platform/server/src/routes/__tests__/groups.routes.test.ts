@@ -30,7 +30,26 @@ jest.mock('../../utils/prisma', () => ({
       findUnique: jest.fn(),
       delete: jest.fn(),
     },
+    post: {
+      findMany: jest.fn(async () => []),
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      delete: jest.fn(),
+    },
+    like: { findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []) },
+    postSave: { findMany: jest.fn(async () => []) },
+    pollVote: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
+    user: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null) },
+    notification: { create: jest.fn() },
   },
+}));
+
+jest.mock('../../services/moderation.service', () => ({
+  assertContentAllowed: jest.fn(async () => undefined),
+}));
+
+jest.mock('../../services/link-preview.service', () => ({
+  enrichPostLinkPreview: jest.fn(),
 }));
 
 jest.mock('../../middleware/auth', () => ({
@@ -242,12 +261,14 @@ describe('Groups routes (Prisma-backed)', () => {
   it('POST /api/groups/:id/posts creates post when member', async () => {
     (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC' });
     (prisma.groupMember.findUnique as any).mockResolvedValue({ id: 'gm_1' });
-    (prisma.groupPost.create as any).mockResolvedValue({
+    (prisma.post.create as any).mockResolvedValue({
       id: 'gp_1',
       groupId: 'g1',
       authorId: 'user-123',
       content: 'Hello group',
+      poll: null,
       createdAt: new Date('2026-01-10T00:00:00.000Z'),
+      author: { id: 'user-123', displayName: 'Member' },
     });
 
     const res = await request(app)
@@ -259,12 +280,25 @@ describe('Groups routes (Prisma-backed)', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.id).toBe('gp_1');
     expect(res.body.data.content).toBe('Hello group');
+    expect((prisma.post.create as any).mock.calls[0][0].data).toMatchObject({ groupId: 'g1', authorId: 'user-123', content: 'Hello group', isPublic: true });
+  });
+
+  it('GET /api/groups/:id/posts keeps a private group’s posts for its members', async () => {
+    (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PRIVATE', isHidden: false });
+    (prisma.groupMember.findUnique as any).mockResolvedValue(null);
+    await request(app).get('/api/groups/g1/posts').set('x-test-auth', '1').expect(403);
+
+    (prisma.groupMember.findUnique as any).mockResolvedValue({ role: 'MEMBER' });
+    (prisma.post.findMany as any).mockResolvedValue([{ id: 'p1', groupId: 'g1', content: 'inside', poll: null, author: { id: 'a' } }]);
+    const res = await request(app).get('/api/groups/g1/posts').set('x-test-auth', '1').expect(200);
+    expect(res.body.data[0]).toMatchObject({ id: 'p1', content: 'inside', isLiked: false });
+    expect((prisma.post.findMany as any).mock.calls[0][0].where).toEqual({ groupId: 'g1', isHidden: false });
   });
 
   it('DELETE /api/groups/:id/posts/:postId returns 403 when not moderator/admin', async () => {
     (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC', isHidden: false });
     (prisma.groupMember.findUnique as any).mockResolvedValue({ role: 'MEMBER' });
-    (prisma.groupPost.findUnique as any).mockResolvedValue({ id: 'gp_1', groupId: 'g1', authorId: 'other-user' });
+    (prisma.post.findUnique as any).mockResolvedValue({ id: 'gp_1', groupId: 'g1', authorId: 'other-user' });
 
     const res = await request(app)
       .delete('/api/groups/g1/posts/gp_1')
@@ -277,8 +311,8 @@ describe('Groups routes (Prisma-backed)', () => {
   it('DELETE /api/groups/:id/posts/:postId succeeds for post author (member)', async () => {
     (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC', isHidden: false });
     (prisma.groupMember.findUnique as any).mockResolvedValue({ role: 'MEMBER' });
-    (prisma.groupPost.findUnique as any).mockResolvedValue({ id: 'gp_1', groupId: 'g1', authorId: 'user-123' });
-    (prisma.groupPost.delete as any).mockResolvedValue({ id: 'gp_1' });
+    (prisma.post.findUnique as any).mockResolvedValue({ id: 'gp_1', groupId: 'g1', authorId: 'user-123' });
+    (prisma.post.delete as any).mockResolvedValue({ id: 'gp_1' });
 
     const res = await request(app)
       .delete('/api/groups/g1/posts/gp_1')
@@ -286,14 +320,14 @@ describe('Groups routes (Prisma-backed)', () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(prisma.groupPost.delete).toHaveBeenCalled();
+    expect(prisma.post.delete).toHaveBeenCalled();
   });
 
   it('DELETE /api/groups/:id/posts/:postId succeeds for moderator', async () => {
     (prisma.group.findUnique as any).mockResolvedValue({ id: 'g1', privacy: 'PUBLIC', isHidden: false });
     (prisma.groupMember.findUnique as any).mockResolvedValue({ role: 'MODERATOR' });
-    (prisma.groupPost.findUnique as any).mockResolvedValue({ id: 'gp_1', groupId: 'g1' });
-    (prisma.groupPost.delete as any).mockResolvedValue({ id: 'gp_1' });
+    (prisma.post.findUnique as any).mockResolvedValue({ id: 'gp_1', groupId: 'g1' });
+    (prisma.post.delete as any).mockResolvedValue({ id: 'gp_1' });
 
     const res = await request(app)
       .delete('/api/groups/g1/posts/gp_1')
@@ -301,7 +335,7 @@ describe('Groups routes (Prisma-backed)', () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(prisma.groupPost.delete).toHaveBeenCalled();
+    expect(prisma.post.delete).toHaveBeenCalled();
   });
 
   it('PATCH /api/groups/:id/members/:userId returns 403 for non-admin', async () => {

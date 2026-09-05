@@ -82,7 +82,30 @@ export function authorAudienceWhere(viewerId?: string, followingIds: string[] = 
       author: { safetySettings: { is: { profileVisibility: 'connections' } } },
     });
   }
-  return { OR: allowed };
+  // A group's posts stay on the group's page.
+  return { groupId: null, OR: allowed };
+}
+
+/**
+ * Whether a viewer may read a group's posts: anyone for a public group,
+ * members (and admins) for a private one. Null groupId means not a group post.
+ */
+export async function canViewGroupPosts(viewerId: string | undefined, groupId: string | null | undefined, isAdmin = false): Promise<boolean> {
+  if (!groupId) return true;
+  if (isAdmin) return true;
+  try {
+    const group = await prisma.group.findUnique({ where: { id: groupId }, select: { privacy: true, isHidden: true } });
+    if (!group || group.isHidden) return false;
+    if (String(group.privacy).toUpperCase() !== 'PRIVATE') return true;
+    if (!viewerId) return false;
+    const member = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: viewerId } },
+      select: { isBanned: true },
+    });
+    return Boolean(member) && !member!.isBanned;
+  } catch {
+    return false;
+  }
 }
 
 /** The ids the viewer follows, for authorAudienceWhere. */

@@ -44,7 +44,7 @@ export async function trendingTopics(days = 7, limit = 10) {
   const since = new Date(Date.now() - Math.min(Math.max(days, 1), 90) * 24 * 60 * 60 * 1000);
   const [posts, videos] = await Promise.all([
     prisma.post.findMany({
-      where: { isHidden: false, isPublic: true, createdAt: { gte: since }, content: { contains: '#' } },
+      where: { isHidden: false, isPublic: true, groupId: null, createdAt: { gte: since }, content: { contains: '#' } },
       select: { content: true },
       orderBy: { createdAt: 'desc' },
       take: 1000,
@@ -137,7 +137,7 @@ router.get('/:tag', optionalAuth, async (req: AuthRequest, res, next) => {
 
     const [posts, videos, postTotal, videoTotal, followers, mine] = await Promise.all([
       prisma.post.findMany({
-        where: { isHidden: false, isPublic: true, content: { contains: `#${tag}`, mode: 'insensitive' } },
+        where: { isHidden: false, isPublic: true, groupId: null, content: { contains: `#${tag}`, mode: 'insensitive' } },
         include: AUTHOR_SELECT,
         orderBy: { createdAt: 'desc' },
         take: 20,
@@ -148,7 +148,7 @@ router.get('/:tag', optionalAuth, async (req: AuthRequest, res, next) => {
         orderBy: [{ engagementScore: 'desc' }, { publishedAt: 'desc' }],
         take: 12,
       }),
-      prisma.post.count({ where: { isHidden: false, isPublic: true, content: { contains: `#${tag}`, mode: 'insensitive' } } }),
+      prisma.post.count({ where: { isHidden: false, isPublic: true, groupId: null, content: { contains: `#${tag}`, mode: 'insensitive' } } }),
       prisma.video.count({ where: { status: 'PUBLISHED', isHidden: false, hashtags: { has: tag } } }),
       prisma.userFeedPreferences.count({ where: { followedHashtags: { has: tag } } }),
       req.user ? followedTagsOf(req.user.id) : Promise.resolve([] as string[]),

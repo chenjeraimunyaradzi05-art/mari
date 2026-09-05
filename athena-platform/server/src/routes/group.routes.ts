@@ -2,6 +2,13 @@ import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
+import { decoratePosts } from '../services/post-decoration.service';
+import { assertContentAllowed } from '../services/moderation.service';
+import { enrichPostLinkPreview } from '../services/link-preview.service';
+import { resolveMentionedUserIds } from '../utils/mentions';
+import { notifySocial, socialLinks } from '../utils/social-notifications';
+import { CONTENT_LIMITS, normalizeMediaUrls, normalizeUserText } from '../utils/contentSafety';
+import { postLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -443,24 +450,36 @@ router.post('/:id/leave', authenticate, async (req: AuthRequest, res, next) => {
 /**
  * GET /api/groups/:id/posts
  */
+// Group posts are Post rows with groupId, so they carry reactions, comments,
+// mentions, media, polls and insights like any other post. They are listed
+// here and nowhere else; a private group's posts are for its members.
+
+const GROUP_POST_AUTHOR = {
+  author: {
+    select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true, headline: true },
+  },
+};
+
+async function assertCanReadGroupPosts(group: any, req: AuthRequest) {
+  const isAdmin = String(req.user?.role || '').toUpperCase() === 'ADMIN';
+  if (apiPrivacyFromDb(group.privacy) !== 'private' || isAdmin) return;
+  if (!req.user) throw new ApiError(401, 'Authentication required');
+  const role = await getMembershipRole(group.id, req.user.id);
+  if (!role) throw new ApiError(403, 'Join the group to see its posts');
+}
+
 router.get('/:id/posts', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
-    if (apiPrivacyFromDb(group.privacy) === 'private' && !req.user) {
-      throw new ApiError(401, 'Authentication required');
-    }
+    await assertCanReadGroupPosts(group, req);
 
-    // The page shows who wrote each post; without the author every post
-    // rendered as anonymous text.
-    const posts = await (prisma as any).groupPost.findMany({
-      where: { groupId: group.id },
-      orderBy: { createdAt: 'desc' },
+    const posts = await prisma.post.findMany({
+      where: { groupId: group.id, isHidden: false },
+      orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
       take: 100,
-      include: {
-        author: { select: { id: true, displayName: true, avatar: true, headline: true } },
-      },
+      include: GROUP_POST_AUTHOR,
     });
-    res.json({ success: true, data: posts });
+    res.json({ success: true, data: await decoratePosts(posts, req.user?.id) });
   } catch (err) {
     next(err);
   }
@@ -469,27 +488,54 @@ router.get('/:id/posts', optionalAuth, async (req: AuthRequest, res, next) => {
 /**
  * POST /api/groups/:id/posts
  */
-router.post('/:id/posts', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/:id/posts', authenticate, postLimiter, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
     const member = await (prisma as any).groupMember.findUnique({
       where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
-      select: { id: true },
+      select: { id: true, isBanned: true, isMuted: true, mutedUntil: true },
     });
-    if (!member) throw new ApiError(403, 'Join the group to post');
+    if (!member || member.isBanned) throw new ApiError(403, 'Join the group to post');
+    if (member.isMuted && (!member.mutedUntil || new Date(member.mutedUntil).getTime() > Date.now())) {
+      throw new ApiError(403, 'You are muted in this group');
+    }
 
-    const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
-    if (!content) throw new ApiError(400, 'Content is required');
+    const content = normalizeUserText(req.body?.content, { field: 'content', maxLength: CONTENT_LIMITS.post });
+    const mediaUrls = normalizeMediaUrls(req.body?.mediaUrls) ?? [];
+    const mediaAlt = Array.isArray(req.body?.mediaAlt)
+      ? req.body.mediaAlt.slice(0, mediaUrls.length).map((a: unknown) => (typeof a === 'string' ? a.trim().slice(0, 300) : ''))
+      : undefined;
+    await assertContentAllowed(content, { kind: 'post', userId: req.user!.id });
+    const mentionedUserIds = (await resolveMentionedUserIds(content)).filter((id) => id !== req.user!.id);
 
-    const post = await (prisma as any).groupPost.create({
+    const post = await prisma.post.create({
       data: {
         groupId: group.id,
         authorId: req.user!.id,
         content,
+        type: mediaUrls.length ? (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(String(mediaUrls[0])) ? 'VIDEO' : 'IMAGE') : 'TEXT',
+        mediaUrls,
+        ...(mediaAlt && mediaAlt.some((a: string) => a) ? { mediaAlt } : {}),
+        isPublic: true,
+        isSensitive: req.body?.isSensitive === true,
+        mentionedUserIds,
       },
+      include: GROUP_POST_AUTHOR,
     });
 
-    res.status(201).json({ success: true, data: post });
+    for (const userId of mentionedUserIds) {
+      await notifySocial({
+        recipientId: userId,
+        actorId: req.user!.id,
+        type: 'MENTION',
+        title: 'You were mentioned',
+        message: (name) => `${name} mentioned you in ${group.name}`,
+        link: socialLinks.post(post.id),
+      });
+    }
+    enrichPostLinkPreview(post.id, content);
+
+    res.status(201).json({ success: true, data: (await decoratePosts([post], req.user!.id))[0] });
   } catch (err) {
     next(err);
   }
@@ -497,12 +543,12 @@ router.post('/:id/posts', authenticate, async (req: AuthRequest, res, next) => {
 
 /**
  * DELETE /api/groups/:id/posts/:postId
- * Moderation: only group ADMIN/MODERATOR
+ * The author, or a group admin or moderator.
  */
 router.delete('/:id/posts/:postId', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
-    const post = await (prisma as any).groupPost.findUnique({
+    const post = await prisma.post.findUnique({
       where: { id: req.params.postId },
       select: { id: true, groupId: true, authorId: true },
     });
@@ -514,7 +560,7 @@ router.delete('/:id/posts/:postId', authenticate, async (req: AuthRequest, res, 
       throw new ApiError(403, 'Insufficient permissions');
     }
 
-    await (prisma as any).groupPost.delete({ where: { id: post.id } });
+    await prisma.post.delete({ where: { id: post.id } });
     res.json({ success: true });
   } catch (err) {
     next(err);

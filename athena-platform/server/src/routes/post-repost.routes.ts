@@ -41,10 +41,14 @@ type RepostTarget = { id: string; authorId: string; repostOfId: string | null; c
 async function loadRepostTarget(id: string, viewerId: string, depth = 0): Promise<RepostTarget> {
   const post = await prisma.post.findUnique({
     where: { id },
-    select: { id: true, authorId: true, isHidden: true, isPublic: true, repostOfId: true, content: true },
+    select: { id: true, authorId: true, isHidden: true, isPublic: true, repostOfId: true, content: true, groupId: true },
   });
   if (!post || post.isHidden || !post.isPublic) {
     throw new ApiError(404, 'Post not found');
+  }
+  // What is said in a group stays in the group.
+  if (post.groupId) {
+    throw new ApiError(400, 'Posts from a group cannot be reposted');
   }
   if (await isBlockedRelationship(viewerId, post.authorId)) {
     throw new ApiError(404, 'Post not found');

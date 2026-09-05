@@ -346,6 +346,8 @@ async function searchPosts(
   const posts = await prisma.post.findMany({
     where: {
       isHidden: false,
+      // Group posts stay on their group's page.
+      groupId: null,
       OR: [
         ...keywords.map((kw) => ({ content: { contains: kw, mode: 'insensitive' as const } })),
       ],

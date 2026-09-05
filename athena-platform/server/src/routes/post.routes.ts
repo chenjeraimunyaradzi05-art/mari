@@ -29,7 +29,7 @@ import {
 import { parseScheduledFor } from '../services/scheduled-posts.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
 import { resolveMentionedUserIds } from '../utils/mentions';
-import { authorAudienceWhere, canViewAuthor } from '../services/audience.service';
+import { authorAudienceWhere, canViewAuthor, canViewGroupPosts } from '../services/audience.service';
 import { mutedWordMatcher } from '../utils/muted-words';
 import { emitToUserRoom, isUserOnline } from '../services/socket.service';
 import { commentLimiter, postLimiter } from '../middleware/socialLimits';
@@ -343,6 +343,10 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
     // A connections-only author's posts are for their followers; a private
     // author's for nobody else.
     if (!isAdmin && !(await canViewAuthor(req.user?.id, post.authorId))) {
+      throw new ApiError(404, 'Post not found');
+    }
+    // A private group's posts are for its members.
+    if (!(await canViewGroupPosts(req.user?.id, post.groupId, isAdmin))) {
       throw new ApiError(404, 'Post not found');
     }
 
@@ -915,6 +919,10 @@ router.post(
         throw new ApiError(404, 'Post not found');
       }
 
+      if (!(await canViewGroupPosts(req.user!.id, post.groupId))) {
+        throw new ApiError(404, 'Post not found');
+      }
+
       // The author can close the thread; their own replies still go through.
       if (post.commentsOff && post.authorId !== req.user!.id) {
         throw new ApiError(403, 'Comments are off for this post');
@@ -1051,7 +1059,8 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
 
-    const where: any = { authorId: userId };
+    // Group posts stay on their group's page, not the profile.
+    const where: any = { authorId: userId, groupId: null };
     const isAdmin = String(req.user?.role || '').toUpperCase() === 'ADMIN';
 
     if (req.user && !isAdmin && (await isBlockedRelationship(req.user.id, userId))) {
@@ -1131,6 +1140,9 @@ router.get('/user/:userId', optionalAuth, async (req: AuthRequest, res, next) =>
 async function loadVisiblePost(id: string, userId: string) {
   const post = await prisma.post.findUnique({ where: { id } });
   if (!post || post.isHidden || (!post.isPublic && post.authorId !== userId)) {
+    throw new ApiError(404, 'Post not found');
+  }
+  if (!(await canViewGroupPosts(userId, post.groupId))) {
     throw new ApiError(404, 'Post not found');
   }
   return post;
