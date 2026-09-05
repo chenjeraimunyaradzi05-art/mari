@@ -15,8 +15,14 @@ import {
   recordAcceleratorPaymentFailure,
 } from '../services/payments-orchestration.service';
 import { prisma } from '../utils/prisma';
+import { sendEmail } from '../utils/email';
 
 const router = Router();
+
+function paymentIntentIdOf(value: string | { id: string } | null | undefined): string | null {
+  if (!value) return null;
+  return typeof value === 'string' ? value : value.id;
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
   apiVersion: '2023-10-16',
@@ -264,6 +270,74 @@ router.post(
                 cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
               },
             });
+            break;
+          }
+
+          // Money going back, or being fought over. Refunds mark what they
+          // refund; disputes wake up trust and safety; a failed renewal tells
+          // the member how to fix it instead of silently lapsing.
+          case 'charge.refunded': {
+            const charge = event.data.object as Stripe.Charge;
+            const paymentIntentId = paymentIntentIdOf(charge.payment_intent as any);
+            if (paymentIntentId) {
+              const session = await prisma.mentorSession.findFirst({
+                where: { stripePaymentIntentId: paymentIntentId },
+                select: { id: true },
+              });
+              if (session) {
+                await prisma.mentorSession.update({ where: { id: session.id }, data: { paymentStatus: 'REFUNDED' } });
+              }
+            }
+            logger.info('Stripe charge refunded', { chargeId: charge.id, paymentIntentId, amountRefunded: charge.amount_refunded });
+            break;
+          }
+
+          case 'charge.dispute.created':
+          case 'charge.dispute.closed': {
+            const dispute = event.data.object as Stripe.Dispute;
+            const paymentIntentId = paymentIntentIdOf(dispute.payment_intent as any);
+            logger.warn('Stripe dispute', {
+              event: event.type,
+              disputeId: dispute.id,
+              paymentIntentId,
+              amount: dispute.amount,
+              reason: dispute.reason,
+              status: dispute.status,
+            });
+            if (event.type === 'charge.dispute.created') {
+              const to = process.env.TRUST_SAFETY_EMAIL || 'trust-safety@athena.com';
+              const respondBy = dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000).toISOString() : 'see Stripe';
+              await sendEmail({
+                to,
+                subject: `Stripe dispute opened: ${dispute.id}`,
+                text: `A cardholder has disputed a charge.\n\nDispute: ${dispute.id}\nAmount: ${(dispute.amount / 100).toFixed(2)} ${dispute.currency.toUpperCase()}\nReason: ${dispute.reason}\nPayment intent: ${paymentIntentId ?? 'unknown'}\nEvidence due: ${respondBy}\n\nRespond in the Stripe dashboard.`,
+                html: `<p>A cardholder has disputed a charge.</p><ul><li>Dispute: ${dispute.id}</li><li>Amount: ${(dispute.amount / 100).toFixed(2)} ${dispute.currency.toUpperCase()}</li><li>Reason: ${dispute.reason}</li><li>Payment intent: ${paymentIntentId ?? 'unknown'}</li><li>Evidence due: ${respondBy}</li></ul><p>Respond in the Stripe dashboard.</p>`,
+              });
+            }
+            break;
+          }
+
+          case 'invoice.payment_failed': {
+            const invoice = event.data.object as Stripe.Invoice;
+            const customerId = paymentIntentIdOf(invoice.customer as any);
+            if (!customerId) break;
+            const dbSubscription = await prisma.subscription.findFirst({
+              where: { stripeCustomerId: customerId },
+              include: { user: { select: { email: true, firstName: true } } },
+            });
+            if (!dbSubscription) break;
+            await prisma.subscription.update({ where: { id: dbSubscription.id }, data: { status: 'PAST_DUE' } });
+            if (dbSubscription.user?.email) {
+              const base = (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+              const link = `${base}/dashboard/settings/billing`;
+              const greeting = dbSubscription.user.firstName ? `Hi ${dbSubscription.user.firstName},` : 'Hi,';
+              await sendEmail({
+                to: dbSubscription.user.email,
+                subject: 'Your ATHENA payment did not go through',
+                text: `${greeting}\n\nWe could not take this period's payment for your ATHENA membership. Stripe will try again over the next few days. To fix it now, update your card here: ${link}\n\nIf the payment keeps failing your membership drops back to the free plan; nothing you have made is lost.\n\nATHENA`,
+                html: `<p>${greeting}</p><p>We could not take this period's payment for your ATHENA membership. Stripe will try again over the next few days. To fix it now, <a href="${link}">update your card</a>.</p><p>If the payment keeps failing your membership drops back to the free plan; nothing you have made is lost.</p><p>ATHENA</p>`,
+              });
+            }
             break;
           }
 
