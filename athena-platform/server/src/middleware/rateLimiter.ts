@@ -72,6 +72,55 @@ const RATE_LIMITS = {
 // SLIDING WINDOW RATE LIMITER
 // ===========================================
 
+/**
+ * Without Redis, or while Redis is failing, limits still have to hold: this
+ * guards login and registration among other things, and "allow everything"
+ * was the previous fallback. This is the same sliding window kept in this
+ * process, so a flood is slowed on every instance even in a degraded
+ * deployment. Not shared across instances, which is the trade-off.
+ */
+const memoryHits = new Map<string, number[]>();
+const MEMORY_HITS_SWEEP_AT = 50_000;
+
+export function memorySlidingWindow(
+  key: string,
+  windowMs: number,
+  max: number,
+  now = Date.now()
+): { allowed: boolean; remaining: number; resetAt: number } {
+  const since = now - windowMs;
+  const stamps = (memoryHits.get(key) ?? []).filter((at) => at > since);
+  const allowed = stamps.length < max;
+  if (allowed) stamps.push(now);
+  memoryHits.set(key, stamps);
+
+  if (memoryHits.size > MEMORY_HITS_SWEEP_AT) {
+    for (const [k, list] of memoryHits) {
+      if (list.every((at) => at <= since)) memoryHits.delete(k);
+    }
+  }
+
+  return {
+    allowed,
+    remaining: Math.max(0, max - stamps.length),
+    resetAt: stamps.length ? stamps[0] + windowMs : now + windowMs,
+  };
+}
+
+/** For tests. */
+export function resetMemoryRateLimits(): void {
+  memoryHits.clear();
+}
+
+// One warning a minute, not one per request, when the fallback is in use.
+let lastFallbackWarning = 0;
+function noteFallback(reason: string, detail?: Record<string, unknown>): void {
+  const now = Date.now();
+  if (now - lastFallbackWarning < 60_000) return;
+  lastFallbackWarning = now;
+  logger.warn(`Rate limiting is using the in-process fallback: ${reason}`, detail);
+}
+
 async function slidingWindowRateLimit(
   key: string,
   windowMs: number,
@@ -82,9 +131,8 @@ async function slidingWindowRateLimit(
   const windowStart = now - windowMs;
 
   if (!redis) {
-    // Fallback to allowing all requests if Redis is unavailable
-    logger.warn('Redis unavailable for rate limiting');
-    return { allowed: true, remaining: max, resetAt: now + windowMs };
+    noteFallback('Redis is not configured');
+    return memorySlidingWindow(key, windowMs, max, now);
   }
 
   const redisKey = `ratelimit:${key}`;
@@ -120,9 +168,8 @@ async function slidingWindowRateLimit(
 
     return { allowed, remaining, resetAt };
   } catch (error: any) {
-    logger.error('Rate limit check failed', { error: error.message, key });
-    // Fail open - allow request if rate limiting fails
-    return { allowed: true, remaining: max, resetAt: now + windowMs };
+    noteFallback('Redis request failed', { error: error.message });
+    return memorySlidingWindow(key, windowMs, max, now);
   }
 }
 
