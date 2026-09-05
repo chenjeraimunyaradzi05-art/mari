@@ -844,6 +844,38 @@ export function disappearingLabel(ttl: number | null | undefined): string {
   return DISAPPEARING_MESSAGE_OPTIONS.find((option) => option.value === (ttl ?? null))?.label ?? 'Off';
 }
 
+// Reference checks: a candidate names referees, each gets an emailed form.
+export const referenceApi = {
+  summary: () => api.get('/references/summary'),
+  forApplication: (applicationId: string) => api.get(`/references/application/${applicationId}`),
+  request: (data: {
+    applicationId?: string;
+    refereeName: string;
+    refereeEmail: string;
+    refereeTitle?: string;
+    refereeCompany?: string;
+    relationship: string;
+    type: string;
+  }) => api.post('/references/request', data),
+  send: (referenceId: string) => api.post(`/references/${referenceId}/send`),
+  // The referee's side, by the token in their email; no account needed.
+  form: (token: string) => api.get(`/references/form/${token}`),
+  submit: (
+    token: string,
+    data: { answers: Array<{ questionId: string; answer: string | number | boolean }>; overallRating?: number; wouldRecommend: boolean; additionalComments?: string }
+  ) => api.post(`/references/form/${token}/submit`, data),
+  decline: (token: string, reason?: string) => api.post(`/references/form/${token}/decline`, reason ? { reason } : {}),
+};
+
+// XP, streaks and leaderboards.
+export const engagementApi = {
+  summary: () => api.get('/engagement/summary'),
+  checkIn: () => api.post('/engagement/streaks/check-in'),
+  leaderboard: (params?: { type?: 'xp' | 'followers' | 'posts' | 'streak'; period?: 'daily' | 'weekly' | 'monthly' | 'alltime'; limit?: number }) =>
+    api.get('/engagement/leaderboard', { params }),
+  xpHistory: (limit = 20) => api.get('/engagement/xp/history', { params: { limit } }),
+};
+
 // ============================================
 // EMPLOYER API
 // ============================================

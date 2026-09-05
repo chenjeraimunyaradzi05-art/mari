@@ -61,6 +61,21 @@ export const reportLimiter = limiter('report', SOCIAL_LIMITS.report.max, SOCIAL_
 export const messageLimiter = limiter('message', SOCIAL_LIMITS.message.max, SOCIAL_LIMITS.message.windowMs);
 
 /**
+ * Public, unauthenticated forms (a referee's reference form) are keyed by the
+ * caller's address: the tokens are unguessable, but a ceiling keeps anyone
+ * from hammering the endpoint all the same.
+ */
+export const publicFormLimiter = createRateLimiter({
+  max: 60,
+  windowMs: HOUR,
+  skip: inactive,
+  keyGenerator: (req: Request) => `public-form:${req.ip}`,
+  handler: (_req, res) => {
+    res.status(429).json({ success: false, message: 'Too many requests. Please try again in a little while.' });
+  },
+});
+
+/**
  * The same ceiling for a path that has no Express middleware chain: the
  * socket. In memory and per process, which is enough to stop one account
  * flooding a thread; the HTTP path keeps the Redis-backed limiter.

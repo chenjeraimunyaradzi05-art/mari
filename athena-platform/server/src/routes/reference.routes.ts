@@ -9,8 +9,25 @@ import { referenceCheckService } from '../services/reference-check.service';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { publicFormLimiter } from '../middleware/socialLimits';
 
 const router = Router();
+
+/**
+ * The reference service throws plain errors for a token that matches nothing.
+ * On the public routes that has to be a 404 the referee can understand, not a
+ * generic 500.
+ */
+async function publicReference<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof Error && /not found|expired|already/i.test(error.message)) {
+      throw new ApiError(/expired/i.test(error.message) ? 410 : 404, error.message);
+    }
+    throw error;
+  }
+}
 
 /**
  * References hang off the candidate's own job application, so an applicationId
@@ -229,11 +246,11 @@ router.get('/application/:applicationId', authenticate, async (req: AuthRequest,
  * @desc Get reference form by token (for referee)
  * @access Public
  */
-router.get('/form/:token', async (req, res, next) => {
+router.get('/form/:token', publicFormLimiter, async (req, res, next) => {
   try {
     const { token } = req.params;
     
-    const data = await referenceCheckService.getReferenceByToken(token);
+    const data = await publicReference(() => referenceCheckService.getReferenceByToken(token));
     
     if (data.expired) {
       throw new ApiError(410, 'This reference request has expired');
@@ -253,7 +270,7 @@ router.get('/form/:token', async (req, res, next) => {
  * @desc Submit reference response
  * @access Public
  */
-router.post('/form/:token/submit', async (req, res, next) => {
+router.post('/form/:token/submit', publicFormLimiter, async (req, res, next) => {
   try {
     const { token } = req.params;
     const { answers, overallRating, wouldRecommend, additionalComments } = req.body;
@@ -266,13 +283,13 @@ router.post('/form/:token/submit', async (req, res, next) => {
       throw new ApiError(400, 'wouldRecommend is required');
     }
     
-    const success = await referenceCheckService.submitReferenceResponse(token, {
+    const success = await publicReference(() => referenceCheckService.submitReferenceResponse(token, {
       answers,
       overallRating,
       wouldRecommend,
       additionalComments,
       submittedAt: new Date(),
-    });
+    }));
     
     res.json({
       success,
@@ -288,12 +305,12 @@ router.post('/form/:token/submit', async (req, res, next) => {
  * @desc Decline reference request
  * @access Public
  */
-router.post('/form/:token/decline', async (req, res, next) => {
+router.post('/form/:token/decline', publicFormLimiter, async (req, res, next) => {
   try {
     const { token } = req.params;
     const { reason } = req.body;
     
-    const success = await referenceCheckService.declineReferenceRequest(token, reason);
+    const success = await publicReference(() => referenceCheckService.declineReferenceRequest(token, reason));
     
     res.json({
       success,

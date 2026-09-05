@@ -25,6 +25,7 @@ import StoriesStrip from '@/components/community/StoriesStrip';
 import { SuggestedPeople } from '@/components/community/SuggestedPeople';
 import { FollowRequests } from '@/components/community/FollowRequests';
 import { TopicSuggestions } from '@/components/community/TopicSuggestions';
+import { EngagementStrip } from '@/components/community/EngagementStrip';
 
 const tabs = [
   { id: 'for-you', name: 'For You', icon: TrendingUp },
@@ -313,6 +314,7 @@ export default function CommunityPage() {
         {/* Right rail */}
         <aside className="space-y-6">
           <TopicSuggestions />
+          <EngagementStrip />
 
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">

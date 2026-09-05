@@ -18,6 +18,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useMyApplications, useUpdateMyApplication } from '@/lib/hooks';
+import { ReferencesPanel } from '@/components/jobs/ReferencesPanel';
 import { formatRelativeTime, JOB_TYPE_LABELS } from '@/lib/utils';
 
 const statusConfig = {
@@ -363,6 +364,9 @@ export default function ApplicationsPage() {
                     </div>
                   </details>
                 )}
+
+                {/* Referees for this application, while it is still live. */}
+                {!['REJECTED', 'WITHDRAWN'].includes(application.status) && <ReferencesPanel applicationId={application.id} />}
               </div>
             );
           })}
