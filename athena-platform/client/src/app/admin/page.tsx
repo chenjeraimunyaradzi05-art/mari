@@ -120,6 +120,7 @@ export default function AdminDashboardPage() {
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3, description: 'Platform metrics and insights' },
     { href: '/admin/gtm', label: 'Go-to-Market', icon: Target, description: 'Launch plans, channels, and initiatives' },
     { href: '/admin/marketing', label: 'Marketing Hub', icon: Megaphone, description: 'Campaigns, leads, and growth ops' },
+    { href: '/admin/feature-flags', label: 'Feature Flags', icon: Settings, description: 'Flags, rollouts and maintenance mode' },
     { href: '/admin/settings', label: 'Settings', icon: Settings, description: 'Platform configuration' },
   ];
 
