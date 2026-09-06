@@ -9,6 +9,7 @@ import { authorAudienceWhere, followingIdsOf } from './audience.service';
 import { mutedWordMatcher } from '../utils/muted-words';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
 import { logger } from '../utils/logger';
+import { rerankWithMl } from './feed-ml.service';
 
 // ==========================================
 // TYPES
@@ -488,6 +489,19 @@ export async function generateFeed(options: FeedOptions): Promise<{
     }
   }
 
+  // With an ML service configured and answering, the ranked candidates are
+  // re-ordered by its scores and its explanations join the reasons. Without
+  // one, or if it is down, the order above stands.
+  let mlReasons = new Map<string, string>();
+  if (userId && algorithm !== 'chronological') {
+    const reranked = await rerankWithMl(rankedPosts, { userId, persona: userContext?.persona ?? null });
+    if (reranked.applied) {
+      rankedPosts = reranked.posts;
+      mlReasons = reranked.reasons;
+      logger.debug('Feed ranked by the ML service', { userId, candidates: rankedPosts.length });
+    }
+  }
+
   // Paginate
   const startIndex = (page - 1) * limit;
   const paginatedPosts = rankedPosts.slice(startIndex, startIndex + limit);
@@ -541,7 +555,7 @@ export async function generateFeed(options: FeedOptions): Promise<{
       userPersona: userContext?.persona,
       source: post.__source ?? (algorithm === 'chronological' ? 'recent' : undefined),
       followedHashtags: exclusions.followedHashtags,
-    }),
+    }).concat(mlReasons.has(post.id) ? [mlReasons.get(post.id)!] : []),
   }));
 
   return {
