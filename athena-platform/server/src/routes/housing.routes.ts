@@ -184,7 +184,9 @@ router.patch(
   '/inquiries/:id',
   authenticate,
   [
-    body('status').optional().isIn(['PENDING', 'CONTACTED', 'VIEWING_SCHEDULED', 'APPLICATION_SUBMITTED', 'APPROVED', 'DECLINED', 'WITHDRAWN']),
+    // The person asking can say they have applied, or withdraw. The outcome
+    // is the agent's to record, on the route below.
+    body('status').optional().isIn(['APPLICATION_SUBMITTED', 'WITHDRAWN']),
     body('viewingDate').optional().isISO8601(),
     body('notes').optional().isString(),
   ],
@@ -315,6 +317,145 @@ router.post(
         success: true,
         data: listing,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// THE AGENT'S SIDE: YOUR LISTINGS AND THEIR INQUIRIES
+// ===========================================
+// The member who listed a place answers the people asking about it, and the
+// asker is told in the app the moment something changes.
+
+// GET /api/housing/my/listings
+router.get('/my/listings', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const listings = await prisma.housingListing.findMany({
+      where: { agentId: req.user!.id },
+      include: {
+        inquiries: {
+          include: { user: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true } } },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ success: true, data: listings });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/housing/listings/:id - Change a listing you made (status, price, availability)
+router.patch(
+  '/listings/:id',
+  authenticate,
+  [
+    body('status').optional().isIn(['ACTIVE', 'PENDING', 'LEASED', 'WITHDRAWN']),
+    body('title').optional().isString().trim().notEmpty().isLength({ max: 200 }),
+    body('description').optional().isString().isLength({ max: 5000 }),
+    body('rentWeekly').optional().isNumeric(),
+    body('availableFrom').optional({ values: 'falsy' }).isISO8601(),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { id } = req.params;
+      const listing = await prisma.housingListing.findUnique({ where: { id }, select: { id: true, agentId: true } });
+      if (!listing) {
+        throw new ApiError(404, 'Housing listing not found');
+      }
+      if (listing.agentId !== req.user!.id && req.user!.role !== 'ADMIN') {
+        throw new ApiError(403, 'Only the person who listed this place can change it');
+      }
+
+      const { status, title, description, rentWeekly, availableFrom, dvSafe, petFriendly, accessibleUnit } = req.body;
+      const updated = await prisma.housingListing.update({
+        where: { id },
+        data: {
+          ...(status && { status }),
+          ...(typeof title === 'string' && { title: title.trim() }),
+          ...(typeof description === 'string' && { description }),
+          ...(rentWeekly !== undefined && rentWeekly !== '' && { rentWeekly: Number(rentWeekly) }),
+          ...(availableFrom && { availableFrom: new Date(availableFrom) }),
+          ...(typeof dvSafe === 'boolean' && { dvSafe }),
+          ...(typeof petFriendly === 'boolean' && { petFriendly }),
+          ...(typeof accessibleUnit === 'boolean' && { accessibleUnit }),
+        },
+      });
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// PATCH /api/housing/listings/:listingId/inquiries/:id - Answer someone asking about your place
+router.patch(
+  '/listings/:listingId/inquiries/:id',
+  authenticate,
+  [
+    body('status').isIn(['CONTACTED', 'VIEWING_SCHEDULED', 'APPROVED', 'DECLINED']),
+    body('viewingDate').optional({ values: 'falsy' }).isISO8601(),
+    body('message').optional().isString().isLength({ max: 1000 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { listingId, id } = req.params;
+      const { status, viewingDate, message } = req.body as { status: string; viewingDate?: string; message?: string };
+
+      const inquiry = await prisma.housingInquiry.findUnique({
+        where: { id },
+        include: { listing: { select: { id: true, title: true, agentId: true } } },
+      });
+      if (!inquiry || inquiry.listingId !== listingId) {
+        throw new ApiError(404, 'Inquiry not found');
+      }
+      if (inquiry.listing.agentId !== req.user!.id && req.user!.role !== 'ADMIN') {
+        throw new ApiError(403, 'Only the person who listed this place can answer inquiries');
+      }
+      if (status === 'VIEWING_SCHEDULED' && !viewingDate) {
+        throw new ApiError(400, 'A viewing needs a date');
+      }
+
+      const updated = await prisma.housingInquiry.update({
+        where: { id },
+        data: {
+          status: status as any,
+          ...(viewingDate && { viewingDate: new Date(viewingDate) }),
+        },
+        include: { user: { select: { id: true, firstName: true, lastName: true, displayName: true, avatar: true } } },
+      });
+
+      const when = viewingDate
+        ? new Date(viewingDate).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Australia/Brisbane' })
+        : '';
+      const said: Record<string, string> = {
+        CONTACTED: `The agent has been in touch about "${inquiry.listing.title}".`,
+        VIEWING_SCHEDULED: `A viewing of "${inquiry.listing.title}" is booked for ${when}.`,
+        APPROVED: `Your application for "${inquiry.listing.title}" was approved.`,
+        DECLINED: `Your inquiry about "${inquiry.listing.title}" was not successful.`,
+      };
+      await prisma.notification.create({
+        data: {
+          userId: inquiry.userId,
+          type: 'SYSTEM',
+          title: 'Housing update',
+          message: `${said[status]}${message ? ` ${message.trim()}` : ''}`,
+          link: '/dashboard/housing',
+        },
+      });
+
+      res.json({ success: true, data: updated });
     } catch (error) {
       next(error);
     }
