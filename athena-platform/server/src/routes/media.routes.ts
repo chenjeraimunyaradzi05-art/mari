@@ -16,8 +16,26 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { moderateImage } from '../services/moderation.service';
+import { checkFileContent } from '../utils/file-signature';
 
 const router = Router();
+
+/**
+ * The bytes have to agree with the declared type before anything else
+ * looks at the file. The allow-lists below check the browser's claim; this
+ * checks the file.
+ */
+function assertContentMatches(file: Express.Multer.File): void {
+  const check = checkFileContent(file.mimetype, file.buffer);
+  if (!check.ok) {
+    logger.warn('Upload refused: content does not match declared type', {
+      declared: file.mimetype,
+      detected: check.detected,
+      name: file.originalname,
+    });
+    throw new ApiError(400, `The file is not what it says it is: ${check.reason}.`);
+  }
+}
 
 // Configure S3 client
 const s3Client = new S3Client({
@@ -344,6 +362,8 @@ router.post('/upload/:type', authenticate, upload.single('file'), async (req: Au
       );
     }
 
+    assertContentMatches(file);
+
     let processedBuffer = file.buffer;
     let contentType = file.mimetype;
 
@@ -585,6 +605,8 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
       );
     }
 
+    assertContentMatches(file);
+
     const fileExtension = getSafeExtensionForContentType(file.mimetype);
     const key = `${config.folder}/${req.user!.id}/${uuidv4()}${fileExtension}`;
 
@@ -654,6 +676,8 @@ router.post('/post-images', authenticate, upload.array('images', 10), async (req
       if (file.size > config.maxSize) {
         throw new ApiError(400, `File too large: ${file.originalname}`);
       }
+
+      assertContentMatches(file);
 
       let processedBuffer = file.buffer;
       let contentType = file.mimetype;

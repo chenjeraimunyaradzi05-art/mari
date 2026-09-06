@@ -107,3 +107,16 @@ those require your explicit action (see "Still requires your action").
    (athena-platform / athena-frontend+mock-api / app-backend) is itself a
    security-maintenance liability.
 5. Add server-side authorization (IDOR/cross-tenant) tests before launch.
+
+## 2026-09-06 — Upload content sniffing (`athena-platform/server`)
+
+- **Uploads must be what they claim.** The media routes checked only the MIME
+  type the browser sent. `athena-platform/server/src/utils/file-signature.ts`
+  now reads each upload's first bytes and `athena-platform/server/src/routes/media.routes.ts`
+  refuses the file when they disagree with the declared type (a JPEG sent as
+  PNG, a ZIP sent as PDF), when the file is a program (MZ, ELF, Mach-O), or
+  when it is HTML or SVG, which can carry scripts, whatever it claims to be.
+  Applies to profile and cover images, post images, videos, thumbnails,
+  captions, sounds, documents and resumes. Unknown declared types fail closed.
+  Images were already re-encoded through sharp, which strips metadata; that
+  is unchanged. Direct-to-S3 presigned uploads are not covered by this check.
