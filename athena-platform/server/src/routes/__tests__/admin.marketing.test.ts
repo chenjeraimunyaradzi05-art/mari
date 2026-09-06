@@ -3,7 +3,8 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    user: { count: jest.fn(async () => 0) },
+    user: { count: jest.fn(async () => 0), findMany: jest.fn(async () => []) },
+    notification: { create: jest.fn(async () => ({})) },
     subscription: { count: jest.fn(async () => 0) },
     referral: { count: jest.fn(async () => 0) },
     lead: {
@@ -38,6 +39,10 @@ jest.mock('../../middleware/rateLimiter', () => {
 
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
+jest.mock('../../utils/email', () => ({
+  sendEmail: jest.fn(async () => true),
 }));
 
 import { app } from '../../index';
@@ -133,5 +138,33 @@ describe('Leads from the site', () => {
 
     await request(app).post('/api/marketing/leads').send({ email: 'nope', source: 'WAITLIST' }).expect(400);
     await request(app).post('/api/marketing/leads').send({ email: 'x@example.com', source: 'IMPORT' }).expect(400);
+  });
+
+  it('a sales enquiry reaches every admin, and the alert inbox when one is set; a waitlist signup does not', async () => {
+    const { sendEmail } = jest.requireMock('../../utils/email') as { sendEmail: jest.Mock };
+    prisma.user.findMany.mockResolvedValue([{ id: 'admin1' }, { id: 'admin2' }]);
+    prisma.lead.upsert.mockResolvedValue({ id: 'l2', email: 'ana@byte.co', source: 'CONTACT_SALES', name: 'Ana', organisation: 'Byte', message: 'We want 40 seats <b>now</b>', createdAt: new Date() });
+    process.env.LEAD_ALERT_EMAIL = 'sales@example.com';
+
+    await request(app).post('/api/marketing/leads').send({ email: 'ana@byte.co', source: 'CONTACT_SALES', name: 'Ana', organisation: 'Byte', message: 'We want 40 seats <b>now</b>' }).expect(201);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(prisma.notification.create).toHaveBeenCalledTimes(2);
+    const note = prisma.notification.create.mock.calls[0][0].data;
+    expect(note).toMatchObject({ userId: 'admin1', type: 'SYSTEM', title: 'Sales enquiry from Ana, Byte', link: '/admin/marketing/leads?source=CONTACT_SALES' });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const mail = sendEmail.mock.calls[0][0] as { to: string; subject: string; html: string };
+    expect(mail.to).toBe('sales@example.com');
+    expect(mail.subject).toBe('Sales enquiry: Ana, Byte');
+    expect(mail.html).toContain('&lt;b&gt;now&lt;/b&gt;');
+
+    jest.clearAllMocks();
+    delete process.env.LEAD_ALERT_EMAIL;
+    prisma.lead.upsert.mockResolvedValue({ id: 'l3', email: 'mei@example.com', source: 'WAITLIST', createdAt: new Date() });
+    prisma.lead.count.mockResolvedValue(0);
+    await request(app).post('/api/marketing/leads').send({ email: 'mei@example.com', source: 'WAITLIST' }).expect(201);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });

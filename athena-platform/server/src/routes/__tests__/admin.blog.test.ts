@@ -109,6 +109,10 @@ describe('Reading the blog', () => {
     const res = await request(app).get('/api/blog/hello').expect(200);
     expect(res.body.data.body).toBe('# Hi');
     expect(prisma.article.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { viewCount: { increment: 1 } } });
+
+    prisma.article.update.mockClear();
+    await request(app).get('/api/blog/hello').set('x-athena-purpose', 'metadata').expect(200);
+    expect(prisma.article.update).not.toHaveBeenCalled();
   });
 
   it('counts tags across published articles', async () => {

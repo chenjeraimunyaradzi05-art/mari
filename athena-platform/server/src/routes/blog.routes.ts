@@ -90,8 +90,11 @@ router.get('/:slug', async (req: Request, res: Response, next: NextFunction) => 
     });
     if (!article) throw new ApiError(404, 'No such article');
 
-    // The read is counted without holding the response for it.
-    prisma.article.update({ where: { id: article.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
+    // The read is counted without holding the response for it. A fetch made
+    // only to build a link preview says so and is not a read.
+    if (req.get('x-athena-purpose') !== 'metadata') {
+      prisma.article.update({ where: { id: article.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
+    }
 
     res.json({ success: true, data: article });
   } catch (error) {

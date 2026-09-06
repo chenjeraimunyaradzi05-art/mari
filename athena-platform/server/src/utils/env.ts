@@ -76,6 +76,7 @@ const ENV_VALIDATIONS: EnvValidation[] = [
   // Australian integrations (optional; the features say so when unset)
   { name: 'ABR_GUID', required: false },
   { name: 'BASIQ_API_KEY', required: false },
+  { name: 'LEAD_ALERT_EMAIL', required: false },
   // Email
   {
     name: 'SENDGRID_API_KEY',

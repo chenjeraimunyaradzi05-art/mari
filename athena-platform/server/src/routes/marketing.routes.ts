@@ -11,6 +11,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { createRateLimiter } from '../middleware/rateLimiter';
 import { logger } from '../utils/logger';
+import { alertStaffOfLead, ALERTED_SOURCES } from '../services/lead-alerts.service';
 
 const router = Router();
 
@@ -83,6 +84,12 @@ router.post(
       }
 
       logger.info('Lead captured', { source, leadId: lead.id });
+
+      // Enquiries someone has to answer reach the admins now, without
+      // holding the person's response for it.
+      if (ALERTED_SOURCES.has(source)) {
+        alertStaffOfLead(lead).catch((error) => logger.warn('Lead alert failed', { leadId: lead.id, error: (error as Error).message }));
+      }
       res.status(201).json({ success: true, data: { id: lead.id, position } });
     } catch (error) {
       next(error);
