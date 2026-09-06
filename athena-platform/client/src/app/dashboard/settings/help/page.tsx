@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { contactLink } from '@/lib/contact';
+import ConciergePanel from '@/components/help/ConciergePanel';
 
 const faqCategories = [
   {
@@ -200,6 +201,8 @@ export default function HelpSupportPage() {
           className="w-full pl-12 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 text-lg"
         />
       </div>
+
+      <ConciergePanel />
 
       {/* Quick Links */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
