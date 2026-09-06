@@ -44,7 +44,8 @@ export default function ConciergePanel() {
   });
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Not every environment that renders this has a scrolling viewport.
+    endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
   }, [turns]);
 
   const ask = async (text: string) => {

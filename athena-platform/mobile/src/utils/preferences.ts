@@ -56,7 +56,9 @@ export function getDeviceDefaults(): LocalPreferences {
   const locales = Localization.getLocales?.() || [];
   const calendars = Localization.getCalendars?.() || [];
   const primary = locales[0];
-  const countryCode = primary?.regionCode || primary?.languageTag?.split('-')[1];
+  // A phone that says nothing about where it is gets the same default as the
+  // locale below: Australia, not the rest of the world in US dollars.
+  const countryCode = primary?.regionCode || primary?.languageTag?.split('-')[1] || 'AU';
   const preferredLocale = primary?.languageTag || 'en-AU';
   const region = regionFromCountry(countryCode || null);
 
