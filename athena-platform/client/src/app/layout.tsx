@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
@@ -56,6 +57,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen antialiased" suppressHydrationWarning>
+        {/* The stored theme, applied before the page becomes interactive so a
+            dark reader never sees a white flash. Mirrors ThemeSync in providers.tsx. */}
+        <Script id="athena-theme-init" strategy="beforeInteractive">
+          {"(function(){try{var s=JSON.parse(localStorage.getItem('athena-ui')||'{}').state;var t=s&&s.theme;var d=t==='dark'||((!t||t==='system')&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);}catch(e){}})();"}
+        </Script>
         <Providers>
           {children}
           <SiteFooter />

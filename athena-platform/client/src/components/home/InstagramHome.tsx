@@ -2,23 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import {
-  Bookmark,
-  Briefcase,
-  Calendar,
-  Compass,
-  GraduationCap,
-  Heart,
-  Home,
-  Loader2,
-  MessageCircle,
-  Search,
-  Send,
-  Sparkles,
-  TrendingUp,
-  Users,
-} from 'lucide-react';
+import { Bookmark, Heart, Loader2, MessageCircle, Send } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { handleFromName, renderSocialText } from '@/lib/social-text';
@@ -37,6 +21,9 @@ import { useImpression } from '@/lib/impressions';
 import { SharePostDialog } from '@/components/community/SharePostDialog';
 import { altFor } from '@/components/community/PostCard';
 import { HomeMiddleColumn } from './HomeMiddleColumn';
+import { HomeHeader } from './HomeHeader';
+import { HomeHero } from './HomeHero';
+import { HOME_NAV } from './nav';
 
 type FeedAuthor = {
   id: string;
@@ -95,21 +82,6 @@ function initials(author: FeedAuthor): string {
       .toUpperCase() || 'A'
   );
 }
-
-// The mobile bar takes the first five, so the order matters: those five are the
-// ones worth a permanent slot on a phone. The rest of the platform is named in
-// full by <PlatformDirectory /> in the middle column rather than crammed here.
-const NAV = [
-  { href: '/', label: 'Home', icon: Home },
-  { href: '/explore', label: 'Reels', icon: Compass },
-  { href: '/jobs', label: 'Jobs', icon: Briefcase },
-  { href: '/mentors', label: 'Mentors', icon: Users },
-  { href: '/search', label: 'Search', icon: Search },
-  { href: '/learning', label: 'Learning', icon: GraduationCap },
-  { href: '/communities', label: 'Communities', icon: Sparkles },
-  { href: '/events', label: 'Events', icon: Calendar },
-  { href: '/salary-insights', label: 'Salary', icon: TrendingUp },
-];
 
 function Avatar({ author, size = 32 }: { author: FeedAuthor; size?: number }) {
   if (author.avatar) {
@@ -567,46 +539,12 @@ export default function InstagramHome() {
 
   return (
     <div className="min-h-screen bg-white text-slate-950 dark:bg-slate-950 dark:text-white">
+      <HomeHeader />
       {/* Wide container with tight gutters: the previous max-w-6xl left large
           empty margins either side of a single 470px column. */}
       <div className="mx-auto flex w-full max-w-[1600px] gap-5 px-3 xl:gap-6 xl:px-5">
-        {/* Left rail — navigation, then the join actions as buttons. */}
-        <aside
-          aria-label="Primary"
-          className="sticky top-0 hidden h-screen w-16 flex-shrink-0 flex-col gap-1 py-6 md:flex xl:w-56"
-        >
-          <Link href="/" className="mb-5 flex items-center gap-3 px-3">
-            <Image src="/icon.svg" alt="ATHENA" width={32} height={32} className="rounded-lg" />
-            <span className="hidden text-xl font-bold gradient-text-feminine xl:inline">ATHENA</span>
-          </Link>
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-4 rounded-full px-3 py-2.5 transition hover:bg-slate-100 dark:hover:bg-slate-900"
-            >
-              <item.icon className="h-6 w-6 flex-shrink-0" />
-              <span className="hidden text-base xl:inline">{item.label}</span>
-            </Link>
-          ))}
-
-          {!isAuthenticated && (
-            <div className="mt-auto hidden flex-col gap-2 pb-2 xl:flex">
-              <Link
-                href="/register"
-                className="rounded-lg bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] py-2.5 text-center text-sm font-semibold text-white"
-              >
-                Sign up
-              </Link>
-              <Link
-                href="/login"
-                className="rounded-lg border border-slate-300 py-2.5 text-center text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
-              >
-                Log in
-              </Link>
-            </div>
-          )}
-        </aside>
+        {/* Left column, empty for now: the navigation lives in the header. */}
+        <aside aria-hidden className="hidden w-16 flex-shrink-0 md:block xl:w-56" />
 
         {/* Middle column — the product story and the revenue surfaces. */}
         <section aria-label="Discover" className="hidden min-w-0 flex-1 py-6 lg:block">
@@ -630,6 +568,14 @@ export default function InstagramHome() {
               <Link href="/dashboard" className="text-xs font-semibold text-rose-600 dark:text-rose-400">
                 Dashboard
               </Link>
+            </div>
+          )}
+
+          {/* Below the large breakpoint the middle column is not shown, so a
+              visitor gets the opening here, above the feed. */}
+          {!authLoading && !isAuthenticated && (
+            <div className="mb-5 lg:hidden">
+              <HomeHero />
             </div>
           )}
 
@@ -698,7 +644,7 @@ export default function InstagramHome() {
         aria-label="Primary, mobile"
         className="sticky bottom-0 flex items-center justify-around border-t border-slate-200 bg-white py-3 md:hidden dark:border-slate-800 dark:bg-slate-950"
       >
-        {NAV.slice(0, 5).map((item) => (
+        {HOME_NAV.slice(0, 5).map((item) => (
           <Link key={item.href} href={item.href} aria-label={item.label}>
             <item.icon className="h-6 w-6" />
           </Link>
