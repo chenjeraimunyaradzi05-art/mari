@@ -6,6 +6,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { ModerationAction, processReportById } from '../services/content-report.service';
 import { logAudit } from '../utils/audit';
 import { logger } from '../utils/logger';
+import { sendEmail } from '../utils/email';
 import crypto from 'crypto';
 
 const router = Router();
@@ -2161,6 +2162,162 @@ router.delete('/events/:id', async (req: AuthRequest, res: Response, next: NextF
     });
 
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// GRANT AND INSURANCE APPLICATIONS
+// ===========================================
+// Grants and insurers are outside organisations; their decision reaches the
+// platform through whoever handles partnerships, who records it here. The
+// applicant is told in the app and by email the moment it is recorded.
+
+const GRANT_DECISIONS = ['UNDER_REVIEW', 'SHORTLISTED', 'AWARDED', 'REJECTED'];
+const INSURANCE_DECISIONS = ['UNDER_REVIEW', 'APPROVED', 'DECLINED', 'ACTIVE', 'LAPSED'];
+
+const aud = (n: number) => new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(n);
+
+async function tellApplicant(userId: string, subject: string, line: string, link: string) {
+  await prisma.notification.create({ data: { userId, type: 'SYSTEM', title: subject, message: line, link } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, firstName: true } });
+  if (!user?.email) return;
+  const base = (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const greeting = user.firstName ? `Hi ${user.firstName},` : 'Hi,';
+  await sendEmail({
+    to: user.email,
+    subject,
+    text: `${greeting}\n\n${line}\n\nSee the details: ${base}${link}\n\nATHENA`,
+    html: `<p>${greeting}</p><p>${line}</p><p><a href="${base}${link}">See the details</a></p><p>ATHENA</p>`,
+  });
+}
+
+router.get('/grants/applications', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const grantId = typeof req.query.grantId === 'string' ? req.query.grantId : undefined;
+    const applications = await prisma.grantApplication.findMany({
+      // Drafts are the applicant's business until they submit.
+      where: { ...(status ? { status: status as any } : { status: { not: 'DRAFT' } }), ...(grantId ? { grantId } : {}) },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        grant: { select: { id: true, name: true, provider: true, providerType: true, maxFunding: true, deadline: true } },
+      },
+      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+    });
+    res.json({ success: true, data: applications });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/grants/applications/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { status, amountAwarded, notes } = req.body as { status?: string; amountAwarded?: number | string; notes?: string };
+    if (!status || !GRANT_DECISIONS.includes(status)) {
+      throw new ApiError(400, 'Unknown decision');
+    }
+    const application = await prisma.grantApplication.findUnique({
+      where: { id: req.params.id },
+      include: { grant: { select: { name: true } } },
+    });
+    if (!application) {
+      throw new ApiError(404, 'Application not found');
+    }
+    if (application.status === 'DRAFT') {
+      throw new ApiError(400, 'This application has not been submitted');
+    }
+
+    const amount = status === 'AWARDED' && amountAwarded !== undefined && amountAwarded !== '' ? Number(amountAwarded) : undefined;
+    const updated = await prisma.grantApplication.update({
+      where: { id: application.id },
+      data: {
+        status: status as any,
+        ...(notes !== undefined ? { notes: String(notes).slice(0, 2000) } : {}),
+        ...(amount !== undefined && Number.isFinite(amount) ? { amountAwarded: amount } : {}),
+        ...(status === 'AWARDED' || status === 'REJECTED' ? { resultAt: new Date() } : {}),
+      },
+    });
+
+    const name = application.grant.name;
+    const line: Record<string, string> = {
+      UNDER_REVIEW: `Your application for ${name} is under review.`,
+      SHORTLISTED: `Your application for ${name} has been shortlisted.`,
+      AWARDED: `Your application for ${name} was successful${amount !== undefined && Number.isFinite(amount) ? `: ${aud(amount)}` : ''}.`,
+      REJECTED: `Your application for ${name} was not successful this time.`,
+    };
+    await tellApplicant(application.userId, 'Update on your grant application', `${line[status]}${notes ? ` ${String(notes).trim()}` : ''}`, '/dashboard/grants');
+
+    logger.info('Grant application decided', { applicationId: application.id, status, by: req.user!.id });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/insurance/applications', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const applications = await prisma.insuranceApplication.findMany({
+      where: status ? { status: status as any } : { status: { not: 'DRAFT' } },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        product: { select: { id: true, name: true, provider: true, type: true, premiumMonthly: true, coverageAmount: true } },
+      },
+      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+    });
+    res.json({ success: true, data: applications });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/insurance/applications/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { status, premiumQuoted, coverageAmount, policyNumber, startDate, endDate, note } = req.body as Record<string, unknown>;
+    if (typeof status !== 'string' || !INSURANCE_DECISIONS.includes(status)) {
+      throw new ApiError(400, 'Unknown decision');
+    }
+    const application = await prisma.insuranceApplication.findUnique({
+      where: { id: req.params.id },
+      include: { product: { select: { name: true, provider: true } } },
+    });
+    if (!application) {
+      throw new ApiError(404, 'Application not found');
+    }
+    if (application.status === 'DRAFT') {
+      throw new ApiError(400, 'This application has not been submitted');
+    }
+
+    const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : Number(v));
+    const updated = await prisma.insuranceApplication.update({
+      where: { id: application.id },
+      data: {
+        status: status as any,
+        ...(num(premiumQuoted) !== undefined ? { premiumQuoted: num(premiumQuoted) } : {}),
+        ...(num(coverageAmount) !== undefined ? { coverageAmount: num(coverageAmount) } : {}),
+        ...(typeof policyNumber === 'string' && policyNumber.trim() ? { policyNumber: policyNumber.trim() } : {}),
+        ...(typeof startDate === 'string' && startDate ? { startDate: new Date(startDate) } : {}),
+        ...(typeof endDate === 'string' && endDate ? { endDate: new Date(endDate) } : {}),
+        ...(status === 'APPROVED' ? { approvedAt: new Date() } : {}),
+      },
+    });
+
+    const name = `${application.product.name} (${application.product.provider})`;
+    const line: Record<string, string> = {
+      UNDER_REVIEW: `Your application for ${name} is under review.`,
+      APPROVED: `Your application for ${name} was approved${num(premiumQuoted) !== undefined ? ` at ${aud(num(premiumQuoted)!)} a month` : ''}.`,
+      DECLINED: `Your application for ${name} was declined.`,
+      ACTIVE: `Your ${name} policy is now active${typeof policyNumber === 'string' && policyNumber ? ` (policy ${policyNumber})` : ''}.`,
+      LAPSED: `Your ${name} policy has lapsed.`,
+    };
+    await tellApplicant(application.userId, 'Update on your insurance application', `${line[status]}${typeof note === 'string' && note.trim() ? ` ${note.trim()}` : ''}`, '/dashboard/finance/insurance');
+
+    logger.info('Insurance application decided', { applicationId: application.id, status, by: req.user!.id });
+    res.json({ success: true, data: updated });
   } catch (error) {
     next(error);
   }

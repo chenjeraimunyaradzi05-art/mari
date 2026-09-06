@@ -114,6 +114,8 @@ export default function AdminDashboardPage() {
     { href: '/admin/compliance', label: 'GDPR & UK Compliance', icon: Shield, description: 'Consent ledger, DSARs, and UK/EU readiness' },
     { href: '/admin/audit-logs', label: 'Audit Logs', icon: FileText, description: 'Review compliance exports and deletions' },
     { href: '/admin/jobs', label: 'Job Management', icon: Briefcase, description: 'Approve, feature, or remove job listings' },
+    { href: '/admin/grants', label: 'Grant Applications', icon: FileText, description: 'Record what the grant providers decided' },
+    { href: '/admin/insurance', label: 'Insurance Applications', icon: FileText, description: 'Record quotes, approvals and policies' },
     { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard, description: 'Manage user subscriptions' },
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3, description: 'Platform metrics and insights' },
     { href: '/admin/gtm', label: 'Go-to-Market', icon: Target, description: 'Launch plans, channels, and initiatives' },

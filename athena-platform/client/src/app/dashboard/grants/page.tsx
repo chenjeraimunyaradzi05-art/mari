@@ -40,6 +40,8 @@ type Grant = {
 type GrantApplication = {
   id: string;
   status: string;
+  amountAwarded?: string | number | null;
+  notes?: string | null;
   grant: Grant;
   createdAt: string;
 };
@@ -229,6 +231,12 @@ export default function GrantsPage() {
                     {app.status.replace('_', ' ')}
                   </span>
                 </div>
+                {(app.amountAwarded || app.notes) && (
+                  <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                    {app.amountAwarded ? <p className="font-medium text-emerald-700 dark:text-emerald-300">Awarded {formatCurrency(toNumber(app.amountAwarded))}</p> : null}
+                    {app.notes ? <p className="whitespace-pre-wrap">{app.notes}</p> : null}
+                  </div>
+                )}
               </div>
             ))}
           </div>
