@@ -340,14 +340,20 @@ export default function MentorMatchPage() {
 
                 {/* Actions */}
                 <div className="flex gap-3 mt-6">
-                  <button className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 flex items-center justify-center gap-2">
+                  <Link
+                    href={`/dashboard/messages?user=${match.mentor.id}`}
+                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
+                  >
                     <MessageCircle className="w-4 h-4" />
                     Connect
-                  </button>
-                  <button className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg font-medium hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center gap-2">
+                  </Link>
+                  <Link
+                    href={`/dashboard/mentors/${match.mentorId}`}
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg font-medium hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center gap-2"
+                  >
                     <Calendar className="w-4 h-4" />
                     Schedule
-                  </button>
+                  </Link>
                 </div>
               </div>
             ))}

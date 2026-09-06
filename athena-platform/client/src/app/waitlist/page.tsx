@@ -48,12 +48,22 @@ export default function WaitlistPage() {
             Share with friends to move up the list!
           </p>
           <div className="flex gap-3 justify-center">
-            <button className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600">
-              Share on Twitter
-            </button>
-            <button className="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm hover:bg-blue-800">
+            <a
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent('I just joined the ATHENA waitlist, the life operating system for women.')}&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin + '/waitlist' : 'https://athena.com/waitlist')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
+            >
+              Share on X
+            </a>
+            <a
+              href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin + '/waitlist' : 'https://athena.com/waitlist')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm hover:bg-blue-800"
+            >
               Share on LinkedIn
-            </button>
+            </a>
           </div>
           <Link href="/" className="block mt-6 text-primary-600 hover:underline text-sm">
             Return to homepage

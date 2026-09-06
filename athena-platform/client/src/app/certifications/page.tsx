@@ -208,9 +208,12 @@ export default function CertificationsPage() {
                     {cert.rating}
                   </span>
                 </div>
-                <button className="w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition font-medium">
-                  Enroll Now
-                </button>
+                <Link
+                  href={`/dashboard/learn?search=${encodeURIComponent(cert.title)}`}
+                  className="block w-full py-2 text-center bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition font-medium"
+                >
+                  Find this course
+                </Link>
               </div>
             ))}
           </div>

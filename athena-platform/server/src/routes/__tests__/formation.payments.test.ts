@@ -49,6 +49,7 @@ const prisma: any = prismaTyped;
 // to be in place before the module is pulled in - a top-level import would be
 // hoisted above this assignment and the service would take the no-Stripe path.
 process.env.STRIPE_SECRET_KEY = 'sk_test_formation';
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- a static import would hoist above the env assignment
 const formationRoutes = require('../formation.routes').default;
 
 function getStripeClient(): any {

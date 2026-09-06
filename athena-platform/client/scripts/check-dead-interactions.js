@@ -176,6 +176,10 @@ function findUnhandledButtons(src, file, lines) {
   const findings = [];
 
   for (const m of src.matchAll(/<(Button|button)(?=[\s/>])/g)) {
+    // A "<button>" inside a comment is prose about buttons, not a button.
+    const lineStart = src.lastIndexOf('\n', m.index) + 1;
+    const linePrefix = src.slice(lineStart, m.index).trimStart();
+    if (linePrefix.startsWith('//') || linePrefix.startsWith('*')) continue;
     const tag = readOpeningTag(src, m.index);
     if (!tag) continue;
 

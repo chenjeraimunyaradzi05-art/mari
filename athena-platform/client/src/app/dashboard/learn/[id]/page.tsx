@@ -15,8 +15,10 @@ import {
   Globe,
   Share2,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useCourse, useEnrollCourse } from '@/lib/hooks';
 import { cn, formatCurrency } from '@/lib/utils';
+import { downloadText, shareOrCopy } from '@/lib/download';
 
 interface CourseDetails {
   id: string;
@@ -484,10 +486,41 @@ export default function CourseDetailPage() {
             </div>
 
             <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-center space-x-4">
-              <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Share course">
+              <button
+                type="button"
+                onClick={async () => {
+                  const outcome = await shareOrCopy({ title: displayCourse.title, text: displayCourse.description, url: window.location.href });
+                  if (outcome === 'copied') toast.success('Link copied');
+                  else if (outcome === 'failed') toast.error('Could not share');
+                }}
+                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                aria-label="Share course"
+              >
                 <Share2 className="w-5 h-5" />
               </button>
-              <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Download course information">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadText(
+                    `${displayCourse.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.txt`,
+                    [
+                      displayCourse.title,
+                      `Provider: ${providerName}`,
+                      duration ? `Duration: ${duration}` : null,
+                      studyModes.length ? `Format: ${studyModes.map(formatLabel).join(', ')}` : null,
+                      typeof displayCourse.cost === 'number' ? `Cost: ${formatCurrency(displayCourse.cost)}` : null,
+                      '',
+                      displayCourse.description,
+                      '',
+                      `More: ${window.location.href}`,
+                    ]
+                      .filter((line) => line !== null)
+                      .join('\n')
+                  )
+                }
+                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                aria-label="Download course information"
+              >
                 <Download className="w-5 h-5" />
               </button>
             </div>

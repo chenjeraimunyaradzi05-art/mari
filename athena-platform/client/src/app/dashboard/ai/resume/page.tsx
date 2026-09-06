@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useResumeOptimizer } from '@/lib/hooks';
 import PaywallGate from '@/components/subscription/PaywallGate';
+import { downloadText } from '@/lib/download';
 
 export default function ResumePage() {
   const [resume, setResume] = useState('');
@@ -313,7 +314,11 @@ export default function ResumePage() {
                     <Copy className="w-5 h-5" />
                     <span>Copy Results</span>
                   </button>
-                  <button className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 flex items-center justify-center space-x-2 transition">
+                  <button
+                    type="button"
+                    onClick={() => downloadText('resume-report.json', JSON.stringify(result, null, 2), 'application/json')}
+                    className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 flex items-center justify-center space-x-2 transition"
+                  >
                     <Download className="w-5 h-5" />
                     <span>Download Report</span>
                   </button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Search,
@@ -120,8 +120,14 @@ export default function LearnPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [selectedStudyMode, setSelectedStudyMode] = useState('');
+  const [page, setPage] = useState(1);
+  // A new search starts from the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, selectedType, selectedStudyMode]);
 
   const { data, isLoading } = useCourses({
+    page,
     search: searchQuery,
     type: selectedType || undefined,
     studyMode: selectedStudyMode || undefined,
@@ -430,9 +436,12 @@ export default function LearnPage() {
           {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => (
             <button
               key={i}
+              type="button"
+              onClick={() => setPage(i + 1)}
+              aria-current={i + 1 === page ? 'page' : undefined}
               className={cn(
                 'px-4 py-2 rounded-lg font-medium transition',
-                i === 0
+                i + 1 === page
                   ? 'bg-primary-600 text-white'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
               )}

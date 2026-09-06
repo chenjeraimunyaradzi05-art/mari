@@ -1,5 +1,6 @@
 import { ApiError } from '../middleware/errorHandler';
 
+// eslint-disable-next-line no-control-regex -- stripping control characters is the point
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u2028\u2029\uFEFF]/g;
 const PUBLIC_UPLOAD_PATH = /^\/uploads\/(?:avatars|covers|posts|videos)\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;
 const AUTH_MEDIA_PATH = /^\/api\/media\/local\/(?:documents|resumes)\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/;

@@ -33,7 +33,7 @@ import {
   BookOpen,
   Sparkles,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/table';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -526,7 +527,7 @@ function WithdrawDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline">Cancel</Button>
+          <DialogClose className={buttonVariants({ variant: 'outline' })}>Cancel</DialogClose>
           <Button disabled={!canWithdraw || !amount || parseFloat(amount) <= 0}>
             Confirm Withdrawal
           </Button>

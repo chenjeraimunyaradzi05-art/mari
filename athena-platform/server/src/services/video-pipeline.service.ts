@@ -37,7 +37,7 @@ let ffmpegBinary: string | null | undefined;
 export function ffmpegPath(): string | null {
   if (ffmpegBinary !== undefined) return ffmpegBinary;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- optional dependency, resolved at runtime
     const resolved = require('ffmpeg-static') as string | null;
     ffmpegBinary = resolved && fs.existsSync(resolved) ? resolved : null;
   } catch {
