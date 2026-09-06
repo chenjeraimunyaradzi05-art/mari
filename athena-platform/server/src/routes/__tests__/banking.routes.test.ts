@@ -149,3 +149,26 @@ describe('Bank feeds', () => {
     expect(createJournalEntry).not.toHaveBeenCalled();
   });
 });
+
+describe('Another member’s bank data', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('cannot be posted, re-categorised, linked or removed: every lookup is scoped to the signed-in member', async () => {
+    prisma.bankTransaction.findFirst.mockResolvedValue(null);
+    prisma.bankAccount.findFirst.mockResolvedValue(null);
+    prisma.bankConnection.findFirst.mockResolvedValue(null);
+
+    await request(app).post('/api/banking/transactions/theirs/post').expect(404);
+    await request(app).patch('/api/banking/transactions/theirs').send({ ledgerAccountId: 'ledger-expense' }).expect(404);
+    await request(app).post('/api/banking/accounts/theirs/link').send({ ledgerAccountId: 'ledger-bank' }).expect(404);
+    await request(app).delete('/api/banking/connections/theirs').expect(404);
+
+    expect(prisma.bankTransaction.findFirst.mock.calls[0][0].where).toEqual({ id: 'theirs', bankAccount: { connection: { userId: 'staff' } } });
+    expect(prisma.bankAccount.findFirst.mock.calls[0][0].where).toEqual({ id: 'theirs', connection: { userId: 'staff' } });
+    expect(prisma.bankConnection.findFirst.mock.calls[0][0].where).toEqual({ id: 'theirs', userId: 'staff' });
+    expect(prisma.bankTransaction.update).not.toHaveBeenCalled();
+    expect(prisma.bankConnection.delete).not.toHaveBeenCalled();
+  });
+});
