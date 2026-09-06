@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Briefcase, GraduationCap, ShieldCheck, Sparkles, Users, Wallet, type LucideIcon } from 'lucide-react';
 import { courseApi, eventsApi, groupsApi, jobApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -103,24 +103,29 @@ export function HomeHero() {
             Welcome to ATHENA
           </div>
 
-          <h1 id="home-hero-title" className="mt-4 max-w-2xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-[2.6rem]" style={{ textWrap: 'balance' }}>
-            Working towards{' '}
-            <span className="relative inline-block align-baseline">
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.span
-                  key={PHRASES[phrase]}
-                  initial={reduce ? false : { opacity: 0, y: 14, filter: 'blur(4px)' }}
-                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                  exit={reduce ? undefined : { opacity: 0, y: -14, filter: 'blur(4px)' }}
-                  transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                  className="inline-block bg-[linear-gradient(90deg,#fda4af_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text text-transparent"
-                >
-                  {PHRASES[phrase]}
-                </motion.span>
-              </AnimatePresence>
+          {/* The phrase changes, the layout does not: every phrase is laid out in
+              the same grid cell, the inactive ones invisible, so the slot is
+              always as wide and as tall as the longest of them. */}
+          <h1 id="home-hero-title" className="mt-4 max-w-2xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-[2.6rem]">
+            <span className="block">Working towards</span>
+            <span className="inline-grid max-w-full align-top">
+              {PHRASES.map((p, i) => {
+                const active = i === phrase;
+                return (
+                  <motion.span
+                    key={p}
+                    aria-hidden={!active}
+                    initial={false}
+                    animate={reduce ? { opacity: active ? 1 : 0 } : { opacity: active ? 1 : 0, y: active ? 0 : 12, filter: active ? 'blur(0px)' : 'blur(4px)' }}
+                    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                    className={cn('col-start-1 row-start-1 whitespace-nowrap bg-[linear-gradient(90deg,#fda4af_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text text-transparent', !active && 'pointer-events-none')}
+                  >
+                    {p}?
+                  </motion.span>
+                );
+              })}
             </span>
-            ?<br />
-            You don&rsquo;t have to do it alone.
+            <span className="block">You don&rsquo;t have to do it alone.</span>
           </h1>
 
           <p className="mt-4 max-w-xl text-sm leading-6 text-white/85 sm:text-base">
@@ -181,38 +186,44 @@ export function HomeHero() {
             );
           })}
         </div>
-        <div className="relative mt-3 min-h-[92px]">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={intent.id}
-              role="tabpanel"
-              initial={reduce ? false : { opacity: 0, x: 10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={reduce ? undefined : { opacity: 0, x: -10 }}
-              transition={{ duration: 0.25 }}
-              className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-900 dark:text-white">{intent.title}</h2>
-                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{intent.copy}</p>
-              </div>
-              <div className="flex flex-shrink-0 flex-wrap gap-2">
-                {intent.links.map(([href, label], i) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={cn(
-                      'focusable inline-flex items-center gap-1 rounded-full px-4 py-2 text-sm font-semibold transition',
-                      i === 0 ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-rose-50' : 'border border-rose-200 text-slate-800 hover:bg-rose-50 dark:border-white/15 dark:text-slate-100 dark:hover:bg-white/10'
-                    )}
-                  >
-                    {label}
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
-                ))}
-              </div>
-            </motion.div>
-          </AnimatePresence>
+        {/* Every panel is laid out in the same cell, so the card is always as
+            tall as the tallest of them and nothing below it moves. */}
+        <div className="relative mt-3 grid">
+          {INTENTS.map((item) => {
+            const active = item.id === intent.id;
+            return (
+              <motion.div
+                key={item.id}
+                role="tabpanel"
+                aria-hidden={!active}
+                initial={false}
+                animate={reduce ? { opacity: active ? 1 : 0 } : { opacity: active ? 1 : 0, x: active ? 0 : 8 }}
+                transition={{ duration: 0.25 }}
+                className={cn('col-start-1 row-start-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between', !active && 'pointer-events-none')}
+              >
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-slate-900 dark:text-white">{item.title}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{item.copy}</p>
+                </div>
+                <div className="flex flex-shrink-0 flex-wrap gap-2">
+                  {item.links.map(([href, label], i) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      tabIndex={active ? 0 : -1}
+                      className={cn(
+                        'focusable inline-flex items-center gap-1 rounded-full px-4 py-2 text-sm font-semibold transition',
+                        i === 0 ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-rose-50' : 'border border-rose-200 text-slate-800 hover:bg-rose-50 dark:border-white/15 dark:text-slate-100 dark:hover:bg-white/10'
+                      )}
+                    >
+                      {label}
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  ))}
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </section>
     </div>

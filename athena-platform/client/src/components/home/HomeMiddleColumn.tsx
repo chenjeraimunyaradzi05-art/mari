@@ -52,11 +52,10 @@ export function SponsoredSlot({
 export function HomeMiddleColumn() {
   return (
     <div className="space-y-6">
-      <HomeHero />
+      {/* Topic circles first, the way Instagram opens with stories. */}
+      <ReelTopicCircles />
 
-      <Reveal>
-        <ReelTopicCircles />
-      </Reveal>
+      <HomeHero />
 
       {/* Real open roles rather than more marketing copy. */}
       <Reveal>
