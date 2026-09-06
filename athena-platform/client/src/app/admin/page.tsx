@@ -122,6 +122,7 @@ export default function AdminDashboardPage() {
     { href: '/admin/gtm', label: 'Go-to-Market', icon: Target, description: 'Launch plans, channels, and initiatives' },
     { href: '/admin/marketing', label: 'Marketing Hub', icon: Megaphone, description: 'Campaigns, leads, and growth ops' },
     { href: '/admin/blog', label: 'Blog', icon: FileText, description: 'Write, publish and archive the articles on /blog' },
+    { href: '/admin/feedback', label: 'Feedback', icon: MessageSquare, description: 'What people send from the help centre, worked through' },
     { href: '/admin/verification', label: 'Verification Requests', icon: Shield, description: 'Approve employer, educator, mentor and creator badges' },
     { href: '/admin/feature-flags', label: 'Feature Flags', icon: Settings, description: 'Flags, rollouts and maintenance mode' },
     { href: '/admin/settings', label: 'Settings', icon: Settings, description: 'Platform configuration' },

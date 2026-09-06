@@ -749,6 +749,7 @@ model User {
   opportunityMatches OpportunityMatch[]
   salaryDataPoints   SalaryDataPoint[]
   articles           Article[]         @relation("AuthoredArticles")
+  feedback           Feedback[]        @relation("UserFeedback")
   salaryAnalyses     SalaryAnalysis[]
   menteeMatches      MentorMatchScore[]   @relation("MenteeMatches")
   mentorMatches      MentorMatchScore[]   @relation("MentorMatches")
@@ -5599,4 +5600,39 @@ model Article {
   updatedAt  DateTime      @updatedAt
 
   @@index([status, publishedAt])
+}
+
+// ============================================
+// Feedback
+// ============================================
+
+enum FeedbackCategory {
+  BUG
+  IDEA
+  PRAISE
+  OTHER
+}
+
+enum FeedbackStatus {
+  NEW
+  SEEN
+  DONE
+}
+
+/// What people tell us from the help centre's feedback page. A signed-in
+/// member is attached by account; a visitor may leave an email for a reply.
+model Feedback {
+  id        String           @id @default(uuid())
+  userId    String?
+  user      User?            @relation("UserFeedback", fields: [userId], references: [id], onDelete: SetNull)
+  email     String?
+  page      String?
+  category  FeedbackCategory @default(OTHER)
+  message   String
+  status    FeedbackStatus   @default(NEW)
+  userAgent String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([status, createdAt])
 }
