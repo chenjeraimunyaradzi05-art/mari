@@ -298,6 +298,7 @@ Registered office and any local representative addresses will be published here 
 
 - [Privacy Center](/privacy-center) - Manage your privacy settings and data rights
 - [Cookie Policy](/cookies) - Learn about our use of cookies
+- [Australian Privacy Statement](/privacy/au) - How the Australian Privacy Principles and the Notifiable Data Breaches scheme apply
 - [UK Privacy Addendum](/privacy/uk) - Additional information for UK users
 - [Terms of Service](/terms) - Our terms of use
 

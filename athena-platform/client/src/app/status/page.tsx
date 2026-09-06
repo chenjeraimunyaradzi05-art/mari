@@ -1,22 +1,25 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import StatusLive from '@/components/status/StatusLive';
 
 export const metadata: Metadata = {
   title: 'System Status | ATHENA',
   description: 'Current availability of ATHENA services.',
 };
 
-// A dedicated status provider (with uptime history) is on the roadmap.
-// Until then this page is honest about what we can and cannot show.
+// The live block reads the API's own health, readiness, version and
+// maintenance endpoints from the reader's browser. Uptime history over time
+// still needs a status provider; what is shown here is what is true now.
 export default function StatusPage() {
   return (
     <div className="container mx-auto max-w-3xl px-4 py-12">
       <h1 className="text-3xl font-bold">System status</h1>
       <p className="mt-4 text-muted-foreground">
-        ATHENA is in staged rollout. We do not yet publish an automated public uptime dashboard —
-        rather than show unverifiable numbers, this page tells you how to check and how to reach us.
+        Checked live from your browser every 30 seconds. We do not yet publish uptime history; rather than
+        show unverifiable numbers, this page shows what is answering right now and how to reach us.
       </p>
       <div className="mt-8 space-y-4">
+        <StatusLive />
         <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-lg font-semibold">Is something down for you?</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">

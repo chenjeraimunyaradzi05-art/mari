@@ -44,6 +44,9 @@ const CLIENT_SRC = path.resolve(__dirname, '..', '..', 'client', 'src');
 // Calls that look broken to the static walk but are correct in practice.
 // Keep each entry justified — an unexplained entry is a bug in waiting.
 const ALLOWED = new Map([
+  // GET /api/maintenance is served by app.get() in index.ts, not a router, so it
+  // stays reachable while the platform is closed. The public status page reads it.
+  ['GET /api/maintenance', 'Defined inline in index.ts as a maintenance-open path'],
   // POST /api/media/upload/video used to be listed here for a literal call in
   // an unmounted upload studio. That component is gone; every upload now goes
   // through mediaApi.upload(type, file), which the walk resolves to the

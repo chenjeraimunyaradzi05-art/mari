@@ -112,6 +112,7 @@ export default function AdminDashboardPage() {
     { href: '/admin/groups', label: 'Group Moderation', icon: Users, description: 'Feature, pin, or hide groups' },
     { href: '/admin/events', label: 'Event Moderation', icon: Calendar, description: 'Feature, pin, or hide events' },
     { href: '/admin/compliance', label: 'GDPR & UK Compliance', icon: Shield, description: 'Consent ledger, DSARs, and UK/EU readiness' },
+    { href: '/admin/breaches', label: 'Data Breach Register', icon: AlertTriangle, description: 'Record incidents, run the notification clocks, notify the regulator' },
     { href: '/admin/audit-logs', label: 'Audit Logs', icon: FileText, description: 'Review compliance exports and deletions' },
     { href: '/admin/jobs', label: 'Job Management', icon: Briefcase, description: 'Approve, feature, or remove job listings' },
     { href: '/admin/grants', label: 'Grant Applications', icon: FileText, description: 'Record what the grant providers decided' },
