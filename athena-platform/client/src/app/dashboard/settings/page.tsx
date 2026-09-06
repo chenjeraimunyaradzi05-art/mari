@@ -14,6 +14,7 @@ import {
   LogOut,
   Rss,
   ShieldAlert,
+  BadgeCheck,
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,12 @@ const settingsGroups = [
         description: 'Manage your subscription and payment methods',
         href: '/dashboard/settings/billing',
         icon: CreditCard,
+      },
+      {
+        name: 'Verification',
+        description: 'Identity, employer, educator, mentor and creator badges',
+        href: '/dashboard/settings/verification',
+        icon: BadgeCheck,
       },
     ],
   },

@@ -309,6 +309,57 @@ router.post(
           // Money going back, or being fought over. Refunds mark what they
           // refund; disputes wake up trust and safety; a failed renewal tells
           // the member how to fix it instead of silently lapsing.
+          // Stripe Identity finished a document check. Passed: the badge is
+          // approved and the profile marked verified. Needs input: the member
+          // is told why and can go again.
+          case 'identity.verification_session.verified':
+          case 'identity.verification_session.requires_input': {
+            const session = event.data.object as Stripe.Identity.VerificationSession;
+            const badge = await prisma.verificationBadge.findFirst({
+              where: { type: 'IDENTITY', metadata: { path: ['sessionId'], equals: session.id } },
+              select: { id: true, userId: true, status: true },
+            });
+            if (!badge) {
+              logger.warn('Identity session with no badge behind it', { sessionId: session.id });
+              break;
+            }
+            if (event.type === 'identity.verification_session.verified') {
+              if (badge.status !== 'APPROVED') {
+                await prisma.$transaction([
+                  prisma.verificationBadge.update({
+                    where: { id: badge.id },
+                    data: { status: 'APPROVED', reviewedAt: new Date(), reason: 'Verified by Stripe Identity' },
+                  }),
+                  prisma.user.update({ where: { id: badge.userId }, data: { isVerified: true } }),
+                  prisma.notification.create({
+                    data: {
+                      userId: badge.userId,
+                      type: 'SYSTEM',
+                      title: 'Identity verified',
+                      message: 'Your identity check passed. The verified badge is on your profile.',
+                      link: '/dashboard/settings/verification',
+                    },
+                  }),
+                ]);
+              }
+            } else {
+              const reason = session.last_error?.reason ?? 'The check could not be completed.';
+              await prisma.$transaction([
+                prisma.verificationBadge.update({ where: { id: badge.id }, data: { reason } }),
+                prisma.notification.create({
+                  data: {
+                    userId: badge.userId,
+                    type: 'SYSTEM',
+                    title: 'Identity check needs another go',
+                    message: `${reason} You can try again from Settings.`,
+                    link: '/dashboard/settings/verification',
+                  },
+                }),
+              ]);
+            }
+            break;
+          }
+
           case 'charge.refunded': {
             const charge = event.data.object as Stripe.Charge;
             const paymentIntentId = paymentIntentIdOf(charge.payment_intent as any);
