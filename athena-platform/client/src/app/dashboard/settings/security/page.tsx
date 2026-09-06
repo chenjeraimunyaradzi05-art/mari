@@ -203,6 +203,24 @@ export default function SecuritySettingsPage() {
 
   const isTwoFactorEnabled = Boolean(twoFactorStatus?.enabled);
 
+  // Recovery codes are single-use; a fresh set replaces whatever is left.
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const regenerateRecoveryCodes = useMutation({
+    mutationFn: () => api.post('/auth/2fa/recovery-codes', recoveryPassword ? { currentPassword: recoveryPassword } : {}),
+    onSuccess: (response) => {
+      const payload = response.data?.data ?? response.data ?? {};
+      const codes: string[] = payload.recoveryCodes ?? payload.codes ?? [];
+      setRecoveryCodes(codes);
+      setRecoveryPassword('');
+      toast.success('New recovery codes issued. The old ones no longer work.');
+    },
+    onError: (error: unknown) => {
+      const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(responseMessage || 'Could not issue new recovery codes');
+    },
+  });
+
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       {/* Header */}
@@ -381,6 +399,36 @@ export default function SecuritySettingsPage() {
             <p className="text-sm text-slate-600 dark:text-slate-400">
               Enabled{twoFactorStatus?.enabledAt ? ` on ${formatDate(twoFactorStatus.enabledAt)}` : ''}.
             </p>
+
+            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+              <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Recovery codes</p>
+              <p className="text-xs text-slate-500">Each code signs you in once if you lose your authenticator. Issuing a new set replaces the old one.</p>
+              {recoveryCodes ? (
+                <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm text-slate-800 dark:text-slate-100 sm:grid-cols-4">
+                  {recoveryCodes.map((code) => (
+                    <li key={code} className="rounded bg-white px-2 py-1 dark:bg-slate-900">
+                      {code}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <input
+                    type="password"
+                    value={recoveryPassword}
+                    onChange={(event) => setRecoveryPassword(event.target.value)}
+                    className="input flex-1 text-sm"
+                    placeholder="Current password"
+                    autoComplete="current-password"
+                    aria-label="Current password"
+                  />
+                  <button type="button" onClick={() => regenerateRecoveryCodes.mutate()} disabled={regenerateRecoveryCodes.isPending} className="btn-outline px-3 text-sm">
+                    {regenerateRecoveryCodes.isPending ? 'Issuing…' : 'Issue new codes'}
+                  </button>
+                </div>
+              )}
+              {recoveryCodes && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Save these now. They are shown once.</p>}
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
               <input
                 type="password"

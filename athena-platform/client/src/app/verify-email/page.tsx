@@ -21,6 +21,20 @@ function VerifyEmailContent() {
   
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('');
+  // An expired link is the common failure; a new one is a form away.
+  const [resendEmail, setResendEmail] = useState('');
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const resend = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!resendEmail.trim()) return;
+    setResendState('sending');
+    try {
+      await api.post('/auth/resend-verification', { email: resendEmail.trim() });
+    } catch {
+      // The route answers the same way whether or not the address exists.
+    }
+    setResendState('sent');
+  };
 
   useEffect(() => {
     if (!token) {
@@ -102,6 +116,27 @@ function VerifyEmailContent() {
                   Create New Account
                 </Link>
               </div>
+              <form onSubmit={resend} className="mt-6 border-t border-slate-100 pt-5 text-left dark:border-slate-800">
+                <p className="mb-2 text-sm text-slate-600 dark:text-slate-400">Link expired? Get a new one.</p>
+                {resendState === 'sent' ? (
+                  <p className="text-sm text-emerald-700 dark:text-emerald-300">If an unverified account exists for that address, a new link is on its way.</p>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={resendEmail}
+                      onChange={(event) => setResendEmail(event.target.value)}
+                      placeholder="you@example.com"
+                      aria-label="Email address"
+                      required
+                      className="input flex-1 text-sm"
+                    />
+                    <button type="submit" disabled={resendState === 'sending'} className="btn-primary px-4 text-sm">
+                      {resendState === 'sending' ? 'Sending…' : 'Resend'}
+                    </button>
+                  </div>
+                )}
+              </form>
             </>
           )}
         </div>
