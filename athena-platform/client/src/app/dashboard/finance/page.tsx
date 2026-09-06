@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse } from 'lucide-react';
+import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const tiles = [
@@ -56,6 +56,12 @@ const tiles = [
     description: 'Payments, payouts, transfers, and adjustments.',
     href: '/dashboard/finance/money',
     icon: Banknote,
+  },
+  {
+    title: 'Bank Feeds',
+    description: 'Bank lines in by consent or statement, journal entries out.',
+    href: '/dashboard/finance/banking',
+    icon: Landmark,
   },
 ];
 
