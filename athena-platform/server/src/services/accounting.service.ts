@@ -310,37 +310,122 @@ export async function updateJournalEntry(id: string, userId: string, data: {
   });
 }
 
-export async function getTrialBalance(params: {
-  organizationId?: string;
-  userId?: string;
-}) {
+// ===========================================
+// REPORTS
+// ===========================================
+// Every report reads the same way: posted journal lines, inside the books the
+// caller may see. An organisation's books need membership; personal books are
+// the caller's own entries with no organisation on them.
+
+async function reportScope(params: { organizationId?: string; userId: string }) {
+  if (params.organizationId) {
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: params.organizationId, userId: params.userId },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Access denied');
+    }
+    return { organizationId: params.organizationId };
+  }
+  return { userId: params.userId, organizationId: null };
+}
+
+export interface AccountTotal {
+  accountId: string;
+  code: string | null;
+  name: string;
+  type: string;
+  debit: number;
+  credit: number;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// Debits and credits summed per account, over posted entries dated in the window.
+async function accountTotals(
+  scope: { organizationId?: string | null; userId?: string },
+  range: { from?: Date; to?: Date }
+): Promise<AccountTotal[]> {
+  const entryDate =
+    range.from || range.to ? { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } : undefined;
   const lines = await prisma.journalLine.findMany({
-    where: {
-      journalEntry: {
-        status: 'POSTED',
-        organizationId: params.organizationId || undefined,
-        userId: params.userId || undefined,
-      },
-    },
-    include: { account: true },
+    where: { journalEntry: { status: 'POSTED', ...scope, ...(entryDate ? { entryDate } : {}) } },
+    include: { account: { select: { id: true, name: true, code: true, type: true } } },
   });
 
-  const balances = new Map<string, { accountId: string; name: string; type: string; debit: number; credit: number }>();
-
-  lines.forEach((line) => {
-    const key = line.accountId;
-    const existing = balances.get(key) || {
+  const totals = new Map<string, AccountTotal>();
+  for (const line of lines) {
+    const existing = totals.get(line.accountId) ?? {
       accountId: line.accountId,
+      code: line.account.code ?? null,
       name: line.account.name,
       type: line.account.type,
       debit: 0,
       credit: 0,
     };
+    existing.debit = round2(existing.debit + Number(line.debit || 0));
+    existing.credit = round2(existing.credit + Number(line.credit || 0));
+    totals.set(line.accountId, existing);
+  }
+  return Array.from(totals.values()).sort((a, b) => (a.code ?? a.name).localeCompare(b.code ?? b.name));
+}
 
-    existing.debit += Number(line.debit || 0);
-    existing.credit += Number(line.credit || 0);
-    balances.set(key, existing);
-  });
+export async function getTrialBalance(params: { organizationId?: string; userId: string }) {
+  const scope = await reportScope(params);
+  return accountTotals(scope, {});
+}
 
-  return Array.from(balances.values());
+/**
+ * Revenue less expenses over a period. Revenue accounts carry credit
+ * balances and expense accounts debit balances, so each side is signed to
+ * read as a positive amount.
+ */
+export async function getProfitAndLoss(params: { organizationId?: string; userId: string; from?: Date; to?: Date }) {
+  const scope = await reportScope(params);
+  const totals = await accountTotals(scope, { from: params.from, to: params.to });
+  const revenue = totals.filter((t) => t.type === 'REVENUE').map((t) => ({ ...t, amount: round2(t.credit - t.debit) }));
+  const expenses = totals.filter((t) => t.type === 'EXPENSE').map((t) => ({ ...t, amount: round2(t.debit - t.credit) }));
+  const totalRevenue = round2(revenue.reduce((n, r) => n + r.amount, 0));
+  const totalExpenses = round2(expenses.reduce((n, e) => n + e.amount, 0));
+  return {
+    period: { from: params.from ?? null, to: params.to ?? null },
+    revenue,
+    expenses,
+    totalRevenue,
+    totalExpenses,
+    netProfit: round2(totalRevenue - totalExpenses),
+  };
+}
+
+/**
+ * What is owned, owed and left over as at a date. Profit to date that has not
+ * been closed to an equity account is shown as retained earnings, which is
+ * what makes the two sides balance.
+ */
+export async function getBalanceSheet(params: { organizationId?: string; userId: string; asOf?: Date }) {
+  const scope = await reportScope(params);
+  const totals = await accountTotals(scope, { to: params.asOf });
+  const assets = totals.filter((t) => t.type === 'ASSET').map((t) => ({ ...t, amount: round2(t.debit - t.credit) }));
+  const liabilities = totals.filter((t) => t.type === 'LIABILITY').map((t) => ({ ...t, amount: round2(t.credit - t.debit) }));
+  const equity = totals.filter((t) => t.type === 'EQUITY').map((t) => ({ ...t, amount: round2(t.credit - t.debit) }));
+  const retainedEarnings = round2(
+    totals.filter((t) => t.type === 'REVENUE').reduce((n, t) => n + (t.credit - t.debit), 0) -
+      totals.filter((t) => t.type === 'EXPENSE').reduce((n, t) => n + (t.debit - t.credit), 0)
+  );
+  const totalAssets = round2(assets.reduce((n, a) => n + a.amount, 0));
+  const totalLiabilities = round2(liabilities.reduce((n, l) => n + l.amount, 0));
+  const totalEquity = round2(equity.reduce((n, e) => n + e.amount, 0) + retainedEarnings);
+  return {
+    asOf: params.asOf ?? null,
+    assets,
+    liabilities,
+    equity,
+    retainedEarnings,
+    totalAssets,
+    totalLiabilities,
+    totalEquity,
+    // Zero when every posted entry balanced, which the posting step enforces.
+    difference: round2(totalAssets - totalLiabilities - totalEquity),
+  };
 }

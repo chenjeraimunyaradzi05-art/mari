@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { ApiError } from '../middleware/errorHandler';
 import { z } from 'zod';
 import {
   listAccounts,
@@ -14,6 +15,8 @@ import {
   voidJournalEntry,
   updateJournalEntry,
   getTrialBalance,
+  getProfitAndLoss,
+  getBalanceSheet,
 } from '../services/accounting.service';
 
 const router = Router();
@@ -181,6 +184,46 @@ router.post('/journals/:id/void', authenticate, async (req: AuthRequest, res: Re
 });
 
 // Reports
+// A date in the query string, or nothing; anything else is a 400 rather than
+// a silent "Invalid Date" that would quietly report the wrong period.
+function dateParam(value: unknown, name: string): Date | undefined {
+  if (value === undefined || value === '') return undefined;
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ApiError(400, `${name} must be a date`);
+  }
+  return parsed;
+}
+
+router.get('/reports/profit-and-loss', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { organizationId, from, to } = req.query;
+    const report = await getProfitAndLoss({
+      organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+      userId: req.user!.id,
+      from: dateParam(from, 'from'),
+      to: dateParam(to, 'to'),
+    });
+    res.json({ data: report });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/reports/balance-sheet', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { organizationId, asOf } = req.query;
+    const report = await getBalanceSheet({
+      organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+      userId: req.user!.id,
+      asOf: dateParam(asOf, 'asOf'),
+    });
+    res.json({ data: report });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/reports/trial-balance', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { organizationId } = req.query;

@@ -331,9 +331,14 @@ export default function AccountingPage() {
             Manage your chart of accounts and journal entries.
           </p>
         </div>
-        <Link href="/dashboard/finance" className="text-sm text-primary-600 hover:underline">
-          Back to Finance Hub
-        </Link>
+        <div className="flex items-center gap-4 text-sm">
+          <Link href="/dashboard/finance/accounting/reports" className="btn-outline px-3 py-1.5">
+            Reports
+          </Link>
+          <Link href="/dashboard/finance" className="text-primary-600 hover:underline">
+            Back to Finance Hub
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
