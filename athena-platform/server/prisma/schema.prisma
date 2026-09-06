@@ -748,6 +748,7 @@ model User {
   careerPredictions  CareerPrediction[]
   opportunityMatches OpportunityMatch[]
   salaryDataPoints   SalaryDataPoint[]
+  articles           Article[]         @relation("AuthoredArticles")
   salaryAnalyses     SalaryAnalysis[]
   menteeMatches      MentorMatchScore[]   @relation("MenteeMatches")
   mentorMatches      MentorMatchScore[]   @relation("MentorMatches")
@@ -5566,4 +5567,36 @@ model DvPanicAlert {
   notifiedContacts Json     @default("[]")
 
   @@index([profileId, triggeredAt])
+}
+
+// ============================================
+// Blog
+// ============================================
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// An article on /blog. The body is Markdown, rendered and sanitised on the
+/// client; the slug is the public address and never changes once published
+/// unless staff change it on purpose.
+model Article {
+  id         String        @id @default(uuid())
+  slug       String        @unique
+  title      String
+  excerpt    String?
+  body       String
+  coverImage String?
+  tags       String[]      @default([])
+  status     ArticleStatus @default(DRAFT)
+  authorId   String
+  author     User          @relation("AuthoredArticles", fields: [authorId], references: [id], onDelete: Cascade)
+  publishedAt DateTime?
+  viewCount  Int           @default(0)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([status, publishedAt])
 }
