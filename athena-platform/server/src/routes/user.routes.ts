@@ -828,6 +828,7 @@ router.patch(
     body('currentJobTitle').optional().trim(),
     body('currentCompany').optional().trim(),
     body('yearsExperience').optional().isInt({ min: 0 }),
+    body('timezone').optional().trim().matches(/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){1,2}$/).withMessage('timezone must be an IANA zone such as Australia/Brisbane'),
     body('persona').optional().isIn([
       'EARLY_CAREER', 'MID_CAREER', 'ENTREPRENEUR', 'CREATOR',
       'MENTOR', 'EDUCATION_PROVIDER', 'EMPLOYER', 'REAL_ESTATE', 'GOVERNMENT_NGO'
@@ -843,7 +844,7 @@ router.patch(
       const allowedFields = [
         'firstName', 'lastName', 'displayName', 'bio', 'headline',
         'city', 'state', 'country', 'currentJobTitle', 'currentCompany',
-        'yearsExperience', 'persona', 'isPublic', 'allowMessages'
+        'yearsExperience', 'persona', 'isPublic', 'allowMessages', 'timezone'
       ];
 
       const updateData: Record<string, any> = {};

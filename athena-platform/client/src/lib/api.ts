@@ -367,6 +367,9 @@ export const courseApi = {
 
   getMyCourses: () => api.get('/courses/me'),
 
+  // The certificates the learner has earned, each with the code an employer can check.
+  myCertificates: () => api.get('/courses/me/certificates'),
+
   enroll: (courseId: string) => api.post(`/courses/${courseId}/enroll`),
 
   getRecommendations: () => api.get('/courses/recommendations/for-me'),

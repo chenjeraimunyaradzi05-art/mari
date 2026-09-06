@@ -3,6 +3,7 @@
 import { ReactNode, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
+  Award,
   BookOpen,
   Clock,
   FileText,
@@ -169,11 +170,14 @@ function CourseTile({ course }: { course: Course }) {
   );
 }
 
-/* Each of these has to go somewhere that actually does what the line says.
-   /courses is still a stub with no search and no course list, and
-   /certifications is a hardcoded page that shows none of your own credentials,
-   so neither is linked from here. */
+/* Each of these has to go somewhere that actually does what the line says. */
 const MORE_WAYS = [
+  {
+    href: '/certifications',
+    icon: Award,
+    title: 'Your certificates',
+    copy: 'The ones you have earned, each with a code an employer can check.',
+  },
   {
     href: '/dashboard/learn/my-courses',
     icon: BookOpen,

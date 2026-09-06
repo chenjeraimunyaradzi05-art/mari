@@ -144,6 +144,31 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
 });
 
 // ===========================================
+// MY CERTIFICATES
+// ===========================================
+
+/**
+ * GET /api/courses/me/certificates
+ * The certificates the signed-in learner has earned, newest first, each with
+ * the code an employer can check at /certificates/:code.
+ */
+router.get('/me/certificates', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const certificates = await prisma.courseCertificate.findMany({
+      where: { userId: req.user!.id },
+      include: { course: { select: { id: true, title: true, slug: true, providerName: true, type: true, durationMonths: true } } },
+      orderBy: { issuedAt: 'desc' },
+    });
+    res.json({
+      success: true,
+      data: certificates.map((c) => ({ id: c.id, code: c.code, issuedAt: c.issuedAt, course: c.course })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // GET ALL COURSES
 // ===========================================
 router.get('/', async (req, res, next) => {

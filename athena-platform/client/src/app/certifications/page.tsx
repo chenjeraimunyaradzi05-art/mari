@@ -1,248 +1,177 @@
 'use client';
 
+/**
+ * Certificates.
+ *
+ * This page used to be a brochure: six invented certification categories and
+ * three "ATHENA Academy" programmes with enrolment counts and star ratings
+ * nobody had ever measured. It now shows two real things: the certificates
+ * the signed-in learner has earned (each with the code an employer can check
+ * at /certificates/:code), and the courses in the catalogue that issue one.
+ * Where there is nothing yet, it says so.
+ */
+
+import { FormEvent, useState } from 'react';
 import Link from 'next/link';
-import { Award, BookOpen, CheckCircle, Clock, Star, TrendingUp, Users, Zap } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import { Award, BookOpen, Clock, Search, ShieldCheck } from 'lucide-react';
+import { courseApi } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
+import { EmptyState, PageHero, PageShell, Section, TileSkeleton } from '@/components/layout/PageShell';
 
-const certificationCategories = [
-  {
-    name: 'Cloud Computing',
-    icon: '☁️',
-    certs: ['AWS Solutions Architect', 'Azure Administrator', 'Google Cloud Professional'],
-    color: 'from-blue-500 to-cyan-500',
-  },
-  {
-    name: 'Data & AI',
-    icon: '🤖',
-    certs: ['Data Science Professional', 'Machine Learning Engineer', 'AI Ethics'],
-    color: 'from-purple-500 to-pink-500',
-  },
-  {
-    name: 'Cybersecurity',
-    icon: '🔒',
-    certs: ['CISSP', 'CompTIA Security+', 'Ethical Hacking'],
-    color: 'from-red-500 to-orange-500',
-  },
-  {
-    name: 'Project Management',
-    icon: '📊',
-    certs: ['PMP', 'Agile Scrum Master', 'Product Management'],
-    color: 'from-green-500 to-emerald-500',
-  },
-  {
-    name: 'Development',
-    icon: '💻',
-    certs: ['Full-Stack Developer', 'React Certified', 'Node.js Expert'],
-    color: 'from-yellow-500 to-amber-500',
-  },
-  {
-    name: 'Business',
-    icon: '💼',
-    certs: ['Business Analysis', 'Financial Modeling', 'Digital Marketing'],
-    color: 'from-indigo-500 to-violet-500',
-  },
-];
+type Certificate = {
+  id: string;
+  code: string;
+  issuedAt: string;
+  course: { id: string; title: string; slug: string; providerName: string | null; type: string | null; durationMonths: number | null };
+};
 
-const featuredCertifications = [
-  {
-    title: 'ATHENA Professional Career Coach',
-    provider: 'ATHENA Academy',
-    duration: '6 weeks',
-    level: 'Intermediate',
-    enrolled: 12500,
-    rating: 4.9,
-    badge: '🏆',
-  },
-  {
-    title: 'AI-Powered Job Search Specialist',
-    provider: 'ATHENA Academy',
-    duration: '4 weeks',
-    level: 'Beginner',
-    enrolled: 8300,
-    rating: 4.8,
-    badge: '🚀',
-  },
-  {
-    title: 'Resume Optimization Expert',
-    provider: 'ATHENA Academy',
-    duration: '3 weeks',
-    level: 'Beginner',
-    enrolled: 15700,
-    rating: 4.7,
-    badge: '📝',
-  },
-];
+type Course = {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  providerName?: string | null;
+  type?: string | null;
+  durationMonths?: number | null;
+  cost?: number | null;
+  organization?: { name: string } | null;
+};
+
+const money = (n: number) => (n >= 1000 ? `$${Math.round(n / 1000)}k` : `$${new Intl.NumberFormat('en-AU').format(n)}`);
+
+function duration(months?: number | null): string | null {
+  if (!months) return null;
+  if (months < 12) return `${months} mo`;
+  const years = months / 12;
+  return Number.isInteger(years) ? `${years} yr` : `${years.toFixed(1)} yr`;
+}
+
+const issued = (iso: string) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
 
 export default function CertificationsPage() {
+  const router = useRouter();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const [code, setCode] = useState('');
+
+  const mine = useQuery({
+    queryKey: ['my-certificates'],
+    queryFn: () => courseApi.myCertificates(),
+    enabled: isAuthenticated,
+    select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as Certificate[]) : []),
+  });
+
+  const courses = useQuery({
+    queryKey: ['courses', { type: 'certificate', limit: 12 }],
+    queryFn: () => courseApi.getAll({ type: 'certificate', limit: 12 }),
+    select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as Course[]) : []),
+  });
+
+  const check = (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = code.trim().toUpperCase();
+    if (trimmed) router.push(`/certificates/${encodeURIComponent(trimmed)}`);
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white via-rose-50/40 to-white text-slate-950 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
-      {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-r from-primary-600 to-primary-800 text-white">
-        <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-20"></div>
-        <div className="container mx-auto px-4 py-20 relative z-10">
-          <div className="max-w-3xl">
-            <div className="flex items-center gap-2 mb-4">
-              <Award className="w-8 h-8" />
-              <span className="text-primary-200 font-medium">ATHENA Certifications</span>
-            </div>
-            <h1 className="text-4xl md:text-5xl font-bold mb-6">
-              Earn Industry-Recognized Certifications
-            </h1>
-            <p className="text-xl text-primary-100 mb-8">
-              Boost your career with professional certifications. Verify your skills, stand out to employers, and unlock new opportunities.
-            </p>
-            <div className="flex flex-wrap gap-4">
-              <Link
-                href="/dashboard/learn"
-                className="px-6 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-slate-100 transition flex items-center gap-2"
-              >
-                <BookOpen className="w-5 h-5" />
-                Start Learning
-              </Link>
-              <Link
-                href="/skills-marketplace"
-                className="px-6 py-3 bg-primary-700 text-white font-semibold rounded-lg hover:bg-primary-600 transition flex items-center gap-2"
-              >
-                <Zap className="w-5 h-5" />
-                Browse Skills
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
+    <PageShell width="wide">
+      <PageHero
+        kicker="Learning"
+        title="Certificates"
+        description="A certificate on ATHENA is issued when every lesson of a course is complete. Each one carries a ten-character code anyone can check, so an employer can see it is real without asking you."
+        primaryAction={isAuthenticated ? { label: 'Courses you have started', href: '/dashboard/learn/my-courses' } : { label: 'Sign in to see yours', href: '/login?next=/certifications' }}
+        secondaryAction={{ label: 'Browse all courses', href: '/courses' }}
+      />
 
-      {/* Stats Section */}
-      <section className="container mx-auto px-4 -mt-8 relative z-20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Active Learners', value: '500K+', icon: Users },
-            { label: 'Certifications Earned', value: '150K+', icon: Award },
-            { label: 'Course Hours', value: '10K+', icon: Clock },
-            { label: 'Avg. Salary Increase', value: '+25%', icon: TrendingUp },
-          ].map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
-              <stat.icon className="w-8 h-8 mx-auto mb-2 text-primary-600" />
-              <div className="text-2xl font-bold text-slate-900 dark:text-white">{stat.value}</div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
+      {isAuthenticated && (
+        <Section icon={Award} title="Your certificates" description="Newest first. Share the link; the code is checkable by anyone.">
+          {mine.isLoading ? (
+            <TileSkeleton count={2} />
+          ) : (mine.data?.length ?? 0) === 0 ? (
+            <EmptyState
+              icon={Award}
+              reason="empty"
+              title="No certificates yet"
+              description="Finish every lesson of a course and its certificate appears here with a code you can share."
+              primaryAction={{ label: 'Courses you have started', href: '/dashboard/learn/my-courses' }}
+              secondaryAction={{ label: 'Find a course', href: '/courses' }}
+            />
+          ) : (
+            <ul className="grid gap-4 sm:grid-cols-2">
+              {mine.data!.map((c) => (
+                <li key={c.id} className="surface p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 dark:bg-primary-900/20">
+                      <Award className="h-5 w-5 text-primary-600" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold text-slate-900 dark:text-white">{c.course.title}</h3>
+                      <p className="text-sm text-slate-500">
+                        {c.course.providerName || 'ATHENA'} · issued {issued(c.issuedAt)}
+                      </p>
+                      <p className="mt-2 font-mono text-sm tracking-widest text-slate-700 dark:text-slate-300">{c.code}</p>
+                      <Link href={`/certificates/${c.code}`} className="mt-2 inline-block text-sm text-primary-600 hover:underline">
+                        Open the checkable certificate
+                      </Link>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
 
-      {/* Categories Section */}
-      <section className="container mx-auto px-4 py-16">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
-            Explore Certification Categories
-          </h2>
-          <p className="text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Choose from a wide range of professional certifications across various industries and skill levels.
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {certificationCategories.map((category) => (
-            <div
-              key={category.name}
-              className="group bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
-            >
-              <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${category.color} flex items-center justify-center text-3xl mb-4`}>
-                {category.icon}
-              </div>
-              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-3 group-hover:text-primary-600 transition">
-                {category.name}
-              </h3>
-              <ul className="space-y-2">
-                {category.certs.map((cert) => (
-                  <li key={cert} className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm">
-                    <CheckCircle className="w-4 h-4 text-green-500" />
-                    {cert}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Featured Certifications */}
-      <section className="bg-white dark:bg-slate-800 py-16">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
-              Featured Certifications
-            </h2>
-            <p className="text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-              Start with our most popular certifications designed to accelerate your career growth.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {featuredCertifications.map((cert) => (
-              <div
-                key={cert.title}
-                className="bg-slate-50 dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 hover:border-primary-500 transition-all"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <span className="text-4xl">{cert.badge}</span>
-                  <span className="px-3 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 rounded-full text-sm font-medium">
-                    {cert.level}
-                  </span>
-                </div>
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-                  {cert.title}
-                </h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                  by {cert.provider}
-                </p>
-                <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400 mb-4">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-4 h-4" />
-                    {cert.duration}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Users className="w-4 h-4" />
-                    {cert.enrolled.toLocaleString()}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Star className="w-4 h-4 text-yellow-500" />
-                    {cert.rating}
-                  </span>
-                </div>
-                <Link
-                  href={`/dashboard/learn?search=${encodeURIComponent(cert.title)}`}
-                  className="block w-full py-2 text-center bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition font-medium"
-                >
-                  Find this course
+      <Section icon={BookOpen} title="Courses that issue a certificate" description="From the catalogue, as providers list them." action={{ label: 'All courses', href: '/courses' }}>
+        {courses.isLoading ? (
+          <TileSkeleton count={3} />
+        ) : (courses.data?.length ?? 0) === 0 ? (
+          <EmptyState
+            icon={BookOpen}
+            reason="empty"
+            title="No certificate courses listed yet"
+            description="Providers list their courses themselves. The full catalogue may still have short courses and diplomas worth a look."
+            primaryAction={{ label: 'Browse all courses', href: '/courses' }}
+          />
+        ) : (
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {courses.data!.map((course) => (
+              <li key={course.id}>
+                <Link href={`/dashboard/learn/${course.id}`} className="surface block h-full p-5 transition hover:shadow-md">
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{course.title}</h3>
+                  <p className="text-sm text-slate-500">{course.providerName || course.organization?.name || 'Provider not stated'}</p>
+                  <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">{course.description}</p>
+                  <p className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                    {duration(course.durationMonths) && (
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" /> {duration(course.durationMonths)}
+                      </span>
+                    )}
+                    <span>{course.cost == null ? 'Cost on enquiry' : course.cost === 0 ? 'Fee-free' : money(course.cost)}</span>
+                  </p>
                 </Link>
-              </div>
+              </li>
             ))}
-          </div>
-        </div>
-      </section>
+          </ul>
+        )}
+      </Section>
 
-      {/* CTA Section */}
-      <section className="container mx-auto px-4 py-16">
-        <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-3xl p-8 md:p-12 text-white text-center">
-          <h2 className="text-3xl font-bold mb-4">Ready to Get Certified?</h2>
-          <p className="text-primary-100 mb-8 max-w-2xl mx-auto">
-            Join thousands of professionals who have advanced their careers through ATHENA certifications.
-          </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            <Link
-              href="/dashboard/learn"
-              className="px-8 py-3 bg-white text-primary-700 font-semibold rounded-lg hover:bg-slate-100 transition"
-            >
-              Browse All Courses
-            </Link>
-            <Link
-              href="/pricing"
-              className="px-8 py-3 bg-primary-700 text-white font-semibold rounded-lg hover:bg-primary-600 transition"
-            >
-              View Pricing
-            </Link>
-          </div>
-        </div>
-      </section>
-    </div>
+      <Section icon={ShieldCheck} title="Check a certificate" description="Given a code by a candidate? See who earned it, for which course, and when.">
+        <form onSubmit={check} className="flex max-w-md flex-wrap gap-2">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="Ten-character code"
+            aria-label="Certificate code"
+            maxLength={12}
+            className="input min-w-[200px] flex-1 font-mono uppercase tracking-widest"
+          />
+          <button type="submit" disabled={!code.trim()} className="btn-primary inline-flex items-center gap-2">
+            <Search className="h-4 w-4" /> Check
+          </button>
+        </form>
+      </Section>
+    </PageShell>
   );
 }

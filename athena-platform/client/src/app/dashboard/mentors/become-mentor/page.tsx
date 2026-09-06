@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import toast from 'react-hot-toast';
 import {
   Users,
   DollarSign,
@@ -18,6 +20,10 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { mentorApi, userApi } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
+
+const errorMessage = (e: unknown) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
 const benefits = [
   {
@@ -120,6 +126,7 @@ const industryOptions = [
 ];
 
 export default function BecomeMentorPage() {
+  const user = useAuthStore((s) => s.user);
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -151,13 +158,30 @@ export default function BecomeMentorPage() {
       saturday: false,
       sunday: false,
     },
-    timezone: 'America/New_York',
+    timezone: 'Australia/Brisbane',
     maxMenteesPerMonth: '5',
   });
 
   const updateFormData = (updates: Partial<FormData>) => {
     setFormData((prev) => ({ ...prev, ...updates }));
   };
+
+  // Start from what the profile already says rather than an empty form.
+  useEffect(() => {
+    if (!user) return;
+    setFormData((prev) => ({
+      ...prev,
+      firstName: prev.firstName || user.firstName || '',
+      lastName: prev.lastName || user.lastName || '',
+      email: prev.email || user.email || '',
+      headline: prev.headline || user.headline || '',
+      bio: prev.bio || user.bio || '',
+      currentRole: prev.currentRole || user.currentJobTitle || '',
+      company: prev.company || user.currentCompany || '',
+      yearsExperience: prev.yearsExperience || (user.yearsExperience != null ? String(user.yearsExperience) : ''),
+      timezone: user.timezone || prev.timezone,
+    }));
+  }, [user]);
 
   const toggleExpertise = (area: string) => {
     setFormData((prev) => ({
@@ -182,12 +206,36 @@ export default function BecomeMentorPage() {
     }));
   };
 
+  // Two writes: the person's profile (name, headline, bio, role, timezone) and
+  // the mentor profile itself, which the server upserts and lists at once.
   const handleSubmit = async () => {
     setIsSubmitting(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsSubmitting(false);
-    setIsSubmitted(true);
+    try {
+      const years = parseInt(formData.yearsExperience, 10);
+      const rate = parseFloat(formData.hourlyRate);
+      const profile: Record<string, unknown> = {};
+      if (formData.firstName.trim()) profile.firstName = formData.firstName.trim();
+      if (formData.lastName.trim()) profile.lastName = formData.lastName.trim();
+      if (formData.headline.trim()) profile.headline = formData.headline.trim();
+      if (formData.bio.trim()) profile.bio = formData.bio.trim();
+      if (formData.currentRole.trim()) profile.currentJobTitle = formData.currentRole.trim();
+      if (formData.company.trim()) profile.currentCompany = formData.company.trim();
+      if (!Number.isNaN(years)) profile.yearsExperience = years;
+      if (formData.timezone) profile.timezone = formData.timezone;
+      if (Object.keys(profile).length > 0) await userApi.updateProfile(profile);
+
+      await mentorApi.become({
+        specializations: Array.from(new Set([...formData.expertiseAreas, ...formData.specializations, ...(formData.industry ? [formData.industry] : [])])),
+        ...(Number.isNaN(years) ? {} : { yearsExperience: years }),
+        ...(Number.isNaN(rate) ? {} : { hourlyRate: rate }),
+        isAvailable: true,
+      });
+      setIsSubmitted(true);
+    } catch (error) {
+      toast.error(errorMessage(error) || 'Your mentor profile did not save. Try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (isSubmitted) {
@@ -198,14 +246,21 @@ export default function BecomeMentorPage() {
             <CheckCircle className="w-10 h-10 text-green-500" />
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">
-            Application Submitted!
+            You&apos;re listed as a mentor
           </h1>
           <p className="text-slate-600 dark:text-slate-300 mb-6">
-            Thank you for applying to become a mentor on ATHENA. Our team will review
-            your application and get back to you within 3-5 business days.
+            Your mentor profile is live now. People can find you on the mentors page and ask for a session; nothing waits on a review.
           </p>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            In the meantime, make sure your profile is complete and up-to-date.
+          <div className="flex flex-wrap justify-center gap-3">
+            <Link href="/mentors" className="btn-primary">
+              See the mentors page
+            </Link>
+            <Link href="/dashboard/mentors" className="btn-outline">
+              Mentor dashboard
+            </Link>
+          </div>
+          <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
+            Paid sessions need payouts connected from the mentor dashboard. You can change your rate, expertise and availability there at any time.
           </p>
         </div>
       </div>
@@ -688,14 +743,17 @@ export default function BecomeMentorPage() {
                 onChange={(e) => updateFormData({ timezone: e.target.value })}
                 className="input-field"
               >
-                <option value="America/New_York">Eastern Time (ET)</option>
-                <option value="America/Chicago">Central Time (CT)</option>
-                <option value="America/Denver">Mountain Time (MT)</option>
-                <option value="America/Los_Angeles">Pacific Time (PT)</option>
-                <option value="Europe/London">GMT/London</option>
-                <option value="Europe/Paris">Central European (CET)</option>
+                <option value="Australia/Brisbane">Brisbane (AEST)</option>
+                <option value="Australia/Sydney">Sydney / Melbourne (AEST, AEDT)</option>
+                <option value="Australia/Adelaide">Adelaide (ACST)</option>
+                <option value="Australia/Perth">Perth (AWST)</option>
+                <option value="Australia/Darwin">Darwin (ACST)</option>
+                <option value="Australia/Hobart">Hobart (AEST, AEDT)</option>
+                <option value="Pacific/Auckland">Auckland (NZST)</option>
                 <option value="Asia/Singapore">Singapore (SGT)</option>
-                <option value="Australia/Sydney">Sydney (AEST)</option>
+                <option value="Europe/London">London (GMT, BST)</option>
+                <option value="America/New_York">New York (ET)</option>
+                <option value="America/Los_Angeles">Los Angeles (PT)</option>
               </select>
             </div>
           </div>
