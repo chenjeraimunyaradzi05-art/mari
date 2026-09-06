@@ -1,0 +1,82 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Weekly sweep, Monday 01:00 UTC
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan (TruffleHog)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository for verified secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified
+
+  dependency-audit:
+    name: npm audit — ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    # Informative for now: report vulnerabilities without blocking merges.
+    # Flip to `false` once the current backlog is triaged.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - athena-frontend
+          - app-backend
+          - athena-platform/server
+          - athena-platform/client
+          - auth-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Audit production dependencies (high+)
+        working-directory: ${{ matrix.project }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm audit --omit=dev --audit-level=high
+          else
+            echo "No package-lock.json in ${{ matrix.project }} — skipping"
+          fi
+
+  dead-secret-guard:
+    name: Guard against committed env files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail if real env files are tracked
+        run: |
+          set -e
+          # .env.example / .template / .sample are fine; real env files are not.
+          tracked=$(git ls-files | grep -E '(^|/)\.env(\.|$)' | grep -vE '\.(example|template|sample)$' || true)
+          if [ -n "$tracked" ]; then
+            echo "::error::Tracked environment files found (rotate their contents and remove from git):"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "No tracked env files."
