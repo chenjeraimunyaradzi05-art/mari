@@ -35,6 +35,15 @@ import { ChannelsScreen } from '../screens/ChannelsScreen';
 import { ApprenticeshipsScreen } from '../screens/ApprenticeshipsScreen';
 import { SkillsMarketplaceScreen } from '../screens/SkillsMarketplaceScreen';
 
+// Parity screens
+import { PostCommentsScreen } from '../screens/PostCommentsScreen';
+import { GroupsScreen } from '../screens/GroupsScreen';
+import { GroupDetailScreen } from '../screens/GroupDetailScreen';
+import { SafetyScreen } from '../screens/SafetyScreen';
+import { MentorsScreen } from '../screens/MentorsScreen';
+import { LearnScreen } from '../screens/LearnScreen';
+import { UpgradeScreen } from '../screens/UpgradeScreen';
+
 // Types
 export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList> | undefined;
@@ -50,6 +59,13 @@ export type RootStackParamList = {
   Applications: undefined;
   SavedJobs: undefined;
   HelpSupport: undefined;
+  PostComments: { postId: string };
+  Groups: undefined;
+  GroupDetail: { groupId: string; name?: string };
+  Safety: undefined;
+  Mentors: undefined;
+  Learn: undefined;
+  Upgrade: undefined;
 };
 
 export type AuthStackParamList = {
@@ -205,6 +221,13 @@ export function AppNavigator() {
             component={HelpSupportScreen}
             options={{ headerShown: true, title: 'Help & Support' }}
           />
+          <RootStack.Screen name="PostComments" component={PostCommentsScreen} options={{ headerShown: true, title: 'Comments' }} />
+          <RootStack.Screen name="Groups" component={GroupsScreen} options={{ headerShown: true, title: 'Groups' }} />
+          <RootStack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ headerShown: true, title: 'Group' }} />
+          <RootStack.Screen name="Safety" component={SafetyScreen} options={{ headerShown: true, title: 'Safety' }} />
+          <RootStack.Screen name="Mentors" component={MentorsScreen} options={{ headerShown: true, title: 'Mentors' }} />
+          <RootStack.Screen name="Learn" component={LearnScreen} options={{ headerShown: true, title: 'Learn' }} />
+          <RootStack.Screen name="Upgrade" component={UpgradeScreen} options={{ headerShown: true, title: 'Membership' }} />
         </>
       ) : (
         <RootStack.Screen name="Auth" component={AuthNavigator} />

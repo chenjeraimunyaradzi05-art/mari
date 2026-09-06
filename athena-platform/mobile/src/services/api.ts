@@ -185,15 +185,122 @@ export const postsApi = {
     api.post('/posts', data),
   like: (id: string) => api.post(`/posts/${id}/like`),
   unlike: (id: string) => api.delete(`/posts/${id}/like`),
+  comment: (id: string, content: string) => api.post(`/posts/${id}/comments`, { content }),
 };
 
 // Messages
 export const messagesApi = {
   getConversations: () => api.get('/messages/conversations'),
   getMessages: (conversationId: string) =>
-    api.get(`/messages/conversations/${conversationId}`),
+    api.get(`/messages/conversations/${conversationId}/messages`),
   send: (conversationId: string, content: string) =>
-    api.post(`/messages/conversations/${conversationId}`, { content }),
+    api.post(`/messages/conversations/${conversationId}/messages`, { content }),
   startConversation: (userId: string) =>
     api.post('/messages/conversations', { userId }),
+};
+
+/** The web app, for links that open a page rather than call the API. */
+export const WEB_URL: string = Constants.expoConfig?.extra?.webUrl || API_URL.replace(/\/api\/?$/, '').replace('://api.', '://');
+
+export interface FeedPost {
+  id: string;
+  content: string;
+  likeCount: number;
+  commentCount: number;
+  createdAt: string;
+  isLiked?: boolean;
+  author: { id?: string; displayName: string; avatar?: string | null; headline?: string | null };
+}
+
+export interface PostComment {
+  id: string;
+  content: string;
+  createdAt: string;
+  likeCount?: number;
+  isLiked?: boolean;
+  author: { id?: string; displayName: string; avatar?: string | null };
+  replies?: PostComment[];
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description?: string | null;
+  privacy?: string;
+  memberCount: number;
+  isMember: boolean;
+}
+
+export interface SafetySettings {
+  isSafeMode: boolean;
+  hideFromSearch: boolean;
+  allowMessages: boolean;
+  safeExitEnabled: boolean;
+  safeExitUrl?: string | null;
+  panicButtonEnabled: boolean;
+  activityLogEnabled: boolean;
+  disguisedAppIcon: boolean;
+  notificationsSafe: boolean;
+  emergencyContacts: Array<{ id: string; name: string; phone: string; relationship: string; notifyOnPanic?: boolean }>;
+}
+
+export interface Mentor {
+  id: string;
+  userId: string;
+  specializations?: string[] | null;
+  yearsExperience?: number | null;
+  hourlyRate?: number | string | null;
+  isAvailable?: boolean;
+  rating?: number | string | null;
+  bio?: string | null;
+  user?: { id?: string; displayName?: string | null; avatar?: string | null; headline?: string | null; bio?: string | null };
+}
+
+export interface Course {
+  id: string;
+  title: string;
+  description: string;
+  type?: string | null;
+  durationMonths?: number | null;
+  studyMode?: string[] | null;
+  organization?: { id: string; name: string; logo?: string | null } | null;
+}
+
+export const groupsApi = {
+  list: (params?: { q?: string }) => api.get('/groups', { params }),
+  get: (id: string) => api.get(`/groups/${id}`),
+  join: (id: string) => api.post(`/groups/${id}/join`),
+  leave: (id: string) => api.post(`/groups/${id}/leave`),
+  posts: (id: string) => api.get(`/groups/${id}/posts`),
+  post: (id: string, content: string) => api.post(`/groups/${id}/posts`, { content }),
+};
+
+export const safetyApi = {
+  settings: () => api.get('/safety/dv/settings'),
+  update: (updates: Partial<Omit<SafetySettings, 'emergencyContacts'>>) => api.put('/safety/dv/settings', updates),
+  enableSafeMode: () => api.post('/safety/dv/safe-mode'),
+  panic: () => api.post('/safety/dv/panic'),
+  addContact: (contact: { name: string; phone: string; relationship: string; email?: string; notifyOnPanic?: boolean }) =>
+    api.post('/safety/dv/emergency-contacts', contact),
+  removeContact: (contactId: string) => api.delete(`/safety/dv/emergency-contacts/${contactId}`),
+};
+
+export const mentorsApi = {
+  list: (params?: { search?: string; specialization?: string; available?: boolean; page?: number; limit?: number }) =>
+    api.get('/mentors', { params }),
+  get: (mentorId: string) => api.get(`/mentors/${mentorId}`),
+  book: (mentorId: string, data: { scheduledAt: string; durationMinutes?: number; note?: string }) =>
+    api.post(`/mentors/${mentorId}/book`, data),
+  sessions: () => api.get('/mentors/sessions'),
+};
+
+export const coursesApi = {
+  list: (params?: { search?: string; type?: string; page?: number; limit?: number }) => api.get('/courses', { params }),
+  mine: () => api.get('/courses/me'),
+  enrol: (courseId: string) => api.post(`/courses/${courseId}/enroll`),
+};
+
+export const billingApi = {
+  pricing: (region: string) => api.get('/payments/pricing', { params: { region } }),
+  subscription: () => api.get('/subscriptions/me'),
 };
