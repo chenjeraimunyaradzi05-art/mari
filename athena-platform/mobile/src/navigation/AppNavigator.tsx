@@ -42,6 +42,7 @@ import { GroupDetailScreen } from '../screens/GroupDetailScreen';
 import { SafetyScreen } from '../screens/SafetyScreen';
 import { MentorsScreen } from '../screens/MentorsScreen';
 import { LearnScreen } from '../screens/LearnScreen';
+import { CourseScreen } from '../screens/CourseScreen';
 import { UpgradeScreen } from '../screens/UpgradeScreen';
 
 // Types
@@ -65,6 +66,7 @@ export type RootStackParamList = {
   Safety: undefined;
   Mentors: undefined;
   Learn: undefined;
+  Course: { courseId: string; title?: string };
   Upgrade: undefined;
 };
 
@@ -227,6 +229,7 @@ export function AppNavigator() {
           <RootStack.Screen name="Safety" component={SafetyScreen} options={{ headerShown: true, title: 'Safety' }} />
           <RootStack.Screen name="Mentors" component={MentorsScreen} options={{ headerShown: true, title: 'Mentors' }} />
           <RootStack.Screen name="Learn" component={LearnScreen} options={{ headerShown: true, title: 'Learn' }} />
+          <RootStack.Screen name="Course" component={CourseScreen} options={({ route }) => ({ headerShown: true, title: route.params?.title ?? 'Course' })} />
           <RootStack.Screen name="Upgrade" component={UpgradeScreen} options={{ headerShown: true, title: 'Membership' }} />
         </>
       ) : (

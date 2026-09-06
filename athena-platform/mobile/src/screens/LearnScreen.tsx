@@ -3,9 +3,12 @@
  * catalogue to enrol from.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, TextInput, Alert, Linking } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { coursesApi, Course, WEB_URL, unwrapApiData } from '../services/api';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { coursesApi, Course, unwrapApiData } from '../services/api';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type Enrolled = Course & { enrollment?: { id: string; progress?: number | null } };
 
@@ -15,6 +18,7 @@ const detail = (course: Course) =>
     .join(' · ');
 
 export function LearnScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [mine, setMine] = useState<Enrolled[]>([]);
   const [catalogue, setCatalogue] = useState<Course[]>([]);
   const [search, setSearch] = useState('');
@@ -59,8 +63,9 @@ export function LearnScreen() {
 
   const renderCourse = ({ item }: { item: Course }) => {
     const enrolled = enrolledIds.has(item.id);
+    const open = () => navigation.navigate('Course', { courseId: item.id, title: item.title });
     return (
-      <View style={styles.card}>
+      <TouchableOpacity style={styles.card} onPress={open} activeOpacity={0.8}>
         <Text style={styles.title}>{item.title}</Text>
         {detail(item) ? <Text style={styles.meta}>{detail(item)}</Text> : null}
         {item.description ? (
@@ -69,15 +74,15 @@ export function LearnScreen() {
           </Text>
         ) : null}
         {enrolled ? (
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => Linking.openURL(`${WEB_URL}/learning`)}>
-            <Text style={styles.secondaryText}>Enrolled · open the classroom on the web</Text>
+          <TouchableOpacity style={styles.secondaryButton} onPress={open}>
+            <Text style={styles.secondaryText}>Enrolled · open the classroom</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={[styles.button, busyId === item.id && styles.disabled]} onPress={() => enrol(item)} disabled={busyId === item.id}>
             <Text style={styles.buttonText}>{busyId === item.id ? 'Enrolling…' : 'Enrol'}</Text>
           </TouchableOpacity>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -108,7 +113,7 @@ export function LearnScreen() {
               {mine.map((c) => {
                 const progress = Math.max(0, Math.min(100, Number(c.enrollment?.progress) || 0));
                 return (
-                  <View key={c.id} style={styles.mineRow}>
+                  <TouchableOpacity key={c.id} style={styles.mineRow} onPress={() => navigation.navigate('Course', { courseId: c.id, title: c.title })}>
                     <View style={styles.mineText}>
                       <Text style={styles.mineTitle}>{c.title}</Text>
                       <View style={styles.track}>
@@ -116,7 +121,7 @@ export function LearnScreen() {
                       </View>
                     </View>
                     <Text style={styles.progress}>{progress}%</Text>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>

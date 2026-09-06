@@ -47,6 +47,12 @@ describe('mobile API client', () => {
 
     await coursesApi.enrol('c9');
     expect(post).toHaveBeenCalledWith('/courses/c9/enroll');
+    await coursesApi.get('c9');
+    await coursesApi.classroom('c9');
+    await coursesApi.completeLesson('c9', 'l1');
+    expect(get).toHaveBeenCalledWith('/courses/c9');
+    expect(get).toHaveBeenCalledWith('/courses/c9/classroom');
+    expect(post).toHaveBeenCalledWith('/courses/c9/lessons/l1/complete');
 
     await billingApi.pricing('AU');
     expect(get).toHaveBeenCalledWith('/payments/pricing', { params: { region: 'AU' } });

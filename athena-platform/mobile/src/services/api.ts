@@ -263,6 +263,9 @@ export interface Course {
   type?: string | null;
   durationMonths?: number | null;
   studyMode?: string[] | null;
+  slug?: string;
+  providerName?: string | null;
+  cost?: number | null;
   organization?: { id: string; name: string; logo?: string | null } | null;
 }
 
@@ -298,6 +301,11 @@ export const coursesApi = {
   list: (params?: { search?: string; type?: string; page?: number; limit?: number }) => api.get('/courses', { params }),
   mine: () => api.get('/courses/me'),
   enrol: (courseId: string) => api.post(`/courses/${courseId}/enroll`),
+  // The course with its outline (lessons locked unless enrolled or preview).
+  get: (idOrSlug: string) => api.get(`/courses/${idOrSlug}`),
+  // Every lesson's content and the learner's progress; enrolled learners only.
+  classroom: (courseId: string) => api.get(`/courses/${courseId}/classroom`),
+  completeLesson: (courseId: string, lessonId: string) => api.post(`/courses/${courseId}/lessons/${lessonId}/complete`),
 };
 
 export const billingApi = {
