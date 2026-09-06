@@ -11,8 +11,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Briefcase, GraduationCap, ShieldCheck, Sparkles, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { ArrowRight, BookOpen, Bookmark, Briefcase, GraduationCap, LayoutDashboard, MessageCircle, PenSquare, Send, ShieldCheck, Sparkles, Users, Wallet, type LucideIcon } from 'lucide-react';
 import { courseApi, eventsApi, groupsApi, jobApi } from '@/lib/api';
+import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 
 const PHRASES = ['a new career', 'a fair salary', 'your own business', 'a mentor who gets it', 'a safer place to grow'];
@@ -76,17 +77,41 @@ function usePulse() {
   ].filter((t) => !t.error);
 }
 
+/** A member's quick doors, in place of the visitor's intents. */
+const QUICK: Array<{ href: string; label: string; hint: string; icon: LucideIcon }> = [
+  { href: '/dashboard', label: 'Your dashboard', hint: 'Everything of yours, in one place', icon: LayoutDashboard },
+  { href: '/dashboard/learn/my-courses', label: 'Your courses', hint: 'Pick up where you stopped', icon: BookOpen },
+  { href: '/dashboard/saved-jobs', label: 'Saved jobs', hint: 'The roles you kept', icon: Bookmark },
+  { href: '/dashboard/messages', label: 'Messages', hint: 'Your conversations', icon: MessageCircle },
+];
+
+function greeting(hour: number): string {
+  if (hour < 5) return 'Still up';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export function HomeHero() {
   const reduce = useReducedMotion();
+  const { isAuthenticated, user } = useAuth();
   const [phrase, setPhrase] = useState(0);
   const [intent, setIntent] = useState<Intent>(INTENTS[0]);
+  // The greeting depends on the viewer's clock, which the server does not
+  // have, so it is settled after mount to keep the first render identical.
+  const [hello, setHello] = useState('Welcome back');
   const pulse = usePulse();
+  const member = isAuthenticated && Boolean(user);
 
   useEffect(() => {
-    if (reduce) return;
+    setHello(greeting(new Date().getHours()));
+  }, []);
+
+  useEffect(() => {
+    if (reduce || member) return;
     const id = window.setInterval(() => setPhrase((p) => (p + 1) % PHRASES.length), 2600);
     return () => window.clearInterval(id);
-  }, [reduce]);
+  }, [reduce, member]);
 
   return (
     <div className="space-y-4">
@@ -100,46 +125,69 @@ export function HomeHero() {
         <div className="relative p-6 sm:p-8 lg:p-10">
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/80">
             <Sparkles className="h-3.5 w-3.5" />
-            Welcome to ATHENA
+            {member ? 'Welcome back' : 'Welcome to ATHENA'}
           </div>
 
-          {/* The phrase changes, the layout does not: every phrase is laid out in
-              the same grid cell, the inactive ones invisible, so the slot is
-              always as wide and as tall as the longest of them. */}
-          <h1 id="home-hero-title" className="mt-4 max-w-2xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-[2.6rem]">
-            <span className="block">Working towards</span>
-            <span className="inline-grid max-w-full align-top">
-              {PHRASES.map((p, i) => {
-                const active = i === phrase;
-                return (
-                  <motion.span
-                    key={p}
-                    aria-hidden={!active}
-                    initial={false}
-                    animate={reduce ? { opacity: active ? 1 : 0 } : { opacity: active ? 1 : 0, y: active ? 0 : 12, filter: active ? 'blur(0px)' : 'blur(4px)' }}
-                    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                    className={cn('col-start-1 row-start-1 whitespace-nowrap bg-[linear-gradient(90deg,#fda4af_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text text-transparent', !active && 'pointer-events-none')}
-                  >
-                    {p}?
-                  </motion.span>
-                );
-              })}
-            </span>
-            <span className="block">You don&rsquo;t have to do it alone.</span>
-          </h1>
+          {member ? (
+            <h1 id="home-hero-title" className="mt-4 max-w-2xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-[2.6rem]">
+              <span className="block">
+                {hello},{' '}
+                <span className="bg-[linear-gradient(90deg,#fda4af_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text text-transparent">{user?.firstName}</span>.
+              </span>
+              <span className="block">Where to today?</span>
+            </h1>
+          ) : (
+            /* The phrase changes, the layout does not: every phrase is laid out
+               in the same grid cell, the inactive ones invisible, so the slot is
+               always as wide and as tall as the longest of them. */
+            <h1 id="home-hero-title" className="mt-4 max-w-2xl text-3xl font-semibold leading-tight sm:text-4xl lg:text-[2.6rem]">
+              <span className="block">Working towards</span>
+              <span className="inline-grid max-w-full align-top">
+                {PHRASES.map((p, i) => {
+                  const active = i === phrase;
+                  return (
+                    <motion.span
+                      key={p}
+                      aria-hidden={!active}
+                      initial={false}
+                      animate={reduce ? { opacity: active ? 1 : 0 } : { opacity: active ? 1 : 0, y: active ? 0 : 12, filter: active ? 'blur(0px)' : 'blur(4px)' }}
+                      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                      className={cn('col-start-1 row-start-1 whitespace-nowrap bg-[linear-gradient(90deg,#fda4af_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text text-transparent', !active && 'pointer-events-none')}
+                    >
+                      {p}?
+                    </motion.span>
+                  );
+                })}
+              </span>
+              <span className="block">You don&rsquo;t have to do it alone.</span>
+            </h1>
+          )}
 
           <p className="mt-4 max-w-xl text-sm leading-6 text-white/85 sm:text-base">
-            Women here are changing careers, asking the awkward salary questions, starting things, and cheering each other on. Have a look around; no account needed.
+            {member ? 'Pick up where you left off, or see what has happened here since you were last in.' : 'Women here are changing careers, asking the awkward salary questions, starting things, and cheering each other on. Have a look around; no account needed.'}
           </p>
 
           <div className="mt-6 flex flex-wrap gap-2">
-            <Link href="/register" className="focusable group inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-violet-800 shadow-[0_10px_30px_-10px_rgba(255,255,255,0.8)] transition hover:bg-rose-50">
-              Join free
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
-            <Link href="/about" className="focusable rounded-full border border-white/40 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
-              See how it works
-            </Link>
+            {member ? (
+              <>
+                <Link href="/dashboard/create-post" className="focusable group inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-violet-800 shadow-[0_10px_30px_-10px_rgba(255,255,255,0.8)] transition hover:bg-rose-50">
+                  <PenSquare className="h-4 w-4" /> Share a win
+                </Link>
+                <Link href="/dashboard" className="focusable inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
+                  Your dashboard <ArrowRight className="h-4 w-4" />
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link href="/register" className="focusable group inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-violet-800 shadow-[0_10px_30px_-10px_rgba(255,255,255,0.8)] transition hover:bg-rose-50">
+                  Join free
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+                <Link href="/about" className="focusable rounded-full border border-white/40 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
+                  See how it works
+                </Link>
+              </>
+            )}
           </div>
 
           {pulse.length > 0 && (
@@ -163,6 +211,22 @@ export function HomeHero() {
         </div>
       </section>
 
+      {member ? (
+        <section aria-label="Your quick doors" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {QUICK.map((q) => (
+            <Link key={q.href} href={q.href} className="tile-glass group flex items-start gap-3 p-4">
+              <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 to-purple-600 text-white">
+                <q.icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-900 dark:text-white">{q.label}</span>
+                <span className="block text-xs text-slate-500 dark:text-slate-400">{q.hint}</span>
+              </span>
+              <Send className="ml-auto mt-1 h-3.5 w-3.5 flex-shrink-0 text-slate-300 transition group-hover:text-rose-500 dark:text-slate-600" />
+            </Link>
+          ))}
+        </section>
+      ) : (
       <section aria-label="What brings you here" className="glow-card rounded-2xl bg-white/80 p-4 backdrop-blur dark:bg-slate-900/60 sm:p-5">
         <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="What brings you here">
           {INTENTS.map((item) => {
@@ -226,6 +290,7 @@ export function HomeHero() {
           })}
         </div>
       </section>
+      )}
     </div>
   );
 }
