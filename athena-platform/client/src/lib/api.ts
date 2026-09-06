@@ -370,6 +370,24 @@ export const courseApi = {
   enroll: (courseId: string) => api.post(`/courses/${courseId}/enroll`),
 
   getRecommendations: () => api.get('/courses/recommendations/for-me'),
+
+  // The provider's side: courses, drafts included; create, edit, publish.
+  byOrganization: (orgId: string) => api.get(`/courses/by-organization/${orgId}`),
+  create: (data: { title: string; description: string; organizationId?: string; type?: string; durationMonths?: number | null; cost?: number | null; studyMode?: string[] }) =>
+    api.post('/courses', data),
+  update: (courseId: string, data: Record<string, unknown>) => api.patch(`/courses/${courseId}`, data),
+  builder: (courseId: string) => api.get(`/courses/${courseId}/builder`),
+  addModule: (courseId: string, data: { title: string; description?: string }) => api.post(`/courses/${courseId}/modules`, data),
+  updateModule: (courseId: string, moduleId: string, data: Record<string, unknown>) => api.patch(`/courses/${courseId}/modules/${moduleId}`, data),
+  deleteModule: (courseId: string, moduleId: string) => api.delete(`/courses/${courseId}/modules/${moduleId}`),
+  addLesson: (courseId: string, moduleId: string, data: Record<string, unknown>) => api.post(`/courses/${courseId}/modules/${moduleId}/lessons`, data),
+  updateLesson: (courseId: string, lessonId: string, data: Record<string, unknown>) => api.patch(`/courses/${courseId}/lessons/${lessonId}`, data),
+  deleteLesson: (courseId: string, lessonId: string) => api.delete(`/courses/${courseId}/lessons/${lessonId}`),
+
+  // The learner's side: the classroom, ticking lessons off, and certificates.
+  classroom: (courseId: string) => api.get(`/courses/${courseId}/classroom`),
+  completeLesson: (courseId: string, lessonId: string) => api.post(`/courses/${courseId}/lessons/${lessonId}/complete`),
+  certificate: (code: string) => api.get(`/courses/certificates/${code}`),
 };
 
 // ============================================

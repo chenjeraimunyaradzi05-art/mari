@@ -43,6 +43,16 @@ interface CourseDetails {
     progress?: number | null;
   } | null;
   isActive?: boolean;
+  // Lessons hosted on ATHENA. Content is present only for enrolled learners
+  // (and preview lessons); the rest come back locked.
+  modules?: Array<{
+    id: string;
+    title: string;
+    description?: string | null;
+    lessons: Array<{ id: string; title: string; type: string; durationMinutes?: number | null; isPreview: boolean; locked?: boolean }>;
+  }>;
+  progress?: { total: number; completed: number; percent: number; certificate?: { code: string; issuedAt: string } | null } | null;
+  canEdit?: boolean;
 }
 
 function toStringList(value: unknown): string[] {
@@ -142,8 +152,12 @@ export default function CourseDetailPage() {
   const duration = formatDuration(displayCourse.durationMonths);
   const providerName = displayCourse.organization?.name || displayCourse.providerName || 'Provider not listed';
   const typeLabel = displayCourse.type ? formatLabel(displayCourse.type) : 'Course';
-  const progress = displayCourse.enrollment?.progress ?? 0;
+  const progress = displayCourse.progress?.percent ?? displayCourse.enrollment?.progress ?? 0;
   const isEnrolled = Boolean(displayCourse.enrollment);
+  const modules = displayCourse.modules ?? [];
+  const lessonCount = modules.reduce((n, m) => n + m.lessons.length, 0);
+  const hasClassroom = lessonCount > 0;
+  const certificate = displayCourse.progress?.certificate ?? null;
 
   // Courses here are provider-run programs, not lessons hosted on ATHENA, so an
   // enrolled learner continues on the provider's own page.
@@ -294,15 +308,39 @@ export default function CourseDetailPage() {
             </div>
           )}
 
-          {activeTab === 'curriculum' && (
+          {activeTab === 'curriculum' && !hasClassroom && (
             <div className="card text-center py-12">
               <BookOpen className="w-12 h-12 text-slate-400 mx-auto mb-4" />
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
                 Curriculum details are not published yet
               </h2>
               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                The current course API provides program-level details only. Lesson modules will appear here when the provider publishes them.
+                Lesson modules will appear here when the provider publishes them.
               </p>
+            </div>
+          )}
+
+          {activeTab === 'curriculum' && hasClassroom && (
+            <div className="space-y-4">
+              {modules.map((module, index) => (
+                <div key={module.id} className="card">
+                  <h2 className="font-semibold text-slate-900 dark:text-white">
+                    {index + 1}. {module.title}
+                  </h2>
+                  {module.description && <p className="mt-1 text-sm text-slate-500">{module.description}</p>}
+                  <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+                    {module.lessons.map((lesson) => (
+                      <li key={lesson.id} className="flex items-center gap-3 py-2 text-sm">
+                        <span className="text-slate-400">{lesson.type.toLowerCase()}</span>
+                        <span className="flex-1 text-slate-800 dark:text-slate-200">{lesson.title}</span>
+                        {lesson.isPreview && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-700">preview</span>}
+                        {lesson.durationMinutes ? <span className="text-xs text-slate-500">{lesson.durationMinutes} min</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {!isEnrolled && <p className="text-sm text-slate-500">Enrol to open every lesson in the classroom. Preview lessons are open to everyone.</p>}
             </div>
           )}
 
@@ -370,7 +408,20 @@ export default function CourseDetailPage() {
                   <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
                 </div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">{progress}% complete</p>
-                {providerSlug ? (
+                {certificate && (
+                  <Link href={`/certificates/${certificate.code}`} className="flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800 hover:underline dark:bg-emerald-900/20 dark:text-emerald-200">
+                    <Award className="w-4 h-4" /> Your certificate
+                  </Link>
+                )}
+                {hasClassroom ? (
+                  <Link
+                    href={`/dashboard/learn/${displayCourse.id}/classroom`}
+                    className="w-full btn-primary py-3 flex items-center justify-center space-x-2"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                    <span>{progress > 0 ? 'Continue learning' : 'Start learning'}</span>
+                  </Link>
+                ) : providerSlug ? (
                   <Link
                     href={`/dashboard/learn/providers/${providerSlug}`}
                     className="w-full btn-primary py-3 flex items-center justify-center space-x-2"
@@ -407,6 +458,14 @@ export default function CourseDetailPage() {
                 <Award className="w-5 h-5" />
                 <span>{isEnrolling ? 'Enrolling...' : 'Enroll Now'}</span>
               </button>
+            )}
+            {displayCourse.canEdit && displayCourse.organization?.id && (
+              <Link
+                href={`/employer/organizations/${displayCourse.organization.id}/education/courses/${displayCourse.id}`}
+                className="mt-3 block text-center text-sm text-primary-600 hover:underline"
+              >
+                Edit this course
+              </Link>
             )}
 
             <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700 space-y-3 text-sm text-slate-600 dark:text-slate-300">

@@ -723,6 +723,8 @@ model User {
   vendorReviews          VendorReview[]
   rfps                   Rfp[]
   ownedVendors           Vendor[]  @relation("VendorOwner")
+  lessonProgress         LessonProgress[]
+  courseCertificates     CourseCertificate[]
 
   // Phase 10: Housing & Financial Security
   housingInquiries      HousingInquiry[]
@@ -2455,9 +2457,86 @@ model Course {
 
   enrollments           CourseEnrollment[]
   educationApplications EducationApplication[]
+  modules               CourseModule[]
+  certificates          CourseCertificate[]
 
   @@index([organizationId])
   @@index([type])
+}
+
+// A course can carry its own lessons on ATHENA: modules of video, article and
+// resource lessons that the provider's team builds, a classroom an enrolled
+// learner works through, and a certificate with a public code once every
+// lesson is done.
+enum CourseLessonType {
+  VIDEO
+  ARTICLE
+  RESOURCE
+}
+
+model CourseModule {
+  id          String  @id @default(uuid())
+  courseId    String
+  title       String
+  description String?
+  position    Int     @default(0)
+
+  course  Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons CourseLesson[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId, position])
+}
+
+model CourseLesson {
+  id              String           @id @default(uuid())
+  moduleId        String
+  title           String
+  type            CourseLessonType @default(ARTICLE)
+  content         String?
+  videoUrl        String?
+  resourceUrl     String?
+  durationMinutes Int?
+  // A preview lesson is open to anyone looking at the course.
+  isPreview       Boolean          @default(false)
+  position        Int              @default(0)
+
+  module   CourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progress LessonProgress[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([moduleId, position])
+}
+
+model LessonProgress {
+  id          String   @id @default(uuid())
+  lessonId    String
+  userId      String
+  completedAt DateTime @default(now())
+
+  lesson CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonId, userId])
+  @@index([userId])
+}
+
+model CourseCertificate {
+  id       String   @id @default(uuid())
+  courseId String
+  userId   String
+  code     String   @unique
+  issuedAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([userId])
 }
 
 model CourseEnrollment {

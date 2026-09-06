@@ -230,6 +230,18 @@ export default function OrganizationDashboardPage() {
         {(organization.type === 'university' || organization.type === 'tafe') && (
           <>
             <Link
+              href={`/employer/organizations/${orgId}/education/courses`}
+              className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-purple-600" />
+                  <span className="font-medium text-slate-900 dark:text-white">Courses</span>
+                </div>
+                <ChevronRight className="h-5 w-5 text-slate-400" />
+              </div>
+            </Link>
+            <Link
               href={`/employer/organizations/${orgId}/education/applications`}
               className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
             >
