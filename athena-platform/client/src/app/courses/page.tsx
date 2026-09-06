@@ -141,7 +141,7 @@ export default function CoursesPage() {
             <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {items.map((course) => (
                 <li key={course.id}>
-                  <Link href={`/dashboard/learn/${course.id}`} className="surface block h-full p-5 transition hover:shadow-md">
+                  <Link href={`/courses/${course.slug}`} className="surface block h-full p-5 transition hover:shadow-md">
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="font-semibold text-slate-900 dark:text-white">{course.title}</h3>
                       {course.type && <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{label(course.type)}</span>}

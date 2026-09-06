@@ -93,6 +93,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }
 
   try {
+    const courses = await fetchPages<{ slug: string; updatedAt?: string }>('/courses');
+    for (const course of courses) {
+      entries.push({ url: `${siteUrl}/courses/${encodeURIComponent(course.slug)}`, lastModified: course.updatedAt ? new Date(course.updatedAt) : undefined, changeFrequency: 'monthly', priority: 0.6 });
+    }
+  } catch {
+    // As above.
+  }
+
+  try {
     const jobs = await fetchPages<{ id: string; updatedAt?: string }>('/jobs');
     for (const job of jobs) {
       entries.push({ url: `${siteUrl}/jobs/${encodeURIComponent(job.id)}`, lastModified: job.updatedAt ? new Date(job.updatedAt) : undefined, changeFrequency: 'weekly', priority: 0.6 });

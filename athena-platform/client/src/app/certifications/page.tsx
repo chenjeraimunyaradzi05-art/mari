@@ -80,7 +80,7 @@ export default function CertificationsPage() {
         kicker="Learning"
         title="Certificates"
         description="A certificate on ATHENA is issued when every lesson of a course is complete. Each one carries a ten-character code anyone can check, so an employer can see it is real without asking you."
-        primaryAction={isAuthenticated ? { label: 'Courses you have started', href: '/dashboard/learn/my-courses' } : { label: 'Sign in to see yours', href: '/login?next=/certifications' }}
+        primaryAction={isAuthenticated ? { label: 'Courses you have started', href: '/dashboard/learn/my-courses' } : { label: 'Sign in to see yours', href: '/login?redirect=/certifications' }}
         secondaryAction={{ label: 'Browse all courses', href: '/courses' }}
       />
 
@@ -138,7 +138,7 @@ export default function CertificationsPage() {
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {courses.data!.map((course) => (
               <li key={course.id}>
-                <Link href={`/dashboard/learn/${course.id}`} className="surface block h-full p-5 transition hover:shadow-md">
+                <Link href={`/courses/${course.slug}`} className="surface block h-full p-5 transition hover:shadow-md">
                   <h3 className="font-semibold text-slate-900 dark:text-white">{course.title}</h3>
                   <p className="text-sm text-slate-500">{course.providerName || course.organization?.name || 'Provider not stated'}</p>
                   <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">{course.description}</p>
