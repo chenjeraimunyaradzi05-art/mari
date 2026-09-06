@@ -1,9 +1,17 @@
 'use client';
 
+/**
+ * Three open roles, as cards someone would want to tap: the employer's mark,
+ * the title, where it is, and the pay in a pill because every job here shows
+ * it. Renders nothing at all when there are no jobs, rather than a promise.
+ */
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Briefcase, MapPin, Wifi } from 'lucide-react';
+import { ArrowRight, Briefcase, Clock, MapPin, Wifi } from 'lucide-react';
 import { jobApi } from '@/lib/api';
+import { cn } from '@/lib/utils';
+import { Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
 
 type Job = {
   id: string;
@@ -22,9 +30,7 @@ type Job = {
 function salaryLabel(job: Job): string | null {
   if (job.showSalary === false) return null;
   const { salaryMin: min, salaryMax: max } = job;
-  const fmt = (n: number) =>
-    n >= 1000 ? `${Math.round(n / 1000)}k` : new Intl.NumberFormat('en-AU').format(n);
-
+  const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : new Intl.NumberFormat('en-AU').format(n));
   if (typeof min === 'number' && typeof max === 'number') return `$${fmt(min)} – $${fmt(max)}`;
   if (typeof min === 'number') return `From $${fmt(min)}`;
   if (typeof max === 'number') return `Up to $${fmt(max)}`;
@@ -36,8 +42,10 @@ function locationLabel(job: Job): string {
   return parts.length > 0 ? parts.join(', ') : job.country || 'Location flexible';
 }
 
+const typeLabel = (type?: string | null) => (type ? type.replace(/[_-]+/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : null);
+
 function initials(name?: string | null): string {
-  if (!name) return 'ATH';
+  if (!name) return 'A';
   return name
     .split(/\s+/)
     .slice(0, 2)
@@ -52,7 +60,6 @@ export function JobSpotlight() {
 
   useEffect(() => {
     let cancelled = false;
-
     jobApi
       .search({ limit: 3 })
       .then((response) => {
@@ -64,7 +71,6 @@ export function JobSpotlight() {
       .catch(() => {
         if (!cancelled) setJobs([]);
       });
-
     return () => {
       cancelled = true;
     };
@@ -73,77 +79,67 @@ export function JobSpotlight() {
   if (jobs !== null && jobs.length === 0) return null;
 
   return (
-    <section className="surface p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
-            <Briefcase className="h-4 w-4 text-rose-500" />
-            <h2 className="rail-title">Jobs worth a look</h2>
-          </div>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            {total !== null
-              ? `${total} of them right now — and every one shows the salary.`
-              : 'From employers who tell you the salary up front.'}
-          </p>
-        </div>
-        <Link
-          href="/jobs"
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 dark:text-rose-400"
-        >
-          Browse all jobs <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
-      </div>
-
-      <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {jobs === null
-          ? [0, 1, 2].map((i) => (
-              <li
-                key={i}
-                className="h-[92px] animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800"
-              />
-            ))
-          : jobs.map((job) => {
-              const salary = salaryLabel(job);
-              return (
-                <li key={job.id}>
-                  <Link
-                    href={`/jobs/${job.id}`}
-                    className="tile-soft flex h-full gap-3 p-4"
-                  >
-                    <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-purple-600 text-[11px] font-bold text-white">
-                      {initials(job.organization?.name)}
+    <Rail
+      icon={Briefcase}
+      tone="rose"
+      kicker="Jobs"
+      title="Jobs worth a look"
+      titleId="home-jobs-title"
+      description={total !== null ? `${total.toLocaleString('en-AU')} open right now, and every one shows the pay.` : 'From employers who tell you the pay up front.'}
+      cta={{ href: '/jobs', label: 'Browse all jobs' }}
+    >
+      <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {jobs === null ? (
+          <SkeletonTiles count={3} height="h-44" />
+        ) : (
+          jobs.map((job, index) => {
+            const salary = salaryLabel(job);
+            const type = typeLabel(job.type);
+            return (
+              <StaggerItem key={job.id}>
+                <Link href={`/jobs/${job.id}`} className="tile-glass group flex h-full flex-col p-4">
+                  <span className="flex items-start justify-between gap-3">
+                    {job.organization?.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- employer logos come from the media store
+                      <img src={job.organization.logo} alt="" className="h-11 w-11 rounded-xl object-cover" />
+                    ) : (
+                      <span className={cn('flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br text-xs font-bold text-white', TILE_GRADIENTS[index % TILE_GRADIENTS.length])}>{initials(job.organization?.name)}</span>
+                    )}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                      {job.isRemote ? (
+                        <>
+                          <Wifi className="h-3 w-3" /> Remote
+                        </>
+                      ) : (
+                        <>
+                          <MapPin className="h-3 w-3" /> {locationLabel(job)}
+                        </>
+                      )}
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
-                        {job.title}
+                  </span>
+                  <span className="mt-3 line-clamp-2 text-[15px] font-semibold leading-snug text-slate-900 dark:text-white">{job.title}</span>
+                  <span className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                    {job.organization?.name || 'ATHENA employer'}
+                    {type ? ` · ${type}` : ''}
+                  </span>
+                  <span className="mt-auto flex items-center justify-between gap-2 pt-4">
+                    {salary ? (
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{salary}</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                        <Clock className="h-3 w-3" /> Pay on the listing
                       </span>
-                      <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
-                        {job.organization?.name || 'ATHENA employer'}
-                      </span>
-                      <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-                        <span className="inline-flex items-center gap-1">
-                          {job.isRemote ? (
-                            <>
-                              <Wifi className="h-3 w-3" /> Remote
-                            </>
-                          ) : (
-                            <>
-                              <MapPin className="h-3 w-3" /> {locationLabel(job)}
-                            </>
-                          )}
-                        </span>
-                        {salary && (
-                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                            {salary}
-                          </span>
-                        )}
-                      </span>
+                    )}
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition-colors group-hover:bg-rose-500 dark:bg-white dark:text-slate-900 dark:group-hover:bg-rose-400">
+                      <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                     </span>
-                  </Link>
-                </li>
-              );
-            })}
-      </ul>
-    </section>
+                  </span>
+                </Link>
+              </StaggerItem>
+            );
+          })
+        )}
+      </StaggerList>
+    </Rail>
   );
 }

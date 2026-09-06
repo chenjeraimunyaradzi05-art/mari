@@ -536,3 +536,65 @@ select:focus-visible,
     animation: none;
   }
 }
+
+/* ── Home rails: glass tiles ──────────────────────────────────────────────── */
+/* The card the rails share: frosted, faintly lifted, with a rose ring and a
+   violet glow on hover. Dark mode is styled separately, the same reason
+   .tile-soft is: a dark: variant inside @apply loses the cascade. */
+
+.tile-glass {
+  position: relative;
+  display: block;
+  border-radius: 1rem;
+  border: 1px solid rgb(255 255 255 / 0.75);
+  background: rgb(255 255 255 / 0.72);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 10px 30px -22px rgb(168 85 247 / 0.35);
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
+
+.tile-glass:hover,
+.tile-glass:focus-visible {
+  transform: translateY(-3px);
+  border-color: rgb(244 114 182 / 0.55);
+  box-shadow:
+    0 18px 40px -22px rgb(168 85 247 / 0.55),
+    0 0 0 1px rgb(244 114 182 / 0.2);
+}
+
+.dark .tile-glass {
+  border-color: rgb(255 255 255 / 0.08);
+  background: rgb(15 23 42 / 0.55);
+  box-shadow: 0 10px 30px -22px rgb(0 0 0 / 0.6);
+}
+
+.dark .tile-glass:hover,
+.dark .tile-glass:focus-visible {
+  border-color: rgb(192 132 252 / 0.45);
+  box-shadow: 0 18px 40px -20px rgb(168 85 247 / 0.6);
+}
+
+/* The rails' own container: a rounded glass panel with the gradient edge. */
+.rail-panel {
+  border-radius: 1.5rem;
+  background: rgb(255 255 255 / 0.65);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.dark .rail-panel {
+  background: rgb(15 23 42 / 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-glass:hover,
+  .tile-glass:focus-visible {
+    transform: none;
+  }
+}
