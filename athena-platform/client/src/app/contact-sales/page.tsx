@@ -1,4 +1,5 @@
 import { contactLink } from '@/lib/contact';
+import LeadForm from '@/components/marketing/LeadForm';
 
 type ContactSalesPageProps = {
   searchParams: Promise<{ intent?: string }>;
@@ -35,6 +36,11 @@ export default async function ContactSalesPage({ searchParams }: ContactSalesPag
           {salesLink.label}
         </a>
         <p className="mt-3 text-sm text-muted-foreground">{copy.note}</p>
+      </div>
+      <div className="mt-6 rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <h2 className="text-lg font-semibold">Or leave your details here</h2>
+        <p className="mb-4 mt-1 text-sm text-muted-foreground">Goes straight to the team. Same thing as the email, without opening your mail client.</p>
+        <LeadForm source="CONTACT_SALES" fixedInterest={intent === 'funding' ? 'funding' : 'sales'} submitLabel={intent === 'funding' ? 'Send funding enquiry' : 'Send enquiry'} />
       </div>
     </div>
   );

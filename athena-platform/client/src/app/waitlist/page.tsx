@@ -1,20 +1,19 @@
 'use client';
 
+/**
+ * The waitlist. A signup is a Lead the marketing hub can see, and the person
+ * is told their real place in the queue rather than a made-up one.
+ */
+
 import { useState } from 'react';
 import Link from 'next/link';
-import { Sparkles, ArrowRight, CheckCircle, Bell, Mail, Briefcase, GraduationCap, Users, Star } from 'lucide-react';
+import { Sparkles, CheckCircle, Bell, Briefcase, Users, Star } from 'lucide-react';
+import LeadForm from '@/components/marketing/LeadForm';
+
+const INTERESTS = ['AI job matching', 'Finding mentors', 'Skills and learning', 'AI career tools', 'Professional networking', 'Starting a business', 'Everything'];
 
 export default function WaitlistPage() {
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [interest, setInterest] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Simulate submission
-    setSubmitted(true);
-  };
+  const [done, setDone] = useState<{ position: number | null; email: string } | null>(null);
 
   const benefits = [
     { icon: Star, title: 'Early Access', description: 'Be first to try new AI features and tools' },
@@ -23,13 +22,8 @@ export default function WaitlistPage() {
     { icon: Users, title: 'Founding Community', description: 'Join our exclusive early adopter community' },
   ];
 
-  const stats = [
-    { value: '25,000+', label: 'On Waitlist' },
-    { value: '500+', label: 'Companies Interested' },
-    { value: '95%', label: 'Satisfaction Rate' },
-  ];
-
-  if (submitted) {
+  if (done) {
+    const shareUrl = typeof window !== 'undefined' ? window.location.origin + '/waitlist' : 'https://athena.com/waitlist';
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 flex items-center justify-center px-4">
         <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl p-8 text-center shadow-2xl">
@@ -38,30 +32,25 @@ export default function WaitlistPage() {
           </div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">You&apos;re on the list!</h2>
           <p className="text-slate-600 dark:text-slate-400 mb-6">
-            Thanks for joining! We&apos;ll notify you at <span className="font-medium text-slate-900 dark:text-white">{email}</span> when it&apos;s your turn.
+            We&apos;ll email <span className="font-medium text-slate-900 dark:text-white">{done.email}</span> when it&apos;s your turn.
           </p>
-          <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 mb-6">
-            <p className="text-sm text-slate-600 dark:text-slate-400">Your position:</p>
-            <p className="text-3xl font-bold text-primary-600">#25,847</p>
-          </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-            Share with friends to move up the list!
-          </p>
+          {done.position != null && (
+            <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 mb-6">
+              <p className="text-sm text-slate-600 dark:text-slate-400">Your place in the queue:</p>
+              <p className="text-3xl font-bold text-primary-600">#{done.position.toLocaleString('en-AU')}</p>
+            </div>
+          )}
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Know someone who should be here too?</p>
           <div className="flex gap-3 justify-center">
             <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent('I just joined the ATHENA waitlist, the life operating system for women.')}&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin + '/waitlist' : 'https://athena.com/waitlist')}`}
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent('I just joined the ATHENA waitlist, the life operating system for women.')}&url=${encodeURIComponent(shareUrl)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
             >
               Share on X
             </a>
-            <a
-              href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin + '/waitlist' : 'https://athena.com/waitlist')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm hover:bg-blue-800"
-            >
+            <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm hover:bg-blue-800">
               Share on LinkedIn
             </a>
           </div>
@@ -75,7 +64,6 @@ export default function WaitlistPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      {/* Hero */}
       <section className="relative bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
         <div className="container mx-auto px-4 py-20 relative z-10">
@@ -84,98 +72,36 @@ export default function WaitlistPage() {
               <Sparkles className="w-5 h-5" />
               <span className="text-sm font-medium">Limited Early Access</span>
             </div>
-            <h1 className="text-4xl md:text-5xl font-bold mb-6">
-              Join the Future of Career Development
-            </h1>
-            <p className="text-xl text-primary-100 mb-8 max-w-2xl mx-auto">
-              Be among the first to experience AI-powered career matching, personalized mentorship, and tools that will transform how you find your dream job.
+            <h1 className="text-4xl md:text-5xl font-bold mb-6">Join the Future of Career Development</h1>
+            <p className="text-xl text-primary-100 mb-4 max-w-2xl mx-auto">
+              Be among the first to experience AI-powered career matching, personalised mentorship, and tools that will transform how you find your dream job.
             </p>
-            
-            {/* Stats */}
-            <div className="flex justify-center gap-8 mb-12">
-              {stats.map((stat) => (
-                <div key={stat.label} className="text-center">
-                  <div className="text-2xl font-bold">{stat.value}</div>
-                  <div className="text-sm text-primary-200">{stat.label}</div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </section>
 
-      {/* Form Section */}
-      <section className="container mx-auto px-4 -mt-16 relative z-20 pb-16">
+      <section className="container mx-auto px-4 -mt-10 relative z-20 pb-16">
         <div className="max-w-xl mx-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-200 dark:border-slate-700">
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 text-center">
-              Reserve Your Spot
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="Jane Doe"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="jane@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  What interests you most?
-                </label>
-                <select
-                  value={interest}
-                  onChange={(e) => setInterest(e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                >
-                  <option value="">Select an option</option>
-                  <option value="jobs">AI Job Matching</option>
-                  <option value="mentors">Finding Mentors</option>
-                  <option value="learning">Skills & Learning</option>
-                  <option value="ai-tools">AI Career Tools</option>
-                  <option value="networking">Professional Networking</option>
-                  <option value="all">Everything!</option>
-                </select>
-              </div>
-              <button
-                type="submit"
-                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition flex items-center justify-center gap-2"
-              >
-                Join Waitlist
-                <ArrowRight className="w-5 h-5" />
-              </button>
-            </form>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 text-center">Reserve Your Spot</h2>
+            <LeadForm source="WAITLIST" variant="waitlist" interestOptions={INTERESTS} submitLabel="Join Waitlist" onDone={setDone} />
             <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-4">
-              By joining, you agree to our Terms of Service and Privacy Policy. No spam, ever.
+              By joining, you agree to our{' '}
+              <Link href="/terms" className="underline">
+                Terms of Service
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="underline">
+                Privacy Policy
+              </Link>
+              . No spam, ever.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Benefits */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
-          Early Access Benefits
-        </h2>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">Early Access Benefits</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
           {benefits.map((benefit) => (
             <div key={benefit.title} className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 text-center">
@@ -186,27 +112,6 @@ export default function WaitlistPage() {
               <p className="text-sm text-slate-600 dark:text-slate-400">{benefit.description}</p>
             </div>
           ))}
-        </div>
-      </section>
-
-      {/* Testimonials */}
-      <section className="bg-white dark:bg-slate-800 py-16">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
-            What Early Users Say
-          </h2>
-          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {[
-              { quote: "The AI matching is incredible. Found my dream job in 2 weeks!", author: "Sarah K., Product Manager" },
-              { quote: "My mentor helped me negotiate a 40% salary increase.", author: "Mike T., Software Engineer" },
-              { quote: "The resume optimizer got me 3x more callbacks.", author: "Emily R., Marketing Director" },
-            ].map((testimonial, i) => (
-              <div key={i} className="bg-slate-50 dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
-                <p className="text-slate-700 dark:text-slate-300 mb-4">&ldquo;{testimonial.quote}&rdquo;</p>
-                <p className="text-sm font-medium text-slate-900 dark:text-white">{testimonial.author}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
     </div>

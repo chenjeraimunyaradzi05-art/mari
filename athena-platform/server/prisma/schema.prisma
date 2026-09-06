@@ -533,12 +533,13 @@ enum BookingStatus {
 // ===========================================
 
 model User {
-  id              String    @id @default(uuid())
-  email           String    @unique
-  googleId        String?   @unique
-  facebookId      String?   @unique
+  bankConnections BankConnection[]
+  id              String           @id @default(uuid())
+  email           String           @unique
+  googleId        String?          @unique
+  facebookId      String?          @unique
   passwordHash    String?
-  emailVerified   Boolean   @default(false)
+  emailVerified   Boolean          @default(false)
   emailVerifiedAt DateTime?
 
   // Profile
@@ -672,22 +673,22 @@ model User {
   businessRegistrations BusinessRegistration[]
 
   // Creator Economy
-  giftBalance          Int                   @default(0) // Gift points balance
-  giftBalancePurchases GiftBalancePurchase[]
-  giftsSent            GiftTransaction[]     @relation("GiftsSent")
-  giftsReceived        GiftTransaction[]     @relation("GiftsReceived")
-  audioTracks          AudioTrack[]          @relation("AudioTracksCreated")
-  liveStreams          LiveStream[]
-  liveStreamMessages   LiveStreamMessage[]
-  pollVotes            PollVote[]
-  commentLikes         CommentLike[]
-  statusViews          StatusView[]
-  savedCollections     SavedCollection[]
-  storyHighlights      StoryHighlight[]
-  followRequestsSent     FollowRequest[] @relation("FollowRequestsSent")
-  followRequestsReceived FollowRequest[] @relation("FollowRequestsReceived")
-  closeFriends           CloseFriend[]   @relation("CloseFriendsOwner")
-  closeFriendOf          CloseFriend[]   @relation("CloseFriendsMember")
+  giftBalance            Int                   @default(0) // Gift points balance
+  giftBalancePurchases   GiftBalancePurchase[]
+  giftsSent              GiftTransaction[]     @relation("GiftsSent")
+  giftsReceived          GiftTransaction[]     @relation("GiftsReceived")
+  audioTracks            AudioTrack[]          @relation("AudioTracksCreated")
+  liveStreams            LiveStream[]
+  liveStreamMessages     LiveStreamMessage[]
+  pollVotes              PollVote[]
+  commentLikes           CommentLike[]
+  statusViews            StatusView[]
+  savedCollections       SavedCollection[]
+  storyHighlights        StoryHighlight[]
+  followRequestsSent     FollowRequest[]       @relation("FollowRequestsSent")
+  followRequestsReceived FollowRequest[]       @relation("FollowRequestsReceived")
+  closeFriends           CloseFriend[]         @relation("CloseFriendsOwner")
+  closeFriendOf          CloseFriend[]         @relation("CloseFriendsMember")
   postDrafts             PostDraft[]
 
   // Gamification
@@ -722,7 +723,7 @@ model User {
   investorIntroductions  InvestorIntroduction[]
   vendorReviews          VendorReview[]
   rfps                   Rfp[]
-  ownedVendors           Vendor[]  @relation("VendorOwner")
+  ownedVendors           Vendor[]                @relation("VendorOwner")
   lessonProgress         LessonProgress[]
   courseCertificates     CourseCertificate[]
 
@@ -760,7 +761,7 @@ model User {
   safetySettings UserSafetySettings?
 
   // Push notification tokens
-  pushTokens PushToken[]
+  pushTokens      PushToken[]
   dvSafetyProfile DvSafetyProfile?
 
   // Stripe Connect (Creator/Mentor payouts)
@@ -880,18 +881,18 @@ model PushToken {
 }
 
 model EscrowPayment {
-  id                    String    @id @default(uuid())
+  id                    String        @id @default(uuid())
   buyerId               String
-  buyer                 User      @relation("EscrowBuyer", fields: [buyerId], references: [id])
+  buyer                 User          @relation("EscrowBuyer", fields: [buyerId], references: [id])
   sellerId              String
-  seller                User      @relation("EscrowSeller", fields: [sellerId], references: [id])
+  seller                User          @relation("EscrowSeller", fields: [sellerId], references: [id])
   amount                Int // in cents
-  platformFee           Int       @default(0)
-  currency              String    @default("AUD")
-  status                String    @default("PENDING") // PENDING, AUTHORIZED, CAPTURED, REFUNDED, FAILED, CANCELED
-  stripePaymentIntentId String?   @unique
+  platformFee           Int           @default(0)
+  currency              String        @default("AUD")
+  status                String        @default("PENDING") // PENDING, AUTHORIZED, CAPTURED, REFUNDED, FAILED, CANCELED
+  stripePaymentIntentId String?       @unique
   stripeTransferId      String?
-  paymentIntentId       String?   @unique // Alias for lookup
+  paymentIntentId       String?       @unique // Alias for lookup
   description           String?
   metadata              Json?
   sessionType           String? // 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order'
@@ -900,8 +901,8 @@ model EscrowPayment {
   capturedAt            DateTime?
   canceledAt            DateTime?
   cancelReason          String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   @@index([buyerId])
   @@index([sellerId])
@@ -1409,27 +1410,27 @@ model Post {
 
   // A POLL post's question lives in content; the options and close time live
   // here: { options: [{ id, text }], endsAt }. Votes are PollVote rows.
-  poll Json?
+  poll             Json?
   // Scheduled posts are stored hidden with this set; the sweep flips them
   // visible when it passes. Null for everything published immediately.
-  scheduledFor DateTime?
+  scheduledFor     DateTime?
   // Members named with @[Name](id) in the content, for "posts mentioning me".
-  mentionedUserIds String[] @default([])
+  mentionedUserIds String[]  @default([])
   // Blurred in the feed until the reader chooses to see it: for posts about
   // harassment, loss, medical detail and the like, marked by the author.
-  isSensitive Boolean @default(false)
+  isSensitive      Boolean   @default(false)
   // Open Graph card for the first link in the post, fetched after posting:
   // { url, title, description, image, siteName }. Null when there is no link
   // or the page gave nothing back.
-  linkPreview Json?
+  linkPreview      Json?
 
   // Reposts. A plain repost has empty content and points at the original; a
   // quote post carries its own words as well. Deleting the original clears
   // the pointer on quotes (their words stay) and removes plain reposts.
   repostOfId  String?
-  repostOf    Post?  @relation("PostReposts", fields: [repostOfId], references: [id], onDelete: SetNull)
-  reposts     Post[] @relation("PostReposts")
-  repostCount Int    @default(0)
+  repostOf    Post?   @relation("PostReposts", fields: [repostOfId], references: [id], onDelete: SetNull)
+  reposts     Post[]  @relation("PostReposts")
+  repostCount Int     @default(0)
 
   // Times the post was on someone's screen. Distinct people are the
   // PostImpression rows; this counts every showing.
@@ -1441,8 +1442,8 @@ model Post {
   // A post written inside a group stays there: it is listed on the group's
   // page, never in the public feeds, and a private group's posts are for its
   // members. Null for everything posted to the community.
-  groupId String?
-  group   Group?  @relation("GroupFeedPosts", fields: [groupId], references: [id], onDelete: Cascade)
+  groupId  String?
+  group    Group?    @relation("GroupFeedPosts", fields: [groupId], references: [id], onDelete: Cascade)
   // Alt text for each entry in mediaUrls, for screen readers: string[].
   mediaAlt Json?
   // When the author last changed the words. updatedAt moves on every counter
@@ -1483,12 +1484,12 @@ model PostImpression {
 }
 
 model PollVote {
-  id       String   @id @default(uuid())
-  postId   String
-  post     Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  userId   String
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  optionId String
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  optionId  String
   createdAt DateTime @default(now())
 
   @@unique([postId, userId])
@@ -1498,10 +1499,10 @@ model PollVote {
 // Completes the save pattern: SavedJob, EventSave, VideoSave and
 // ApprenticeshipBookmark all existed, but the feed's save button had no store.
 model PostSave {
-  id        String   @id @default(uuid())
-  postId    String
-  userId    String
-  createdAt DateTime @default(now())
+  id           String           @id @default(uuid())
+  postId       String
+  userId       String
+  createdAt    DateTime         @default(now())
   // Optional folder; a save with none sits in "Unsorted".
   collectionId String?
   collection   SavedCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
@@ -1517,18 +1518,18 @@ model PostSave {
 // A post being written, kept across devices until it is published or thrown
 // away. The composer saves it as the member types.
 model PostDraft {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind      String   @default("TEXT") // TEXT, POLL, WIN
-  content   String
-  mediaUrls Json?
-  mediaAlt  Json?
-  poll      Json?
-  isPublic  Boolean  @default(true)
-  isSensitive Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        String   @default("TEXT") // TEXT, POLL, WIN
+  content     String
+  mediaUrls   Json?
+  mediaAlt    Json?
+  poll        Json?
+  isPublic    Boolean  @default(true)
+  isSensitive Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([userId, updatedAt])
 }
@@ -1597,7 +1598,7 @@ model Comment {
   parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies  Comment[] @relation("CommentReplies")
 
-  likeCount Int @default(0)
+  likeCount Int     @default(0)
   // Pinned to the top of the thread by the post's author; one per post.
   isPinned  Boolean @default(false)
 
@@ -2128,14 +2129,14 @@ model Status {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type     StatusType @default(IMAGE)
-  mediaUrl String
-  caption  String?
+  type      StatusType     @default(IMAGE)
+  mediaUrl  String
+  caption   String?
   // Everyone, or only the author's close friends.
-  audience StatusAudience @default(EVERYONE)
+  audience  StatusAudience @default(EVERYONE)
   // Distinct viewers; each is also a StatusView row so a story can be marked
   // seen for the person who saw it.
-  viewCount Int @default(0)
+  viewCount Int            @default(0)
 
   createdAt DateTime @default(now())
   expiresAt DateTime
@@ -2537,6 +2538,231 @@ model CourseCertificate {
 
   @@unique([courseId, userId])
   @@index([userId])
+}
+
+// ===========================================
+// MARKETING: CAMPAIGNS, LEADS, GO-TO-MARKET
+// ===========================================
+// The marketing hub and the go-to-market board were static pages. These are
+// the records behind them: campaigns with a channel and a budget, leads from
+// the waitlist, sales enquiries, partners, press and influencers, and the
+// initiatives on the launch board.
+
+enum CampaignChannel {
+  EMAIL
+  SOCIAL
+  PAID_SOCIAL
+  SEARCH
+  PARTNER
+  EVENT
+  PRESS
+  REFERRAL
+  IN_APP
+  INFLUENCER
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum LeadSource {
+  WAITLIST
+  CONTACT_SALES
+  PARTNER
+  PRESS
+  INFLUENCER
+  EVENT
+  REFERRAL
+  WEBSITE
+  IMPORT
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum InitiativeStatus {
+  PLANNED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+model MarketingCampaign {
+  id          String          @id @default(uuid())
+  name        String
+  objective   String?
+  channel     CampaignChannel
+  status      CampaignStatus  @default(DRAFT)
+  audience    String?
+  budgetCents Int?
+  spentCents  Int             @default(0)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  utmCampaign String?         @unique
+  notes       String?
+  createdById String?
+
+  leads Lead[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([channel])
+}
+
+model Lead {
+  id              String             @id @default(uuid())
+  email           String
+  name            String?
+  organisation    String?
+  role            String?
+  source          LeadSource         @default(WEBSITE)
+  status          LeadStatus         @default(NEW)
+  interest        String?
+  message         String?
+  campaignId      String?
+  campaign        MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  ownerId         String?
+  notes           String?
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  convertedUserId String?
+  lastContactedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email, source])
+  @@index([source, status])
+  @@index([campaignId])
+  @@index([createdAt])
+}
+
+model GtmInitiative {
+  id          String           @id @default(uuid())
+  title       String
+  description String?
+  area        String           @default("launch")
+  status      InitiativeStatus @default(PLANNED)
+  ownerId     String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  position    Int              @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([area, position])
+}
+
+enum TaxTreatment {
+  GST
+  GST_FREE
+  EXPORT
+  INPUT_TAXED
+  BAS_EXCLUDED
+  CAPITAL
+  GST_COLLECTED
+  GST_PAID
+}
+
+enum BankProvider {
+  BASIQ
+  CSV
+}
+
+enum BankConnectionStatus {
+  PENDING
+  ACTIVE
+  DISCONNECTED
+  ERROR
+}
+
+enum BankTransactionStatus {
+  UNREVIEWED
+  CATEGORISED
+  POSTED
+  IGNORED
+}
+
+// A bank reached by consent through Basiq, or a set of pasted statements.
+model BankConnection {
+  id                   String               @id @default(uuid())
+  userId               String
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId       String?
+  provider             BankProvider
+  institution          String
+  status               BankConnectionStatus @default(PENDING)
+  providerUserId       String?
+  providerConnectionId String?
+  lastSyncedAt         DateTime?
+  lastError            String?
+  accounts             BankAccount[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([userId])
+}
+
+model BankAccount {
+  id                String             @id @default(uuid())
+  connectionId      String
+  connection        BankConnection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  providerAccountId String
+  name              String
+  accountNumber     String?
+  bsb               String?
+  type              String?
+  currency          String             @default("AUD")
+  balanceCents      Int                @default(0)
+  availableCents    Int?
+  ledgerAccountId   String?
+  ledgerAccount     AccountingAccount? @relation(fields: [ledgerAccountId], references: [id], onDelete: SetNull)
+  transactions      BankTransaction[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@unique([connectionId, providerAccountId])
+  @@index([ledgerAccountId])
+}
+
+model BankTransaction {
+  id                    String                @id @default(uuid())
+  bankAccountId         String
+  bankAccount           BankAccount           @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  providerTransactionId String?
+  fingerprint           String
+  postedAt              DateTime
+  description           String
+  amountCents           Int
+  category              String?
+  status                BankTransactionStatus @default(UNREVIEWED)
+  ledgerAccountId       String?
+  ledgerAccount         AccountingAccount?    @relation("BankTransactionLedger", fields: [ledgerAccountId], references: [id], onDelete: SetNull)
+  journalEntryId        String?
+  journalEntry          JournalEntry?         @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  note                  String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@unique([bankAccountId, fingerprint])
+  @@index([bankAccountId, postedAt])
+  @@index([status])
+  @@index([ledgerAccountId])
 }
 
 model CourseEnrollment {
@@ -3699,9 +3925,12 @@ model AccountingAccount {
   currency String                @default("AUD")
   isActive Boolean               @default(true)
 
-  organization Organization? @relation(fields: [organizationId], references: [id])
-  user         User?         @relation(fields: [userId], references: [id])
-  journalLines JournalLine[]
+  organization     Organization?     @relation(fields: [organizationId], references: [id])
+  user             User?             @relation(fields: [userId], references: [id])
+  journalLines     JournalLine[]
+  bankAccounts     BankAccount[]
+  bankTransactions BankTransaction[] @relation("BankTransactionLedger")
+  taxTreatment     TaxTreatment      @default(GST)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3726,9 +3955,10 @@ model JournalEntry {
   postedAt    DateTime?
   metadata    Json?
 
-  organization Organization? @relation(fields: [organizationId], references: [id])
-  user         User?         @relation(fields: [userId], references: [id])
-  lines        JournalLine[]
+  organization     Organization?     @relation(fields: [organizationId], references: [id])
+  user             User?             @relation(fields: [userId], references: [id])
+  lines            JournalLine[]
+  bankTransactions BankTransaction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -5313,14 +5543,14 @@ model DvSafeChat {
 }
 
 model DvSafeMessage {
-  id       String     @id @default(uuid())
-  chatId   String
-  chat     DvSafeChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  senderId String
+  id           String     @id @default(uuid())
+  chatId       String
+  chat         DvSafeChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId     String
   // AES-256-GCM under DV_ENCRYPTION_KEY: base64(iv + tag + ciphertext).
   content      String
   autoDeleteAt DateTime?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime   @default(now())
 
   @@index([chatId, createdAt])
   @@index([autoDeleteAt])

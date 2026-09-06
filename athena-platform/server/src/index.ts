@@ -45,6 +45,8 @@ import messageRoutes from './routes/message.routes';
 import adminRoutes from './routes/admin.routes';
 import adminSeedRoutes from './routes/admin-seed.routes';
 import adminOperationsRoutes from './routes/admin-operations.routes';
+import adminMarketingRoutes from './routes/admin-marketing.routes';
+import marketingRoutes from './routes/marketing.routes';
 import referralRoutes from './routes/referral.routes';
 import employerRoutes from './routes/employer.routes';
 import educationRoutes from './routes/education.routes';
@@ -557,7 +559,10 @@ app.use('/api/admin/seed', adminSeedRoutes);
 // with router.use, so the /api/admin paths it does not own fall straight
 // through to adminRoutes without being authenticated twice.
 app.use('/api/admin', adminOperationsRoutes);
+// The marketing hub guards its own routes, like the operations router.
+app.use('/api/admin/marketing', adminMarketingRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/marketing', marketingRoutes);
 app.use('/api/referrals', referralRoutes);
 app.use('/api/employer', employerRoutes);
 app.use('/api/education', educationRoutes);
