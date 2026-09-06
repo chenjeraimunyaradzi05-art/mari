@@ -1,12 +1,48 @@
 import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth'; // Assuming this exists
 import * as FormationService from '../services/formation.service';
+import * as Abr from '../services/abr.service';
 import { BusinessType } from '@prisma/client';
 
 const router = Router();
 
 // Protect all routes
 router.use(authenticate);
+
+// The Australian Business Register, live when ABR_GUID is set; the ASIC register by link.
+router.get('/lookup/abn/:abn', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const abn = Abr.digitsOnly(req.params.abn);
+    const valid = Abr.isValidAbn(abn);
+    const entity = valid && Abr.isConfigured() ? await Abr.lookupAbn(abn) : null;
+    res.json({ success: true, data: { abn, formatted: valid ? Abr.formatAbn(abn) : null, valid, configured: Abr.isConfigured(), entity, lookupUrl: Abr.ABR_LOOKUP_URL } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/lookup/acn/:acn', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const acn = Abr.digitsOnly(req.params.acn);
+    const valid = Abr.isValidAcn(acn);
+    res.json({ success: true, data: { acn, formatted: valid ? Abr.formatAcn(acn) : null, valid, registerUrl: Abr.ASIC_CONNECT_SEARCH_URL } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/lookup/name', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    if (!Abr.isConfigured()) {
+      return res.json({ success: true, data: { configured: false, matches: [], lookupUrl: Abr.ABR_LOOKUP_URL } });
+    }
+    const matches = await Abr.searchNames(q);
+    res.json({ success: true, data: { configured: true, matches, lookupUrl: Abr.ABR_LOOKUP_URL } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Get all registrations
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {

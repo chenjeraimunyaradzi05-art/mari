@@ -47,6 +47,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useFormations } from '@/lib/hooks';
+import AbnLookup from './AbnLookup';
 
 // ============================================
 // TYPES
@@ -464,6 +465,8 @@ export function FormationDashboard({ className }: FormationDashboardProps) {
           </CardContent>
         </Card>
       )}
+
+      <AbnLookup />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

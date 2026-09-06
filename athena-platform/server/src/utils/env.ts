@@ -73,6 +73,9 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     validator: (v) => v.startsWith('whsec_'),
     errorMessage: 'STRIPE_WEBHOOK_SECRET must start with whsec_',
   },
+  // Australian integrations (optional; the features say so when unset)
+  { name: 'ABR_GUID', required: false },
+  { name: 'BASIQ_API_KEY', required: false },
   // Email
   {
     name: 'SENDGRID_API_KEY',

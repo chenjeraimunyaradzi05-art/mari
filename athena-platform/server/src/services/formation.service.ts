@@ -4,6 +4,7 @@
  */
 
 import Stripe from 'stripe';
+import { digitsOnly, isValidAbn, isValidAcn } from './abr.service';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
@@ -147,11 +148,19 @@ export async function updateRegistration(
     throw new ApiError(400, 'Cannot update registration in this status');
   }
 
+  // An ABN or ACN given here has to pass its checksum before it is kept.
+  const abn = data?.abn ? digitsOnly(data.abn) : null;
+  if (abn && !isValidAbn(abn)) throw new ApiError(400, 'That ABN does not pass its checksum');
+  const acn = data?.acn ? digitsOnly(data.acn) : null;
+  if (acn && !isValidAcn(acn)) throw new ApiError(400, 'That ACN does not pass its checksum');
+
   return prisma.businessRegistration.update({
     where: { id: registrationId },
     data: {
       data: data, // Updates the JSON blob
       businessName: data.businessName || registration.businessName,
+      abn: abn ?? registration.abn,
+      acn: acn ?? registration.acn,
     },
   });
 }

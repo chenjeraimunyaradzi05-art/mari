@@ -62,6 +62,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
+import { AbnNameCheck } from './AbnLookup';
 
 // ============================================
 // TYPES
@@ -517,8 +518,9 @@ function BusinessInfoStep({
               onChange={(e) => onChange({ businessName: e.target.value })}
             />
             <p className="text-xs text-muted-foreground">
-              Your official business name (LLC or Inc. will be added automatically)
+              The name as it will go on the register. For a company, Pty Ltd is added at registration.
             </p>
+            <AbnNameCheck name={data.businessName} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="dba">
