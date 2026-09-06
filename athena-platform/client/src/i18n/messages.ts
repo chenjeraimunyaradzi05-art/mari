@@ -12,7 +12,10 @@ export type SupportedLocale =
   | 'ar-SA'
   | 'ar-EG'
   | 'es'
-  | 'es-US';
+  | 'es-US'
+  | 'es-MX'
+  | 'vi'
+  | 'vi-VN';
 
 type MessageKey =
   | 'cookie.title'
@@ -54,6 +57,16 @@ const AR_MESSAGES: Messages = {
   'cookie.ccpaNotice': 'سكان كاليفورنيا: يمكنك إيقاف مشاركة بعض البيانات في أي وقت.',
 };
 
+const VI_MESSAGES: Messages = {
+  'cookie.title': 'Quyền riêng tư và cookie',
+  'cookie.description':
+    'Chúng tôi dùng cookie để vận hành nền tảng, cải thiện trải nghiệm và đo lường hiệu quả. Bạn có thể chấp nhận tất cả hoặc từ chối các cookie tùy chọn.',
+  'cookie.acceptAll': 'Chấp nhận tất cả',
+  'cookie.rejectOptional': 'Từ chối tùy chọn',
+  'cookie.manage': 'Quản lý trong Cài đặt',
+  'cookie.ccpaNotice': 'Cư dân California: bạn có thể từ chối một số hình thức chia sẻ dữ liệu bất cứ lúc nào.',
+};
+
 const MESSAGES: Record<string, Messages> = {
   en: EN_MESSAGES,
   'en-AU': EN_MESSAGES,
@@ -69,6 +82,9 @@ const MESSAGES: Record<string, Messages> = {
   'ar-EG': AR_MESSAGES,
   es: ES_MESSAGES,
   'es-US': ES_MESSAGES,
+  'es-MX': ES_MESSAGES,
+  vi: VI_MESSAGES,
+  'vi-VN': VI_MESSAGES,
 };
 
 export function getMessages(locale: string): Messages {
