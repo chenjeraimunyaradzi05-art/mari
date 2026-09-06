@@ -3,7 +3,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { createAcceleratorEnrollmentPayment } from '../services/payments-orchestration.service';
 
@@ -1192,6 +1192,162 @@ router.get('/vendors', async (req: AuthRequest, res: Response, next: NextFunctio
   }
 });
 
+// ===========================================
+// VENDOR ACCOUNTS
+// ===========================================
+// A vendor listing can belong to a member: the one who registered it, or the
+// one who claimed a catalogue entry from an address at that vendor's domain.
+// Owning a vendor is what lets a member answer RFPs.
+
+const VENDOR_CATEGORIES = [
+  'ACCOUNTING_TAX',
+  'LEGAL',
+  'DESIGN_MARKETING',
+  'TECH_DEVELOPMENT',
+  'HR_COMPLIANCE',
+  'BUSINESS_COACHING',
+  'PHOTOGRAPHY_VIDEO',
+  'COPYWRITING',
+  'VIRTUAL_ASSISTANT',
+  'OTHER',
+];
+
+const vendorFieldValidators = [
+  body('description').optional().isString().isLength({ max: 2000 }),
+  body('services').optional().isArray({ max: 20 }),
+  body('priceRange').optional().isString().isLength({ max: 60 }),
+  body('website').optional().isString().isLength({ max: 200 }),
+  body('email').optional({ values: 'falsy' }).isEmail(),
+  body('phone').optional().isString().isLength({ max: 30 }),
+  body('location').optional().isString().isLength({ max: 120 }),
+];
+
+function domainOf(email: string | null | undefined): string | null {
+  const at = (email || '').lastIndexOf('@');
+  return at > 0 ? (email as string).slice(at + 1).toLowerCase() : null;
+}
+
+function vendorFieldsFrom(bodyIn: Record<string, unknown>) {
+  const data: Record<string, unknown> = {};
+  for (const key of ['description', 'priceRange', 'website', 'email', 'phone', 'location'] as const) {
+    if (typeof bodyIn[key] === 'string') data[key] = (bodyIn[key] as string).trim() || null;
+  }
+  if (Array.isArray(bodyIn.services)) {
+    data.services = bodyIn.services.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim().slice(0, 80));
+  }
+  return data;
+}
+
+// POST /api/business/vendors - Register your business as a vendor
+router.post(
+  '/vendors',
+  authenticate,
+  [body('name').isString().trim().notEmpty().isLength({ max: 120 }), body('category').isIn(VENDOR_CATEGORIES), ...vendorFieldValidators],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const vendor = await prisma.vendor.create({
+        data: {
+          ownerId: req.user!.id,
+          name: String(req.body.name).trim(),
+          category: req.body.category,
+          isVerified: false,
+          isPartner: false,
+          ...vendorFieldsFrom(req.body),
+        } as any,
+      });
+
+      logger.info(`User ${req.user!.id} registered vendor ${vendor.id}`);
+      res.status(201).json({ success: true, data: vendor });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// GET /api/business/vendors/mine - The vendors you own, with the proposals they have made
+router.get('/vendors/mine', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const vendors = await prisma.vendor.findMany({
+      where: { ownerId: req.user!.id },
+      include: {
+        rfpResponses: {
+          include: {
+            rfp: { select: { id: true, title: true, category: true, status: true, budget: true, deadline: true, userId: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ success: true, data: vendors });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/business/vendors/:id/claim - Take over an unowned catalogue entry
+router.post('/vendors/:id/claim', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const vendor = await prisma.vendor.findUnique({ where: { id } });
+    if (!vendor) {
+      throw new ApiError(404, 'Vendor not found');
+    }
+    if (vendor.ownerId) {
+      throw new ApiError(409, vendor.ownerId === req.user!.id ? 'This listing is already yours' : 'This listing has already been claimed');
+    }
+    // A listing with a contact address belongs to whoever writes from that
+    // domain; one without is open to the first member who claims it, and
+    // stays unverified until an admin says otherwise.
+    const vendorDomain = domainOf(vendor.email);
+    if (vendorDomain && vendorDomain !== domainOf(req.user!.email)) {
+      throw new ApiError(403, `Claim this listing from an email address at ${vendorDomain}`);
+    }
+
+    const updated = await prisma.vendor.update({ where: { id }, data: { ownerId: req.user!.id } });
+    logger.info(`User ${req.user!.id} claimed vendor ${id}`);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/business/vendors/:id - Edit a listing you own
+router.patch(
+  '/vendors/:id',
+  authenticate,
+  [body('name').optional().isString().trim().notEmpty().isLength({ max: 120 }), body('category').optional().isIn(VENDOR_CATEGORIES), ...vendorFieldValidators],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { id } = req.params;
+      const vendor = await prisma.vendor.findUnique({ where: { id }, select: { id: true, ownerId: true } });
+      if (!vendor) {
+        throw new ApiError(404, 'Vendor not found');
+      }
+      if (vendor.ownerId !== req.user!.id && req.user!.role !== 'ADMIN') {
+        throw new ApiError(403, 'Only the owner can edit this listing');
+      }
+      const data: Record<string, unknown> = vendorFieldsFrom(req.body);
+      if (typeof req.body.name === 'string') data.name = req.body.name.trim();
+      if (typeof req.body.category === 'string') data.category = req.body.category;
+
+      const updated = await prisma.vendor.update({ where: { id }, data: data as any });
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // GET /api/business/vendors/:id - Get vendor details
 router.get('/vendors/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -1438,7 +1594,7 @@ router.get(
 );
 
 // GET /api/business/rfps/:id - Get RFP details
-router.get('/rfps/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/rfps/:id', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -1461,9 +1617,15 @@ router.get('/rfps/:id', async (req: AuthRequest, res: Response, next: NextFuncti
       throw new ApiError(404, 'RFP not found');
     }
 
+    // Proposals and their prices are the RFP owner's to see. A vendor's owner
+    // sees their own; everyone else sees how many there are.
+    const viewerId = req.user?.id;
+    const seesAll = Boolean(viewerId) && (rfp.userId === viewerId || req.user?.role === 'ADMIN');
+    const responses = seesAll ? rfp.responses : rfp.responses.filter((r) => Boolean(viewerId) && r.vendor.ownerId === viewerId);
+
     res.json({
       success: true,
-      data: rfp,
+      data: { ...rfp, responses, responseCount: rfp.responses.length },
     });
   } catch (error) {
     next(error);
@@ -1505,6 +1667,167 @@ router.patch(
         success: true,
         data: updated,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// RFP RESPONSES
+// ===========================================
+// A vendor's owner pitches for an open RFP; the RFP's owner shortlists,
+// selects or passes. Selecting one closes the RFP as awarded and tells the
+// vendor; the others are told they were not chosen.
+
+// POST /api/business/rfps/:id/responses - Pitch for an RFP on behalf of a vendor you own
+router.post(
+  '/rfps/:id/responses',
+  authenticate,
+  [
+    body('vendorId').isString().notEmpty(),
+    body('proposal').isString().trim().notEmpty().isLength({ max: 5000 }),
+    body('priceQuote').optional({ values: 'null' }).isFloat({ min: 0 }),
+    body('timeline').optional().isString().isLength({ max: 200 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { id } = req.params;
+      const userId = req.user!.id;
+      const { vendorId, proposal, priceQuote, timeline } = req.body;
+
+      const rfp = await prisma.rfp.findUnique({ where: { id }, select: { id: true, userId: true, status: true, title: true } });
+      if (!rfp) {
+        throw new ApiError(404, 'RFP not found');
+      }
+      if (rfp.status !== 'OPEN') {
+        throw new ApiError(400, 'This RFP is no longer open');
+      }
+      if (rfp.userId === userId) {
+        throw new ApiError(400, 'You cannot respond to your own RFP');
+      }
+
+      const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true, ownerId: true, name: true } });
+      if (!vendor || vendor.ownerId !== userId) {
+        throw new ApiError(403, 'You can only respond on behalf of a vendor you own');
+      }
+
+      const existing = await prisma.rfpResponse.findUnique({ where: { rfpId_vendorId: { rfpId: id, vendorId } } });
+      if (existing) {
+        throw new ApiError(409, 'This vendor has already responded to this RFP');
+      }
+
+      const response = await prisma.rfpResponse.create({
+        data: {
+          rfpId: id,
+          vendorId,
+          proposal: String(proposal).trim(),
+          priceQuote: priceQuote !== undefined && priceQuote !== null && priceQuote !== '' ? Number(priceQuote) : undefined,
+          timeline: typeof timeline === 'string' ? timeline.trim() || null : undefined,
+        },
+        include: { vendor: { select: { id: true, name: true, category: true } } },
+      });
+
+      await prisma.notification.create({
+        data: {
+          userId: rfp.userId,
+          type: 'SYSTEM',
+          title: 'New proposal on your RFP',
+          message: `${vendor.name} responded to "${rfp.title}".`,
+          link: `/dashboard/rfps?rfp=${rfp.id}`,
+        },
+      });
+
+      logger.info(`Vendor ${vendorId} responded to RFP ${id}`);
+      res.status(201).json({ success: true, data: response });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// PATCH /api/business/rfps/:id/responses/:responseId - Shortlist, select or pass on a proposal
+router.patch(
+  '/rfps/:id/responses/:responseId',
+  authenticate,
+  [body('status').isIn(['SHORTLISTED', 'SELECTED', 'REJECTED'])],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { id, responseId } = req.params;
+      const status = req.body.status as 'SHORTLISTED' | 'SELECTED' | 'REJECTED';
+
+      const rfp = await prisma.rfp.findUnique({ where: { id }, select: { id: true, userId: true, status: true, title: true } });
+      if (!rfp) {
+        throw new ApiError(404, 'RFP not found');
+      }
+      if (rfp.userId !== req.user!.id) {
+        throw new ApiError(403, 'Only the RFP owner decides on proposals');
+      }
+
+      const response = await prisma.rfpResponse.findUnique({
+        where: { id: responseId },
+        include: { vendor: { select: { id: true, name: true, ownerId: true } } },
+      });
+      if (!response || response.rfpId !== id) {
+        throw new ApiError(404, 'Proposal not found');
+      }
+
+      const tell = async (userId: string | null | undefined, title: string, message: string) => {
+        if (!userId) return;
+        await prisma.notification.create({
+          data: { userId, type: 'SYSTEM', title, message, link: '/dashboard/rfps?tab=proposals' },
+        });
+      };
+
+      if (status === 'SELECTED') {
+        const [updated] = await prisma.$transaction([
+          prisma.rfpResponse.update({ where: { id: responseId }, data: { status: 'SELECTED', isSelected: true } }),
+          prisma.rfpResponse.updateMany({
+            where: { rfpId: id, id: { not: responseId }, status: { in: ['SUBMITTED', 'SHORTLISTED'] } },
+            data: { status: 'REJECTED', isSelected: false },
+          }),
+          prisma.rfp.update({ where: { id }, data: { status: 'AWARDED' } }),
+        ]);
+
+        await tell(response.vendor.ownerId, 'Your proposal was selected', `${response.vendor.name} has been chosen for "${rfp.title}". The buyer will be in touch.`);
+        const others = await prisma.rfpResponse.findMany({
+          where: { rfpId: id, id: { not: responseId } },
+          select: { vendor: { select: { ownerId: true } } },
+        });
+        const losers = others.map((o) => o.vendor.ownerId).filter((v): v is string => Boolean(v));
+        if (losers.length > 0) {
+          await prisma.notification.createMany({
+            data: losers.map((userId) => ({
+              userId,
+              type: 'SYSTEM' as const,
+              title: 'Proposal not selected',
+              message: `"${rfp.title}" went to another vendor. Thank you for pitching.`,
+              link: '/dashboard/rfps?tab=proposals',
+            })),
+          });
+        }
+
+        res.json({ success: true, data: updated });
+        return;
+      }
+
+      const updated = await prisma.rfpResponse.update({ where: { id: responseId }, data: { status, isSelected: false } });
+      await tell(
+        response.vendor.ownerId,
+        status === 'SHORTLISTED' ? 'Your proposal was shortlisted' : 'Proposal not selected',
+        status === 'SHORTLISTED'
+          ? `${response.vendor.name} is on the shortlist for "${rfp.title}".`
+          : `"${rfp.title}" will not be going to ${response.vendor.name} this time.`
+      );
+      res.json({ success: true, data: updated });
     } catch (error) {
       next(error);
     }

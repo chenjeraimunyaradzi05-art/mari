@@ -722,6 +722,7 @@ model User {
   investorIntroductions  InvestorIntroduction[]
   vendorReviews          VendorReview[]
   rfps                   Rfp[]
+  ownedVendors           Vendor[]  @relation("VendorOwner")
 
   // Phase 10: Housing & Financial Security
   housingInquiries      HousingInquiry[]
@@ -4010,12 +4011,19 @@ model Vendor {
   reviews      VendorReview[]
   rfpResponses RfpResponse[]
 
+  // The member who registered this vendor, or claimed a catalogue entry from
+  // an address at its domain. Owning a vendor is what lets a member answer
+  // RFPs on its behalf.
+  ownerId String?
+  owner   User?   @relation("VendorOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([category])
   @@index([isPartner])
   @@index([avgRating])
+  @@index([ownerId])
 }
 
 model VendorReview {

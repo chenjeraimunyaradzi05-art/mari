@@ -1003,6 +1003,28 @@ export const businessApi = {
   getRfp: (id: string) => api.get(`/business/rfps/${id}`),
 
   updateRfpStatus: (id: string, status: string) => api.patch(`/business/rfps/${id}`, { status }),
+
+  // Vendor accounts: register your business, claim a catalogue entry, edit it.
+  registerVendor: (data: {
+    name: string;
+    category: string;
+    description?: string;
+    services?: string[];
+    priceRange?: string;
+    website?: string;
+    email?: string;
+    phone?: string;
+    location?: string;
+  }) => api.post('/business/vendors', data),
+  getMyVendors: () => api.get('/business/vendors/mine'),
+  claimVendor: (id: string) => api.post(`/business/vendors/${id}/claim`),
+  updateVendor: (id: string, data: Record<string, unknown>) => api.patch(`/business/vendors/${id}`, data),
+
+  // Proposals on an RFP: a vendor's owner pitches; the RFP's owner decides.
+  respondToRfp: (rfpId: string, data: { vendorId: string; proposal: string; priceQuote?: number; timeline?: string }) =>
+    api.post(`/business/rfps/${rfpId}/responses`, data),
+  decideRfpResponse: (rfpId: string, responseId: string, status: 'SHORTLISTED' | 'SELECTED' | 'REJECTED') =>
+    api.patch(`/business/rfps/${rfpId}/responses/${responseId}`, { status }),
 };
 
 // ============================================
@@ -1056,6 +1078,12 @@ export const housingApi = {
     api.post(`/housing/listings/${id}/inquire`, data),
 
   getMyInquiries: () => api.get('/housing/my/inquiries'),
+
+  // The agent's side: the places you listed and the people asking about them.
+  getMyListings: () => api.get('/housing/my/listings'),
+  updateListing: (id: string, data: Record<string, unknown>) => api.patch(`/housing/listings/${id}`, data),
+  answerInquiry: (listingId: string, inquiryId: string, data: { status: 'CONTACTED' | 'VIEWING_SCHEDULED' | 'APPROVED' | 'DECLINED'; viewingDate?: string; message?: string }) =>
+    api.patch(`/housing/listings/${listingId}/inquiries/${inquiryId}`, data),
 
   updateInquiry: (id: string, data: { status?: string; viewingDate?: string; notes?: string }) =>
     api.patch(`/housing/inquiries/${id}`, data),
