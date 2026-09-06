@@ -27,6 +27,7 @@ const createAccountSchema = z.object({
   name: z.string().min(1).max(200),
   code: z.string().min(1).max(50).optional(),
   type: z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE']),
+  taxTreatment: z.enum(['GST', 'GST_FREE', 'EXPORT', 'INPUT_TAXED', 'BAS_EXCLUDED', 'CAPITAL', 'GST_COLLECTED', 'GST_PAID']).optional(),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
 });
 
@@ -34,6 +35,7 @@ const updateAccountSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   code: z.string().min(1).max(50).optional(),
   type: z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE']).optional(),
+  taxTreatment: z.enum(['GST', 'GST_FREE', 'EXPORT', 'INPUT_TAXED', 'BAS_EXCLUDED', 'CAPITAL', 'GST_COLLECTED', 'GST_PAID']).optional(),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
   isActive: z.boolean().optional(),
 });

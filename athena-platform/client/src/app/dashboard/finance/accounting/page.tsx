@@ -5,6 +5,18 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 
+const TAX_TREATMENTS = [
+  { value: 'GST', label: 'GST applies (10%)' },
+  { value: 'GST_FREE', label: 'GST-free' },
+  { value: 'EXPORT', label: 'Export sales' },
+  { value: 'INPUT_TAXED', label: 'Input-taxed' },
+  { value: 'BAS_EXCLUDED', label: 'Not on the BAS' },
+  { value: 'CAPITAL', label: 'Capital purchase (G10)' },
+  { value: 'GST_COLLECTED', label: 'GST collected account (1A)' },
+  { value: 'GST_PAID', label: 'GST paid account (1B)' },
+];
+const treatmentLabel = (value?: string) => TAX_TREATMENTS.find((t) => t.value === value)?.label ?? 'GST applies (10%)';
+
 export default function AccountingPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [journals, setJournals] = useState<any[]>([]);
@@ -18,6 +30,7 @@ export default function AccountingPage() {
     code: '',
     type: 'ASSET',
     currency: 'AUD',
+    taxTreatment: 'GST',
   });
   const [journalForm, setJournalForm] = useState({
     organizationId: '',
@@ -35,6 +48,7 @@ export default function AccountingPage() {
     code: '',
     type: 'ASSET',
     currency: 'AUD',
+    taxTreatment: 'GST',
   });
   const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
   const [editingJournal, setEditingJournal] = useState({
@@ -118,6 +132,7 @@ export default function AccountingPage() {
         code: accountForm.code || undefined,
         type: accountForm.type,
         currency: accountForm.currency || undefined,
+        taxTreatment: accountForm.taxTreatment,
       });
       setAccountForm({
         organizationId: '',
@@ -125,6 +140,7 @@ export default function AccountingPage() {
         code: '',
         type: 'ASSET',
         currency: 'AUD',
+        taxTreatment: 'GST',
       });
       await reload();
     } catch (error: any) {
@@ -220,6 +236,7 @@ export default function AccountingPage() {
       code: account.code || '',
       type: account.type || 'ASSET',
       currency: account.currency || 'AUD',
+      taxTreatment: account.taxTreatment || 'GST',
     });
   };
 
@@ -243,6 +260,7 @@ export default function AccountingPage() {
         code: editingAccount.code || undefined,
         type: editingAccount.type,
         currency: editingAccount.currency,
+        taxTreatment: editingAccount.taxTreatment,
       });
       setEditingAccountId(null);
       await reload();
@@ -409,6 +427,20 @@ export default function AccountingPage() {
                 {['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].map((type) => (
                   <option key={type} value={type}>
                     {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm text-slate-600 dark:text-slate-400">Tax treatment</label>
+              <select
+                value={accountForm.taxTreatment}
+                onChange={(e) => setAccountForm({ ...accountForm, taxTreatment: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+              >
+                {TAX_TREATMENTS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
                   </option>
                 ))}
               </select>
@@ -657,19 +689,36 @@ export default function AccountingPage() {
                     </td>
                     <td className="py-2 text-sm text-slate-600 dark:text-slate-300">
                       {editingAccountId === account.id ? (
-                        <select
-                          value={editingAccount.type}
-                          onChange={(e) => setEditingAccount({ ...editingAccount, type: e.target.value })}
-                          className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
-                        >
-                          {['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].map((type) => (
-                            <option key={type} value={type}>
-                              {type}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="space-y-1">
+                          <select
+                            value={editingAccount.type}
+                            onChange={(e) => setEditingAccount({ ...editingAccount, type: e.target.value })}
+                            className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
+                          >
+                            {['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].map((type) => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={editingAccount.taxTreatment}
+                            onChange={(e) => setEditingAccount({ ...editingAccount, taxTreatment: e.target.value })}
+                            aria-label="Tax treatment"
+                            className="block rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
+                          >
+                            {TAX_TREATMENTS.map((t) => (
+                              <option key={t.value} value={t.value}>
+                                {t.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       ) : (
-                        account.type
+                        <>
+                          {account.type}
+                          <span className="block text-xs text-slate-400">{treatmentLabel(account.taxTreatment)}</span>
+                        </>
                       )}
                     </td>
                     <td className="py-2 text-sm text-slate-600 dark:text-slate-300">

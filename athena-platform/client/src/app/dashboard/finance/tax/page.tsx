@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
+import BasWorksheet from '@/components/finance/BasWorksheet';
 
 export default function TaxPage() {
   const [rates, setRates] = useState<any[]>([]);
@@ -349,6 +350,8 @@ export default function TaxPage() {
           </p>
         </div>
       </div>
+
+      <BasWorksheet onLodged={reload} />
 
       {formError && (
         <div className="card border border-red-200 bg-red-50 text-sm text-red-700">

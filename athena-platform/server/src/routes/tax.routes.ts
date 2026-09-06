@@ -13,6 +13,7 @@ import {
   submitTaxReturn,
   deleteTaxReturn,
 } from '../services/tax.service';
+import { computeBas, lodgeBas, parsePeriod } from '../services/bas.service';
 
 const router = Router();
 
@@ -166,6 +167,52 @@ router.delete('/returns/:id', authenticate, async (req: AuthRequest, res: Respon
   try {
     await deleteTaxReturn(req.params.id, req.user!.id);
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/tax/bas?from=YYYY-MM-DD&to=YYYY-MM-DD[&organizationId=]: the worksheet, counted from the ledger
+router.get('/bas', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { from, to } = parsePeriod(req.query.from, req.query.to);
+    const organizationId = typeof req.query.organizationId === 'string' && req.query.organizationId ? req.query.organizationId : undefined;
+    const worksheet = await computeBas({ userId: req.user!.id, organizationId, from, to });
+    res.json({ success: true, data: worksheet });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const lodgeBasSchema = z.object({
+  from: z.string().min(10),
+  to: z.string().min(10),
+  organizationId: z.string().uuid().optional(),
+  w1: z.number().min(0).optional(),
+  w2: z.number().min(0).optional(),
+  reference: z.string().max(100).optional(),
+  lodgedVia: z.string().max(120).optional(),
+});
+
+// POST /api/tax/bas/lodge: record a BAS lodged through the ATO, worksheet attached
+router.post('/bas/lodge', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const parsed = lodgeBasSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, message: parsed.error.issues[0]?.message || 'Invalid BAS lodgement' });
+    }
+    const { from, to } = parsePeriod(parsed.data.from, parsed.data.to);
+    const record = await lodgeBas({
+      userId: req.user!.id,
+      organizationId: parsed.data.organizationId,
+      from,
+      to,
+      w1: parsed.data.w1,
+      w2: parsed.data.w2,
+      reference: parsed.data.reference,
+      lodgedVia: parsed.data.lodgedVia,
+    });
+    res.status(201).json({ success: true, data: record });
   } catch (error) {
     next(error);
   }

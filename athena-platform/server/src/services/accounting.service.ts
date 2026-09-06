@@ -5,6 +5,8 @@ import { ApiError } from '../middleware/errorHandler';
 const toDecimal = (value: number) => new Prisma.Decimal(value);
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
 const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'] as const;
+export const TAX_TREATMENTS = ['GST', 'GST_FREE', 'EXPORT', 'INPUT_TAXED', 'BAS_EXCLUDED', 'CAPITAL', 'GST_COLLECTED', 'GST_PAID'] as const;
+export type TaxTreatment = (typeof TAX_TREATMENTS)[number];
 
 /**
  * Verify user has access to an accounting account
@@ -101,6 +103,7 @@ export async function createAccount(data: {
   code?: string;
   type: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
   currency?: string;
+  taxTreatment?: TaxTreatment;
 }) {
   if (!data.name || !data.type) {
     throw new ApiError(400, 'Account name and type are required');
@@ -114,6 +117,9 @@ export async function createAccount(data: {
   if (data.code !== undefined && data.code.trim().length === 0) {
     throw new ApiError(400, 'Account code cannot be empty');
   }
+  if (data.taxTreatment && !TAX_TREATMENTS.includes(data.taxTreatment)) {
+    throw new ApiError(400, 'Invalid tax treatment');
+  }
 
   return prisma.accountingAccount.create({
     data: {
@@ -123,6 +129,7 @@ export async function createAccount(data: {
       code: data.code,
       type: data.type,
       currency: data.currency || 'AUD',
+      taxTreatment: data.taxTreatment || 'GST',
     },
   });
 }
@@ -133,8 +140,12 @@ export async function updateAccount(id: string, userId: string, data: {
   type?: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
   currency?: string;
   isActive?: boolean;
+  taxTreatment?: TaxTreatment;
 }) {
   await verifyAccountAccess(id, userId);
+  if (data.taxTreatment && !TAX_TREATMENTS.includes(data.taxTreatment)) {
+    throw new ApiError(400, 'Invalid tax treatment');
+  }
   if (data.name !== undefined && data.name.trim().length === 0) {
     throw new ApiError(400, 'Account name cannot be empty');
   }
