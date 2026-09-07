@@ -1,16 +1,13 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { Heart, ShieldCheck } from 'lucide-react';
 import { ORGANISATION, contactLink, HAS_LEGAL_IDENTITY } from '@/lib/contact';
 
 /**
  * The site footer, mounted once in the root layout so every page carries the
- * way out to everything else.
- *
- * Before this, the only comprehensive link map was inside the homepage's middle
- * column, which is `hidden lg:block` — so on a phone, and on all ~150 other
- * pages, there was no footer at all. Someone who landed on a shared job link
- * had no route to the safety centre, the privacy centre, or the terms they had
- * agreed to.
+ * way out to everything else. One glass panel, compact: the brand and the
+ * safety line across the top, six tight columns of links, and one closing
+ * row with the credit, the ways to get in touch and the legal links.
  *
  * Every href here resolves: each was requested against a running server, and
  * the auth-gated ones redirect to /login carrying a `redirect` param so the
@@ -36,7 +33,7 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     links: [
       { href: '/learning', label: 'Learning' },
       { href: '/courses', label: 'Courses' },
-      { href: '/certifications', label: 'Certifications' },
+      { href: '/certifications', label: 'Certificates' },
       { href: '/skills', label: 'Skills' },
       { href: '/mentors', label: 'Mentors' },
       { href: '/mentorship', label: 'How mentoring works' },
@@ -103,32 +100,56 @@ const LEGAL: FooterLink[] = [
   { href: '/mentor-agreement', label: 'Mentor agreement' },
 ];
 
+const linkClass = 'focusable rounded-sm text-[13px] leading-5 text-slate-600 transition hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-300';
+
 export function SiteFooter() {
   const year = new Date().getFullYear();
   const support = contactLink('support');
   const help = contactLink('sales');
+  const touch: FooterLink[] = [
+    { href: support.href, label: support.isEmail ? support.label : 'Help centre' },
+    { href: help.href, label: help.isEmail ? help.label : 'Talk to our team' },
+    { href: '/contact', label: 'Contact' },
+  ];
 
   return (
-    <footer
-      className="mt-16 border-t border-slate-200 bg-white text-slate-950 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
-      aria-labelledby="site-footer-heading"
-    >
-      <h2 id="site-footer-heading" className="sr-only">
-        Site links
-      </h2>
+    <footer className="mt-14 px-3 pb-8 text-slate-950 xl:px-5 dark:text-white" aria-labelledby="site-footer-heading">
+      <div className="rail-panel glow-card mx-auto w-full max-w-7xl p-5 sm:p-7">
+        <h2 id="site-footer-heading" className="sr-only">
+          Site links
+        </h2>
 
-      <div className="mx-auto w-full max-w-7xl px-4 py-12 sm:px-6">
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {/* The brand on the left; the thing someone might need in a hurry on the right. */}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <Image src="/icon.svg" alt="" width={36} height={36} className="rounded-xl" />
+            <div>
+              <p className="font-display text-xl font-medium leading-tight text-slate-900 dark:text-white">{ORGANISATION.shortName}</p>
+              <p className="eyebrow-soft text-rose-500 dark:text-rose-300">Built in {ORGANISATION.jurisdiction}, for women everywhere.</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 rounded-2xl bg-rose-50/80 px-4 py-3 text-[13px] leading-5 text-slate-700 sm:flex-row sm:items-center dark:bg-rose-500/10 dark:text-slate-200">
+            <p className="flex items-start gap-2">
+              <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500" strokeWidth={1.75} />
+              <span>
+                In immediate danger, call <strong>000</strong>. For family violence support in Australia, 1800RESPECT is on <strong>1800 737 732</strong>.
+              </span>
+            </p>
+            <Link href="/safety-center" className="focusable flex-shrink-0 rounded-full bg-rose-500 px-3.5 py-1.5 text-center text-xs font-semibold text-white transition hover:bg-rose-600 dark:bg-rose-400 dark:text-slate-950 dark:hover:bg-rose-300">
+              Safety centre
+            </Link>
+          </div>
+        </div>
+
+        {/* Six tight columns. */}
+        <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-rose-100/70 pt-6 sm:grid-cols-3 lg:grid-cols-6 dark:border-white/10">
           {COLUMNS.map((column) => (
             <nav key={column.title} aria-label={column.title}>
-              <h3 className="kicker">{column.title}</h3>
-              <ul className="mt-3 space-y-2">
+              <h3 className="eyebrow-soft text-rose-500 dark:text-rose-300">{column.title}</h3>
+              <ul className="mt-2 space-y-1">
                 {column.links.map((link) => (
                   <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      className="focusable text-sm text-slate-600 transition hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400"
-                    >
+                    <Link href={link.href} className={linkClass}>
                       {link.label}
                     </Link>
                   </li>
@@ -138,99 +159,29 @@ export function SiteFooter() {
           ))}
         </div>
 
-        {/* Safety sits above the legal line, not buried in a column, because it
-            is the thing someone might need in a hurry. */}
-        <div className="mt-10 flex flex-col gap-3 rounded-2xl border border-rose-100 bg-rose-50/50 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-rose-500/20 dark:bg-rose-500/5">
-          <p className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
-            <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500" />
+        {/* One closing row: credit, ways in, the legal line. */}
+        <div className="mt-6 flex flex-col gap-3 border-t border-rose-100/70 pt-5 text-xs text-slate-500 lg:flex-row lg:items-center lg:justify-between dark:border-white/10 dark:text-slate-400">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
             <span>
-              In immediate danger, call <strong>000</strong>. For family violence support in
-              Australia, 1800RESPECT is on <strong>1800 737 732</strong>.
-            </span>
-          </p>
-          <Link
-            href="/safety-center"
-            className="focusable flex-shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
-          >
-            Safety centre
-          </Link>
-        </div>
-
-        <div className="mt-10 border-t border-slate-200 pt-8 dark:border-slate-800">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-md">
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                {ORGANISATION.shortName}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
-                Built in {ORGANISATION.jurisdiction}, for women everywhere.
-              </p>
-
-              {/* Credit where it is due. */}
-              <p className="mt-4 flex flex-wrap items-center gap-1.5 text-sm text-slate-600 dark:text-slate-400">
-                <span>Designed and built by</span>
-                <span className="font-semibold text-slate-900 dark:text-white">
-                  Munyaradzi Chenjerai
-                </span>
-                <Heart className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-500">
-                Developer and vision founder
-              </p>
-            </div>
-
-            <div className="text-sm text-slate-600 dark:text-slate-400">
-              <p className="font-medium text-slate-900 dark:text-white">Get in touch</p>
-              <ul className="mt-2 space-y-1.5">
-                <li>
-                  <Link
-                    href={support.href}
-                    className="focusable transition hover:text-rose-600 dark:hover:text-rose-400"
-                  >
-                    {support.isEmail ? support.label : 'Help centre'}
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href={help.href}
-                    className="focusable transition hover:text-rose-600 dark:hover:text-rose-400"
-                  >
-                    {help.isEmail ? help.label : 'Talk to our team'}
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href="/contact"
-                    className="focusable transition hover:text-rose-600 dark:hover:text-rose-400"
-                  >
-                    Contact
-                  </Link>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="mt-8 flex flex-col gap-3 border-t border-slate-100 pt-6 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800/60">
-            <p className="text-xs text-slate-500">
               &copy; {year} {ORGANISATION.legalName}
-              {/* The ABN and registered office are published only once they are
-                  real — see lib/contact.ts. An invented company number is worse
-                  than an absent one. */}
+              {/* The ABN is published only once it is real; see lib/contact.ts. */}
               {HAS_LEGAL_IDENTITY && ORGANISATION.abn ? ` · ABN ${ORGANISATION.abn}` : ''}
-            </p>
-            <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              {LEGAL.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="focusable text-xs text-slate-500 transition hover:text-rose-600 dark:hover:text-rose-400"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+            </span>
+            <span aria-hidden className="text-rose-300">·</span>
+            <span>
+              Designed and built by <span className="font-semibold text-slate-800 dark:text-slate-100">Munyaradzi Chenjerai</span>, developer and vision founder
+            </span>
+            <Heart className="h-3 w-3 text-rose-500" aria-hidden="true" />
+          </p>
+          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {[...touch, ...LEGAL].map((link) => (
+              <li key={link.href}>
+                <Link href={link.href} className="focusable rounded-sm transition hover:text-rose-600 dark:hover:text-rose-300">
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </footer>
