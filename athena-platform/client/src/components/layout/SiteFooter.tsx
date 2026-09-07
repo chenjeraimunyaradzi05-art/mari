@@ -2,6 +2,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Heart, ShieldCheck } from 'lucide-react';
 import { ORGANISATION, contactLink, HAS_LEGAL_IDENTITY } from '@/lib/contact';
+import { FooterColumn } from './FooterColumn';
 
 /**
  * The site footer, mounted once in the root layout so every page carries the
@@ -141,12 +142,11 @@ export function SiteFooter() {
           </div>
         </div>
 
-        {/* Six tight columns. */}
-        <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-rose-100/70 pt-6 sm:grid-cols-3 lg:grid-cols-6 dark:border-white/10">
+        {/* Six tight columns on a wide screen; on a phone each folds to its heading. */}
+        <div className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 border-t border-rose-100/70 pt-5 sm:grid-cols-2 sm:gap-y-3 lg:grid-cols-6 lg:gap-y-5 lg:pt-6 dark:border-white/10">
           {COLUMNS.map((column) => (
-            <nav key={column.title} aria-label={column.title}>
-              <h3 className="eyebrow-soft text-rose-500 dark:text-rose-300">{column.title}</h3>
-              <ul className="mt-2 space-y-1">
+            <FooterColumn key={column.title} title={column.title}>
+              <ul className="space-y-1">
                 {column.links.map((link) => (
                   <li key={link.href}>
                     <Link href={link.href} className={linkClass}>
@@ -155,7 +155,7 @@ export function SiteFooter() {
                   </li>
                 ))}
               </ul>
-            </nav>
+            </FooterColumn>
           ))}
         </div>
 
