@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Banknote, Bot, Briefcase, Building2, Compass, GraduationCap, Heart, LayoutGrid, Lock, ShieldCheck, Users } from 'lucide-react';
+import { ArrowRight, Banknote, Bot, Briefcase, Building2, Compass, GraduationCap, Heart, LayoutGrid, Lock, Search, ShieldCheck, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Rail } from './RailShell';
 
@@ -203,14 +203,58 @@ const GROUPS: Group[] = [
   },
 ];
 
+/** Every destination with its group, for searching across all of them. */
+const ALL = GROUPS.flatMap((g) => g.items.map((item) => ({ ...item, group: g })));
+
 export function PlatformDirectory() {
   const reduce = useReducedMotion();
   const [activeId, setActiveId] = useState(GROUPS[0].id);
+  const [query, setQuery] = useState('');
   const active = GROUPS.find((g) => g.id === activeId) ?? GROUPS[0];
   const total = GROUPS.reduce((sum, g) => sum + g.items.length, 0);
+  const q = query.trim().toLowerCase();
+  const matches = q.length >= 2 ? ALL.filter((d) => `${d.label} ${d.blurb} ${d.group.title}`.toLowerCase().includes(q)) : null;
 
   return (
     <Rail icon={LayoutGrid} tone="rose" kicker="Everything here" title="Explore the whole platform" titleId="directory-heading" description={`${total} places to go, grouped by what you came for. A padlock means you need an account; sign in and you land straight back on the page you picked.`}>
+      <label className="relative mb-3 block">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Looking for something? Type it: grants, mentors, tax, reels…" aria-label="Search the platform's pages" className="input w-full rounded-full pl-9 pr-9 text-sm" />
+        {query && (
+          <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="focusable absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </label>
+
+      {matches ? (
+        <div>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            {matches.length === 0 ? `Nothing here matches “${query.trim()}”. Try another word, or browse by area below.` : `${matches.length} ${matches.length === 1 ? 'place matches' : 'places match'} “${query.trim()}”.`}
+          </p>
+          {matches.length > 0 && (
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {matches.map((item) => (
+                <li key={item.href}>
+                  <Link href={item.href} className="tile-glass group flex h-full items-start gap-3 p-3.5">
+                    <span className={cn('mt-0.5 h-8 w-1 flex-shrink-0 rounded-full bg-gradient-to-b', item.group.tint)} aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white">
+                        <span className="truncate">{item.label}</span>
+                        {item.gated && <Lock className="h-3 w-3 flex-shrink-0 text-slate-400" aria-label="Sign in required" />}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{item.blurb}</span>
+                      <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{item.group.title}</span>
+                    </span>
+                    <ArrowRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-rose-500 dark:text-slate-600" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+      <>
       <div role="tablist" aria-label="Areas of the platform" className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-2">
         {GROUPS.map((group) => {
           const on = group.id === active.id;
@@ -269,6 +313,8 @@ export function PlatformDirectory() {
           </ul>
         </motion.div>
       </AnimatePresence>
+      </>
+      )}
     </Rail>
   );
 }

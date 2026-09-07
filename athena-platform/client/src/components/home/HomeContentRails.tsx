@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Clock, GraduationCap, Sparkles, Users } from 'lucide-react';
 import { courseApi, groupsApi } from '@/lib/api';
+import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
 
@@ -49,29 +50,48 @@ const TYPE_STRIPE: Record<string, string> = {
 const typeLabel = (t?: string | null) => (t ? t.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) : 'Course');
 
 export function LearningRail() {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [courses, setCourses] = useState<Course[] | null>(null);
+  // True when the rows are the member's own recommendations rather than the catalogue.
+  const [picked, setPicked] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
-    courseApi
-      .getAll({ limit: 3 })
-      .then((r) => {
-        if (cancelled) return;
-        const data = r.data?.data;
-        setCourses(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (!cancelled) setCourses([]);
-      });
+    const rows = (r: { data?: { data?: unknown } }) => (Array.isArray(r.data?.data) ? (r.data.data as Course[]) : []);
+    const load = async () => {
+      if (isAuthenticated) {
+        try {
+          const picks = rows(await courseApi.getRecommendations());
+          if (picks.length > 0) {
+            if (!cancelled) {
+              setCourses(picks.slice(0, 3));
+              setPicked(true);
+            }
+            return;
+          }
+        } catch {
+          // The catalogue is the fallback.
+        }
+      }
+      const list = rows(await courseApi.getAll({ limit: 3 }));
+      if (!cancelled) {
+        setCourses(list);
+        setPicked(false);
+      }
+    };
+    load().catch(() => {
+      if (!cancelled) setCourses([]);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated, authLoading]);
 
   if (courses !== null && courses.length === 0) return null;
 
   return (
-    <Rail icon={GraduationCap} tone="violet" kicker="Learning" title="Learn something new" titleId="home-learning-title" description="Real courses, and what happened to the people who finished them." cta={{ href: '/courses', label: 'See all courses' }}>
+    <Rail icon={GraduationCap} tone="violet" kicker="Learning" title={picked ? 'Picked for you' : 'Learn something new'} titleId="home-learning-title" description={picked ? 'Chosen from what you have done here so far.' : 'Real courses, and what happened to the people who finished them.'} cta={{ href: '/courses', label: 'See all courses' }}>
       <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {courses === null ? (
           <SkeletonTiles count={3} height="h-52" />

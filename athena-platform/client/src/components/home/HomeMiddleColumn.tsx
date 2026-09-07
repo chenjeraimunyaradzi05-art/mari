@@ -8,6 +8,7 @@ import { Reveal } from './Reveal';
 import { HomeReelsRail } from './HomeReelsRail';
 import { ReelTopicCircles } from './ReelTopicCircles';
 import { JobSpotlight } from './JobSpotlight';
+import { WinsRail } from './WinsRail';
 import { MentorsRail } from './MentorsRail';
 import { EventsRail } from './EventsRail';
 import { LearningRail, CommunityRail } from './HomeContentRails';
@@ -99,7 +100,13 @@ export function HomeMiddleColumn() {
 
       <HomeHero />
 
-      {/* Real open roles rather than more marketing copy. */}
+      {/* Members' own wins, before anything we are selling. Renders nothing
+          when none have been posted. */}
+      <Reveal>
+        <WinsRail />
+      </Reveal>
+
+      {/* Real open roles and apprenticeships rather than more marketing copy. */}
       <Reveal>
         <JobSpotlight />
       </Reveal>

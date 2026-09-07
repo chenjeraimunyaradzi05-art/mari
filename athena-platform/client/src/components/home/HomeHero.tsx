@@ -10,8 +10,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, BookOpen, Bookmark, Briefcase, GraduationCap, LayoutDashboard, MessageCircle, PenSquare, Send, ShieldCheck, Sparkles, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'framer-motion';
+import { ArrowRight, BookOpen, Bookmark, Briefcase, GraduationCap, LayoutDashboard, Lock, MapPin, MessageCircle, PenSquare, Send, ShieldCheck, Sparkles, UserCheck, Users, Wallet, type LucideIcon } from 'lucide-react';
 import { courseApi, eventsApi, groupsApi, jobApi } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -77,6 +77,14 @@ function usePulse() {
   ].filter((t) => !t.error);
 }
 
+/** What anyone here can count on, each a door to the page that backs it up. */
+const TRUST: Array<{ href: string; label: string; hint: string; icon: LucideIcon; tint: string }> = [
+  { href: '/safety-center', label: 'Women-only', hint: 'A gate, and a safe mode', icon: ShieldCheck, tint: 'from-rose-500 to-pink-500' },
+  { href: '/help/community-guidelines', label: 'People moderate', hint: 'Not only a filter', icon: UserCheck, tint: 'from-violet-500 to-indigo-500' },
+  { href: '/privacy-center', label: 'Your data, your call', hint: 'See it, export it, delete it', icon: Lock, tint: 'from-emerald-400 to-teal-500' },
+  { href: '/about', label: 'Built in Queensland', hint: 'For women everywhere', icon: MapPin, tint: 'from-amber-400 to-orange-500' },
+];
+
 /** A member's quick doors, in place of the visitor's intents. */
 const QUICK: Array<{ href: string; label: string; hint: string; icon: LucideIcon }> = [
   { href: '/dashboard', label: 'Your dashboard', hint: 'Everything of yours, in one place', icon: LayoutDashboard },
@@ -103,6 +111,29 @@ export function HomeHero() {
   const pulse = usePulse();
   const member = isAuthenticated && Boolean(user);
 
+  // The aurora follows the pointer a little, each blob by a different amount,
+  // so the card has depth. Springs keep it slow; reduced motion switches it off.
+  const px = useMotionValue(0);
+  const py = useMotionValue(0);
+  const sx = useSpring(px, { stiffness: 60, damping: 20 });
+  const sy = useSpring(py, { stiffness: 60, damping: 20 });
+  const b1x = useTransform(sx, (v) => v * 28);
+  const b1y = useTransform(sy, (v) => v * 22);
+  const b2x = useTransform(sx, (v) => v * -20);
+  const b2y = useTransform(sy, (v) => v * -16);
+  const b3x = useTransform(sx, (v) => v * 14);
+  const b3y = useTransform(sy, (v) => v * -26);
+  const onPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (reduce) return;
+    const r = event.currentTarget.getBoundingClientRect();
+    px.set(((event.clientX - r.left) / r.width - 0.5) * 2);
+    py.set(((event.clientY - r.top) / r.height - 0.5) * 2);
+  };
+  const onPointerLeave = () => {
+    px.set(0);
+    py.set(0);
+  };
+
   useEffect(() => {
     setHello(greeting(new Date().getHours()));
   }, []);
@@ -115,11 +146,17 @@ export function HomeHero() {
 
   return (
     <div className="space-y-4">
-      <section aria-labelledby="home-hero-title" className="relative overflow-hidden rounded-3xl border border-violet-200/40 text-white shadow-[0_30px_80px_-40px_rgba(168,85,247,0.7)] dark:border-white/10">
+      <section aria-labelledby="home-hero-title" onPointerMove={onPointerMove} onPointerLeave={onPointerLeave} className="relative overflow-hidden rounded-3xl border border-violet-200/40 text-white shadow-[0_30px_80px_-40px_rgba(168,85,247,0.7)] dark:border-white/10">
         <div aria-hidden className="absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,#3b0f4f_0%,#140b25_45%,#1a0b17_100%)]" />
-        <div aria-hidden className="aurora-blob left-[-12%] top-[-25%] h-72 w-72 bg-rose-500" />
-        <div aria-hidden className="aurora-blob aurora-blob--slow right-[-8%] top-[5%] h-80 w-80 bg-violet-500" />
-        <div aria-hidden className="aurora-blob aurora-blob--slower bottom-[-35%] left-[30%] h-72 w-72 bg-amber-400" />
+        <motion.div aria-hidden style={{ x: b1x, y: b1y }} className="pointer-events-none absolute inset-0">
+          <div className="aurora-blob left-[-12%] top-[-25%] h-72 w-72 bg-rose-500" />
+        </motion.div>
+        <motion.div aria-hidden style={{ x: b2x, y: b2y }} className="pointer-events-none absolute inset-0">
+          <div className="aurora-blob aurora-blob--slow right-[-8%] top-[5%] h-80 w-80 bg-violet-500" />
+        </motion.div>
+        <motion.div aria-hidden style={{ x: b3x, y: b3y }} className="pointer-events-none absolute inset-0">
+          <div className="aurora-blob aurora-blob--slower bottom-[-35%] left-[30%] h-72 w-72 bg-amber-400" />
+        </motion.div>
         <div aria-hidden className="grid-fade absolute inset-0 opacity-60" />
 
         <div className="relative p-6 sm:p-8 lg:p-10">
@@ -210,6 +247,22 @@ export function HomeHero() {
           )}
         </div>
       </section>
+
+      <ul aria-label="What you can count on" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {TRUST.map((t) => (
+          <li key={t.href}>
+            <Link href={t.href} className="tile-glass group flex h-full items-center gap-2.5 px-3 py-2.5">
+              <span className={cn('flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white', t.tint)}>
+                <t.icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-semibold text-slate-900 dark:text-white">{t.label}</span>
+                <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">{t.hint}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
 
       {member ? (
         <section aria-label="Your quick doors" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
