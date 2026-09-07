@@ -62,7 +62,7 @@ export function WinsRail() {
   if (wins !== null && wins.length === 0) return null;
 
   return (
-    <Rail icon={Trophy} tone="amber" kicker="Wins" title="Worth celebrating" titleId="home-wins-title" description="Members marking a win, in their own words. Cheer them on." cta={{ href: '/feed', label: 'See the feed' }}>
+    <Rail icon={Trophy} tone="amber" kicker="worth a cheer" title="Wins worth celebrating" titleId="home-wins-title" description="Women here marking a win, in their own words. Go on, cheer them on." cta={{ href: '/feed', label: 'See the feed' }}>
       <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {wins === null ? (
           <SkeletonTiles count={3} height="h-44" />

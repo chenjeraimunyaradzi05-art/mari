@@ -598,3 +598,102 @@ select:focus-visible,
     transform: none;
   }
 }
+
+/* ── The softer home ──────────────────────────────────────────────────────── */
+/* An italic eyebrow in the display face, a warm title with a small flourish
+   under it, twinkles for the hero, and a blush wash behind the column. */
+
+.eyebrow-soft {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-style: italic;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.title-flourish {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 0.3rem;
+}
+
+.title-flourish::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 2.75rem;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #fb7185 0%, #c084fc 55%, #fcd34d 100%);
+  opacity: 0.9;
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.7) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(20deg);
+  }
+}
+
+.twinkle {
+  position: absolute;
+  pointer-events: none;
+  animation: twinkle 3.2s ease-in-out infinite;
+}
+
+.twinkle--2 {
+  animation-delay: -1.1s;
+  animation-duration: 3.8s;
+}
+
+.twinkle--3 {
+  animation-delay: -2.2s;
+  animation-duration: 4.4s;
+}
+
+/* A soft radial wash of blush and lavender behind the top of the column. */
+.blush-wash {
+  background:
+    radial-gradient(60% 50% at 20% 10%, rgb(251 207 232 / 0.55) 0%, transparent 70%),
+    radial-gradient(50% 45% at 85% 25%, rgb(221 214 254 / 0.55) 0%, transparent 70%),
+    radial-gradient(45% 40% at 55% 85%, rgb(254 243 199 / 0.5) 0%, transparent 70%);
+}
+
+.dark .blush-wash {
+  background:
+    radial-gradient(60% 50% at 20% 10%, rgb(190 24 93 / 0.18) 0%, transparent 70%),
+    radial-gradient(50% 45% at 85% 25%, rgb(124 58 237 / 0.18) 0%, transparent 70%),
+    radial-gradient(45% 40% at 55% 85%, rgb(217 119 6 / 0.12) 0%, transparent 70%);
+}
+
+/* Warmer glass: a blush tint in light, a plum tint in dark. */
+.tile-glass {
+  border-color: rgb(253 164 175 / 0.35);
+  background: rgb(255 251 252 / 0.8);
+}
+
+.dark .tile-glass {
+  background: rgb(30 17 38 / 0.6);
+  border-color: rgb(255 255 255 / 0.08);
+}
+
+.rail-panel {
+  background: rgb(255 250 251 / 0.7);
+}
+
+.dark .rail-panel {
+  background: rgb(24 14 32 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twinkle {
+    animation: none;
+    opacity: 0.6;
+  }
+}

@@ -8,10 +8,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Star, Users } from 'lucide-react';
+import { Star, Users } from 'lucide-react';
 import { mentorApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
+import { GoButton, Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
 
 type Mentor = {
   id: string;
@@ -56,14 +56,14 @@ export function MentorsRail() {
   if (mentors !== null && mentors.length === 0) return null;
 
   return (
-    <Rail icon={Users} tone="rose" kicker="Mentors" title="People who have done it" titleId="home-mentors-title" description="Book a session with someone a few steps ahead of you." cta={{ href: '/mentors', label: 'All mentors' }}>
+    <Rail icon={Users} tone="rose" kicker="with someone a few steps ahead" title="Women who have done it" titleId="home-mentors-title" description="Book an hour with someone who remembers exactly where you are now." cta={{ href: '/mentors', label: 'Meet them all' }}>
       <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {mentors === null ? (
           <SkeletonTiles count={3} height="h-44" />
         ) : (
           mentors.map((mentor, index) => {
             const name = mentor.user?.displayName?.trim() || 'ATHENA mentor';
-            const areas = specs(mentor.specializations).slice(0, 3);
+            const areas = specs(mentor.specializations).slice(0, 2);
             const rate = mentor.hourlyRate != null ? Number(mentor.hourlyRate) : null;
             const rating = mentor.rating != null ? Number(mentor.rating) : null;
             return (
@@ -98,10 +98,8 @@ export function MentorsRail() {
                       </span>
                     )}
                     <span className="ml-auto inline-flex items-center gap-2">
-                      {rate !== null && <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700 dark:bg-white/10 dark:text-slate-200">{rate === 0 ? 'Free' : `$${rate}/hr`}</span>}
-                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white transition-colors group-hover:bg-rose-500 dark:bg-white dark:text-slate-900 dark:group-hover:bg-rose-400">
-                        <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                      </span>
+                      {rate !== null && <span className="rounded-full bg-rose-50 px-2 py-0.5 font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">{rate === 0 ? 'Free' : `$${rate} an hour`}</span>}
+                      <GoButton className="h-7 w-7" />
                     </span>
                   </span>
                 </Link>

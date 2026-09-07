@@ -103,7 +103,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
-        display: ['var(--font-playfair)', 'Georgia', 'serif'],
+        display: ['var(--font-fraunces)', 'Playfair Display', 'Georgia', 'serif'],
         mono: ['var(--font-jetbrains)', 'Fira Code', 'monospace'],
       },
       spacing: {

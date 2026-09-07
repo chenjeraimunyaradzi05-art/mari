@@ -1,6 +1,18 @@
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
+import { Fraunces } from 'next/font/google';
 import './globals.css';
+
+// The display face: a soft, warm serif for the headings and italic eyebrows
+// on the public pages. Exposed as a variable so Tailwind's `font-display`
+// and the home page's `.eyebrow-soft` can reach it.
+const fraunces = Fraunces({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  style: ['normal', 'italic'],
+  variable: '--font-fraunces',
+  display: 'swap',
+});
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
 import { SiteFooter } from '@/components/layout/SiteFooter';
@@ -56,7 +68,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen antialiased" suppressHydrationWarning>
+      <body className={`${fraunces.variable} min-h-screen antialiased`} suppressHydrationWarning>
         {/* The stored theme, applied before the page becomes interactive so a
             dark reader never sees a white flash. Mirrors ThemeSync in providers.tsx. */}
         <Script id="athena-theme-init" strategy="beforeInteractive">

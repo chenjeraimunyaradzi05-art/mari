@@ -63,7 +63,7 @@ export function EventsRail() {
   if (events !== null && events.length === 0) return null;
 
   return (
-    <Rail icon={CalendarDays} tone="sky" kicker="Events" title="Coming up" titleId="home-events-title" description="Meetups, workshops and online sessions, soonest first." cta={{ href: '/events', label: 'All events' }}>
+    <Rail icon={CalendarDays} tone="sky" kicker="for your calendar" title="Coming up, come along" titleId="home-events-title" description="Meetups, workshops and online sessions, soonest first. Bring a friend." cta={{ href: '/events', label: 'Every event' }}>
       <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {events === null ? (
           <SkeletonTiles count={3} height="h-36" />
@@ -96,7 +96,7 @@ export function EventsRail() {
                     </span>
                     <span className="mt-2 flex items-center gap-2">
                       <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold', event.price === 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200')}>
-                        {event.price === 0 ? 'Free' : typeof event.price === 'number' ? `$${event.price}` : sentence(event.type) || 'Event'}
+                        {event.price === 0 ? 'Free to come' : typeof event.price === 'number' ? `$${event.price}` : sentence(event.type) || 'Event'}
                       </span>
                       {typeof event.attendees === 'number' && event.attendees > 1 && (
                         <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">

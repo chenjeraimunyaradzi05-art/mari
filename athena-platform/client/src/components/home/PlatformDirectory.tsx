@@ -216,10 +216,10 @@ export function PlatformDirectory() {
   const matches = q.length >= 2 ? ALL.filter((d) => `${d.label} ${d.blurb} ${d.group.title}`.toLowerCase().includes(q)) : null;
 
   return (
-    <Rail icon={LayoutGrid} tone="rose" kicker="Everything here" title="Explore the whole platform" titleId="directory-heading" description={`${total} places to go, grouped by what you came for. A padlock means you need an account; sign in and you land straight back on the page you picked.`}>
+    <Rail icon={LayoutGrid} tone="rose" kicker="everything, in one place" title="Wander the whole place" titleId="directory-heading" description={`${total} rooms to wander into, grouped by what you came for. A little padlock means you need an account; sign in and you land straight back where you picked.`}>
       <label className="relative mb-3 block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Looking for something? Type it: grants, mentors, tax, reels…" aria-label="Search the platform's pages" className="input w-full rounded-full pl-9 pr-9 text-sm" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Looking for something in particular? Grants, mentors, tax, reels…" aria-label="Search the platform's pages" className="input w-full rounded-full pl-9 pr-9 text-sm" />
         {query && (
           <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="focusable absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10">
             <X className="h-3.5 w-3.5" />

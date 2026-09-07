@@ -119,7 +119,7 @@ export function HomeReelsRail({ compact: isCompact = false }: { compact?: boolea
 
   if (isCompact) {
     return (
-      <Rail icon={Play} tone="violet" kicker="Reels" title="Short video from women building in public" titleId="home-reels-title" description="Career wins, salary talk and founder stories, ninety seconds each." cta={{ href: '/explore', label: 'Watch reels' }}>
+      <Rail icon={Play} tone="violet" kicker="ninety seconds at a time" title="Women building in public" titleId="home-reels-title" description="Career wins, salary talk and founder stories, each one short enough for the bus." cta={{ href: '/explore', label: 'Watch reels' }}>
         {reels === null ? (
           <div className="grid grid-cols-3 gap-2">
             {[0, 1, 2].map((i) => (

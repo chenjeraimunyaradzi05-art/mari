@@ -10,11 +10,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Briefcase, Clock, Hammer, MapPin, Wifi } from 'lucide-react';
+import { Briefcase, Clock, Hammer, MapPin, Wifi } from 'lucide-react';
 import { jobApi } from '@/lib/api';
 import { apprenticeshipApi } from '@/lib/api-extensions';
 import { cn } from '@/lib/utils';
-import { Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
+import { GoButton, Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
 
 type Job = {
   id: string;
@@ -88,14 +88,6 @@ function Mark({ name, logo, index }: { name?: string | null; logo?: string | nul
   return <span className={cn('flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br text-xs font-bold text-white', TILE_GRADIENTS[index % TILE_GRADIENTS.length])}>{initials(name)}</span>;
 }
 
-function Arrow({ tone }: { tone: 'rose' | 'amber' }) {
-  return (
-    <span className={cn('flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition-colors dark:bg-white dark:text-slate-900', tone === 'rose' ? 'group-hover:bg-rose-500 dark:group-hover:bg-rose-400' : 'group-hover:bg-amber-500 dark:group-hover:bg-amber-400')}>
-      <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-    </span>
-  );
-}
-
 type Tab = 'jobs' | 'apprenticeships';
 
 export function JobSpotlight() {
@@ -153,10 +145,10 @@ export function JobSpotlight() {
     <Rail
       icon={Briefcase}
       tone="rose"
-      kicker="Find work"
-      title={current === 'jobs' ? 'Jobs worth a look' : 'Learn on the job, and get paid'}
+      kicker="for your working life"
+      title={current === 'jobs' ? 'Roles that could be yours' : 'Learn on the job, and be paid for it'}
       titleId="home-jobs-title"
-      description={current === 'jobs' ? (total !== null ? `${total.toLocaleString('en-AU')} open right now, and every one shows the pay.` : 'From employers who tell you the pay up front.') : 'Apprenticeships and traineeships with a registered provider, wage shown.'}
+      description={current === 'jobs' ? (total !== null ? `${total.toLocaleString('en-AU')} open right now, every one with the pay shown, so you never have to ask.` : 'From employers who tell you the pay up front.') : 'Apprenticeships and traineeships with a registered provider, the wage shown.'}
       cta={current === 'jobs' ? { href: '/jobs', label: 'Browse all jobs' } : { href: '/apprenticeships', label: 'All apprenticeships' }}
     >
       {showTabs && (
@@ -183,7 +175,6 @@ export function JobSpotlight() {
               ) : (
                 jobs.map((job, index) => {
                   const salary = job.showSalary === false ? null : range(job.salaryMin, job.salaryMax);
-                  const type = titleCase(job.type);
                   return (
                     <StaggerItem key={job.id}>
                       <Link href={`/jobs/${job.id}`} className="tile-glass group flex h-full flex-col p-4">
@@ -202,10 +193,7 @@ export function JobSpotlight() {
                           </span>
                         </span>
                         <span className="mt-3 line-clamp-2 text-[15px] font-semibold leading-snug text-slate-900 dark:text-white">{job.title}</span>
-                        <span className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
-                          {job.organization?.name || 'ATHENA employer'}
-                          {type ? ` · ${type}` : ''}
-                        </span>
+                        <span className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{job.organization?.name || 'ATHENA employer'}</span>
                         <span className="mt-auto flex items-center justify-between gap-2 pt-4">
                           {salary ? (
                             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{salary}</span>
@@ -214,7 +202,7 @@ export function JobSpotlight() {
                               <Clock className="h-3 w-3" /> Pay on the listing
                             </span>
                           )}
-                          <Arrow tone="rose" />
+                          <GoButton />
                         </span>
                       </Link>
                     </StaggerItem>
@@ -259,7 +247,7 @@ export function JobSpotlight() {
                       </span>
                       <span className="mt-auto flex items-center justify-between gap-2 pt-4">
                         {wage ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">{wage} while you train</span> : <span className="text-xs text-slate-400">Wage on the listing</span>}
-                        <Arrow tone="amber" />
+                        <GoButton />
                       </span>
                     </Link>
                   </StaggerItem>

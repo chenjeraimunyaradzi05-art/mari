@@ -8,11 +8,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Clock, GraduationCap, Sparkles, Users } from 'lucide-react';
+import { Clock, GraduationCap, Sparkles, Users } from 'lucide-react';
 import { courseApi, groupsApi } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
-import { Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
+import { GoButton, Rail, SkeletonTiles, StaggerItem, StaggerList, TILE_GRADIENTS } from './RailShell';
 
 /* ------------------------------------------------------------------ courses */
 
@@ -91,7 +91,7 @@ export function LearningRail() {
   if (courses !== null && courses.length === 0) return null;
 
   return (
-    <Rail icon={GraduationCap} tone="violet" kicker="Learning" title={picked ? 'Picked for you' : 'Learn something new'} titleId="home-learning-title" description={picked ? 'Chosen from what you have done here so far.' : 'Real courses, and what happened to the people who finished them.'} cta={{ href: '/courses', label: 'See all courses' }}>
+    <Rail icon={GraduationCap} tone="violet" kicker="for your mind" title={picked ? 'Picked for you' : 'Grow into something new'} titleId="home-learning-title" description={picked ? 'Chosen from what you have done here so far.' : 'Real courses from real providers, and what happened to the women who finished them.'} cta={{ href: '/courses', label: 'Browse courses' }}>
       <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {courses === null ? (
           <SkeletonTiles count={3} height="h-52" />
@@ -125,26 +125,24 @@ export function LearningRail() {
                       {course.studyMode?.[0] && <span className="capitalize">{course.studyMode[0].replace(/-/g, ' ')}</span>}
                     </span>
 
-                    {/* Outcomes are the reason to pick one of these over a video course. */}
-                    {(employed !== null || typeof course.avgStartingSalary === 'number') && (
-                      <span className="mt-auto grid grid-cols-2 gap-2 pt-4">
+                    {/* One soft line on outcomes, the reason to pick one of these over a video course. */}
+                    <span className="mt-auto flex items-end justify-between gap-3 pt-4">
+                      <span className="min-w-0 text-xs leading-5 text-slate-600 dark:text-slate-400">
                         {employed !== null && (
-                          <span className="rounded-xl bg-slate-50 p-2.5 dark:bg-white/5">
-                            <span className="block text-base font-semibold tabular-nums text-slate-900 dark:text-white">{employed}%</span>
-                            <span className="block text-[10px] uppercase tracking-wide text-slate-500">employed after</span>
-                            <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
-                              <span className={cn('block h-full rounded-full bg-gradient-to-r', stripe)} style={{ width: `${employed}%` }} />
-                            </span>
-                          </span>
+                          <>
+                            <span className="font-display text-base font-semibold not-italic text-slate-900 dark:text-white">{employed}%</span> in work after
+                          </>
                         )}
+                        {employed !== null && typeof course.avgStartingSalary === 'number' && ' · '}
                         {typeof course.avgStartingSalary === 'number' && (
-                          <span className="rounded-xl bg-slate-50 p-2.5 dark:bg-white/5">
-                            <span className="block text-base font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{money(course.avgStartingSalary)}</span>
-                            <span className="block text-[10px] uppercase tracking-wide text-slate-500">median start</span>
-                          </span>
+                          <>
+                            <span className="font-display text-base font-semibold text-emerald-600 dark:text-emerald-400">{money(course.avgStartingSalary)}</span> to start
+                          </>
                         )}
+                        {employed === null && typeof course.avgStartingSalary !== 'number' && 'Outcomes not stated yet'}
                       </span>
-                    )}
+                      <GoButton />
+                    </span>
                   </span>
                 </Link>
               </StaggerItem>
@@ -189,7 +187,7 @@ export function CommunityRail() {
   if (groups !== null && groups.length === 0) return null;
 
   return (
-    <Rail icon={Users} tone="amber" kicker="Communities" title="Find your people" titleId="home-communities-title" description="Smaller rooms, for wherever you happen to be right now." cta={{ href: '/communities', label: 'See them all' }}>
+    <Rail icon={Users} tone="amber" kicker="for your people" title="Find your people" titleId="home-communities-title" description="Small rooms for wherever you happen to be right now. Pull up a chair." cta={{ href: '/communities', label: 'See every room' }}>
       <StaggerList className="grid gap-3 sm:grid-cols-2">
         {groups === null ? (
           <SkeletonTiles count={4} height="h-28" />
@@ -201,9 +199,7 @@ export function CommunityRail() {
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-2">
                     <span className="truncate text-[15px] font-semibold text-slate-900 dark:text-white">{group.name}</span>
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition-colors group-hover:bg-amber-500 dark:bg-white dark:text-slate-900 dark:group-hover:bg-amber-400">
-                      <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                    </span>
+                    <GoButton className="h-7 w-7" />
                   </span>
                   {group.description && <span className="mt-1 line-clamp-2 block text-xs leading-5 text-slate-600 dark:text-slate-400">{group.description}</span>}
                   <span className="mt-2 flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
@@ -213,8 +209,8 @@ export function CommunityRail() {
                         <Users className="h-3 w-3" /> {group.memberCount.toLocaleString('en-AU')} members
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                      <Sparkles className="h-3 w-3" /> Open to join
+                    <span className="inline-flex items-center gap-1 text-rose-500 dark:text-rose-300">
+                      <Sparkles className="h-3 w-3" /> You are welcome here
                     </span>
                   </span>
                 </span>
