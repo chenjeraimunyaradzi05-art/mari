@@ -1,18 +1,21 @@
 'use client';
 
 /**
- * The opening of the home page, softly: an aurora of rose, lavender and gold
- * behind frosted glass with a few twinkles, a serif headline that keeps naming
- * what someone might be here for, one gentle line of the platform's live
- * numbers, and a row of intents that swap a short, warm pitch with two doors.
- * A member is greeted by name for the time of day and given her quick doors.
+ * The opening of the home page, softly, in either theme.
+ *
+ * Light: a blush, lavender and cream sky with plum text and rose ink.
+ * Dark: the same aurora over deep plum with cream text.
+ * Both carry a serif headline that keeps naming what someone might be here
+ * for, one gentle line of the platform's live numbers, and a row of intents
+ * that swap a short, warm pitch with two doors. A member is greeted by name
+ * for the time of day and given her quick doors instead.
  */
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'framer-motion';
-import { ArrowRight, BookOpen, Bookmark, Briefcase, GraduationCap, LayoutDashboard, MessageCircle, PenSquare, ShieldCheck, Sparkles, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { ArrowRight, BookOpen, Bookmark, Briefcase, GraduationCap, LayoutDashboard, MessageCircle, PenSquare, ShieldCheck, Users, Wallet, type LucideIcon } from 'lucide-react';
 import { courseApi, eventsApi, groupsApi, jobApi } from '@/lib/api';
 import { useAuth } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -43,6 +46,14 @@ function greeting(hour: number): string {
   if (hour < 17) return 'Good afternoon';
   return 'Good evening';
 }
+
+/**
+ * The headline's changing phrase. Deep rose to purple to amber on a pale sky;
+ * blush to lavender to butter on a dark one. Kept as one class so the two
+ * halves of the theme never drift apart.
+ */
+const PHRASE_INK =
+  'bg-[linear-gradient(90deg,#be123c_0%,#9333ea_52%,#c2410c_100%)] dark:bg-[linear-gradient(90deg,#fecdd3_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text italic text-transparent';
 
 /** Counts up from zero the first time it is shown; still for reduced motion. */
 function CountUp({ value }: { value: number }) {
@@ -93,7 +104,7 @@ function usePulse() {
 
 function Twinkle({ className }: { className: string }) {
   return (
-    <svg aria-hidden viewBox="0 0 24 24" className={cn('twinkle h-4 w-4 text-white/90', className)} fill="currentColor">
+    <svg aria-hidden viewBox="0 0 24 24" className={cn('twinkle h-4 w-4 text-rose-300 dark:text-white/90', className)} fill="currentColor">
       <path d="M12 2c.6 4.6 3.4 7.4 8 8-4.6.6-7.4 3.4-8 8-.6-4.6-3.4-7.4-8-8 4.6-.6 7.4-3.4 8-8z" />
     </svg>
   );
@@ -147,16 +158,22 @@ export function HomeHero() {
 
   return (
     <div className="space-y-4">
-      <section aria-labelledby="home-hero-title" onPointerMove={onPointerMove} onPointerLeave={onPointerLeave} className="relative overflow-hidden rounded-[2rem] border border-rose-200/50 text-white shadow-[0_30px_80px_-40px_rgba(236,72,153,0.6)] dark:border-white/10">
-        <div aria-hidden className="absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,#5b1d4f_0%,#2a1236_45%,#3a1224_100%)]" />
+      <section
+        aria-labelledby="home-hero-title"
+        onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
+        className="relative overflow-hidden rounded-[2rem] border border-rose-200/70 text-slate-900 shadow-[0_24px_60px_-38px_rgba(190,24,93,0.45)] dark:border-white/10 dark:text-white dark:shadow-[0_30px_80px_-40px_rgba(236,72,153,0.6)]"
+      >
+        {/* A pale blush sky by day, deep plum by night. */}
+        <div aria-hidden className="absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,#fff1f2_0%,#fae8ff_48%,#fff7ed_100%)] dark:bg-[radial-gradient(120%_120%_at_0%_0%,#5b1d4f_0%,#2a1236_45%,#3a1224_100%)]" />
         <motion.div aria-hidden style={{ x: b1x, y: b1y }} className="pointer-events-none absolute inset-0">
-          <div className="aurora-blob left-[-12%] top-[-25%] h-72 w-72 bg-rose-400" />
+          <div className="aurora-blob left-[-12%] top-[-25%] h-72 w-72 bg-rose-300 dark:bg-rose-400" />
         </motion.div>
         <motion.div aria-hidden style={{ x: b2x, y: b2y }} className="pointer-events-none absolute inset-0">
-          <div className="aurora-blob aurora-blob--slow right-[-8%] top-[5%] h-80 w-80 bg-fuchsia-400" />
+          <div className="aurora-blob aurora-blob--slow right-[-8%] top-[5%] h-80 w-80 bg-fuchsia-200 dark:bg-fuchsia-400" />
         </motion.div>
         <motion.div aria-hidden style={{ x: b3x, y: b3y }} className="pointer-events-none absolute inset-0">
-          <div className="aurora-blob aurora-blob--slower bottom-[-35%] left-[30%] h-72 w-72 bg-amber-300" />
+          <div className="aurora-blob aurora-blob--slower bottom-[-35%] left-[30%] h-72 w-72 bg-amber-200 dark:bg-amber-300" />
         </motion.div>
         <div aria-hidden className="grid-fade absolute inset-0 opacity-40" />
         <Twinkle className="right-[9%] top-[14%]" />
@@ -164,12 +181,12 @@ export function HomeHero() {
         <Twinkle className="twinkle--3 right-[13%] bottom-[22%] h-5 w-5" />
 
         <div className="relative p-6 sm:p-8 lg:p-10">
-          <p className={cn('eyebrow-soft text-rose-100/90')}>{member ? 'Welcome back' : 'Welcome to ATHENA'}</p>
+          <p className="eyebrow-soft text-rose-600 dark:text-rose-100/90">{member ? 'Welcome back' : 'Welcome to ATHENA'}</p>
 
           {member ? (
             <h1 id="home-hero-title" className="mt-3 max-w-2xl font-display text-[2rem] font-medium leading-[1.12] sm:text-4xl 2xl:text-[2.6rem]">
               <span className="block">
-                {hello}, <span className="bg-[linear-gradient(90deg,#fecdd3_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text italic text-transparent">{user?.firstName}</span>.
+                {hello}, <span className={PHRASE_INK}>{user?.firstName}</span>.
               </span>
               <span className="block">Where to today?</span>
             </h1>
@@ -189,7 +206,7 @@ export function HomeHero() {
                       initial={false}
                       animate={reduce ? { opacity: active ? 1 : 0 } : { opacity: active ? 1 : 0, y: active ? 0 : 12, filter: active ? 'blur(0px)' : 'blur(4px)' }}
                       transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                      className={cn('col-start-1 row-start-1 whitespace-nowrap bg-[linear-gradient(90deg,#fecdd3_0%,#e9d5ff_50%,#fde68a_100%)] bg-clip-text italic text-transparent', !active && 'pointer-events-none')}
+                      className={cn('col-start-1 row-start-1 whitespace-nowrap', PHRASE_INK, !active && 'pointer-events-none')}
                     >
                       {p}?
                     </motion.span>
@@ -200,27 +217,27 @@ export function HomeHero() {
             </h1>
           )}
 
-          <p className="mt-5 max-w-lg text-[15px] leading-7 text-rose-50/90">
+          <p className="mt-5 max-w-lg text-[15px] leading-7 text-slate-700 dark:text-rose-50/90">
             {member ? 'Pick up where you left off, or see what has happened here since you were last in.' : 'Women here are changing careers, asking the awkward salary questions, starting things, and cheering each other on. Have a look around; no account needed, no rush.'}
           </p>
 
           <div className="mt-6 flex flex-wrap gap-2">
             {member ? (
               <>
-                <Link href="/dashboard/create-post" className="focusable inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-rose-700 shadow-[0_10px_30px_-10px_rgba(255,255,255,0.8)] transition hover:bg-rose-50">
+                <Link href="/dashboard/create-post" className="focusable inline-flex items-center gap-2 rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_26px_-12px_rgba(244,63,94,0.9)] transition hover:bg-rose-600 dark:bg-white dark:text-rose-700 dark:hover:bg-rose-50">
                   <PenSquare className="h-4 w-4" /> Share a win
                 </Link>
-                <Link href="/dashboard" className="focusable inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
+                <Link href="/dashboard" className="focusable inline-flex items-center gap-2 rounded-full border border-rose-300 bg-white/70 px-5 py-2.5 text-sm font-semibold text-rose-700 backdrop-blur transition hover:bg-white dark:border-white/40 dark:bg-white/10 dark:text-white dark:hover:bg-white/20">
                   Your dashboard <ArrowRight className="h-4 w-4" />
                 </Link>
               </>
             ) : (
               <>
-                <Link href="/register" className="focusable group inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-rose-700 shadow-[0_10px_30px_-10px_rgba(255,255,255,0.8)] transition hover:bg-rose-50">
+                <Link href="/register" className="focusable group inline-flex items-center gap-2 rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_26px_-12px_rgba(244,63,94,0.9)] transition hover:bg-rose-600 dark:bg-white dark:text-rose-700 dark:shadow-[0_10px_30px_-10px_rgba(255,255,255,0.8)] dark:hover:bg-rose-50">
                   Join, it&rsquo;s free
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                 </Link>
-                <Link href="/about" className="focusable rounded-full border border-white/40 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
+                <Link href="/about" className="focusable rounded-full border border-rose-300 bg-white/70 px-5 py-2.5 text-sm font-semibold text-rose-700 backdrop-blur transition hover:bg-white dark:border-white/40 dark:bg-white/10 dark:text-white dark:hover:bg-white/20">
                   Have a look around first
                 </Link>
               </>
@@ -229,15 +246,15 @@ export function HomeHero() {
 
           {/* One gentle sentence of live numbers rather than a row of boxes. */}
           {pulse.length > 0 && (
-            <p className="mt-7 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-rose-50/85">
-              <span className="pulse-dot relative mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-300" aria-hidden />
+            <p className="mt-7 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-slate-600 dark:text-rose-50/85">
+              <span className="pulse-dot relative mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-300" aria-hidden />
               <span>Right now there are</span>
               {loaded.length === 0 ? (
-                <span className="inline-block h-4 w-40 animate-pulse rounded bg-white/20" aria-label="Counting" />
+                <span className="inline-block h-4 w-40 animate-pulse rounded bg-rose-200/70 dark:bg-white/20" aria-label="Counting" />
               ) : (
                 loaded.map((t, i) => (
                   <span key={t.key}>
-                    <Link href={t.href} className="focusable rounded-sm font-display text-base font-semibold italic text-white underline decoration-rose-300/60 decoration-1 underline-offset-4 transition hover:decoration-white">
+                    <Link href={t.href} className="focusable rounded-sm font-display text-base font-semibold italic text-rose-700 underline decoration-rose-300 decoration-1 underline-offset-4 transition hover:decoration-rose-500 dark:text-white dark:decoration-rose-300/60 dark:hover:decoration-white">
                       <CountUp value={t.value as number} /> {t.value === 1 ? t.one : t.many}
                     </Link>
                     {i < loaded.length - 2 ? ',' : i === loaded.length - 2 ? ' and' : '.'}

@@ -484,7 +484,7 @@ select:focus-visible,
 
 /* A faint dot grid that fades out towards the edges. */
 .grid-fade {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.45) 1px, transparent 1.2px);
+  background-image: radial-gradient(rgba(190, 24, 93, 0.16) 1px, transparent 1.2px);
   background-size: 22px 22px;
   -webkit-mask-image: radial-gradient(ellipse at center, #000 25%, transparent 72%);
   mask-image: radial-gradient(ellipse at center, #000 25%, transparent 72%);
@@ -696,4 +696,20 @@ select:focus-visible,
     animation: none;
     opacity: 0.6;
   }
+}
+
+/* ── Light mode for the hero's sky ────────────────────────────────────────── */
+/* The dot grid and the aurora were drawn for a dark ground. On a pale one the
+   dots go rose and the blobs soften, so the headline keeps its contrast. */
+
+.dark .grid-fade {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.45) 1px, transparent 1.2px);
+}
+
+.aurora-blob {
+  opacity: 0.55;
+}
+
+.dark .aurora-blob {
+  opacity: 0.75;
 }
