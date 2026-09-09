@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { Activity, LifeBuoy, PieChart, Plus, Sparkles, Trash2, TrendingUp } from 'lucide-react';
+import { Activity, Coins, History, LifeBuoy, ListChecks, PieChart, Plus, ScrollText, Sparkles, Trash2, TrendingUp } from 'lucide-react';
 import { strategyApi, apiMessage } from '@/lib/strategy-api';
 import { financeApi } from '@/lib/api';
 import { Bars, Disclaimer, Field, JumpLinks, LineChart, Notes, NumberInput, Panel, Pending, SavePlanBar, SelectInput, Stat, aud, inputClass, num, opt, pct, useCalc } from '@/components/strategy/StrategyUi';
@@ -34,12 +34,14 @@ type Form = {
   answers: Record<string, number>; age: string;
   investments: string; superNow: string; monthly: string; salary: string; salaryGrowth: string; years: string; extra: string; breakStart: string; breakYears: string;
   expenses: string; months: string; efSavings: string; efMonthly: string; stability: string;
+  estate: Record<string, boolean>; taxableIncome: string; roundTo: string;
 };
 
 const DEFAULTS: Form = {
   answers: {}, age: '',
   investments: '', superNow: '', monthly: '', salary: '', salaryGrowth: '3', years: '15', extra: '200', breakStart: '3', breakYears: '2',
   expenses: '', months: '', efSavings: '', efMonthly: '', stability: 'stable',
+  estate: {}, taxableIncome: '', roundTo: '5',
 };
 
 type Profile = { profile: string; label: string; summary: string; score: number; maxScore: number; growthPct: number; defensivePct: number; allocation: Array<{ assetClass: string; label: string; pct: number }>; expectedReturnPct: number; volatilityPct: number; cappedBy: string | null; notes: string[]; asAt: string };
@@ -47,6 +49,21 @@ type Holding = { id: string; name: string; kind: 'ASSET' | 'LIABILITY'; category
 type NetWorth = { totalAssets: number; totalLiabilities: number; netWorth: number; investable: number; profile: string | null; byCategory: Array<{ category: string; label: string; kind: string; value: number; pctOfAssets: number }>; allocation: Array<{ assetClass: string; label: string; value: number; currentPct: number; targetPct: number; drift: number; move: number }>; suggestions: string[]; warnings: string[] };
 type Projection = { years: number; returnPct: number; scenarios: Array<{ key: string; label: string; endTotal: number; endRealTotal: number; totalContributed: number; growth: number; milestones: Array<{ amount: number; year: number | null }>; series: Array<{ year: number; total: number }> }>; notes: string[] };
 type Emergency = { monthsRecommended: number; target: number; current: number; gap: number; progressPct: number; monthsToTarget: number | null; targetDate: string | null; milestones: Array<{ pct: number; amount: number; reached: boolean }>; notes: string[] };
+
+type Roadmap = { steps: Array<{ key: string; title: string; why: string; status: 'done' | 'in_progress' | 'next' | 'later'; href: string; detail: string }>; completed: number; total: number; personalRunwayMonths: number | null; cash: number; monthlyExpenses: number | null };
+type Peers = { members: number; enough: boolean; emergencyFund: { withGoalPct: number; medianProgressPct: number; reachedPct: number } | null; superTrackedPct: number | null; investingPlanPct: number | null; note: string };
+type RoundUps = { roundTo: number; days: number; purchases: number; total: number; monthlyEstimate: number; yearlyEstimate: number; yearlyWithReturn: number; examples: Array<{ description: string; spent: number; roundUp: number }>; note: string };
+type Review = { holdings: Array<{ id?: string; name: string; value: number; costBase: number | null; gain: number | null; gainPct: number | null; heldMonths: number | null; discountEligible: boolean; taxIfSold: number | null }>; unrealisedGains: number; unrealisedLosses: number; netPosition: number; taxIfAllSold: number; harvest: Array<{ name: string; loss: number; note: string }>; notes: string[] };
+type NetWorthHistory = { points: Array<{ day: string; netWorth: number }>; change: number; since: string | null; milestones: Array<{ amount: number; reachedOn: string | null }> };
+
+const ESTATE_ITEMS = [
+  { key: 'will', label: 'A will', why: 'Without one the state decides who gets what, and it is rarely what you would have chosen.' },
+  { key: 'attorney', label: 'An enduring power of attorney', why: 'Someone to manage money and decisions if you cannot, chosen by you rather than a tribunal.' },
+  { key: 'super_nomination', label: 'A binding nomination on your super', why: 'Super does not pass under a will. Tell the fund who gets it, and make it non-lapsing.' },
+  { key: 'insurance_beneficiaries', label: 'Beneficiaries on any life cover', why: 'So the payout goes straight to them, outside the estate.' },
+  { key: 'guardian', label: 'A guardian named for any children', why: 'In the will, with the person asked first.' },
+  { key: 'digital', label: 'A list of accounts and where the passwords are', why: 'Somewhere the executor can find it; not in the will, which becomes public.' },
+];
 
 const COLORS = ['#f43f5e', '#a855f7', '#f59e0b', '#10b981', '#3b82f6'];
 
@@ -60,31 +77,75 @@ export default function InvestPage() {
   // Holdings are the member's own records, loaded once and after each change.
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [holdingsLoaded, setHoldingsLoaded] = useState(false);
-  const [newHolding, setNewHolding] = useState({ name: '', category: 'CASH', value: '' });
+  const [newHolding, setNewHolding] = useState({ name: '', category: 'CASH', value: '', costBase: '', acquiredAt: '' });
   const [netWorth, setNetWorth] = useState<NetWorth | null>(null);
   const [netWorthError, setNetWorthError] = useState<string | null>(null);
+  const [history, setHistory] = useState<NetWorthHistory | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
+  const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
+  const [peers, setPeers] = useState<Peers | null>(null);
+  const [roundUps, setRoundUps] = useState<RoundUps | null>(null);
+  const [roundUpsError, setRoundUpsError] = useState<string | null>(null);
+  const [autoSaving, setAutoSaving] = useState(false);
   const profileId = profile.result?.profile;
+  const taxable = num(form.taxableIncome);
 
   const loadNetWorth = useCallback(async () => {
     try {
-      const [h, nw] = await Promise.all([strategyApi.investing.getHoldings(), strategyApi.investing.netWorth(profileId ? { profile: profileId } : undefined)]);
+      const [h, nw, hist, rev] = await Promise.all([
+        strategyApi.investing.getHoldings(),
+        strategyApi.investing.netWorth(profileId ? { profile: profileId } : undefined),
+        strategyApi.investing.netWorthHistory().catch(() => null),
+        strategyApi.investing.holdingsReview(taxable > 0 ? { taxableIncome: taxable } : undefined).catch(() => null),
+      ]);
       setHoldings(h.data?.data ?? []);
       setNetWorth(nw.data?.data ?? null);
+      setHistory(hist?.data?.data ?? null);
+      setReview(rev?.data?.data ?? null);
       setNetWorthError(null);
     } catch (err) {
       setNetWorthError(apiMessage(err, 'Sign in to keep holdings and see net worth.'));
     } finally {
       setHoldingsLoaded(true);
     }
-  }, [profileId]);
+  }, [profileId, taxable]);
 
   useEffect(() => { loadNetWorth(); }, [loadNetWorth]);
+
+  // The roadmap and the peer snapshot are the member's own; a visitor sees neither.
+  useEffect(() => {
+    strategyApi.roadmap().then((r) => setRoadmap(r.data?.data ?? null)).catch(() => setRoadmap(null));
+    strategyApi.peers().then((r) => setPeers(r.data?.data ?? null)).catch(() => setPeers(null));
+  }, []);
+
+  const roundTo = num(form.roundTo, 5);
+  useEffect(() => {
+    strategyApi.investing.roundUps({ roundTo, days: 30 })
+      .then((r) => { setRoundUps(r.data?.data ?? null); setRoundUpsError(null); })
+      .catch((err) => setRoundUpsError(apiMessage(err, 'Connect a bank or paste a statement to see round-ups.')));
+  }, [roundTo]);
+
+  const applyRoundUps = async () => {
+    if (!roundUps) return;
+    setAutoSaving(true);
+    try {
+      const goals: Array<{ id: string; type: string; status: string }> = (await financeApi.getSavingsGoals()).data?.data ?? [];
+      const ef = goals.find((g) => g.type === 'EMERGENCY_FUND' && g.status === 'ACTIVE');
+      if (!ef) { toast.error('Start an emergency fund goal first, just above.'); return; }
+      await financeApi.updateSavingsGoal(ef.id, { autoSaveEnabled: true, autoSaveAmount: roundUps.monthlyEstimate });
+      toast.success(`Auto-save of ${aud(roundUps.monthlyEstimate)} a month set on the emergency fund`);
+    } catch (err) {
+      toast.error(apiMessage(err, 'That could not be set.'));
+    } finally {
+      setAutoSaving(false);
+    }
+  };
 
   const addHolding = async () => {
     if (!newHolding.name.trim() || !newHolding.value) { toast.error('A name and a value, please.'); return; }
     try {
-      await strategyApi.investing.addHolding({ name: newHolding.name.trim(), category: newHolding.category, value: num(newHolding.value) });
-      setNewHolding({ name: '', category: newHolding.category, value: '' });
+      await strategyApi.investing.addHolding({ name: newHolding.name.trim(), category: newHolding.category, value: num(newHolding.value), costBase: opt(newHolding.costBase), acquiredAt: newHolding.acquiredAt || undefined });
+      setNewHolding({ name: '', category: newHolding.category, value: '', costBase: '', acquiredAt: '' });
       await loadNetWorth();
     } catch (err) {
       toast.error(apiMessage(err, 'That could not be added.'));
@@ -132,7 +193,7 @@ export default function InvestPage() {
         <Link href="/dashboard/finance/savings" className="btn-secondary inline-flex items-center gap-2">Savings goals</Link>
       </div>
 
-      <JumpLinks items={[{ id: 'emergency', label: 'Safety net' }, { id: 'profile', label: 'Your mix' }, { id: 'net-worth', label: 'What you own' }, { id: 'projection', label: 'Where it goes' }]} />
+      <JumpLinks items={[{ id: 'roadmap', label: 'Roadmap' }, { id: 'emergency', label: 'Safety net' }, { id: 'round-ups', label: 'Round-ups' }, { id: 'profile', label: 'Your mix' }, { id: 'net-worth', label: 'What you own' }, { id: 'projection', label: 'Where it goes' }, { id: 'estate', label: 'A will' }]} />
 
       <SavePlanBar
         area="INVESTMENT"
@@ -141,6 +202,27 @@ export default function InvestPage() {
         onLoaded={(inputs) => setForm((f) => ({ ...f, ...(inputs as Partial<Form>) }))}
         summary={profile.result ? `${profile.result.label} mix.` : undefined}
       />
+
+      {roadmap && (
+        <Panel id="roadmap" icon={ListChecks} title="Your roadmap" intro={`${roadmap.completed} of ${roadmap.total} in place.${roadmap.personalRunwayMonths !== null ? ` Your cash covers ${roadmap.personalRunwayMonths} months of expenses.` : ''} One thing at a time, in the order that holds up.`}>
+          <ol className="grid gap-2 md:grid-cols-2">
+            {roadmap.steps.map((s, i) => (
+              <li key={s.key}>
+                <Link href={s.href} className={cn('flex h-full gap-3 rounded-xl border p-3 transition hover:border-rose-300', s.status === 'next' ? 'border-rose-300 bg-rose-50/60 dark:border-rose-700 dark:bg-rose-900/10' : s.status === 'done' ? 'border-emerald-200 dark:border-emerald-900/50' : 'border-slate-200 dark:border-slate-800')}>
+                  <span className={cn('mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold', s.status === 'done' ? 'bg-emerald-500 text-white' : s.status === 'next' ? 'bg-rose-500 text-white' : s.status === 'in_progress' ? 'bg-amber-400 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300')}>{s.status === 'done' ? '✓' : i + 1}</span>
+                  <span className="min-w-0">
+                    <span className="flex flex-wrap items-center gap-2"><span className="font-medium text-slate-900 dark:text-white">{s.title}</span><span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{s.status.replace('_', ' ')}</span></span>
+                    <span className="block text-xs text-slate-600 dark:text-slate-400">{s.detail}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+          {peers && peers.enough && peers.emergencyFund && (
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Across members: {pct(peers.emergencyFund.withGoalPct)} have an emergency fund goal and the middle one is {pct(peers.emergencyFund.medianProgressPct)} of the way; {pct(peers.superTrackedPct ?? 0)} track their super. {peers.note}</p>
+          )}
+        </Panel>
+      )}
 
       <Panel id="emergency" icon={LifeBuoy} title="The safety net first" intro="Three to six months of expenses somewhere you can reach in a day. It is what lets everything else stay invested through a bad year.">
         <div className="grid gap-4 md:grid-cols-5">
@@ -173,6 +255,22 @@ export default function InvestPage() {
               </div>
             )}
           </Pending>
+        )}
+      </Panel>
+
+      <Panel id="round-ups" icon={Coins} title="Round-ups" intro="What rounding every card purchase up would have put aside last month, read from your bank feed. Set it as the auto-save on the emergency fund and the decision is made once." aside={<Link href="/dashboard/finance/banking" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Bank feeds</Link>}>
+        <div className="max-w-xs"><Field label="Round each purchase up to the nearest"><SelectInput value={form.roundTo} onChange={set('roundTo')} options={[{ value: '1', label: '$1' }, { value: '5', label: '$5' }, { value: '10', label: '$10' }]} /></Field></div>
+        {roundUpsError && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{roundUpsError}</p>}
+        {roundUps && (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Stat label="Last 30 days" value={aud(roundUps.total)} sub={`${roundUps.purchases} purchases rounded up`} tone="good" big />
+              <Stat label="A month, about" value={aud(roundUps.monthlyEstimate)} sub={`${aud(roundUps.yearlyEstimate)} a year`} />
+              <Stat label="A year, in a savings account" value={aud(roundUps.yearlyWithReturn)} sub="at 4.5%" />
+            </div>
+            {roundUps.examples.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{roundUps.examples.map((e) => `${e.description} ${aud(e.spent)} → +${aud(e.roundUp)}`).join(' · ')}</p>}
+            {roundUps.monthlyEstimate > 0 && <button type="button" onClick={applyRoundUps} disabled={autoSaving} className="btn-secondary inline-flex items-center gap-2"><Coins className="h-4 w-4" /> {autoSaving ? 'Setting…' : 'Auto-save this on the emergency fund'}</button>}
+          </div>
         )}
       </Panel>
 
@@ -216,10 +314,12 @@ export default function InvestPage() {
 
       <Panel id="net-worth" icon={PieChart} title="What you own" intro="Add what you hold and owe. Super accounts and savings goals you already track are counted in automatically." aside={<Link href="/dashboard/finance/super" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Super tracker</Link>}>
         {netWorthError && holdingsLoaded && <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">{netWorthError}</p>}
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_0.8fr_0.8fr_1fr_auto] lg:items-end">
           <Field label="What is it"><input value={newHolding.name} onChange={(e) => setNewHolding((h) => ({ ...h, name: e.target.value }))} placeholder="e.g. Vanguard ETF, car loan" className={inputClass} /></Field>
           <Field label="Kind"><SelectInput value={newHolding.category} onChange={(v) => setNewHolding((h) => ({ ...h, category: v }))} options={CATEGORIES} /></Field>
           <Field label="Value"><NumberInput value={newHolding.value} onChange={(v) => setNewHolding((h) => ({ ...h, value: v }))} prefix="$" /></Field>
+          <Field label="Cost" hint="What you paid, for gains."><NumberInput value={newHolding.costBase} onChange={(v) => setNewHolding((h) => ({ ...h, costBase: v }))} prefix="$" /></Field>
+          <Field label="Bought on"><input type="date" value={newHolding.acquiredAt} onChange={(e) => setNewHolding((h) => ({ ...h, acquiredAt: e.target.value }))} className={inputClass} /></Field>
           <button type="button" onClick={addHolding} className="btn-primary inline-flex items-center gap-2"><Plus className="h-4 w-4" /> Add</button>
         </div>
 
@@ -260,6 +360,38 @@ export default function InvestPage() {
             </ul>
           </div>
         )}
+
+        {history && history.points.length > 1 && (
+          <div className="mt-6">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200"><History className="h-4 w-4 text-rose-500" /> Where it has gone</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{history.change >= 0 ? 'Up' : 'Down'} {aud(Math.abs(history.change))} since {history.since}.{history.milestones.filter((m) => m.reachedOn).length > 0 ? ` ${history.milestones.filter((m) => m.reachedOn).map((m) => `${aud(m.amount)} on ${m.reachedOn}`).join(' · ')}` : ''}</p>
+            <div className="mt-2"><LineChart series={[{ label: 'Net worth', color: '#f43f5e', values: history.points.map((p) => p.netWorth) }]} labels={history.points.map((p) => p.day.slice(5))} height={140} /></div>
+          </div>
+        )}
+
+        {review && review.holdings.some((h) => h.gain !== null) && (
+          <div className="mt-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Gains, losses and the tax on them</h3>
+              <div className="w-44"><Field label="Your taxable income"><NumberInput value={form.taxableIncome} onChange={set('taxableIncome')} prefix="$" placeholder="90000" /></Field></div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <Stat label="Unrealised gains" value={aud(review.unrealisedGains)} tone="good" />
+              <Stat label="Unrealised losses" value={aud(review.unrealisedLosses)} tone="warn" />
+              <Stat label="Tax if you sold it all" value={aud(review.taxIfAllSold)} sub="after the discount on anything held over a year" />
+            </div>
+            <ul className="mt-3 divide-y divide-slate-100 text-sm dark:divide-slate-800">
+              {review.holdings.filter((h) => h.gain !== null).map((h) => (
+                <li key={h.id ?? h.name} className="flex items-center justify-between py-1.5">
+                  <span className="text-slate-800 dark:text-slate-200">{h.name} <span className="text-xs text-slate-400">{h.heldMonths !== null ? `· held ${h.heldMonths} months${h.discountEligible ? ', discount applies' : ''}` : ''}</span></span>
+                  <span className={cn('font-medium', (h.gain ?? 0) >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')}>{(h.gain ?? 0) >= 0 ? '+' : ''}{aud(h.gain)}{h.gainPct !== null ? ` (${h.gainPct}%)` : ''}{h.taxIfSold ? ` · ${aud(h.taxIfSold)} tax if sold` : ''}</span>
+                </li>
+              ))}
+            </ul>
+            {review.harvest.map((x) => <p key={x.name} className="mt-2 text-sm text-slate-700 dark:text-slate-300">→ {x.note}</p>)}
+            <Notes items={review.notes} />
+          </div>
+        )}
       </Panel>
 
       <Panel id="projection" icon={Activity} title="Where it goes" intro="Keep going as you are, add a little more, or take a break. All three, side by side, in today’s dollars too.">
@@ -292,6 +424,20 @@ export default function InvestPage() {
             </div>
           )}
         </Pending>
+      </Panel>
+
+      <Panel id="estate" icon={ScrollText} title="A will, and who gets the super" intro="Six things, an afternoon, done once. Tick them off here; the roadmap reads it.">
+        <ul className="grid gap-2 md:grid-cols-2">
+          {ESTATE_ITEMS.map((item) => (
+            <li key={item.key}>
+              <label className={cn('flex cursor-pointer gap-3 rounded-xl border p-3', form.estate[item.key] ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-800')}>
+                <input type="checkbox" checked={Boolean(form.estate[item.key])} onChange={(e) => setForm((f) => ({ ...f, estate: { ...f.estate, [item.key]: e.target.checked } }))} className="mt-1 h-4 w-4 rounded border-slate-300 text-rose-500" />
+                <span><span className="block text-sm font-medium text-slate-900 dark:text-white">{item.label}</span><span className="block text-xs leading-5 text-slate-600 dark:text-slate-400">{item.why}</span></span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">A will and a power of attorney are done through a solicitor or the Public Trustee in your state; the super nomination is a form from your fund. Save the plan to keep the ticks.</p>
       </Panel>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -8,8 +8,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Calculator, Landmark, Receipt, Sparkles, Wallet } from 'lucide-react';
-import { strategyApi } from '@/lib/strategy-api';
+import toast from 'react-hot-toast';
+import { Calculator, GraduationCap, Landmark, Receipt, ScanSearch, Sparkles, Wallet } from 'lucide-react';
+import { strategyApi, apiMessage } from '@/lib/strategy-api';
 import { Bars, Check, Disclaimer, Field, JumpLinks, Notes, NumberInput, Panel, Pending, SavePlanBar, Stat, aud, num, opt, pct, useCalc } from '@/components/strategy/StrategyUi';
 
 type Form = {
@@ -17,6 +18,7 @@ type Form = {
   wfhHours: string; wfhWeeks: string; carKm: string; selfEducation: string; tools: string; fees: string; donations: string; incomeProtection: string; phone: string; phonePct: string; clothing: string; personalSuper: string; other: string;
   superBalance: string; personalDeductible: string; afterTax: string; spouseIncome: string; spouseContribution: string;
   profit: string; sales: string; expenses: string; soleOtherIncome: string; gst: boolean;
+  helpGrowth: string; helpIndexation: string; helpLump: string; helpExtra: string;
 };
 
 const DEFAULTS: Form = {
@@ -24,6 +26,7 @@ const DEFAULTS: Form = {
   wfhHours: '', wfhWeeks: '48', carKm: '', selfEducation: '', tools: '', fees: '', donations: '', incomeProtection: '', phone: '', phonePct: '50', clothing: '', personalSuper: '', other: '',
   superBalance: '', personalDeductible: '', afterTax: '', spouseIncome: '', spouseContribution: '',
   profit: '', sales: '', expenses: '', soleOtherIncome: '', gst: false,
+  helpGrowth: '3', helpIndexation: '3.2', helpLump: '', helpExtra: '',
 };
 
 type Estimate = { asAt: string; taxableIncome: number; incomeTax: number; lito: number; medicareLevy: number; helpRepayment: number; totalTax: number; netIncome: number; monthlyTakeHome: number; fortnightlyTakeHome: number; marginalRate: number; effectiveRate: number; employerSuper: number; brackets: Array<{ from: number; to: number | null; rate: number; amount: number; tax: number }>; notes: string[] };
@@ -31,9 +34,41 @@ type Deductions = { items: Array<{ key: string; label: string; amount: number; b
 type SuperPlan = { employerContributions: number; voluntaryConcessional: number; concessionalTotal: number; concessionalCap: number; concessionalHeadroom: number; overCapBy: number; taxSavedByVoluntary: number; netCostOfVoluntary: number; division293Tax: number; coContribution: number; spouseOffset: number; marginalRate: number; moves: Array<{ key: string; label: string; amount: number; benefit: number; detail: string }>; notes: string[] };
 type SetAside = { taxOnBusinessIncome: number; helpOnBusinessIncome: number; gstNetAnnual: number; quarterlyIncomeTax: number; quarterlyGst: number; quarterlyTotal: number; setAsidePctOfProfit: number; mustRegisterForGst: boolean; suggestedSuper: number; notes: string[] };
 
+type HelpDebt = { balance: number; compulsoryThisYear: number; repaymentRatePct: number; scenarios: Array<{ key: string; label: string; yearsToRepay: number | null; totalIndexation: number; totalRepaid: number; voluntaryPaid: number; series: Array<{ year: number; balance: number }> }>; lumpSumComparison: { lumpSum: number; indexationSaved: number; investedInstead: number; yearsSooner: number; verdict: string } | null; notes: string[] };
+type Scan = { from: string; to: string; scanned: number; lines: Array<{ id?: string; description: string; amount: number; postedAt?: string; category: string; key: string; likelihood: string; reason: string }>; totals: Array<{ key: string; label: string; likely: number; possible: number; count: number }>; suggestedInput: Record<string, number>; notes: string[] };
+const SCAN_TO_FORM: Record<string, keyof Form> = { selfEducation: 'selfEducation', toolsAndEquipment: 'tools', professionalFees: 'fees', donations: 'donations', incomeProtectionPremiums: 'incomeProtection', phoneAndInternet: 'phone', workClothing: 'clothing', other: 'other' };
+
 export default function TaxPlanPage() {
   const [form, setForm] = useState<Form>(DEFAULTS);
   const set = <K extends keyof Form>(key: K) => (value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const [scan, setScan] = useState<Scan | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  const runScan = async () => {
+    setScanning(true);
+    setScanError(null);
+    try {
+      const res = await strategyApi.tax.bankDeductions();
+      setScan(res.data?.data ?? null);
+    } catch (err) {
+      setScanError(apiMessage(err, 'Connect a bank or paste a statement on the bank feeds page first.'));
+    } finally {
+      setScanning(false);
+    }
+  };
+  const useScan = () => {
+    if (!scan) return;
+    setForm((f) => {
+      const next = { ...f };
+      for (const [field, key] of Object.entries(SCAN_TO_FORM)) {
+        const amount = scan.suggestedInput[field];
+        if (amount) (next as Record<string, unknown>)[key] = String(amount);
+      }
+      return next;
+    });
+    toast.success('Amounts carried into the deductions planner');
+  };
 
   const income = num(form.income);
   const estimate = useCalc<Estimate>(strategyApi.tax.estimate, { grossIncome: income, deductions: opt(form.deductionsGuess), salarySacrifice: opt(form.sacrifice), hasHelpDebt: form.help, helpBalance: opt(form.helpBalance) }, income > 0);
@@ -41,6 +76,7 @@ export default function TaxPlanPage() {
   const superPlan = useCalc<SuperPlan>(strategyApi.tax.superPlan, { income, superBalance: opt(form.superBalance), salarySacrifice: opt(form.sacrifice), personalDeductible: opt(form.personalDeductible), personalAfterTax: opt(form.afterTax), spouseIncome: opt(form.spouseIncome), spouseContribution: opt(form.spouseContribution) }, income > 0);
   const profit = num(form.profit);
   const setAside = useCalc<SetAside>(strategyApi.tax.setAside, { businessProfit: profit, businessSales: opt(form.sales), businessExpenses: opt(form.expenses), otherIncome: opt(form.soleOtherIncome), gstRegistered: form.gst, hasHelpDebt: form.help }, profit > 0);
+  const helpDebt = useCalc<HelpDebt>(strategyApi.tax.helpDebt, { balance: num(form.helpBalance), income, incomeGrowthPct: opt(form.helpGrowth), indexationPct: opt(form.helpIndexation), lumpSum: opt(form.helpLump), extraMonthly: opt(form.helpExtra) }, form.help && num(form.helpBalance) > 0 && income > 0);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -56,7 +92,7 @@ export default function TaxPlanPage() {
         <Link href="/dashboard/finance/tax" className="btn-secondary inline-flex items-center gap-2">BAS and returns</Link>
       </div>
 
-      <JumpLinks items={[{ id: 'estimate', label: 'This year’s tax' }, { id: 'deductions', label: 'Deductions' }, { id: 'super', label: 'Super' }, { id: 'set-aside', label: 'Sole trader quarter' }]} />
+      <JumpLinks items={[{ id: 'estimate', label: 'This year’s tax' }, { id: 'help', label: 'HELP debt' }, { id: 'deductions', label: 'Deductions' }, { id: 'bank', label: 'From the bank feed' }, { id: 'super', label: 'Super' }, { id: 'set-aside', label: 'Sole trader quarter' }]} />
 
       <SavePlanBar
         area="TAX"
@@ -114,6 +150,37 @@ export default function TaxPlanPage() {
         )}
       </Panel>
 
+      <Panel id="help" icon={GraduationCap} title="The HELP debt" intro="No interest, but indexed every June and repaid through your tax. When it is gone, what a lump sum or an extra amount does, and whether paying it early beats investing the money.">
+        {!form.help || num(form.helpBalance) === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Tick “I have a HELP debt” above and give the balance.</p>
+        ) : (
+          <>
+            <div className="grid gap-4 md:grid-cols-4">
+              <Field label="A lump sum now"><NumberInput value={form.helpLump} onChange={set('helpLump')} prefix="$" /></Field>
+              <Field label="Extra each month"><NumberInput value={form.helpExtra} onChange={set('helpExtra')} prefix="$" /></Field>
+              <Field label="Indexation" hint="The lower of CPI and wage growth."><NumberInput value={form.helpIndexation} onChange={set('helpIndexation')} suffix="%" step={0.1} /></Field>
+              <Field label="Income growth, a year"><NumberInput value={form.helpGrowth} onChange={set('helpGrowth')} suffix="%" step={0.5} /></Field>
+            </div>
+            {income > 0 && (
+              <Pending loading={helpDebt.loading} error={helpDebt.error}>
+                {helpDebt.result && (
+                  <div className="mt-5 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {helpDebt.result.scenarios.map((s, i) => (
+                        <Stat key={s.key} label={s.label} value={s.yearsToRepay === null ? 'Not in 40 years' : `Gone in ${s.yearsToRepay} year${s.yearsToRepay === 1 ? '' : 's'}`} sub={`${aud(s.totalIndexation)} of indexation along the way`} tone={i === 0 ? 'rose' : 'good'} big={i === 0} />
+                      ))}
+                    </div>
+                    <p className="text-sm text-slate-700 dark:text-slate-300">This year’s compulsory repayment is about {aud(helpDebt.result.compulsoryThisYear)}, {pct(helpDebt.result.repaymentRatePct, 1)} of your income, taken out of your pay.</p>
+                    {helpDebt.result.lumpSumComparison && <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-800 dark:bg-slate-800/60 dark:text-slate-200">{helpDebt.result.lumpSumComparison.verdict}</div>}
+                    <Notes items={helpDebt.result.notes} />
+                  </div>
+                )}
+              </Pending>
+            )}
+          </>
+        )}
+      </Panel>
+
       <Panel id="deductions" icon={Sparkles} title="Deductions worth the receipts" intro="Each one at the published rate, and what it saves at your marginal rate. Fill in what applies.">
         <div className="grid gap-4 md:grid-cols-4">
           <Field label="Hours at home, a week"><NumberInput value={form.wfhHours} onChange={set('wfhHours')} min={0} max={80} /></Field>
@@ -151,6 +218,40 @@ export default function TaxPlanPage() {
               </div>
             )}
           </Pending>
+        )}
+      </Panel>
+
+      <Panel id="bank" icon={ScanSearch} title="What your bank feed suggests" intro="The financial year’s spending read against the kinds of cost the ATO accepts. A hint at what to keep receipts for, carried into the planner above with one click." aside={<Link href="/dashboard/finance/banking" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Bank feeds</Link>}>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" onClick={runScan} disabled={scanning} className="btn-primary inline-flex items-center gap-2"><ScanSearch className="h-4 w-4" /> {scanning ? 'Reading…' : scan ? 'Read it again' : 'Read my bank feed'}</button>
+          {scan && Object.keys(scan.suggestedInput).length > 0 && <button type="button" onClick={useScan} className="btn-secondary">Carry these into the deductions</button>}
+          {scanError && <span className="text-sm text-slate-500 dark:text-slate-400">{scanError}</span>}
+        </div>
+        {scan && (
+          <div className="mt-5 space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-400">{scan.scanned} lines from {scan.from} to {scan.to}; {scan.lines.length} look like they could be for work.</p>
+            {scan.totals.length > 0 && (
+              <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+                {scan.totals.map((t) => (
+                  <li key={t.key} className="flex items-center justify-between py-2">
+                    <span className="text-slate-800 dark:text-slate-200">{t.label} <span className="text-xs text-slate-400">· {t.count} line{t.count === 1 ? '' : 's'}</span></span>
+                    <span className="text-right text-slate-900 dark:text-white">{t.likely > 0 && <span className="text-emerald-700 dark:text-emerald-300">{aud(t.likely)} likely</span>}{t.likely > 0 && t.possible > 0 && ' · '}{t.possible > 0 && <span className="text-amber-700 dark:text-amber-300">{aud(t.possible)} possible</span>}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {scan.lines.length > 0 && (
+              <details className="text-sm">
+                <summary className="cursor-pointer text-xs font-medium text-slate-600 dark:text-slate-300">The lines</summary>
+                <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto text-xs">
+                  {scan.lines.slice(0, 200).map((l, i) => (
+                    <li key={l.id ?? i} className="flex items-start justify-between gap-3 rounded bg-slate-50 px-2 py-1 dark:bg-slate-800/60"><span className="text-slate-700 dark:text-slate-300">{l.postedAt ? `${l.postedAt} · ` : ''}{l.description} <span className="text-slate-400">· {l.category}, {l.likelihood}</span></span><span className="shrink-0 text-slate-900 dark:text-white">{aud(l.amount)}</span></li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <Notes items={scan.notes} />
+          </div>
         )}
       </Panel>
 

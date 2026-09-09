@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Home, Key, Landmark, PiggyBank, ShieldCheck } from 'lucide-react';
+import { HeartHandshake, Home, Key, Landmark, PiggyBank, ShieldCheck } from 'lucide-react';
 import { PageHero, PageShell, Section } from '@/components/layout/PageShell';
 import { strategyApi } from '@/lib/strategy-api';
 import { Check, Disclaimer, Field, NumberInput, Pending, SelectInput, Stat, aud, num, useCalc } from '@/components/strategy/StrategyUi';
@@ -18,6 +18,8 @@ const STATES = ['QLD', 'NSW', 'VIC', 'WA', 'SA', 'TAS', 'ACT', 'NT'].map((s) => 
 
 type Rent = { comfortableWeeklyRent: number; netWeeklyIncome: number };
 type Duty = { dutyPayable: number; generalDuty: number; firstHomeRelief: number; reliefApplied: string; note: string; asAt: string };
+type RentHelp = { households: Array<{ id: string; label: string }>; bondHelp: Array<{ state: string; scheme: string; what: string; who: string; leavingViolence: string; url: string }>; leavingViolence: { name: string; what: string; url: string; phone: string } };
+type Assistance = { estimateFortnightly: number; threshold: number; maximum: number };
 
 const STEPS = [
   { title: 'The deposit', copy: 'Five percent is enough under the Home Guarantee Scheme, with no mortgage insurance. Twenty percent avoids it without the scheme. The plan works out which, and when you get there.', href: '/dashboard/housing/plan#deposit' },
@@ -34,8 +36,14 @@ export default function HousingPage() {
   const [firstHome, setFirstHome] = useState(true);
   const [newHome, setNewHome] = useState(false);
 
+  const [household, setHousehold] = useState('single');
+  const [fortnightlyRent, setFortnightlyRent] = useState('');
+
   const rent = useCalc<Rent>(strategyApi.housing.rent, { annualIncome: num(income) }, num(income) > 0);
   const duty = useCalc<Duty>(strategyApi.housing.stampDuty, { state, price: num(price), firstHome, newHome }, num(price) > 0);
+  const help = useCalc<RentHelp>(() => strategyApi.housing.rentHelp(), {}, true, 0);
+  const assistance = useCalc<Assistance>(strategyApi.housing.rentAssistance, { fortnightlyRent: num(fortnightlyRent), household }, num(fortnightlyRent) > 0);
+  const bond = help.result?.bondHelp.find((b) => b.state === state);
 
   return (
     <PageShell>
@@ -124,6 +132,40 @@ export default function HousingPage() {
           </ul>
           <div className="mt-4">
             <Link href="/dashboard/finance/savings" className="text-sm font-semibold text-rose-600 dark:text-rose-400">Savings goals</Link>
+          </div>
+        </Section>
+      </div>
+
+      <div className="mt-6">
+        <Section icon={HeartHandshake} title="Help with the bond and the rent" description="Every state lends the bond interest-free to people who cannot pay it up front, and Rent Assistance tops up a low income. Pick your state above and the scheme appears here.">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Household"><SelectInput value={household} onChange={setHousehold} options={(help.result?.households ?? [{ id: 'single', label: 'Single, no children' }]).map((h) => ({ value: h.id, label: h.label }))} /></Field>
+                <Field label="Rent, a fortnight"><NumberInput value={fortnightlyRent} onChange={setFortnightlyRent} prefix="$" placeholder="800" /></Field>
+              </div>
+              {num(fortnightlyRent) > 0 && (
+                <Pending loading={assistance.loading} error={assistance.error}>
+                  {assistance.result && <div className="mt-3"><Stat label="Rent Assistance, with an income support payment" value={`${aud(assistance.result.estimateFortnightly)} a fortnight`} sub={`75c for each dollar of rent over ${aud(assistance.result.threshold)}, up to ${aud(assistance.result.maximum)}`} tone={assistance.result.estimateFortnightly > 0 ? 'good' : 'plain'} big /></div>}
+                </Pending>
+              )}
+            </div>
+            <div className="space-y-3">
+              {bond && (
+                <div className="tile-soft p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-500">{bond.state}: {bond.scheme}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{bond.what}</p>
+                  <a href={bond.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400">How to apply</a>
+                </div>
+              )}
+              {help.result && (
+                <div className="tile-soft p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-500">If you are leaving violence</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{bond?.leavingViolence} {help.result.leavingViolence.name}: {help.result.leavingViolence.what}</p>
+                  <a href={help.result.leavingViolence.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400">{help.result.leavingViolence.phone}</a>
+                </div>
+              )}
+            </div>
           </div>
         </Section>
       </div>

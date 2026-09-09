@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { BadgeCheck, Building2, Compass, Landmark, PieChart, Timer } from 'lucide-react';
+import { BadgeCheck, Building2, Compass, Landmark, Mic, PieChart, Timer, Users } from 'lucide-react';
 import { strategyApi } from '@/lib/strategy-api';
 import { Bars, Check, Disclaimer, Field, JumpLinks, LineChart, Notes, NumberInput, Panel, Pending, SavePlanBar, SelectInput, Stat, aud, num, opt, pct, useCalc } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
@@ -27,6 +27,7 @@ type Form = {
   preMoney: string; raise: string; pool: string; founderPct: string;
   cash: string; monthlyRevenue: string; monthlyExpenses: string; revenueGrowth: string; expenseGrowth: string;
   stage: string; grantIndustry: string; state: string; amountNeeded: string; indigenous: boolean; regional: boolean;
+  investorTypes: string; pitchText: string;
 };
 
 const DEFAULTS: Form = {
@@ -36,6 +37,7 @@ const DEFAULTS: Form = {
   preMoney: '', raise: '', pool: '10', founderPct: '100',
   cash: '', monthlyRevenue: '', monthlyExpenses: '', revenueGrowth: '5', expenseGrowth: '1',
   stage: 'Early', grantIndustry: '', state: 'QLD', amountNeeded: '', indigenous: false, regional: false,
+  investorTypes: '', pitchText: '',
 };
 
 type Structures = { recommended: string; reasons: string[]; yourMarginalRate: number; notes: string[]; asAt: string; options: Array<{ type: string; label: string; taxOnProfit: number; effectiveRate: number; yourTax: number; setupCost: { low: number; high: number }; annualCost: { low: number; high: number }; complexity: number; assetProtection: number; raisingCapital: number; canRetainProfits: boolean; available: boolean; unavailableReason?: string; pros: string[]; cons: string[]; taxNote: string; score: number }> };
@@ -43,6 +45,10 @@ type Valuation = { industry: string; range: { low: number; mid: number; high: nu
 type Raise = { postMoney: number; investorPct: number; founderPctAfter: number; founderValueAfter: number; pricePerShare: number | null; ifValuationLower: { preMoney: number; founderPctAfter: number }; notes: string[] };
 type Runway = { monthlyBurn: number; runwayMonths: number | null; runwayEnds: string | null; breakEvenMonth: number | null; lowestCash: number; series: Array<{ month: number; cash: number }>; notes: string[] };
 type Matches = { matches: Array<{ id: string; name: string; provider: string; maxFunding?: string | number | null; deadline?: string | null; isRolling?: boolean; match: { score: number; reasons: string[]; gaps: string[] } }> };
+
+type InvestorMatches = { matches: Array<{ id: string; name: string; type: string; description?: string | null; website?: string | null; minCheckSize?: string | number | null; maxCheckSize?: string | number | null; match: { score: number; reasons: string[]; gaps: string[] } }> };
+type Pitch = { score: number; grade: string; wordCount: number; found: Array<{ key: string; label: string; how: string }>; missing: Array<{ key: string; label: string; prompt: string }>; tips: string[] };
+const INVESTOR_TYPES = [['', 'Any kind'], ['ANGEL', 'Angels'], ['VC', 'Venture funds'], ['CORPORATE_VC', 'Corporate funds'], ['FAMILY_OFFICE', 'Family offices'], ['ACCELERATOR', 'Accelerators'], ['GOVERNMENT', 'Government programs']].map(([value, label]) => ({ value, label }));
 
 const dots = (n: number) => '●'.repeat(n) + '○'.repeat(3 - n);
 
@@ -57,6 +63,9 @@ export default function BusinessStrategyPage() {
   const raise = useCalc<Raise>(strategyApi.business.raise, { preMoney: num(form.preMoney), raiseAmount: num(form.raise), optionPoolPct: opt(form.pool), founderOwnershipPct: opt(form.founderPct) }, num(form.preMoney) > 0 && num(form.raise) > 0);
   const runway = useCalc<Runway>(strategyApi.business.runway, { cashOnHand: num(form.cash), monthlyRevenue: num(form.monthlyRevenue), monthlyExpenses: num(form.monthlyExpenses), revenueGrowthPct: opt(form.revenueGrowth), expenseGrowthPct: opt(form.expenseGrowth) }, num(form.monthlyExpenses) > 0);
   const grants = useCalc<Matches>(strategyApi.business.grantMatches, { stage: form.stage, industry: form.grantIndustry || undefined, state: form.state || undefined, amountNeeded: opt(form.amountNeeded), womenLed: true, indigenous: form.indigenous, regional: form.regional }, true, 500);
+
+  const investors = useCalc<InvestorMatches>(strategyApi.business.investorMatches, { stage: form.stage, industry: form.grantIndustry || undefined, state: form.state || undefined, raiseAmount: opt(form.raise) ?? opt(form.amountNeeded), investorTypes: form.investorTypes || undefined }, true, 500);
+  const pitch = useCalc<Pitch>(strategyApi.business.pitchCheck, { text: form.pitchText }, form.pitchText.trim().length >= 20, 700);
 
   const recommended = structures.result?.options.find((o) => o.type === structures.result?.recommended);
 
@@ -74,7 +83,7 @@ export default function BusinessStrategyPage() {
         <Link href="/dashboard/formation" className="btn-secondary inline-flex items-center gap-2"><Building2 className="h-4 w-4" /> Formation studio</Link>
       </div>
 
-      <JumpLinks items={[{ id: 'structure', label: 'Structure' }, { id: 'valuation', label: 'Valuation' }, { id: 'raise', label: 'A raise' }, { id: 'runway', label: 'Runway' }, { id: 'grants', label: 'Grants' }]} />
+      <JumpLinks items={[{ id: 'structure', label: 'Structure' }, { id: 'valuation', label: 'Valuation' }, { id: 'raise', label: 'A raise' }, { id: 'runway', label: 'Runway' }, { id: 'grants', label: 'Grants' }, { id: 'investors', label: 'Investors' }, { id: 'pitch', label: 'The pitch' }]} />
 
       <SavePlanBar
         area="BUSINESS"
@@ -275,6 +284,66 @@ export default function BusinessStrategyPage() {
             )
           )}
         </Pending>
+      </Panel>
+
+      <Panel id="investors" icon={Users} title="Investors that fit" intro="Every investor listed on the platform, scored on stage, sector, where they invest, cheque size against your raise, and the kind of investor you want. Ask for an introduction from the investors page." aside={<Link href="/dashboard/investors" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">All investors</Link>}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label="Kind of investor"><SelectInput value={form.investorTypes} onChange={set('investorTypes')} options={INVESTOR_TYPES} /></Field>
+          <Field label="Raising" hint="From the raise above, or the grant amount."><NumberInput value={form.raise} onChange={set('raise')} prefix="$" /></Field>
+          <p className="self-end pb-2 text-xs text-slate-500 dark:text-slate-400">Stage, industry and state come from the grants section above.</p>
+        </div>
+        <Pending loading={investors.loading} error={investors.error}>
+          {investors.result && (
+            investors.result.matches.length === 0 ? (
+              <p className="mt-5 text-sm text-slate-500 dark:text-slate-400">No investors are listed yet. The directory fills as they are added and verified.</p>
+            ) : (
+              <ul className="mt-5 space-y-3">
+                {investors.result.matches.slice(0, 10).map((inv) => (
+                  <li key={inv.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">{inv.name}</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{inv.type.replace(/_/g, ' ').toLowerCase()}{inv.minCheckSize || inv.maxCheckSize ? ` · cheques ${inv.minCheckSize ? aud(Number(inv.minCheckSize)) : ''}${inv.minCheckSize && inv.maxCheckSize ? ' to ' : ''}${inv.maxCheckSize ? aud(Number(inv.maxCheckSize)) : ''}` : ''}</p>
+                      </div>
+                      <div className="w-32"><Bars rows={[{ label: 'Fit', value: inv.match.score, display: `${inv.match.score}%`, color: inv.match.score >= 70 ? 'bg-emerald-500' : inv.match.score >= 40 ? 'bg-amber-400' : 'bg-slate-400' }]} max={100} /></div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                      {inv.match.reasons.map((r) => <span key={r} className="text-emerald-700 dark:text-emerald-300">✓ {r}</span>)}
+                      {inv.match.gaps.map((r) => <span key={r} className="text-amber-700 dark:text-amber-300">! {r}</span>)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )
+          )}
+        </Pending>
+      </Panel>
+
+      <Panel id="pitch" icon={Mic} title="The pitch, checked" intro="Paste the pitch, or the notes for it. This reads for the ten things an investor listens for and says which are missing. It does not judge the idea; a mentor does that.">
+        <textarea value={form.pitchText} onChange={(e) => set('pitchText')(e.target.value)} rows={8} placeholder="Two million Australian women lose an average of $30,000 in super over a career break and nobody tells them until it is too late. We built…" className="w-full rounded-md border border-slate-200 bg-transparent px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:text-white" maxLength={20000} />
+        {form.pitchText.trim().length >= 20 && (
+          <Pending loading={pitch.loading} error={pitch.error}>
+            {pitch.result && (
+              <div className="mt-5 space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Stat label="Coverage" value={`${pitch.result.score} / 100`} sub={pitch.result.grade} tone={pitch.result.score >= 85 ? 'good' : pitch.result.score >= 65 ? 'plain' : 'warn'} big />
+                  <Stat label="Covered" value={`${pitch.result.found.length} of 10`} sub={pitch.result.found.map((f) => f.label.toLowerCase()).join(', ') || 'nothing yet'} />
+                  <Stat label="Length" value={`${pitch.result.wordCount} words`} sub="about 250 is two minutes spoken" />
+                </div>
+                {pitch.result.missing.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Still to cover</h3>
+                    <ul className="mt-2 space-y-1.5 text-sm">
+                      {pitch.result.missing.map((m) => <li key={m.key} className="rounded-lg bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-900/20 dark:text-amber-100"><strong className="font-medium">{m.label}.</strong> {m.prompt}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {pitch.result.tips.length > 0 && <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-300">{pitch.result.tips.map((t) => <li key={t}>→ {t}</li>)}</ul>}
+                <p className="text-xs text-slate-500 dark:text-slate-400">The pitch stays in this plan when you save it, and is never sent anywhere else. <Link href="/dashboard/mentors" className="font-medium text-rose-600 hover:underline dark:text-rose-400">Practise it with a mentor</Link></p>
+              </div>
+            )}
+          </Pending>
+        )}
       </Panel>
 
       <Disclaimer asAt={structures.result?.asAt} />
