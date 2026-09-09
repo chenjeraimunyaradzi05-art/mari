@@ -54,6 +54,7 @@ All protected endpoints require: `Authorization: Bearer <accessToken>`
 | Business | `/api/business/*` | Bearer | Accelerators, grants, investors, vendors |
 | Housing | `/api/housing/*` | Bearer | Safe housing listings |
 | Finance | `/api/finance/*` | Bearer | Savings, insurance, superannuation |
+| Strategy | `/api/strategy/*` | Mixed | Housing, business, tax and investment calculators (open); saved plans, holdings, net worth and grant matching (Bearer) |
 | Impact | `/api/impact/*` | Bearer | Social impact metrics, DV services |
 | Community Support | `/api/community-support/*` | Bearer | Support programs, indigenous communities |
 | GDPR | `/api/gdpr/*` | Bearer | DSAR, consents, cookie preferences |

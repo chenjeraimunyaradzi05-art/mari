@@ -733,6 +733,8 @@ model User {
   insuranceApplications InsuranceApplication[]
   superAccounts         SuperannuationAccount[]
   financialHealthScore  FinancialHealthScore?
+  strategyPlans         StrategyPlan[]
+  portfolioHoldings     PortfolioHolding[]
 
   // Phase 11: Social Impact & Scale
   programEnrollments       ProgramEnrollment[]
@@ -4589,6 +4591,77 @@ model FinancialHealthScore {
   user User @relation(fields: [userId], references: [id])
 
   @@index([overallScore])
+}
+
+// The four strategies a member works through and saves: housing, business,
+// tax and investment. One plan per area, the latest inputs and result, so
+// the page opens where she left it.
+enum StrategyArea {
+  HOUSING
+  BUSINESS
+  TAX
+  INVESTMENT
+}
+
+model StrategyPlan {
+  id     String       @id @default(uuid())
+  userId String
+  area   StrategyArea
+  title  String?
+  inputs Json
+  result Json
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, area])
+  @@index([userId])
+}
+
+enum HoldingKind {
+  ASSET
+  LIABILITY
+}
+
+enum WealthCategory {
+  CASH
+  BONDS
+  AU_SHARES
+  INTL_SHARES
+  PROPERTY
+  SUPER
+  CRYPTO
+  BUSINESS
+  OTHER_ASSET
+  MORTGAGE
+  HECS
+  CREDIT_CARD
+  PERSONAL_LOAN
+  OTHER_LIABILITY
+}
+
+// What a member owns and owes, entered by hand, for the net worth and
+// allocation view. Super accounts and savings goals are added on top.
+model PortfolioHolding {
+  id       String         @id @default(uuid())
+  userId   String
+  kind     HoldingKind
+  category WealthCategory
+  name     String
+  value    Decimal
+  costBase Decimal?
+  currency String         @default("AUD")
+  notes    String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, kind])
 }
 
 // ===========================================

@@ -101,6 +101,7 @@ import referenceRoutes from './routes/reference.routes';
 import feedRoutes from './routes/feed.routes';
 import groupChatRoutes from './routes/group-chat.routes';
 import gdprRoutes from './routes/gdpr.routes';
+import strategyRoutes from './routes/strategy.routes';
 import complianceRoutes from './routes/compliance.routes';
 // livestream routes require schema additions (StreamKey, LiveStream models) — not yet ready
 // import livestreamRoutes from './routes/livestream.routes';
@@ -607,6 +608,7 @@ app.use('/api/money', moneyRoutes);
 app.use('/api/business', businessRoutes);
 app.use('/api/housing', housingRoutes);
 app.use('/api/finance', financeRoutes);
+app.use('/api/strategy', strategyRoutes);
 app.use('/api/impact', impactRoutes);
 app.use('/api/community-support', communitySupportRoutes);
 app.use('/api/ai-algorithms', aiAlgorithmsRoutes);
