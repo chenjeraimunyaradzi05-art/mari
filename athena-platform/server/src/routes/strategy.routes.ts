@@ -47,6 +47,16 @@ import {
   type RiskProfile,
   type WealthCategory,
 } from '../services/strategy/investment-plan.service';
+import { assessInvestmentProperty, compareLoans } from '../services/strategy/property-finance.service';
+import { estimateRentAssistance, rentAssistanceReference, type Household } from '../services/strategy/rent-assistance.service';
+import { checkPitch, rankInvestors } from '../services/strategy/investor-match.service';
+import { planHelpDebt } from '../services/strategy/help-debt.service';
+import { scanForDeductions } from '../services/strategy/deduction-finder.service';
+import { planDebtPayoff } from '../services/strategy/debt-payoff.service';
+import { assessInsuranceNeeds, planGoal, projectSuper, reviewHoldings, roundUpPotential } from '../services/strategy/wealth-tools.service';
+import { buildRoadmap, peerSnapshot } from '../services/strategy/roadmap.service';
+import { listTransactions } from '../services/open-banking.service';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -299,9 +309,12 @@ const holdingSchema = z.object({
   category: z.enum(categories),
   value: money,
   costBase: optMoney,
+  acquiredAt: z.string().regex(/^\d{4}-\d{2}-\d{2}/).nullable().optional(),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
   notes: z.string().max(500).optional(),
 });
+
+const acquiredDate = (v: string | null | undefined) => (v === undefined ? undefined : v === null ? null : new Date(v));
 
 router.get('/investing/holdings', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -316,7 +329,7 @@ router.post('/investing/holdings', authenticate, async (req: AuthRequest, res: R
   try {
     const data = parse(holdingSchema, req.body);
     const kind = LIABILITY_CATEGORIES.includes(data.category) ? 'LIABILITY' : 'ASSET';
-    const holding = await prisma.portfolioHolding.create({ data: { userId: req.user!.id, kind, category: data.category, name: data.name, value: data.value, costBase: data.costBase, currency: data.currency ?? 'AUD', notes: data.notes } });
+    const holding = await prisma.portfolioHolding.create({ data: { userId: req.user!.id, kind, category: data.category, name: data.name, value: data.value, costBase: data.costBase, acquiredAt: acquiredDate(data.acquiredAt) ?? undefined, currency: data.currency ?? 'AUD', notes: data.notes } });
     ok(res, holding, 201);
   } catch (error) {
     next(error);
@@ -335,7 +348,7 @@ router.patch('/investing/holdings/:id', authenticate, async (req: AuthRequest, r
     await ownHolding(req.user!.id, req.params.id);
     const data = parse(holdingSchema.partial(), req.body);
     const kind = data.category ? (LIABILITY_CATEGORIES.includes(data.category) ? 'LIABILITY' : 'ASSET') : undefined;
-    const holding = await prisma.portfolioHolding.update({ where: { id: req.params.id }, data: { ...data, ...(kind ? { kind } : {}) } });
+    const holding = await prisma.portfolioHolding.update({ where: { id: req.params.id }, data: { ...data, acquiredAt: acquiredDate(data.acquiredAt), ...(kind ? { kind } : {}) } });
     ok(res, holding);
   } catch (error) {
     next(error);
@@ -372,7 +385,196 @@ router.get('/investing/net-worth', authenticate, async (req: AuthRequest, res: R
       profile,
       emergencyFundTarget: q.emergencyFundTarget ?? (emergencyGoal ? Number(emergencyGoal.targetAmount) : undefined),
     });
+    // Today's figure is kept so the page can show where net worth has gone.
+    if (holdings.length + superAccounts.length + goals.length > 0) {
+      const day = new Date(new Date().toISOString().slice(0, 10));
+      const snapshot = { totalAssets: result.totalAssets, totalLiabilities: result.totalLiabilities, netWorth: result.netWorth, investable: result.investable };
+      await prisma.netWorthSnapshot.upsert({ where: { userId_day: { userId, day } }, create: { userId, day, ...snapshot }, update: snapshot }).catch((err: Error) => logger.debug('Net worth snapshot skipped', { error: err.message }));
+    }
     ok(res, { ...result, profile: profile ?? null, holdingsCount: holdings.length, superAccounts: superAccounts.length, savingsGoals: goals.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/investing/net-worth-history', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const rows = await prisma.netWorthSnapshot.findMany({ where: { userId: req.user!.id }, orderBy: { day: 'asc' }, take: 400 });
+    const points = rows.map((r) => ({ day: r.day.toISOString().slice(0, 10), netWorth: Number(r.netWorth), totalAssets: Number(r.totalAssets), totalLiabilities: Number(r.totalLiabilities) }));
+    const first = points[0];
+    const last = points[points.length - 1];
+    const milestones = [10000, 50000, 100000, 250000, 500000, 1000000].map((amount) => ({ amount, reachedOn: points.find((p) => p.netWorth >= amount)?.day ?? null }));
+    ok(res, { points, change: first && last ? last.netWorth - first.netWorth : 0, since: first?.day ?? null, milestones });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/investing/holdings-review', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parse(z.object({ taxableIncome: optMoney }), req.query);
+    const holdings = await prisma.portfolioHolding.findMany({ where: { userId: req.user!.id, kind: 'ASSET' } });
+    ok(res, reviewHoldings(holdings.map((h) => ({ id: h.id, name: h.name, category: h.category, value: Number(h.value), costBase: h.costBase === null ? null : Number(h.costBase), acquiredAt: h.acquiredAt })), q.taxableIncome ?? 90000));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ------------------------------------------------- the rest of the housing plan
+
+router.get('/housing/rent-help', async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    ok(res, rentAssistanceReference());
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/housing/rent-assistance', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ fortnightlyRent: money, household: z.enum(['single', 'single_sharer', 'couple', 'single_children_1_2', 'single_children_3', 'couple_children_1_2', 'couple_children_3']) }), req.body);
+    ok(res, estimateRentAssistance({ fortnightlyRent: input.fortnightlyRent, household: input.household as Household }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/housing/compare-loans', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({
+      principal: money, years: z.coerce.number().min(1).max(40), horizonYears: z.coerce.number().min(1).max(40).optional(), offsetBalance: optMoney,
+      loans: z.array(z.object({ name: z.string().min(1).max(60), ratePct: z.coerce.number().min(0).max(30), annualFee: optMoney, upfrontFee: optMoney, offset: optBool, fixedYears: z.coerce.number().min(0).max(10).optional(), revertRatePct: z.coerce.number().min(0).max(30).optional() })).min(1).max(6),
+    }), req.body);
+    ok(res, compareLoans(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/housing/investment-property', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({
+      state, price: money, weeklyRent: money, depositPct: z.coerce.number().min(0).max(100).optional(), ratePct: z.coerce.number().min(0).max(30).optional(), interestOnly: optBool, years: z.coerce.number().min(1).max(40).optional(),
+      taxableIncome: money, managementPct: z.coerce.number().min(0).max(20).optional(), vacancyWeeks: z.coerce.number().min(0).max(52).optional(), annualCosts: optMoney, depreciation: optMoney, growthPct: optPct, rentGrowthPct: optPct, horizonYears: z.coerce.number().min(1).max(30).optional(),
+    }), req.body);
+    ok(res, assessInvestmentProperty({ ...input, state: input.state as (typeof AU_STATES)[number] }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------- the rest of the business plan
+
+router.get('/business/investor-matches', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parse(z.object({ stage: z.string().max(60).optional(), industry: z.string().max(60).optional(), state: z.string().max(10).optional(), raiseAmount: optMoney, investorTypes: z.string().max(200).optional() }), req.query);
+    const investors = await prisma.investor.findMany({ where: { isActive: true } });
+    const ranked = rankInvestors(investors, { ...q, investorTypes: q.investorTypes ? q.investorTypes.split(',').map((s) => s.trim()).filter(Boolean) : undefined });
+    ok(res, { profile: q, matches: ranked });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/business/pitch-check', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ text: z.string().max(20000).optional(), sections: z.record(z.string().max(4000)).optional() }), req.body);
+    ok(res, checkPitch(input as Parameters<typeof checkPitch>[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --------------------------------------------------- the rest of the tax plan
+
+router.post('/tax/help-debt', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ balance: money, income: money, incomeGrowthPct: z.coerce.number().min(-20).max(50).optional(), indexationPct: z.coerce.number().min(0).max(20).optional(), lumpSum: optMoney, extraMonthly: optMoney, investReturnPct: z.coerce.number().min(0).max(30).optional() }), req.body);
+    ok(res, planHelpDebt(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/tax/bank-deductions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parse(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}/).optional() }), req.query);
+    const now = new Date();
+    const fyStart = new Date(Date.UTC(now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1, 6, 1));
+    const lines = await listTransactions(req.user!.id, { from: q.from ? new Date(q.from) : fyStart, to: q.to ? new Date(`${q.to}T23:59:59.999Z`) : now, limit: 3000 });
+    ok(res, { ...scanForDeductions(lines), from: (q.from ? new Date(q.from) : fyStart).toISOString().slice(0, 10), to: (q.to ? new Date(q.to) : now).toISOString().slice(0, 10) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// -------------------------------------------- the rest of the investing plan
+
+router.post('/investing/debts', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({
+      debts: z.array(z.object({ name: z.string().min(1).max(60), balance: money, ratePct: z.coerce.number().min(0).max(100), minPayment: optMoney })).min(1).max(12),
+      extraMonthly: optMoney, method: z.enum(['avalanche', 'snowball']).optional(), consolidationRatePct: z.coerce.number().min(0).max(100).optional(), consolidationYears: z.coerce.number().min(0.5).max(30).optional(), consolidationFee: optMoney,
+    }), req.body);
+    ok(res, planDebtPayoff(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/investing/goal-plan', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ target: money, current: optMoney, targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/).optional(), months: z.coerce.number().min(1).max(600).optional(), ratePct: z.coerce.number().min(0).max(20).optional() }), req.body);
+    ok(res, planGoal(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/investing/round-ups', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parse(z.object({ roundTo: z.coerce.number().optional(), days: z.coerce.number().min(7).max(365).optional() }), req.query);
+    const roundTo = ([1, 5, 10] as const).find((v) => v === q.roundTo) ?? 5;
+    const days = q.days ?? 30;
+    const now = new Date();
+    const lines = await listTransactions(req.user!.id, { from: new Date(now.getTime() - days * 86400000), to: now, limit: 3000 });
+    ok(res, roundUpPotential(lines, roundTo, days));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/investing/insurance-needs', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ income: money, monthlyExpenses: money, debts: optMoney, dependants: z.coerce.number().min(0).max(12).optional(), yearsOfSupport: z.coerce.number().min(0).max(40).optional(), partnerIncome: optMoney, savings: optMoney, superBalance: optMoney, existingLife: optMoney, existingTpd: optMoney, existingIncomeProtectionMonthly: optMoney, emergencyFundMonths: z.coerce.number().min(0).max(24).optional() }), req.body);
+    ok(res, assessInsuranceNeeds(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/investing/super-projection', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ age: z.coerce.number().min(15).max(80), retirementAge: z.coerce.number().min(55).max(80).optional(), balance: money, salary: money, salaryGrowthPct: z.coerce.number().min(-10).max(30).optional(), extraMonthly: optMoney, returnPct: z.coerce.number().min(0).max(20).optional(), feesPct: z.coerce.number().min(0).max(5).optional(), inflationPct: z.coerce.number().min(0).max(15).optional(), careerBreakYears: z.coerce.number().min(0).max(20).optional(), breakAtAge: z.coerce.number().min(15).max(80).optional(), partTimeYears: z.coerce.number().min(0).max(30).optional(), partTimeFraction: z.coerce.number().min(0.1).max(1).optional() }), req.body);
+    ok(res, projectSuper(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ------------------------------------------------------------ the roadmap
+
+router.get('/roadmap', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    ok(res, await buildRoadmap(req.user!.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/peers', authenticate, async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    ok(res, await peerSnapshot());
   } catch (error) {
     next(error);
   }

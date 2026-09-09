@@ -75,6 +75,7 @@ import topicRoutes from './routes/topic.routes';
 import livestreamRoutes from './routes/livestream.routes';
 import channelRoutes from './routes/channel.routes';
 import { startMessageExpirySweeper } from './services/message-expiry.service';
+import { startGrantReminderSweeper } from './services/strategy/grant-reminders.service';
 import apprenticeshipRoutes from './routes/apprenticeship.routes';
 import skillsMarketplaceRoutes from './routes/skills-marketplace.routes';
 import safetyRoutes from './routes/safety.routes';
@@ -735,6 +736,8 @@ export async function startServer() {
 
     // Disappearing messages: delete what has expired, once a minute.
     startMessageExpirySweeper();
+    // Grant applications left in draft: a nudge a week out and the day before.
+    startGrantReminderSweeper();
     // Scheduled posts: publish what has come due, once a minute.
     startScheduledPostPublisher();
   });

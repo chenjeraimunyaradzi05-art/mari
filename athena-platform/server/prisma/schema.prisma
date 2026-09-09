@@ -735,6 +735,7 @@ model User {
   financialHealthScore  FinancialHealthScore?
   strategyPlans         StrategyPlan[]
   portfolioHoldings     PortfolioHolding[]
+  netWorthSnapshots     NetWorthSnapshot[]
 
   // Phase 11: Social Impact & Scale
   programEnrollments       ProgramEnrollment[]
@@ -4651,9 +4652,10 @@ model PortfolioHolding {
   category WealthCategory
   name     String
   value    Decimal
-  costBase Decimal?
-  currency String         @default("AUD")
-  notes    String?
+  costBase   Decimal?
+  acquiredAt DateTime?
+  currency   String         @default("AUD")
+  notes      String?
 
   user User @relation(fields: [userId], references: [id])
 
@@ -4662,6 +4664,26 @@ model PortfolioHolding {
 
   @@index([userId])
   @@index([userId, kind])
+}
+
+// Net worth, once a day when it is looked at, so the investing page can show
+// where it has gone over the months. Nothing is stored that the holdings,
+// super and savings could not rebuild; this is the history of the total.
+model NetWorthSnapshot {
+  id               String   @id @default(uuid())
+  userId           String
+  day              DateTime @db.Date
+  totalAssets      Decimal
+  totalLiabilities Decimal
+  netWorth         Decimal
+  investable       Decimal  @default(0)
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, day])
+  @@index([userId])
 }
 
 // ===========================================

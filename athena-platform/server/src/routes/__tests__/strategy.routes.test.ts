@@ -3,11 +3,18 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    strategyPlan: { findMany: jest.fn(async () => []), upsert: jest.fn(), deleteMany: jest.fn(async () => ({ count: 1 })), findUnique: jest.fn(async () => null) },
+    strategyPlan: { findMany: jest.fn(async () => []), upsert: jest.fn(), deleteMany: jest.fn(async () => ({ count: 1 })), findUnique: jest.fn(async () => null), count: jest.fn(async () => 0) },
     portfolioHolding: { findMany: jest.fn(async () => []), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
-    superannuationAccount: { findMany: jest.fn(async () => []) },
+    netWorthSnapshot: { upsert: jest.fn(async () => ({})), findMany: jest.fn(async () => []) },
+    superannuationAccount: { findMany: jest.fn(async () => []), count: jest.fn(async () => 0) },
     savingsGoal: { findMany: jest.fn(async () => []) },
+    insuranceApplication: { findMany: jest.fn(async () => []) },
+    businessRegistration: { count: jest.fn(async () => 0) },
     grant: { findMany: jest.fn(async () => []) },
+    investor: { findMany: jest.fn(async () => []) },
+    user: { count: jest.fn(async () => 3) },
+    bankConnection: { findMany: jest.fn(async () => []) },
+    bankTransaction: { findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -54,10 +61,30 @@ describe('The strategy routes', () => {
     expect(reference.body.data.investing.questions.length).toBeGreaterThan(3);
   });
 
+  it('runs the second set of open calculators too', async () => {
+    const loans = await request(app).post('/api/strategy/housing/compare-loans').send({ principal: 400000, years: 30, loans: [{ name: 'A', ratePct: 6 }, { name: 'B', ratePct: 5.8, annualFee: 400 }] }).expect(200);
+    expect(loans.body.data.loans).toHaveLength(2);
+    const help = await request(app).get('/api/strategy/housing/rent-help').expect(200);
+    expect(help.body.data.bondHelp).toHaveLength(8);
+    const rent = await request(app).post('/api/strategy/housing/rent-assistance').send({ fortnightlyRent: 400, household: 'single' }).expect(200);
+    expect(rent.body.data.estimateFortnightly).toBe(186.3);
+    const hecs = await request(app).post('/api/strategy/tax/help-debt').send({ balance: 20000, income: 80000 }).expect(200);
+    expect(hecs.body.data.scenarios).toHaveLength(3);
+    const debts = await request(app).post('/api/strategy/investing/debts').send({ debts: [{ name: 'Card', balance: 3000, ratePct: 20 }] }).expect(200);
+    expect(debts.body.data.chosen.months).not.toBeNull();
+    const goal = await request(app).post('/api/strategy/investing/goal-plan').send({ target: 6000, months: 6 }).expect(200);
+    expect(goal.body.data.monthlyNeeded).toBe(1000);
+    const pitch = await request(app).post('/api/strategy/business/pitch-check').send({ text: 'We are raising $500,000.' }).expect(200);
+    expect(pitch.body.data.found.map((f: any) => f.key)).toContain('ask');
+    const sup = await request(app).post('/api/strategy/investing/super-projection').send({ age: 30, balance: 40000, salary: 80000 }).expect(200);
+    expect(sup.body.data.scenarios).toHaveLength(3);
+  });
+
   it('refuses bad input with a reason', async () => {
     const res = await request(app).post('/api/strategy/housing/stamp-duty').send({ state: 'XX', price: 100 }).expect(400);
     expect(res.body.message || res.body.error).toMatch(/state/);
     await request(app).post('/api/strategy/housing/mortgage').send({ principal: 100000, annualRatePct: 6, years: 99 }).expect(400);
+    await request(app).post('/api/strategy/investing/debts').send({ debts: [] }).expect(400);
   });
 
   it('saves one plan per area for the member and lists them', async () => {
@@ -85,6 +112,9 @@ describe('The strategy routes', () => {
     expect(created.body.data.kind).toBe('LIABILITY');
     expect(created.body.data.userId).toBe('ana');
 
+    const dated = await request(app).post('/api/strategy/investing/holdings').set(as('ana')).send({ name: 'ETF', category: 'INTL_SHARES', value: 9000, costBase: 8000, acquiredAt: '2024-05-01' }).expect(201);
+    expect(new Date(dated.body.data.acquiredAt).toISOString().slice(0, 10)).toBe('2024-05-01');
+
     prisma.portfolioHolding.findUnique.mockResolvedValue({ id: 'h1', userId: 'ana' });
     await request(app).patch('/api/strategy/investing/holdings/h1').set(as('bea')).send({ value: 1 }).expect(403);
     await request(app).delete('/api/strategy/investing/holdings/h1').set(as('bea')).expect(403);
@@ -96,7 +126,7 @@ describe('The strategy routes', () => {
     await request(app).delete('/api/strategy/investing/holdings/h1').set(as('ana')).expect(204);
   });
 
-  it('builds net worth from holdings, super and savings, using the saved profile', async () => {
+  it('builds net worth from holdings, super and savings, using the saved profile, and keeps the day’s figure', async () => {
     prisma.portfolioHolding.findMany.mockResolvedValue([{ id: 'h1', name: 'ETF', kind: 'ASSET', category: 'INTL_SHARES', value: '10000' }]);
     prisma.superannuationAccount.findMany.mockResolvedValue([{ balance: '55000' }]);
     prisma.savingsGoal.findMany.mockResolvedValue([{ type: 'EMERGENCY_FUND', currentAmount: '8000', targetAmount: '12000' }]);
@@ -107,6 +137,13 @@ describe('The strategy routes', () => {
     expect(res.body.data.profile).toBe('growth');
     expect(res.body.data.investable).toBe(10000);
     expect(res.body.data.warnings.some((w: string) => /emergency fund/i.test(w))).toBe(true);
+    expect(prisma.netWorthSnapshot.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.netWorthSnapshot.upsert.mock.calls[0][0].create.netWorth).toBe(73000);
+
+    prisma.netWorthSnapshot.findMany.mockResolvedValue([{ day: new Date('2026-08-01'), netWorth: '60000', totalAssets: '60000', totalLiabilities: '0' }, { day: new Date('2026-09-10'), netWorth: '73000', totalAssets: '73000', totalLiabilities: '0' }]);
+    const history = await request(app).get('/api/strategy/investing/net-worth-history').set(as('ana')).expect(200);
+    expect(history.body.data.change).toBe(13000);
+    expect(history.body.data.milestones.find((m: any) => m.amount === 50000).reachedOn).toBe('2026-08-01');
   });
 
   it('ranks the listed grants against the member’s profile and drops closed ones', async () => {
@@ -118,5 +155,35 @@ describe('The strategy routes', () => {
     expect(res.body.data.matches.map((g: any) => g.id)).toEqual(['g1']);
     expect(res.body.data.matches[0].match.score).toBeGreaterThan(70);
     expect(prisma.grant.findMany.mock.calls[0][0].where).toEqual({ isActive: true });
+  });
+
+  it('ranks the listed investors the same way', async () => {
+    prisma.investor.findMany.mockResolvedValue([
+      { id: 'i1', name: 'Angel', type: 'ANGEL', stages: ['Seed'], industries: ['Health'], regions: ['National'], minCheckSize: '25000', maxCheckSize: '250000', isVerified: true },
+      { id: 'i2', name: 'Late fund', type: 'VC', stages: ['Series B'], industries: ['Mining'], regions: ['WA'], minCheckSize: '5000000', maxCheckSize: '20000000' },
+    ]);
+    const res = await request(app).get('/api/strategy/business/investor-matches?stage=Seed&industry=Health&state=QLD&raiseAmount=200000&investorTypes=ANGEL').set(as('ana')).expect(200);
+    expect(res.body.data.matches[0].id).toBe('i1');
+    expect(res.body.data.matches[0].match.score).toBeGreaterThan(res.body.data.matches[1].match.score);
+  });
+
+  it('builds the roadmap from the member’s own records', async () => {
+    prisma.savingsGoal.findMany.mockResolvedValue([{ type: 'EMERGENCY_FUND', status: 'ACTIVE', currentAmount: '3000', targetAmount: '12000' }]);
+    prisma.portfolioHolding.findMany.mockResolvedValue([{ kind: 'LIABILITY', category: 'CREDIT_CARD', value: '2000' }]);
+    prisma.superannuationAccount.count.mockResolvedValue(1);
+    prisma.strategyPlan.findMany.mockResolvedValue([{ area: 'INVESTMENT', inputs: { expenses: '3000', estate: { will: true } }, result: { profile: 'balanced', label: 'Balanced' } }]);
+
+    const res = await request(app).get('/api/strategy/roadmap').set(as('ana')).expect(200);
+    const byKey = Object.fromEntries(res.body.data.steps.map((s: any) => [s.key, s.status]));
+    expect(byKey.emergency_fund).toBe('in_progress');
+    expect(byKey.expensive_debt).toBe('next');
+    expect(byKey.super).toBe('in_progress');
+    expect(byKey.insurance).toBe('later');
+    expect(byKey.investing).toBe('done');
+    expect(byKey.estate).toBe('in_progress');
+    expect(res.body.data.personalRunwayMonths).toBe(1);
+
+    const peers = await request(app).get('/api/strategy/peers').set(as('ana')).expect(200);
+    expect(peers.body.data.enough).toBe(false);
   });
 });
