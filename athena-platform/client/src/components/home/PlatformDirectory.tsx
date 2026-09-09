@@ -131,6 +131,7 @@ const GROUPS: Group[] = [
       { href: '/dashboard/creator', label: 'Creator earnings', blurb: 'Gifts, subscriptions and brand work, paid out through Stripe', gated: true },
       { href: '/dashboard/finance/tax/plan', label: 'Tax plan', blurb: 'What you will owe, the deductions, and what to set aside', gated: true },
       { href: '/dashboard/finance/invest', label: 'Investing', blurb: 'Your mix, what you own, and where it goes', gated: true },
+      { href: '/dashboard/finance/debt', label: 'Debts', blurb: 'Paid off in the right order, and the HELP question answered', gated: true },
       { href: '/dashboard/business/strategy', label: 'Business strategy', blurb: 'Structure, valuation, a raise, and the grants that fit', gated: true },
       { href: '/dashboard/finance/super', label: 'Super', blurb: 'The retirement gap, and closing yours', gated: true },
       { href: '/dashboard/housing/plan', label: 'Housing plan', blurb: 'The deposit, the loan, and rent or buy', gated: true },

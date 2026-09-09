@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PiggyBank, Plus, Loader2, Target, TrendingUp } from 'lucide-react';
 import { financeApi } from '@/lib/api';
+import { GoalPlanHint } from '@/components/strategy/GoalPlanHint';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 const goalTypes = [
@@ -184,6 +185,7 @@ export default function SavingsPage() {
               placeholder="Monthly target (optional)"
               className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
             />
+            <GoalPlanHint target={targetAmount} targetDate={targetDate} onUse={(m) => setMonthlyTarget(String(m))} />
           </div>
           <div className="flex gap-2">
             <button onClick={handleCreate} disabled={saving} className="btn-primary">

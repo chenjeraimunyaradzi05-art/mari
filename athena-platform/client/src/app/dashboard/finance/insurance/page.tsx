@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shield, Loader2, Check } from 'lucide-react';
 import { financeApi } from '@/lib/api';
+import { InsuranceNeedsPanel } from '@/components/strategy/InsuranceNeedsPanel';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 type InsuranceProduct = {
@@ -233,6 +234,8 @@ export default function InsurancePage() {
           ))}
         </div>
       )}
+
+      <InsuranceNeedsPanel />
 
       <div className="text-center">
         <Link href="/dashboard/finance" className="text-sm text-primary-600 hover:underline">

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy } from 'lucide-react';
+import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const tiles = [
@@ -24,6 +24,13 @@ const tiles = [
     description: 'Rent you can carry, the deposit, the loan, and rent or buy.',
     href: '/dashboard/housing/plan',
     icon: Home,
+    highlight: true,
+  },
+  {
+    title: 'Debts',
+    description: 'Cards and loans paid off in the right order, and whether consolidating helps.',
+    href: '/dashboard/finance/debt',
+    icon: CreditCard,
     highlight: true,
   },
   {

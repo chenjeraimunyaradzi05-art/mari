@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Landmark, Plus, Loader2, TrendingUp, CalendarDays } from 'lucide-react';
 import { financeApi } from '@/lib/api';
+import { SuperProjectionPanel } from '@/components/strategy/SuperProjection';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
 type SuperAccount = {
@@ -250,6 +251,8 @@ export default function SuperPage() {
           ))}
         </div>
       )}
+
+      <SuperProjectionPanel balance={totalBalance} />
 
       {/* Projected summary */}
       {!loading && accounts.length > 0 && totalProjected > 0 && (

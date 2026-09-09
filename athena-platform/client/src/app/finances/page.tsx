@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Activity, ArrowRight, BookOpen, Calculator, Home, Landmark, LifeBuoy, PiggyBank, Receipt, Shield, TrendingUp, type LucideIcon } from 'lucide-react';
+import { Activity, ArrowRight, BookOpen, Calculator, CreditCard, Home, Landmark, LifeBuoy, PiggyBank, Receipt, Shield, TrendingUp, type LucideIcon } from 'lucide-react';
 import { PageHero, PageShell, Section } from '@/components/layout/PageShell';
 import { strategyApi } from '@/lib/strategy-api';
 import { Disclaimer, Field, NumberInput, Pending, Stat, aud, num, pct, useCalc } from '@/components/strategy/StrategyUi';
@@ -20,6 +20,7 @@ type Estimate = { monthlyTakeHome: number; totalTax: number; effectiveRate: numb
 const TILES: Array<{ href: string; title: string; blurb: string; icon: LucideIcon; gated?: boolean }> = [
   { href: '/dashboard/finance/invest#emergency', title: 'The safety net', blurb: 'Three to six months of expenses, sized for your income and tracked as a goal.', icon: LifeBuoy, gated: true },
   { href: '/dashboard/finance/savings', title: 'Savings goals', blurb: 'A deposit, a course, a trip, a business. One bar each, filling up.', icon: PiggyBank, gated: true },
+  { href: '/dashboard/finance/debt', title: 'Debts', blurb: 'Cards and loans paid off in the right order, and a straight answer on consolidating.', icon: CreditCard, gated: true },
   { href: '/dashboard/finance/tax/plan', title: 'Tax plan', blurb: 'What this year will cost, the deductions worth the receipts, and what a sole trader puts aside.', icon: Receipt, gated: true },
   { href: '/dashboard/finance/super', title: 'Super', blurb: 'Track the balance, and the contributions that close the gap a career break opens.', icon: Landmark, gated: true },
   { href: '/dashboard/finance/invest', title: 'Investing', blurb: 'Your mix from six questions, what you own against it, and where it goes over the years.', icon: TrendingUp, gated: true },
