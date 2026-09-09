@@ -321,6 +321,7 @@ export default function TaxPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Tax & Returns</h1>
+          <Link href="/dashboard/finance/tax/plan" className="mt-2 inline-flex text-sm font-medium text-primary-600 hover:underline">Plan this year’s tax, deductions and super</Link>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
             Maintain tax rates and prepare returns.
           </p>

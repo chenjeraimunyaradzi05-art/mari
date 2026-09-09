@@ -120,6 +120,7 @@ const GROUPS: Group[] = [
     items: [
       { href: '/finances', label: 'Finances', blurb: 'Money coming in, money going out' },
       { href: '/business', label: 'Business', blurb: 'The tools for running one' },
+      { href: '/housing', label: 'Housing', blurb: 'Rent you can carry, a deposit, and safe places to live' },
       { href: '/formation', label: 'Company formation', blurb: 'Register a company, step by step' },
       { href: '/grants', label: 'Grants', blurb: 'Funding you are actually eligible for' },
       { href: '/capital', label: 'Capital', blurb: 'Investors, and what they are looking for' },
@@ -128,9 +129,11 @@ const GROUPS: Group[] = [
       { href: '/vendors', label: 'Vendors', blurb: 'Suppliers other members have vetted' },
       { href: '/pricing', label: 'Plans and pricing', blurb: 'What is free, and what is not' },
       { href: '/dashboard/creator', label: 'Creator earnings', blurb: 'Gifts, subscriptions and brand work, paid out through Stripe', gated: true },
-      { href: '/dashboard/finance/tax', label: 'Tax', blurb: 'GST, the BAS worksheet and what to set aside', gated: true },
+      { href: '/dashboard/finance/tax/plan', label: 'Tax plan', blurb: 'What you will owe, the deductions, and what to set aside', gated: true },
+      { href: '/dashboard/finance/invest', label: 'Investing', blurb: 'Your mix, what you own, and where it goes', gated: true },
+      { href: '/dashboard/business/strategy', label: 'Business strategy', blurb: 'Structure, valuation, a raise, and the grants that fit', gated: true },
       { href: '/dashboard/finance/super', label: 'Super', blurb: 'The retirement gap, and closing yours', gated: true },
-      { href: '/dashboard/housing', label: 'Housing', blurb: 'Somewhere to live, and how to afford it', gated: true },
+      { href: '/dashboard/housing/plan', label: 'Housing plan', blurb: 'The deposit, the loan, and rent or buy', gated: true },
     ],
   },
   {

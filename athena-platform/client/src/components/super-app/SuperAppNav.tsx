@@ -84,8 +84,9 @@ const NAV_ITEMS: Record<AppMode, { label: string; icon: React.ElementType; href:
     { label: 'Mentorship', icon: Users, href: '/mentorship' },
   ],
   business: [
-    { label: 'Dashboard', icon: Home, href: '/business' },
+    { label: 'Dashboard', icon: Home, href: '/dashboard/business' },
     { label: 'Formation', icon: Building2, href: '/formation' },
+    { label: 'Strategy', icon: Compass, href: '/dashboard/business/strategy' },
     { label: 'Finances', icon: Wallet, href: '/finances' },
     { label: 'Team', icon: Users, href: '/team' },
     { label: 'Growth', icon: TrendingUp, href: '/growth' },

@@ -63,7 +63,7 @@ const quickLaunches = [
   },
   {
     label: 'Finance OS',
-    description: 'Money, tax, accounting, savings, and inventory',
+    description: 'Savings, investing, tax and housing plans, and the books',
     href: '/dashboard/finance',
     icon: DollarSign,
   },

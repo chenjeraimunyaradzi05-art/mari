@@ -286,8 +286,8 @@ export default function HousingPage() {
           <a href="#list-a-place" onClick={() => setShowListForm(true)} className="btn-secondary inline-flex items-center gap-2">
             <Plus className="w-4 h-4" /> List a place
           </a>
-          <Link href="/dashboard/finance" className="btn-primary inline-flex items-center gap-2">
-            Financial wellness
+          <Link href="/dashboard/housing/plan" className="btn-primary inline-flex items-center gap-2">
+            Plan to rent or buy
           </Link>
         </div>
       </div>

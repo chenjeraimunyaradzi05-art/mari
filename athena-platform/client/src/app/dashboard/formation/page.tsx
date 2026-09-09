@@ -95,9 +95,14 @@ export default function FormationLandingPage() {
               Payment and submission status
             </li>
           </ul>
-          <Link href="/dashboard/formation/new" className="inline-flex text-sm font-medium text-primary hover:underline">
-            Start registration
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/dashboard/business/strategy#structure" className="inline-flex text-sm font-medium text-primary hover:underline">
+              Compare structures first
+            </Link>
+            <Link href="/dashboard/formation/new" className="inline-flex text-sm font-medium text-primary hover:underline">
+              Start registration
+            </Link>
+          </div>
         </div>
 
         <div className="border rounded-lg p-6 space-y-4">
@@ -106,11 +111,16 @@ export default function FormationLandingPage() {
           </div>
           <h3 className="font-semibold text-xl">Tax Optimization</h3>
           <p className="text-sm text-slate-500">
-            Configure tax rates, deductions, and return planning from the finance workspace.
+            What to put aside each quarter, GST, the deductions, and the BAS worked out from the ledger.
           </p>
-          <Link href="/dashboard/finance/tax" className="inline-flex text-sm font-medium text-primary hover:underline">
-            Open tax workspace
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/dashboard/finance/tax/plan" className="inline-flex text-sm font-medium text-primary hover:underline">
+              Open the tax plan
+            </Link>
+            <Link href="/dashboard/finance/tax" className="inline-flex text-sm font-medium text-primary hover:underline">
+              BAS and returns
+            </Link>
+          </div>
         </div>
 
         <div className="border rounded-lg p-6 space-y-4">

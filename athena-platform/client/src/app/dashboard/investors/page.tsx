@@ -113,9 +113,14 @@ export default function InvestorsPage() {
             {headerLabel} ready to back women-led ventures.
           </p>
         </div>
-        <Link href="/dashboard/accelerator" className="btn-primary inline-flex items-center gap-2">
-          Join an accelerator <Sparkles className="w-4 h-4" />
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/business/strategy#raise" className="btn-secondary inline-flex items-center gap-2">
+            Model a raise
+          </Link>
+          <Link href="/dashboard/accelerator" className="btn-primary inline-flex items-center gap-2">
+            Join an accelerator <Sparkles className="w-4 h-4" />
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">

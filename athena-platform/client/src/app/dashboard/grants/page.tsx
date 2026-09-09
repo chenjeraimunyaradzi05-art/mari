@@ -117,9 +117,14 @@ export default function GrantsPage() {
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">{activeLabel} tailored to your growth stage.</p>
         </div>
-        <Link href="/dashboard/investors" className="btn-primary inline-flex items-center gap-2">
-          Meet investors <ChevronRight className="w-4 h-4" />
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/business/strategy#grants" className="btn-secondary inline-flex items-center gap-2">
+            Find my matches
+          </Link>
+          <Link href="/dashboard/investors" className="btn-primary inline-flex items-center gap-2">
+            Meet investors <ChevronRight className="w-4 h-4" />
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">

@@ -56,6 +56,7 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     title: 'Money and business',
     links: [
       { href: '/finances', label: 'Finances' },
+      { href: '/housing', label: 'Housing' },
       { href: '/business', label: 'Business' },
       { href: '/formation', label: 'Company formation' },
       { href: '/grants', label: 'Grants' },

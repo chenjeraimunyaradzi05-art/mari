@@ -107,9 +107,12 @@ export default function SuperPage() {
             Combined balance: {formatCurrency(totalBalance)}
           </p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary inline-flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Add account
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/finance/tax/plan#super" className="btn-secondary inline-flex items-center gap-2">Contribution strategy</Link>
+          <button onClick={() => setShowForm(!showForm)} className="btn-primary inline-flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Add account
+          </button>
+        </div>
       </div>
 
       {showForm && (

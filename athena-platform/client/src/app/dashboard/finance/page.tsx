@@ -1,10 +1,31 @@
 'use client';
 
 import Link from 'next/link';
-import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark } from 'lucide-react';
+import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const tiles = [
+  {
+    title: 'Investing plan',
+    description: 'The safety net, your mix, what you own, and where it goes.',
+    href: '/dashboard/finance/invest',
+    icon: LifeBuoy,
+    highlight: true,
+  },
+  {
+    title: 'Tax plan',
+    description: 'What you will owe, the deductions, super moves, and the quarter set-aside.',
+    href: '/dashboard/finance/tax/plan',
+    icon: Receipt,
+    highlight: true,
+  },
+  {
+    title: 'Housing plan',
+    description: 'Rent you can carry, the deposit, the loan, and rent or buy.',
+    href: '/dashboard/housing/plan',
+    icon: Home,
+    highlight: true,
+  },
   {
     title: 'Savings Goals',
     description: 'Emergency funds, home deposits, and goal tracking.',

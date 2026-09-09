@@ -135,9 +135,12 @@ export default function SavingsPage() {
             Total saved: {formatCurrency(totalSaved)}
           </p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary inline-flex items-center gap-2">
-          <Plus className="w-4 h-4" /> New goal
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard/finance/invest#emergency" className="btn-secondary inline-flex items-center gap-2">Size an emergency fund</Link>
+          <button onClick={() => setShowForm(!showForm)} className="btn-primary inline-flex items-center gap-2">
+            <Plus className="w-4 h-4" /> New goal
+          </button>
+        </div>
       </div>
 
       {showForm && (
