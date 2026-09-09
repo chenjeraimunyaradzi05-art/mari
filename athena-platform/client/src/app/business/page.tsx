@@ -1,204 +1,97 @@
 'use client';
 
+/**
+ * Business, in public. The page used to sell Delaware LLCs and EIN
+ * registration under invented figures, to an Australian audience. It now
+ * describes the four ways an Australian business trades, the order the
+ * platform's business tools come in, and where each of them is.
+ */
+
 import Link from 'next/link';
-import { Building, Briefcase, CheckCircle, ArrowRight, Shield, Clock, Zap } from 'lucide-react';
+import { ArrowRight, BadgeCheck, Building2, Compass, Landmark, Receipt, Rocket, Store, Users, type LucideIcon } from 'lucide-react';
+import { PageHero, PageShell, Section } from '@/components/layout/PageShell';
+
+const STRUCTURES = [
+  { name: 'Sole trader', cost: 'Free with an ABN', line: 'The simplest. Profit goes on your own tax return, and so does the risk.' },
+  { name: 'Partnership', cost: '$100 to $500', line: 'Two or more of you, sharing profit and liability under a written agreement.' },
+  { name: 'Company', cost: '$600 to $1,500', line: 'A separate legal entity. 25% tax on profit kept in, shares for investors, ASIC every year.' },
+  { name: 'Trust', cost: '$1,500 to $3,000', line: 'Profit streamed to family at their rates and assets held apart. An accountant, every year.' },
+];
+
+const STEPS: Array<{ title: string; copy: string; href: string; icon: LucideIcon; gated?: boolean }> = [
+  { title: 'Choose the structure', copy: 'The same profit through all four, on this year’s tax scale, with what each gives you beyond tax.', href: '/dashboard/business/strategy#structure', icon: Compass, gated: true },
+  { title: 'Register it', copy: 'ABN and business name, and ASIC for a company, with the register checked as you type.', href: '/formation', icon: Building2 },
+  { title: 'Tax from day one', copy: 'What to put aside each quarter, when GST starts, and the BAS worked out from the ledger.', href: '/dashboard/finance/tax/plan#set-aside', icon: Receipt, gated: true },
+  { title: 'Grants that fit', copy: 'Federal, state and foundation programs, scored against your stage, industry and state.', href: '/grants', icon: BadgeCheck },
+  { title: 'Know what it is worth', copy: 'A valuation range from three methods, what a raise costs you, and how long the cash lasts.', href: '/dashboard/business/strategy#valuation', icon: Landmark, gated: true },
+  { title: 'Investors and the cohort', copy: 'Angels and funds with a warm introduction, and the twelve-week accelerator with founders at your stage.', href: '/capital', icon: Users },
+  { title: 'The accelerator', copy: 'Market validation to launch, in twelve weeks, with a mentor and a room of women doing the same.', href: '/accelerator', icon: Rocket },
+  { title: 'Hire the help', copy: 'Vetted accountants, lawyers, designers and developers, and requests for proposals they answer.', href: '/vendors', icon: Store },
+];
 
 export default function BusinessPage() {
-  const services = [
-    {
-      title: 'Company Formation',
-      description: 'Register your business in multiple jurisdictions with our streamlined process.',
-      icon: Building,
-      features: ['LLC & Corp Formation', 'EIN Registration', 'Registered Agent', 'Operating Agreements'],
-      price: 'From $299',
-    },
-    {
-      title: 'Compliance & Legal',
-      description: 'Stay compliant with automated reminders and document management.',
-      icon: Shield,
-      features: ['Annual Reports', 'BOI Filing', 'Corporate Amendments', 'Document Storage'],
-      price: 'From $99/yr',
-    },
-    {
-      title: 'Business Banking',
-      description: 'Open business bank accounts and manage finances in one place.',
-      icon: Briefcase,
-      features: ['Business Checking', 'Multi-currency', 'Payment Processing', 'Expense Tracking'],
-      price: 'Free',
-    },
-  ];
-
-  const jurisdictions = [
-    { name: 'Delaware', time: '24 hours', popular: true },
-    { name: 'Wyoming', time: '48 hours', popular: true },
-    { name: 'Nevada', time: '48 hours', popular: false },
-    { name: 'Florida', time: '3-5 days', popular: false },
-    { name: 'Texas', time: '3-5 days', popular: false },
-    { name: 'California', time: '5-7 days', popular: false },
-  ];
-
-  const steps = [
-    { title: 'Choose Entity Type', description: 'LLC, Corporation, or other business structure' },
-    { title: 'Select State', description: 'Pick your formation jurisdiction' },
-    { title: 'Submit Information', description: 'Provide business details online' },
-    { title: 'We Handle Filing', description: 'Our team processes everything' },
-    { title: 'Receive Documents', description: 'Get your formation docs digitally' },
-  ];
-
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      {/* Hero */}
-      <section className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-700 text-white overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
-        <div className="container mx-auto px-4 py-20 relative z-10">
-          <div className="max-w-3xl">
-            <div className="flex items-center gap-2 mb-4">
-              <Building className="w-8 h-8" />
-              <span className="text-blue-200 font-medium">ATHENA Business Services</span>
-            </div>
-            <h1 className="text-4xl md:text-5xl font-bold mb-6">
-              Start & Grow Your Business
-            </h1>
-            <p className="text-xl text-blue-100 mb-8">
-              From company formation to compliance, we provide everything you need to build and scale your business.
-            </p>
-            <div className="flex flex-wrap gap-4">
-              <Link
-                href="/dashboard/formation"
-                className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition flex items-center gap-2"
-              >
-                <Zap className="w-5 h-5" />
-                Start Your Business
-              </Link>
-              <Link
-                href="/contact-sales"
-                className="px-6 py-3 bg-blue-800 text-white font-semibold rounded-lg hover:bg-blue-900 transition"
-              >
-                Talk to an Expert
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
+    <PageShell width="wide">
+      <PageHero
+        kicker="Business"
+        title="Start it, fund it, run it"
+        description="Registering a business in Australia takes a morning once the decisions are made. This is where the decisions get made, and where every tool for the years after lives."
+        primaryAction={{ label: 'Compare the structures', href: '/dashboard/business/strategy' }}
+        secondaryAction={{ label: 'Formation studio', href: '/formation' }}
+      />
 
-      {/* Stats */}
-      <section className="container mx-auto px-4 -mt-8 relative z-20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { value: '50K+', label: 'Businesses Formed' },
-            { value: '50', label: 'States Covered' },
-            { value: '24hr', label: 'Fast Formation' },
-            { value: '4.9★', label: 'Customer Rating' },
-          ].map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-lg text-center">
-              <div className="text-3xl font-bold text-blue-600">{stat.value}</div>
-              <div className="text-sm text-slate-600 dark:text-slate-400">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Services */}
-      <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
-          Business Services
-        </h2>
-        <div className="grid md:grid-cols-3 gap-6">
-          {services.map((service) => (
-            <div key={service.title} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="w-14 h-14 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mb-4">
-                <service.icon className="w-7 h-7 text-blue-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">{service.title}</h3>
-              <p className="text-slate-600 dark:text-slate-400 mb-4">{service.description}</p>
-              <ul className="space-y-2 mb-6">
-                {service.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                    <CheckCircle className="w-4 h-4 text-blue-500" />
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-              <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                <span className="text-lg font-bold text-slate-900 dark:text-white">{service.price}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Formation States */}
-      <section className="bg-white dark:bg-slate-800 py-16">
-        <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-8 text-center">
-            Formation Jurisdictions
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 max-w-4xl mx-auto">
-            {jurisdictions.map((state) => (
-              <div
-                key={state.name}
-                className={`p-4 rounded-xl text-center border ${
-                  state.popular
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900'
-                }`}
-              >
-                {state.popular && (
-                  <span className="text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full mb-2 inline-block">
-                    Popular
-                  </span>
-                )}
-                <h3 className="font-semibold text-slate-900 dark:text-white">{state.name}</h3>
-                <div className="flex items-center justify-center gap-1 text-sm text-slate-600 dark:text-slate-400 mt-1">
-                  <Clock className="w-3 h-3" />
-                  {state.time}
-                </div>
-              </div>
+      <div className="mt-8">
+        <Section icon={Compass} title="Four ways to trade" description="Which one depends on the profit, who shares it, and how much of your own life you want between you and the business." action={{ label: 'Compare on your numbers', href: '/dashboard/business/strategy#structure' }}>
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {STRUCTURES.map((s) => (
+              <li key={s.name} className="tile-soft p-4">
+                <h3 className="font-semibold text-slate-900 dark:text-white">{s.name}</h3>
+                <p className="text-xs font-medium text-rose-500">{s.cost} to set up</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{s.line}</p>
+              </li>
             ))}
-          </div>
-        </div>
-      </section>
+          </ul>
+        </Section>
+      </div>
 
-      {/* Process */}
-      <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-12 text-center">
-          How It Works
-        </h2>
-        <div className="max-w-4xl mx-auto">
-          <div className="relative">
-            <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-blue-200 dark:bg-blue-800 hidden md:block"></div>
-            <div className="space-y-8">
-              {steps.map((step, i) => (
-                <div key={step.title} className="flex gap-6 items-start">
-                  <div className="w-16 h-16 bg-blue-600 text-white rounded-full flex items-center justify-center flex-shrink-0 text-xl font-bold relative z-10">
-                    {i + 1}
+      <div className="mt-6">
+        <Section icon={Rocket} title="From idea to funded" description="In the order a founder meets them.">
+          <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {STEPS.map((s, i) => (
+              <li key={s.title}>
+                <Link href={s.href} className="tile-soft group flex h-full flex-col p-4">
+                  <div className="flex items-center justify-between">
+                    <s.icon className="h-5 w-5 text-rose-500" />
+                    <span className="text-xs text-slate-400">{i + 1}</span>
                   </div>
-                  <div className="pt-4">
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{step.title}</h3>
-                    <p className="text-slate-600 dark:text-slate-400">{step.description}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+                  <h3 className="mt-3 font-semibold text-slate-900 dark:text-white">{s.title}</h3>
+                  <p className="mt-1 flex-1 text-sm leading-6 text-slate-600 dark:text-slate-400">{s.copy}</p>
+                  <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
+                    {s.gated ? 'Sign in and open' : 'Open'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      </div>
 
-      {/* CTA */}
-      <section className="container mx-auto px-4 py-16">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-3xl p-8 md:p-12 text-white text-center">
-          <h2 className="text-3xl font-bold mb-4">Ready to Start Your Business?</h2>
-          <p className="text-blue-100 mb-8 max-w-2xl mx-auto">
-            Form your company in minutes. Our team handles all the paperwork so you can focus on building.
-          </p>
-          <Link
-            href="/dashboard/formation"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition"
-          >
-            Get Started <ArrowRight className="w-4 h-4" />
-          </Link>
-        </div>
-      </section>
-    </div>
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Section icon={Receipt} title="The books, without an accountant on speed dial" description="Bank feeds by consent, a ledger, invoices, inventory, and the BAS worked out from what was posted.">
+          <div className="flex flex-wrap gap-2">
+            <Link href="/dashboard/finance" className="focusable rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900">Open the books</Link>
+            <Link href="/dashboard/finance/tax" className="focusable rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900">The BAS worksheet</Link>
+          </div>
+        </Section>
+        <Section icon={Users} title="Not on your own" description="Founders at the same stage in the communities, mentors who have run the numbers before, and requests for proposals that vendors answer.">
+          <div className="flex flex-wrap gap-2">
+            <Link href="/communities" className="focusable rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900">Founder communities</Link>
+            <Link href="/rfps" className="focusable rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900">Requests for proposals</Link>
+          </div>
+        </Section>
+      </div>
+
+      <p className="mt-6 text-xs leading-5 text-slate-500 dark:text-slate-400">Set-up costs are typical ranges for Australian registrations and agreements, not quotes. The comparison tool estimates tax from the published scale; a registered tax agent confirms the choice before you register.</p>
+    </PageShell>
   );
 }
