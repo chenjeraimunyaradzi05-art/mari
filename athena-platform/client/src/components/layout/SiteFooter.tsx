@@ -67,6 +67,17 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     ],
   },
   {
+    title: 'Wellbeing',
+    links: [
+      { href: '/wellness', label: 'Wellness' },
+      { href: '/dashboard/wellness/track', label: 'Health dashboard' },
+      { href: '/dashboard/wellness/forums', label: 'Forums' },
+      { href: '/dashboard/wellness/circles', label: 'Support circles' },
+      { href: '/dashboard/wellness/practitioners', label: 'Find care' },
+      { href: '/dashboard/wellness/mental-load', label: 'The mental load' },
+    ],
+  },
+  {
     title: 'Safety and privacy',
     links: [
       { href: '/safety-center', label: 'Safety centre' },

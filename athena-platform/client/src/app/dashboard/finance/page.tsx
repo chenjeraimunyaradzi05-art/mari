@@ -55,6 +55,13 @@ const tiles = [
     highlight: true,
   },
   {
+    title: 'Wellness',
+    description: 'Cycle, mood, sleep, habits, the mental load, and care that takes you seriously.',
+    href: '/dashboard/wellness',
+    icon: HeartPulse,
+    highlight: true,
+  },
+  {
     title: 'Financial Health',
     description: 'Your personalized financial wellness score.',
     href: '/dashboard/finance/health',

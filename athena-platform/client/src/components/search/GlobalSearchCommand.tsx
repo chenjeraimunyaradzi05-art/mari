@@ -8,6 +8,7 @@ import {
   Building2,
   Command,
   Compass,
+  HeartPulse,
   DollarSign,
   FileText,
   GraduationCap,
@@ -66,6 +67,12 @@ const quickLaunches = [
     description: 'Savings, investing, tax and housing plans, and the books',
     href: '/dashboard/finance',
     icon: DollarSign,
+  },
+  {
+    label: 'Wellness',
+    description: 'Cycle, mood and sleep tracking, forums, circles, and health practitioners for women',
+    href: '/dashboard/wellness',
+    icon: HeartPulse,
   },
   {
     label: 'Mentor Network',

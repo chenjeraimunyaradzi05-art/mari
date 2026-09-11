@@ -13,6 +13,7 @@ import {
   Users,
   GraduationCap,
   MessageCircle,
+  HeartPulse,
   Sparkles,
   Plus,
 } from 'lucide-react';
@@ -29,6 +30,7 @@ const mainNavItems = [
   { href: '/dashboard/mentors', label: 'Mentors', icon: Users },
   { href: '/dashboard/learn', label: 'Learn', icon: GraduationCap },
   { href: '/dashboard/ai', label: 'AI Tools', icon: Sparkles },
+  { href: '/dashboard/wellness', label: 'Wellness', icon: HeartPulse },
 ];
 
 export default function DashboardHeader() {

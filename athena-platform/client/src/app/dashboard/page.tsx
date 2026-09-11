@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {
   Briefcase,
+  HeartPulse,
   TrendingUp,
   Users,
   BookOpen,
@@ -28,6 +29,7 @@ export default function DashboardPage() {
     { name: 'AI Resume', href: '/dashboard/ai/resume', icon: Sparkles, color: 'bg-purple-500' },
     { name: 'Find Mentors', href: '/dashboard/mentors', icon: Users, color: 'bg-green-500' },
     { name: 'Learn Skills', href: '/dashboard/learn', icon: BookOpen, color: 'bg-orange-500' },
+    { name: 'Check In', href: '/dashboard/wellness', icon: HeartPulse, color: 'bg-rose-500' },
   ];
 
   const stats = [

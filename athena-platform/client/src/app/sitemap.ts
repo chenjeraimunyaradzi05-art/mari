@@ -41,6 +41,7 @@ const STATIC: Array<[string, Frequency, number]> = [
   ['/formation', 'monthly', 0.6],
   ['/finances', 'monthly', 0.6],
   ['/housing', 'monthly', 0.6],
+  ['/wellness', 'monthly', 0.6],
   ['/capital', 'monthly', 0.6],
   ['/grants', 'monthly', 0.6],
   ['/accelerator', 'monthly', 0.5],

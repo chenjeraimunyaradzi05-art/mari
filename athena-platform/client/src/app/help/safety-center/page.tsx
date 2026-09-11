@@ -328,6 +328,16 @@ export default function SafetyCenterPage() {
             </p>
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="bg-white dark:bg-slate-800 rounded-lg p-4">
+                <h4 className="font-semibold text-slate-900 dark:text-white">Beyond Blue (AU)</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Anxiety, depression and how to talk about them, 24/7</p>
+                <a href="tel:1300224636" className="text-pink-600 dark:text-pink-400 text-sm">1300 22 4636</a>
+              </div>
+              <div className="bg-white dark:bg-slate-800 rounded-lg p-4">
+                <h4 className="font-semibold text-slate-900 dark:text-white">13YARN (AU)</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Aboriginal and Torres Strait Islander crisis support, 24/7</p>
+                <a href="tel:139276" className="text-pink-600 dark:text-pink-400 text-sm">13 92 76</a>
+              </div>
+              <div className="bg-white dark:bg-slate-800 rounded-lg p-4">
                 <h4 className="font-semibold text-slate-900 dark:text-white">Mind</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400">Mental health support and information</p>
                 <a href="tel:03001233393" className="text-pink-600 dark:text-pink-400 text-sm">0300 123 3393</a>
@@ -338,6 +348,17 @@ export default function SafetyCenterPage() {
                 <a href="tel:03444775774" className="text-pink-600 dark:text-pink-400 text-sm">0344 477 5774</a>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Wellness */}
+        <section className="mb-12">
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 dark:border-rose-800 dark:bg-rose-900/20">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Looking after yourself, here</h2>
+            <p className="mt-2 text-slate-700 dark:text-slate-300">
+              The wellness area has moderated forums for anxiety, low mood, burnout, trauma, motherhood and grief, small support circles, a directory of women&apos;s health practitioners with telehealth marked, and trackers that are encrypted and read only by you.
+            </p>
+            <Link href="/wellness" className="mt-4 inline-flex items-center px-6 py-3 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors">Open wellness</Link>
           </div>
         </section>
 
