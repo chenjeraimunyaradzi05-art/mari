@@ -737,6 +737,27 @@ model User {
   portfolioHoldings     PortfolioHolding[]
   netWorthSnapshots     NetWorthSnapshot[]
 
+  // Pillar 4: Health & Wellness
+  healthEntries        HealthEntry[]
+  healthSettings       HealthSettings?
+  medications          Medication[]
+  healthNotes          HealthNote[]
+  healthShares         HealthShare[]
+  mentalLoadEntries    MentalLoadEntry[]
+  wellnessPosts        WellnessPost[]            @relation("WellnessPostsAuthored")
+  wellnessReplies      WellnessReply[]           @relation("WellnessRepliesAuthored")
+  wellnessSupports     WellnessSupport[]         @relation("WellnessSupports")
+  circlesFacilitated   WellnessCircle[]          @relation("CirclesFacilitated")
+  circleMemberships    WellnessCircleMember[]    @relation("CircleMemberships")
+  circleCheckIns       WellnessCircleCheckIn[]   @relation("CircleCheckIns")
+  practitionerProfile  HealthPractitioner?       @relation("PractitionerProfile")
+  healthBookings       HealthBooking[]           @relation("HealthBookings")
+  healthReviews        HealthReview[]            @relation("HealthReviews")
+  habits               Habit[]                   @relation("Habits")
+  challengesCreated    WellnessChallenge[]       @relation("ChallengesCreated")
+  challengeMemberships WellnessChallengeMember[] @relation("ChallengeMemberships")
+  wellnessGoals        WellnessGoal[]            @relation("WellnessGoals")
+
   // Phase 11: Social Impact & Scale
   programEnrollments       ProgramEnrollment[]
   indigenousMemberships    IndigenousCommunityMember[]
@@ -751,8 +772,8 @@ model User {
   careerPredictions  CareerPrediction[]
   opportunityMatches OpportunityMatch[]
   salaryDataPoints   SalaryDataPoint[]
-  articles           Article[]         @relation("AuthoredArticles")
-  feedback           Feedback[]        @relation("UserFeedback")
+  articles           Article[]            @relation("AuthoredArticles")
+  feedback           Feedback[]           @relation("UserFeedback")
   salaryAnalyses     SalaryAnalysis[]
   menteeMatches      MentorMatchScore[]   @relation("MenteeMatches")
   mentorMatches      MentorMatchScore[]   @relation("MentorMatches")
@@ -4646,12 +4667,12 @@ enum WealthCategory {
 // What a member owns and owes, entered by hand, for the net worth and
 // allocation view. Super accounts and savings goals are added on top.
 model PortfolioHolding {
-  id       String         @id @default(uuid())
-  userId   String
-  kind     HoldingKind
-  category WealthCategory
-  name     String
-  value    Decimal
+  id         String         @id @default(uuid())
+  userId     String
+  kind       HoldingKind
+  category   WealthCategory
+  name       String
+  value      Decimal
   costBase   Decimal?
   acquiredAt DateTime?
   currency   String         @default("AUD")
@@ -5679,20 +5700,20 @@ enum ArticleStatus {
 /// client; the slug is the public address and never changes once published
 /// unless staff change it on purpose.
 model Article {
-  id         String        @id @default(uuid())
-  slug       String        @unique
-  title      String
-  excerpt    String?
-  body       String
-  coverImage String?
-  tags       String[]      @default([])
-  status     ArticleStatus @default(DRAFT)
-  authorId   String
-  author     User          @relation("AuthoredArticles", fields: [authorId], references: [id], onDelete: Cascade)
+  id          String        @id @default(uuid())
+  slug        String        @unique
+  title       String
+  excerpt     String?
+  body        String
+  coverImage  String?
+  tags        String[]      @default([])
+  status      ArticleStatus @default(DRAFT)
+  authorId    String
+  author      User          @relation("AuthoredArticles", fields: [authorId], references: [id], onDelete: Cascade)
   publishedAt DateTime?
-  viewCount  Int           @default(0)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  viewCount   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   @@index([status, publishedAt])
 }
@@ -5730,4 +5751,556 @@ model Feedback {
   updatedAt DateTime         @updatedAt
 
   @@index([status, createdAt])
+}
+
+// ===========================================
+// HEALTH & WELLNESS (Pillar 4)
+// ===========================================
+
+enum HealthEntryKind {
+  CHECKIN
+  SLEEP
+  ACTIVITY
+  NUTRITION
+  HYDRATION
+  PERIOD
+  SYMPTOM
+  MEDICATION_DOSE
+}
+
+/// One health record. What it says is encrypted at rest under
+/// HEALTH_ENCRYPTION_KEY; only the kind and the day are readable, so the
+/// database can find a member's month without being able to read it.
+model HealthEntry {
+  id      String          @id @default(uuid())
+  userId  String
+  kind    HealthEntryKind
+  day     DateTime        @db.Date
+  at      DateTime        @default(now())
+  payload String
+  refId   String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, kind, day])
+  @@index([userId, day])
+  @@index([refId])
+}
+
+/// What a member has chosen to track, and how private the rest is.
+model HealthSettings {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  trackers               Json
+  cycleLengthHint        Int?
+  periodLengthHint       Int?
+  hiddenWarnings         String[] @default([])
+  anonymousByDefault     Boolean  @default(false)
+  checkInReminderHour    Int?
+  shareWithPractitioners Boolean  @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A medication or supplement. Name, dose and who prescribed it are
+/// encrypted in `details`; the schedule stays readable so reminders can run.
+model Medication {
+  id            String    @id @default(uuid())
+  userId        String
+  details       String
+  times         String[]  @default([])
+  daysOfWeek    Int[]     @default([])
+  startDate     DateTime  @db.Date
+  endDate       DateTime? @db.Date
+  repeatsLeft   Int?
+  nextRefillDue DateTime? @db.Date
+  isActive      Boolean   @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isActive])
+}
+
+/// A note a member keeps for herself or for a visit. Encrypted.
+model HealthNote {
+  id        String  @id @default(uuid())
+  userId    String
+  bookingId String?
+  content   String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// A time-limited link a member hands a practitioner to read her summary.
+model HealthShare {
+  id           String    @id @default(uuid())
+  userId       String
+  token        String    @unique
+  scope        String[]  @default([])
+  label        String?
+  bookingId    String?
+  days         Int       @default(90)
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  openedCount  Int       @default(0)
+  lastOpenedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum MentalLoadCategory {
+  HOUSEHOLD
+  CHILDCARE
+  ADMIN
+  EMOTIONAL
+  CARE
+  PLANNING
+  WORK_OVERFLOW
+  OTHER
+}
+
+enum MentalLoadCarrier {
+  ME
+  PARTNER
+  SHARED
+  OTHER
+}
+
+model MentalLoadEntry {
+  id        String             @id @default(uuid())
+  userId    String
+  day       DateTime           @db.Date
+  category  MentalLoadCategory
+  task      String
+  minutes   Int
+  carriedBy MentalLoadCarrier  @default(ME)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, day])
+}
+
+model WellnessForum {
+  id          String  @id @default(uuid())
+  slug        String  @unique
+  name        String
+  topic       String
+  description String
+  guidelines  String
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  postCount   Int     @default(0)
+
+  posts WellnessPost[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WellnessPost {
+  id             String    @id @default(uuid())
+  forumId        String
+  authorId       String
+  isAnonymous    Boolean   @default(false)
+  title          String
+  body           String
+  contentWarning String?
+  isHidden       Boolean   @default(false)
+  hiddenReason   String?
+  isPinned       Boolean   @default(false)
+  isLocked       Boolean   @default(false)
+  crisisFlagged  Boolean   @default(false)
+  replyCount     Int       @default(0)
+  supportCount   Int       @default(0)
+  lastReplyAt    DateTime?
+
+  forum    WellnessForum     @relation(fields: [forumId], references: [id], onDelete: Cascade)
+  author   User              @relation("WellnessPostsAuthored", fields: [authorId], references: [id], onDelete: Cascade)
+  replies  WellnessReply[]
+  supports WellnessSupport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([forumId, isHidden, createdAt])
+  @@index([authorId])
+}
+
+model WellnessReply {
+  id              String  @id @default(uuid())
+  postId          String
+  authorId        String
+  isAnonymous     Boolean @default(false)
+  isFromModerator Boolean @default(false)
+  body            String
+  isHidden        Boolean @default(false)
+
+  post   WellnessPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User         @relation("WellnessRepliesAuthored", fields: [authorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([postId, createdAt])
+  @@index([authorId])
+}
+
+model WellnessSupport {
+  id     String @id @default(uuid())
+  postId String
+  userId String
+
+  post WellnessPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User         @relation("WellnessSupports", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+}
+
+enum CircleFormat {
+  VIDEO
+  ASYNC
+  IN_PERSON
+}
+
+enum CircleStatus {
+  OPEN
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+enum CircleRole {
+  FACILITATOR
+  MEMBER
+}
+
+model WellnessCircle {
+  id            String       @id @default(uuid())
+  name          String
+  topic         String
+  description   String
+  facilitatorId String
+  capacity      Int          @default(6)
+  weeks         Int          @default(8)
+  startsOn      DateTime     @db.Date
+  meetingDay    Int
+  meetingTime   String
+  format        CircleFormat @default(VIDEO)
+  meetingLink   String?
+  location      String?
+  status        CircleStatus @default(OPEN)
+  isFeatured    Boolean      @default(false)
+
+  facilitator User                    @relation("CirclesFacilitated", fields: [facilitatorId], references: [id], onDelete: Cascade)
+  members     WellnessCircleMember[]
+  checkIns    WellnessCircleCheckIn[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, startsOn])
+  @@index([topic])
+}
+
+model WellnessCircleMember {
+  id                String     @id @default(uuid())
+  circleId          String
+  userId            String
+  role              CircleRole @default(MEMBER)
+  continueRequested Boolean    @default(false)
+  leftAt            DateTime?
+
+  circle WellnessCircle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user   User           @relation("CircleMemberships", fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now())
+
+  @@unique([circleId, userId])
+  @@index([userId])
+}
+
+model WellnessCircleCheckIn {
+  id       String @id @default(uuid())
+  circleId String
+  userId   String
+  week     Int
+  mood     Int
+  wins     String
+  blockers String
+  nextStep String
+
+  circle WellnessCircle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user   User           @relation("CircleCheckIns", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([circleId, userId, week])
+}
+
+enum PractitionerKind {
+  GP
+  OBGYN
+  PSYCHOLOGIST
+  PSYCHIATRIST
+  COUNSELLOR
+  THERAPIST
+  NUTRITIONIST
+  DIETITIAN
+  DERMATOLOGIST
+  SPORTS_MEDICINE
+  PHYSIOTHERAPIST
+  MIDWIFE
+  PELVIC_HEALTH
+  SERVICE
+  OTHER
+}
+
+/// A practitioner or a service in the women's health directory. A
+/// practitioner with an account owns her profile; a SERVICE row is an
+/// organisation reached by phone or its own site.
+model HealthPractitioner {
+  id              String           @id @default(uuid())
+  slug            String           @unique
+  name            String
+  kind            PractitionerKind
+  headline        String
+  bio             String
+  qualifications  String[]         @default([])
+  modalities      String[]         @default([])
+  specialties     String[]         @default([])
+  languages       String[]         @default(["English"])
+  suburb          String?
+  city            String?
+  state           String?
+  telehealth      Boolean          @default(true)
+  inPerson        Boolean          @default(false)
+  bulkBilling     Boolean          @default(false)
+  medicareRebate  Boolean          @default(false)
+  privateHealth   Boolean          @default(false)
+  feeFrom         Decimal?
+  feeNote         String?
+  ahpraNumber     String?
+  website         String?
+  phone           String?
+  bookingUrl      String?
+  availability    Json?
+  slotMinutes     Int              @default(50)
+  acceptsBookings Boolean          @default(true)
+  ownerUserId     String?          @unique
+  isVerified      Boolean          @default(false)
+  isActive        Boolean          @default(true)
+  ratingAvg       Decimal          @default(0)
+  ratingCount     Int              @default(0)
+
+  owner    User?           @relation("PractitionerProfile", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  bookings HealthBooking[]
+  reviews  HealthReview[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, state])
+  @@index([isActive, isVerified])
+}
+
+enum HealthBookingMode {
+  TELEHEALTH
+  IN_PERSON
+}
+
+enum HealthBookingStatus {
+  REQUESTED
+  CONFIRMED
+  DECLINED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+model HealthBooking {
+  id                  String              @id @default(uuid())
+  practitionerId      String
+  userId              String
+  scheduledAt         DateTime
+  durationMinutes     Int                 @default(50)
+  mode                HealthBookingMode   @default(TELEHEALTH)
+  reason              String?
+  status              HealthBookingStatus @default(REQUESTED)
+  practitionerNote    String?
+  meetingLink         String?
+  shareId             String?
+  followUpOfId        String?
+  followUpCheckSentAt DateTime?
+
+  practitioner HealthPractitioner @relation(fields: [practitionerId], references: [id], onDelete: Cascade)
+  user         User               @relation("HealthBookings", fields: [userId], references: [id], onDelete: Cascade)
+  followUpOf   HealthBooking?     @relation("BookingFollowUps", fields: [followUpOfId], references: [id], onDelete: SetNull)
+  followUps    HealthBooking[]    @relation("BookingFollowUps")
+  review       HealthReview?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([practitionerId, scheduledAt])
+  @@index([userId, scheduledAt])
+  @@index([status])
+}
+
+/// A rating from a completed booking only, so every review is a real visit.
+model HealthReview {
+  id             String  @id @default(uuid())
+  practitionerId String
+  userId         String
+  bookingId      String  @unique
+  rating         Int
+  comment        String?
+  isHidden       Boolean @default(false)
+
+  practitioner HealthPractitioner @relation(fields: [practitionerId], references: [id], onDelete: Cascade)
+  user         User               @relation("HealthReviews", fields: [userId], references: [id], onDelete: Cascade)
+  booking      HealthBooking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([practitionerId])
+}
+
+enum HabitDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+model Habit {
+  id            String          @id @default(uuid())
+  userId        String
+  name          String
+  templateKey   String?
+  difficulty    HabitDifficulty @default(MEDIUM)
+  targetPerWeek Int             @default(7)
+  cue           String?
+  reminderTime  String?
+  evidenceNote  String?
+  evidenceUrl   String?
+  isArchived    Boolean         @default(false)
+
+  user User       @relation("Habits", fields: [userId], references: [id], onDelete: Cascade)
+  logs HabitLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isArchived])
+}
+
+model HabitLog {
+  id      String   @id @default(uuid())
+  habitId String
+  day     DateTime @db.Date
+  done    Boolean  @default(true)
+  note    String?
+
+  habit Habit @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([habitId, day])
+}
+
+model WellnessChallenge {
+  id               String   @id @default(uuid())
+  name             String
+  description      String
+  habitTemplateKey String?
+  startsOn         DateTime @db.Date
+  endsOn           DateTime @db.Date
+  createdById      String
+  isPublic         Boolean  @default(true)
+
+  createdBy User                      @relation("ChallengesCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  members   WellnessChallengeMember[]
+
+  createdAt DateTime @default(now())
+
+  @@index([startsOn, endsOn])
+}
+
+model WellnessChallengeMember {
+  id          String  @id @default(uuid())
+  challengeId String
+  userId      String
+  habitId     String?
+
+  challenge WellnessChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User              @relation("ChallengeMemberships", fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now())
+
+  @@unique([challengeId, userId])
+}
+
+enum WellnessMetric {
+  SLEEP_HOURS
+  ACTIVITY_SESSIONS
+  ACTIVITY_MINUTES
+  CHECKIN_DAYS
+  HYDRATION_GLASSES
+  MEDITATION_DAYS
+  STEPS
+}
+
+enum GoalPeriod {
+  DAY
+  WEEK
+}
+
+enum WellnessGoalStatus {
+  ACTIVE
+  PAUSED
+  ACHIEVED
+  ARCHIVED
+}
+
+model WellnessGoal {
+  id               String             @id @default(uuid())
+  userId           String
+  metric           WellnessMetric
+  target           Float
+  period           GoalPeriod         @default(WEEK)
+  label            String?
+  startedOn        DateTime           @db.Date
+  reviewEveryWeeks Int                @default(4)
+  nextReviewOn     DateTime           @db.Date
+  status           WellnessGoalStatus @default(ACTIVE)
+  weeksMet         Int                @default(0)
+  bestStreakWeeks  Int                @default(0)
+
+  user User @relation("WellnessGoals", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
 }

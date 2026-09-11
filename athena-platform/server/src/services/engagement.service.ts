@@ -148,6 +148,16 @@ export const ACHIEVEMENTS = {
     xp: 300,
     category: 'community',
   },
+
+  // Wellness achievements
+  FIRST_CHECKIN: { id: 'first_checkin', name: 'Checked In', description: 'Logged your first wellness check-in', icon: '🌱', xp: 50, category: 'wellness' },
+  CHECKIN_STREAK_7: { id: 'checkin_streak_7', name: 'A Week of Noticing', description: 'Checked in seven days in a row', icon: '🌿', xp: 150, category: 'wellness' },
+  CHECKIN_STREAK_30: { id: 'checkin_streak_30', name: 'A Month of Noticing', description: 'Checked in thirty days in a row', icon: '🌳', xp: 500, category: 'wellness' },
+  HABIT_STREAK_7: { id: 'habit_streak_7', name: 'Seven Straight', description: 'Kept a habit for seven days in a row', icon: '✅', xp: 150, category: 'wellness' },
+  HABIT_STREAK_30: { id: 'habit_streak_30', name: 'Thirty Straight', description: 'Kept a habit for thirty days in a row', icon: '🏅', xp: 500, category: 'wellness' },
+  HABIT_STREAK_100: { id: 'habit_streak_100', name: 'One Hundred Days', description: 'Kept a habit for one hundred days in a row', icon: '💎', xp: 1500, category: 'wellness' },
+  CIRCLE_JOINED: { id: 'circle_joined', name: 'In the Circle', description: 'Joined a wellness support circle', icon: '🫶', xp: 100, category: 'wellness' },
+  GOAL_MONTH: { id: 'goal_month', name: 'Four Good Weeks', description: 'Met a wellness goal four weeks running', icon: '🎯', xp: 400, category: 'wellness' },
 } as const;
 
 export type AchievementId = keyof typeof ACHIEVEMENTS;

@@ -103,6 +103,9 @@ import feedRoutes from './routes/feed.routes';
 import groupChatRoutes from './routes/group-chat.routes';
 import gdprRoutes from './routes/gdpr.routes';
 import strategyRoutes from './routes/strategy.routes';
+import wellnessRoutes from './routes/wellness.routes';
+import { startWellnessSweeper } from './services/wellness/wellness-reminders.service';
+import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
 import complianceRoutes from './routes/compliance.routes';
 // livestream routes require schema additions (StreamKey, LiveStream models) — not yet ready
 // import livestreamRoutes from './routes/livestream.routes';
@@ -610,6 +613,7 @@ app.use('/api/business', businessRoutes);
 app.use('/api/housing', housingRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/strategy', strategyRoutes);
+app.use('/api/wellness', wellnessRoutes);
 app.use('/api/impact', impactRoutes);
 app.use('/api/community-support', communitySupportRoutes);
 app.use('/api/ai-algorithms', aiAlgorithmsRoutes);
@@ -738,6 +742,9 @@ export async function startServer() {
     startMessageExpirySweeper();
     // Grant applications left in draft: a nudge a week out and the day before.
     startGrantReminderSweeper();
+    // Wellness: doses due, refills, the day-after-a-visit check-in, circle check-ins, goal reviews.
+    startWellnessSweeper();
+    startWellnessCatalogue();
     // Scheduled posts: publish what has come due, once a minute.
     startScheduledPostPublisher();
   });
