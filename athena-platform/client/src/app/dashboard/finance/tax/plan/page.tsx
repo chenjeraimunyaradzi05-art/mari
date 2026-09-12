@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { Calculator, GraduationCap, Landmark, Receipt, ScanSearch, Sparkles, Wallet } from 'lucide-react';
+import { Calculator, Coins, GraduationCap, Landmark, Receipt, ScanSearch, Sparkles, Wallet } from 'lucide-react';
 import { strategyApi, apiMessage } from '@/lib/strategy-api';
 import { Bars, Check, Disclaimer, Field, JumpLinks, Notes, NumberInput, Panel, Pending, SavePlanBar, Stat, aud, num, opt, pct, useCalc } from '@/components/strategy/StrategyUi';
 
@@ -36,6 +36,8 @@ type SetAside = { taxOnBusinessIncome: number; helpOnBusinessIncome: number; gst
 
 type HelpDebt = { balance: number; compulsoryThisYear: number; repaymentRatePct: number; scenarios: Array<{ key: string; label: string; yearsToRepay: number | null; totalIndexation: number; totalRepaid: number; voluntaryPaid: number; series: Array<{ year: number; balance: number }> }>; lumpSumComparison: { lumpSum: number; indexationSaved: number; investedInstead: number; yearsSooner: number; verdict: string } | null; notes: string[] };
 type Scan = { from: string; to: string; scanned: number; lines: Array<{ id?: string; description: string; amount: number; postedAt?: string; category: string; key: string; likelihood: string; reason: string }>; totals: Array<{ key: string; label: string; likely: number; possible: number; count: number }>; suggestedInput: Record<string, number>; notes: string[] };
+type Statement = { fy: string; from: string; to: string; lines: Array<{ key: string; label: string; count: number; gross: number; platformFees: number; net: number }>; assessableIncome: number; platformFees: number; paidToBank: number; gstRegistrationDue: boolean; notes: string[] };
+const CURRENT_FY = new Date().getMonth() >= 6 ? new Date().getFullYear() + 1 : new Date().getFullYear();
 const SCAN_TO_FORM: Record<string, keyof Form> = { selfEducation: 'selfEducation', toolsAndEquipment: 'tools', professionalFees: 'fees', donations: 'donations', incomeProtectionPremiums: 'incomeProtection', phoneAndInternet: 'phone', workClothing: 'clothing', other: 'other' };
 
 export default function TaxPlanPage() {
@@ -44,6 +46,23 @@ export default function TaxPlanPage() {
   const [scan, setScan] = useState<Scan | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [statement, setStatement] = useState<Statement | null>(null);
+  const [statementFy, setStatementFy] = useState(String(CURRENT_FY));
+  const [statementBusy, setStatementBusy] = useState(false);
+  const [statementError, setStatementError] = useState<string | null>(null);
+
+  const loadStatement = async () => {
+    setStatementBusy(true);
+    setStatementError(null);
+    try {
+      const res = await strategyApi.tax.earningsStatement({ fy: num(statementFy, CURRENT_FY) });
+      setStatement(res.data?.data ?? null);
+    } catch (err) {
+      setStatementError(apiMessage(err, 'Sign in to see what the platform paid you.'));
+    } finally {
+      setStatementBusy(false);
+    }
+  };
 
   const runScan = async () => {
     setScanning(true);
@@ -92,7 +111,7 @@ export default function TaxPlanPage() {
         <Link href="/dashboard/finance/tax" className="btn-secondary inline-flex items-center gap-2">BAS and returns</Link>
       </div>
 
-      <JumpLinks items={[{ id: 'estimate', label: 'This year’s tax' }, { id: 'help', label: 'HELP debt' }, { id: 'deductions', label: 'Deductions' }, { id: 'bank', label: 'From the bank feed' }, { id: 'super', label: 'Super' }, { id: 'set-aside', label: 'Sole trader quarter' }]} />
+      <JumpLinks items={[{ id: 'estimate', label: 'This year’s tax' }, { id: 'help', label: 'HELP debt' }, { id: 'deductions', label: 'Deductions' }, { id: 'bank', label: 'From the bank feed' }, { id: 'super', label: 'Super' }, { id: 'set-aside', label: 'Sole trader quarter' }, { id: 'earnings', label: 'Paid by ATHENA' }]} />
 
       <SavePlanBar
         area="TAX"
@@ -310,6 +329,32 @@ export default function TaxPlanPage() {
               </div>
             )}
           </Pending>
+        )}
+      </Panel>
+
+      <Panel id="earnings" icon={Coins} title="What the platform paid you" intro="Gifts from viewers, mentoring sessions and the payouts to your bank, summed for a financial year: the statement to keep with your tax records if you earn here.">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-36"><Field label="Financial year ending June"><NumberInput value={statementFy} onChange={setStatementFy} min={2020} max={2100} /></Field></div>
+          <button type="button" onClick={loadStatement} disabled={statementBusy} className="btn-primary inline-flex items-center gap-2"><Coins className="h-4 w-4" /> {statementBusy ? 'Adding up…' : 'Show the statement'}</button>
+          {statementError && <span className="text-sm text-slate-500 dark:text-slate-400">{statementError}</span>}
+        </div>
+        {statement && (
+          <div className="mt-5 space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Stat label={`Assessable income, ${statement.fy}`} value={aud(statement.assessableIncome)} sub={`${statement.from} to ${statement.to}, after the platform fee`} tone="rose" big />
+              <Stat label="Platform fees taken" value={aud(statement.platformFees)} sub="already off the figure on the left" />
+              <Stat label="Paid to your bank" value={aud(statement.paidToBank)} sub={statement.gstRegistrationDue ? 'over $75,000 gross: GST registration is due' : 'under the GST threshold'} tone={statement.gstRegistrationDue ? 'warn' : 'plain'} />
+            </div>
+            <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+              {statement.lines.map((l) => (
+                <li key={l.key} className="flex items-center justify-between py-2">
+                  <span className="text-slate-800 dark:text-slate-200">{l.label} <span className="text-xs text-slate-400">· {l.count}</span></span>
+                  <span className="text-slate-900 dark:text-white">{aud(l.net)}{l.platformFees > 0 ? <span className="text-xs text-slate-400"> (gross {aud(l.gross)})</span> : null}</span>
+                </li>
+              ))}
+            </ul>
+            <Notes items={statement.notes} />
+          </div>
         )}
       </Panel>
 

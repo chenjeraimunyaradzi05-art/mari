@@ -3,8 +3,9 @@
  *
  * The calculators are open routes, so the public pages call them before a
  * visitor has an account. Plans, holdings, net worth, the roadmap, grant
- * and investor matching and anything read from the bank feed are the
- * member's own records and need a session.
+ * and investor matching, formation documents, the earnings statement and
+ * anything read from the bank feed are the member's own records and need
+ * a session.
  */
 
 import { api } from './api';
@@ -45,6 +46,15 @@ export const strategyApi = {
     grantMatches: (params: Body) => api.get('/strategy/business/grant-matches', { params }),
     investorMatches: (params: Body) => api.get('/strategy/business/investor-matches', { params }),
     pitchCheck: (data: Body) => api.post('/strategy/business/pitch-check', data),
+    deckOutline: (data: Body) => api.post('/strategy/business/deck-outline', data),
+    launchPackage: (params: Body) => api.get('/strategy/business/launch-package', { params }),
+    acceleratorCertificate: (enrollmentId: string) => api.get(`/strategy/business/accelerator-certificates/${enrollmentId}`),
+  },
+
+  formation: {
+    documents: (id: string) => api.get(`/formation/${id}/documents`),
+    generateDocuments: (id: string) => api.post(`/formation/${id}/documents`),
+    document: (id: string, key: string) => api.get(`/formation/${id}/documents/${key}`, { responseType: 'text' }),
   },
 
   tax: {
@@ -54,6 +64,7 @@ export const strategyApi = {
     setAside: (data: Body) => api.post('/strategy/tax/set-aside', data),
     helpDebt: (data: Body) => api.post('/strategy/tax/help-debt', data),
     bankDeductions: (params?: Body) => api.get('/strategy/tax/bank-deductions', { params }),
+    earningsStatement: (params?: Body) => api.get('/strategy/tax/earnings-statement', { params }),
   },
 
   investing: {

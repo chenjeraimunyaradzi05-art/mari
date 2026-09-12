@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useFormation, useSubmitFormation, useUpdateFormation } from '@/lib/hooks';
 import { formatRelativeTime } from '@/lib/utils';
+import { FormationDocuments } from '@/components/strategy/FormationDocuments';
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -495,6 +496,8 @@ export default function FormationDetailPage() {
           </div>
         </div>
       )}
+
+      <FormationDocuments registrationId={id} businessName={formation.businessName} />
 
       <div className="border rounded-lg p-6 space-y-3">
         <h2 className="text-lg font-semibold">Raw data</h2>

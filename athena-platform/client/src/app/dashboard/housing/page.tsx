@@ -281,6 +281,7 @@ export default function HousingPage() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">Safe, flexible housing for women</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">{headerLabel}. Verified landlords, privacy-first.</p>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400"><Link href="/dashboard/safety" className="font-medium text-rose-600 hover:underline dark:text-rose-400">Leaving violence? Emergency help and a safety plan</Link>, and 1800RESPECT on 1800 737 732, any hour.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <a href="#list-a-place" onClick={() => setShowListForm(true)} className="btn-secondary inline-flex items-center gap-2">

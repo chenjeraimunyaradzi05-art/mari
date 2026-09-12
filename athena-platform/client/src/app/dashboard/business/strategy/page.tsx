@@ -8,8 +8,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { BadgeCheck, Building2, Compass, Landmark, Mic, PieChart, Timer, Users } from 'lucide-react';
-import { strategyApi } from '@/lib/strategy-api';
+import toast from 'react-hot-toast';
+import { BadgeCheck, Building2, Compass, Download, Landmark, Mic, PieChart, Rocket, Timer, Users } from 'lucide-react';
+import { strategyApi, apiMessage } from '@/lib/strategy-api';
+import { downloadText } from '@/lib/download';
 import { Bars, Check, Disclaimer, Field, JumpLinks, LineChart, Notes, NumberInput, Panel, Pending, SavePlanBar, SelectInput, Stat, aud, num, opt, pct, useCalc } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +30,7 @@ type Form = {
   cash: string; monthlyRevenue: string; monthlyExpenses: string; revenueGrowth: string; expenseGrowth: string;
   stage: string; grantIndustry: string; state: string; amountNeeded: string; indigenous: boolean; regional: boolean;
   investorTypes: string; pitchText: string;
+  launchStructure: string; launchEmployees: boolean; launchPremises: boolean;
 };
 
 const DEFAULTS: Form = {
@@ -38,6 +41,7 @@ const DEFAULTS: Form = {
   cash: '', monthlyRevenue: '', monthlyExpenses: '', revenueGrowth: '5', expenseGrowth: '1',
   stage: 'Early', grantIndustry: '', state: 'QLD', amountNeeded: '', indigenous: false, regional: false,
   investorTypes: '', pitchText: '',
+  launchStructure: 'SOLE_TRADER', launchEmployees: false, launchPremises: false,
 };
 
 type Structures = { recommended: string; reasons: string[]; yourMarginalRate: number; notes: string[]; asAt: string; options: Array<{ type: string; label: string; taxOnProfit: number; effectiveRate: number; yourTax: number; setupCost: { low: number; high: number }; annualCost: { low: number; high: number }; complexity: number; assetProtection: number; raisingCapital: number; canRetainProfits: boolean; available: boolean; unavailableReason?: string; pros: string[]; cons: string[]; taxNote: string; score: number }> };
@@ -49,6 +53,11 @@ type Matches = { matches: Array<{ id: string; name: string; provider: string; ma
 type InvestorMatches = { matches: Array<{ id: string; name: string; type: string; description?: string | null; website?: string | null; minCheckSize?: string | number | null; maxCheckSize?: string | number | null; match: { score: number; reasons: string[]; gaps: string[] } }> };
 type Pitch = { score: number; grade: string; wordCount: number; found: Array<{ key: string; label: string; how: string }>; missing: Array<{ key: string; label: string; prompt: string }>; tips: string[] };
 const INVESTOR_TYPES = [['', 'Any kind'], ['ANGEL', 'Angels'], ['VC', 'Venture funds'], ['CORPORATE_VC', 'Corporate funds'], ['FAMILY_OFFICE', 'Family offices'], ['ACCELERATOR', 'Accelerators'], ['GOVERNMENT', 'Government programs']].map(([value, label]) => ({ value, label }));
+
+type LaunchPackage = { structure: string; checklist: Array<{ key: string; title: string; detail: string; href?: string; external?: boolean; vendorCategory?: string }>; vendors: Array<{ category: string; label: string; picks: Array<{ id: string; name: string; description: string | null; priceRange: string | null; discountPct: number | null; isPartner: boolean; isVerified: boolean; rating: number | null; reviewCount: number; website: string | null; location: string | null }> }> };
+type ValuationPoint = { date: string; valuationMid: number };
+const readHistory = (r?: Record<string, unknown>): ValuationPoint[] => (Array.isArray(r?.valuationHistory) ? (r!.valuationHistory as ValuationPoint[]).filter((p) => p && typeof p.date === 'string') : []);
+const STRUCTURES = [['SOLE_TRADER', 'Sole trader'], ['PARTNERSHIP', 'Partnership'], ['COMPANY', 'Company'], ['TRUST', 'Trust']].map(([value, label]) => ({ value, label }));
 
 const dots = (n: number) => '●'.repeat(n) + '○'.repeat(3 - n);
 
@@ -67,6 +76,21 @@ export default function BusinessStrategyPage() {
   const investors = useCalc<InvestorMatches>(strategyApi.business.investorMatches, { stage: form.stage, industry: form.grantIndustry || undefined, state: form.state || undefined, raiseAmount: opt(form.raise) ?? opt(form.amountNeeded), investorTypes: form.investorTypes || undefined }, true, 500);
   const pitch = useCalc<Pitch>(strategyApi.business.pitchCheck, { text: form.pitchText }, form.pitchText.trim().length >= 20, 700);
 
+  const launch = useCalc<LaunchPackage>(strategyApi.business.launchPackage, { structure: form.launchStructure, employees: form.launchEmployees, premises: form.launchPremises }, true, 300);
+  const [valuationHistory, setValuationHistory] = useState<ValuationPoint[]>([]);
+  const [deckBusy, setDeckBusy] = useState(false);
+  const downloadDeck = async () => {
+    setDeckBusy(true);
+    try {
+      const res = await strategyApi.business.deckOutline({ text: form.pitchText });
+      downloadText('pitch-deck-outline.md', String(res.data?.data?.markdown ?? ''), 'text/markdown;charset=utf-8');
+    } catch (err) {
+      toast.error(apiMessage(err, 'The outline could not be made.'));
+    } finally {
+      setDeckBusy(false);
+    }
+  };
+
   const recommended = structures.result?.options.find((o) => o.type === structures.result?.recommended);
 
   return (
@@ -83,13 +107,14 @@ export default function BusinessStrategyPage() {
         <Link href="/dashboard/formation" className="btn-secondary inline-flex items-center gap-2"><Building2 className="h-4 w-4" /> Formation studio</Link>
       </div>
 
-      <JumpLinks items={[{ id: 'structure', label: 'Structure' }, { id: 'valuation', label: 'Valuation' }, { id: 'raise', label: 'A raise' }, { id: 'runway', label: 'Runway' }, { id: 'grants', label: 'Grants' }, { id: 'investors', label: 'Investors' }, { id: 'pitch', label: 'The pitch' }]} />
+      <JumpLinks items={[{ id: 'structure', label: 'Structure' }, { id: 'launch', label: 'Launch package' }, { id: 'valuation', label: 'Valuation' }, { id: 'raise', label: 'A raise' }, { id: 'runway', label: 'Runway' }, { id: 'grants', label: 'Grants' }, { id: 'investors', label: 'Investors' }, { id: 'pitch', label: 'The pitch' }]} />
 
       <SavePlanBar
         area="BUSINESS"
         inputs={form}
         result={{ recommended: structures.result?.recommended ?? null, valuationMid: valuation.result?.range.mid ?? null, runwayMonths: runway.result?.runwayMonths ?? null, founderPctAfter: raise.result?.founderPctAfter ?? null }}
-        onLoaded={(inputs) => setForm((f) => ({ ...f, ...(inputs as Partial<Form>) }))}
+        onLoaded={(inputs, _title, saved) => { setForm((f) => ({ ...f, ...(inputs as Partial<Form>) })); setValuationHistory(readHistory(saved)); }}
+        onSaved={(saved) => setValuationHistory(readHistory(saved))}
         summary={recommended ? `Leaning ${recommended.label.toLowerCase()}.` : undefined}
       />
 
@@ -156,6 +181,53 @@ export default function BusinessStrategyPage() {
         )}
       </Panel>
 
+      <Panel id="launch" icon={Rocket} title="The launch package" intro="Everything a launch needs, in order, and the vetted vendors on the platform who do each part, partners with their member discount first. Send the rest out as a request for proposals." aside={<Link href="/dashboard/rfps" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Request proposals</Link>}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label="Structure"><SelectInput value={form.launchStructure} onChange={set('launchStructure')} options={STRUCTURES} /></Field>
+          <div className="flex items-end pb-2"><Check checked={form.launchEmployees} onChange={set('launchEmployees')} label="I will employ someone" /></div>
+          <div className="flex items-end pb-2"><Check checked={form.launchPremises} onChange={set('launchPremises')} label="I will lease premises" /></div>
+        </div>
+        <Pending loading={launch.loading} error={launch.error}>
+          {launch.result && (
+            <div className="mt-5 grid gap-6 lg:grid-cols-[3fr_2fr]">
+              <ol className="space-y-2">
+                {launch.result.checklist.map((s, i) => (
+                  <li key={s.key} className="flex gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-100 text-xs font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">{i + 1}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">{s.title}</p>
+                      <p className="text-xs leading-5 text-slate-600 dark:text-slate-400">{s.detail}</p>
+                      {s.href && (s.external ? <a href={s.href} target="_blank" rel="noreferrer" className="text-xs font-medium text-rose-600 hover:underline dark:text-rose-400">Open</a> : <Link href={s.href} className="text-xs font-medium text-rose-600 hover:underline dark:text-rose-400">Open</Link>)}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <div className="space-y-3">
+                {launch.result.vendors.map((group) => (
+                  <div key={group.category} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.label}</p>
+                    {group.picks.length === 0 ? (
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">No vendor listed yet. <Link href="/dashboard/rfps" className="font-medium text-rose-600 hover:underline dark:text-rose-400">Ask for proposals</Link></p>
+                    ) : (
+                      <ul className="mt-1 space-y-1.5">
+                        {group.picks.map((v) => (
+                          <li key={v.id} className="text-sm">
+                            <span className="font-medium text-slate-900 dark:text-white">{v.name}</span>
+                            {v.isPartner && v.discountPct ? <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{v.discountPct}% off for members</span> : v.isPartner ? <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">partner</span> : null}
+                            <span className="block text-xs text-slate-500 dark:text-slate-400">{[v.priceRange, v.rating ? `${v.rating.toFixed(1)}★ (${v.reviewCount})` : null, v.location].filter(Boolean).join(' · ')}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+                <Link href="/vendors" className="inline-block text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Every vendor</Link>
+              </div>
+            </div>
+          )}
+        </Pending>
+      </Panel>
+
       <Panel id="valuation" icon={Landmark} title="What it is worth" intro="Three ordinary methods side by side, with the things that move the number named. A range, not a price tag.">
         <div className="grid gap-4 md:grid-cols-4">
           <Field label="Revenue, a year"><NumberInput value={form.revenue} onChange={set('revenue')} prefix="$" placeholder="400000" /></Field>
@@ -194,6 +266,12 @@ export default function BusinessStrategyPage() {
           </Pending>
         )}
       </Panel>
+
+      {valuationHistory.length > 1 && (
+        <Panel icon={Landmark} title="What it has been worth" intro="The likely valuation each time this plan was saved.">
+          <LineChart series={[{ label: 'Likely valuation', color: '#f43f5e', values: valuationHistory.map((p) => p.valuationMid) }]} labels={valuationHistory.map((p) => p.date.slice(2))} height={140} />
+        </Panel>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel id="raise" icon={PieChart} title="A raise" intro="What you keep after the round.">
@@ -339,6 +417,10 @@ export default function BusinessStrategyPage() {
                   </div>
                 )}
                 {pitch.result.tips.length > 0 && <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-300">{pitch.result.tips.map((t) => <li key={t}>→ {t}</li>)}</ul>}
+                <div className="flex flex-wrap items-center gap-3">
+                  <button type="button" onClick={downloadDeck} disabled={deckBusy} className="btn-secondary inline-flex items-center gap-2"><Download className="h-4 w-4" /> {deckBusy ? 'Making…' : 'Download a deck outline'}</button>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Twelve slides in the order investors expect, your words on the ones you have written.</span>
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">The pitch stays in this plan when you save it, and is never sent anywhere else. <Link href="/dashboard/mentors" className="font-medium text-rose-600 hover:underline dark:text-rose-400">Practise it with a mentor</Link></p>
               </div>
             )}

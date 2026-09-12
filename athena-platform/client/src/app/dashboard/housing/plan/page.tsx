@@ -209,6 +209,9 @@ export default function HousingPlanPage() {
                     <PiggyBank className="h-4 w-4" /> {creatingGoal ? 'Starting…' : 'Start a deposit goal'}
                   </button>
                   <Link href="/dashboard/finance/savings" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">See savings goals</Link>
+                  <span className="text-xs text-slate-400">·</span>
+                  <a href={`https://www.realestate.com.au/buy/in-${form.state.toLowerCase()}/list-1?maxPrice=${Math.round(price)}`} target="_blank" rel="noreferrer" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Search realestate.com.au</a>
+                  <a href={`https://www.domain.com.au/sale/?state=${form.state.toLowerCase()}&price=0-${Math.round(price)}`} target="_blank" rel="noreferrer" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Search Domain</a>
                 </div>
                 <Notes items={deposit.result.notes} />
               </div>

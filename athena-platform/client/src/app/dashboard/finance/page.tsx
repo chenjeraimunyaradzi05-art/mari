@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RoadmapStrip } from '@/components/strategy/RoadmapStrip';
 
 const tiles = [
   {
@@ -109,6 +110,8 @@ export default function FinanceOverviewPage() {
           Build financial security with savings, insurance, super, and business tools.
         </p>
       </div>
+
+      <RoadmapStrip />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {tiles.map((tile) => (

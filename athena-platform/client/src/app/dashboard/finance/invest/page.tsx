@@ -46,7 +46,7 @@ const DEFAULTS: Form = {
 
 type Profile = { profile: string; label: string; summary: string; score: number; maxScore: number; growthPct: number; defensivePct: number; allocation: Array<{ assetClass: string; label: string; pct: number }>; expectedReturnPct: number; volatilityPct: number; cappedBy: string | null; notes: string[]; asAt: string };
 type Holding = { id: string; name: string; kind: 'ASSET' | 'LIABILITY'; category: string; value: string | number; notes?: string | null };
-type NetWorth = { totalAssets: number; totalLiabilities: number; netWorth: number; investable: number; profile: string | null; byCategory: Array<{ category: string; label: string; kind: string; value: number; pctOfAssets: number }>; allocation: Array<{ assetClass: string; label: string; value: number; currentPct: number; targetPct: number; drift: number; move: number }>; suggestions: string[]; warnings: string[] };
+type NetWorth = { totalAssets: number; totalLiabilities: number; netWorth: number; investable: number; profile: string | null; byCategory: Array<{ category: string; label: string; kind: string; value: number; pctOfAssets: number }>; allocation: Array<{ assetClass: string; label: string; value: number; currentPct: number; targetPct: number; drift: number; move: number }>; suggestions: string[]; warnings: string[]; wholeOfWealth?: { growthPct: number; defensivePct: number; targetGrowthPct: number; superGrowthPct: number | null; superBalance: number; note: string }; incomeEstimate?: { annual: number; monthly: number; byCategory: Array<{ category: string; label: string; value: number; yieldPct: number; income: number }>; note: string } };
 type Projection = { years: number; returnPct: number; scenarios: Array<{ key: string; label: string; endTotal: number; endRealTotal: number; totalContributed: number; growth: number; milestones: Array<{ amount: number; year: number | null }>; series: Array<{ year: number; total: number }> }>; notes: string[] };
 type Emergency = { monthsRecommended: number; target: number; current: number; gap: number; progressPct: number; monthsToTarget: number | null; targetDate: string | null; milestones: Array<{ pct: number; amount: number; reached: boolean }>; notes: string[] };
 
@@ -344,6 +344,12 @@ export default function InvestPage() {
               <Stat label="Invested outside super" value={aud(netWorth.investable)} sub="after the emergency fund" />
               <Stat label="Measured against" value={netWorth.profile ? netWorth.profile.replace('_', ' ') : 'balanced'} sub={netWorth.profile ? 'your mix above' : 'answer the questions to use yours'} />
             </div>
+            {(netWorth.wholeOfWealth || netWorth.incomeEstimate) && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {netWorth.wholeOfWealth && <Stat label="Growth assets, super included" value={`${Math.round(netWorth.wholeOfWealth.growthPct)}% growth`} sub={netWorth.wholeOfWealth.note} tone={Math.abs(netWorth.wholeOfWealth.growthPct - netWorth.wholeOfWealth.targetGrowthPct) <= 10 ? 'good' : 'warn'} />}
+                {netWorth.incomeEstimate && netWorth.incomeEstimate.annual > 0 && <Stat label="Income the holdings might pay" value={`${aud(netWorth.incomeEstimate.annual)} a year`} sub={`${aud(netWorth.incomeEstimate.monthly)} a month. ${netWorth.incomeEstimate.byCategory.map((c) => `${c.label} ${c.yieldPct}%`).join(', ')}. ${netWorth.incomeEstimate.note}`} />}
+              </div>
+            )}
             <div className="grid gap-5 md:grid-cols-2">
               <div>
                 <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">By kind</h3>

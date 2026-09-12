@@ -221,6 +221,9 @@ export default function AcceleratorPage() {
                     <div className="text-xs text-slate-500">
                       Enrolled {formatDate(enrollment.enrolledAt)} · Status {enrollment.status}
                     </div>
+                    {enrollment.status === 'COMPLETED' && (
+                      <Link href={`/certificates/accelerator/${enrollment.id}`} className="mt-1 inline-block text-xs font-medium text-primary-600 hover:underline">Certificate of completion</Link>
+                    )}
                   </div>
                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
                     {enrollment.paymentStatus}

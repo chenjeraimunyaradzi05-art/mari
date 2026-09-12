@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Activity, RefreshCw, Loader2, TrendingUp, TrendingDown, AlertCircle, CheckCircle } from 'lucide-react';
 import { financeApi } from '@/lib/api';
+import { RoadmapStrip } from '@/components/strategy/RoadmapStrip';
 
 type HealthScore = {
   id: string;
@@ -233,6 +234,8 @@ export default function HealthScorePage() {
           )}
         </div>
       )}
+
+      <RoadmapStrip />
 
       <div className="text-center">
         <Link href="/dashboard/finance" className="text-sm text-primary-600 hover:underline">

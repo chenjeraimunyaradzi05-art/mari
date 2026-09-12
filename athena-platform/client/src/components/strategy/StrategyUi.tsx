@@ -263,7 +263,7 @@ type SavedPlan = { id: string; area: StrategyArea; title?: string | null; inputs
  * one plan per area. When the page opens it asks for the saved plan and
  * hands the inputs back through `onLoaded` so every field fills in.
  */
-export function SavePlanBar({ area, inputs, result, onLoaded, summary }: { area: StrategyArea; inputs: Record<string, unknown>; result: Record<string, unknown>; onLoaded: (inputs: Record<string, unknown>, title: string) => void; summary?: string }) {
+export function SavePlanBar({ area, inputs, result, onLoaded, onSaved, summary }: { area: StrategyArea; inputs: Record<string, unknown>; result: Record<string, unknown>; onLoaded: (inputs: Record<string, unknown>, title: string, result: Record<string, unknown>) => void; onSaved?: (result: Record<string, unknown>) => void; summary?: string }) {
   const [title, setTitle] = useState('');
   const [saved, setSaved] = useState<SavedPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -279,7 +279,7 @@ export function SavePlanBar({ area, inputs, result, onLoaded, summary }: { area:
         if (mine) {
           setSaved(mine);
           setTitle(mine.title ?? '');
-          onLoaded(mine.inputs ?? {}, mine.title ?? '');
+          onLoaded(mine.inputs ?? {}, mine.title ?? '', mine.result ?? {});
         }
       })
       .catch(() => { /* a visitor without a session sees the calculators only */ });
@@ -291,6 +291,7 @@ export function SavePlanBar({ area, inputs, result, onLoaded, summary }: { area:
     try {
       const res = await strategyApi.savePlan(area, { title: title.trim() || undefined, inputs, result });
       setSaved(res.data?.data ?? null);
+      onSaved?.(res.data?.data?.result ?? {});
       toast.success('Plan saved');
     } catch (err) {
       toast.error(apiMessage(err, 'Sign in to save a plan.'));
