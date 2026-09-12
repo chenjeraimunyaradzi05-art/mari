@@ -38,7 +38,7 @@ export default function TrackPage() {
   const [checkin, setCheckin] = useState<{ mood: number | null; stress: number | null; anxiety: number | null; energy: number | null; note: string }>({ mood: null, stress: null, anxiety: null, energy: null, note: '' });
   const [sleep, setSleep] = useState({ hours: '', quality: null as number | null, bedtime: '', wakeTime: '' });
   const [move, setMove] = useState({ type: 'walk', minutes: '', intensity: 'moderate', steps: '' });
-  const [food, setFood] = useState({ meal: 'lunch', description: '', calories: '', vegServes: '' });
+  const [food, setFood] = useState({ meal: 'lunch', description: '', calories: '', vegServes: '', protein: '', carbs: '', fat: '' });
   const [period, setPeriod] = useState({ flow: 'medium', pain: 0 as number, symptoms: [] as string[] });
   const [symptom, setSymptom] = useState({ name: '', severity: null as number | null, note: '' });
 
@@ -70,7 +70,7 @@ export default function TrackPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <PageTitle icon={HeartPulse} kicker="Wellness" title="Track" blurb="A day at a time. Log it when it happens, or fill a day in later. Everything is encrypted before it is stored." />
+      <PageTitle icon={HeartPulse} kicker="Wellness" title="Track" blurb="A day at a time. Log it when it happens, or fill a day in later. Everything is encrypted before it is stored." action={<Link href="/dashboard/wellness/import" className="btn-secondary text-sm">Bring in Apple Health or Google Fit</Link>} />
       <WellnessNav current="/dashboard/wellness/track" />
       <JumpLinks items={[{ id: 'checkin', label: 'Check-in' }, { id: 'sleep', label: 'Sleep' }, { id: 'movement', label: 'Movement' }, { id: 'water', label: 'Water and food' }, { id: 'cycle', label: 'Cycle' }, { id: 'symptoms', label: 'Symptoms' }]} />
 
@@ -152,8 +152,14 @@ export default function TrackPage() {
                 <Field label="What" className="sm:col-span-2"><input value={food.description} onChange={(e) => setFood((f) => ({ ...f, description: e.target.value }))} maxLength={200} className={inputClass} placeholder="Oats, a banana, coffee" /></Field>
                 <Field label="Veg serves"><NumberInput value={food.vegServes} onChange={(v) => setFood((f) => ({ ...f, vegServes: v }))} min={0} max={20} step={0.5} /></Field>
               </div>
-              <div className="mt-3 flex items-end gap-3"><Field label="Calories" hint="Optional."><NumberInput value={food.calories} onChange={(v) => setFood((f) => ({ ...f, calories: v }))} min={0} /></Field><button type="button" onClick={() => { save('NUTRITION', { meal: food.meal, description: food.description || undefined, calories: food.calories ? num(food.calories) : undefined, vegServes: food.vegServes ? num(food.vegServes) : undefined }); setFood((f) => ({ ...f, description: '', calories: '', vegServes: '' })); }} className="btn-primary mb-1 text-sm"><Utensils className="mr-1 inline h-4 w-4" />Add meal</button></div>
-              {forDay('NUTRITION').length > 0 && <ul className="mt-3 space-y-1.5">{forDay('NUTRITION').map((e) => { const p = e.payload as { meal: string; description?: string; calories?: number; vegServes?: number }; return <li key={e.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60"><span className="text-slate-800 dark:text-slate-200">{p.meal}{p.description ? `: ${p.description}` : ''}{p.vegServes ? ` · ${p.vegServes} veg` : ''}{p.calories ? ` · ${p.calories} kcal` : ''}</span><button type="button" onClick={() => remove(e.id)} className="text-slate-400 hover:text-rose-500" aria-label="Remove"><Trash2 className="h-4 w-4" /></button></li>; })}</ul>}
+              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-end">
+                <Field label="Calories" hint="All of these are optional."><NumberInput value={food.calories} onChange={(v) => setFood((f) => ({ ...f, calories: v }))} min={0} /></Field>
+                <Field label="Protein"><NumberInput value={food.protein} onChange={(v) => setFood((f) => ({ ...f, protein: v }))} min={0} suffix="g" /></Field>
+                <Field label="Carbs"><NumberInput value={food.carbs} onChange={(v) => setFood((f) => ({ ...f, carbs: v }))} min={0} suffix="g" /></Field>
+                <Field label="Fat"><NumberInput value={food.fat} onChange={(v) => setFood((f) => ({ ...f, fat: v }))} min={0} suffix="g" /></Field>
+                <button type="button" onClick={() => { save('NUTRITION', { meal: food.meal, description: food.description || undefined, calories: food.calories ? num(food.calories) : undefined, protein: food.protein ? num(food.protein) : undefined, carbs: food.carbs ? num(food.carbs) : undefined, fat: food.fat ? num(food.fat) : undefined, vegServes: food.vegServes ? num(food.vegServes) : undefined }); setFood((f) => ({ ...f, description: '', calories: '', vegServes: '', protein: '', carbs: '', fat: '' })); }} className="btn-primary mb-1 text-sm"><Utensils className="mr-1 inline h-4 w-4" />Add meal</button>
+              </div>
+              {forDay('NUTRITION').length > 0 && <ul className="mt-3 space-y-1.5">{forDay('NUTRITION').map((e) => { const p = e.payload as { meal: string; description?: string; calories?: number; vegServes?: number; protein?: number; carbs?: number; fat?: number }; const macros = [p.protein ? `${p.protein} g protein` : '', p.carbs ? `${p.carbs} g carbs` : '', p.fat ? `${p.fat} g fat` : ''].filter(Boolean).join(', '); return <li key={e.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60"><span className="text-slate-800 dark:text-slate-200">{p.meal}{p.description ? `: ${p.description}` : ''}{p.vegServes ? ` · ${p.vegServes} veg` : ''}{p.calories ? ` · ${p.calories} kcal` : ''}{macros ? ` · ${macros}` : ''}</span><button type="button" onClick={() => remove(e.id)} className="text-slate-400 hover:text-rose-500" aria-label="Remove"><Trash2 className="h-4 w-4" /></button></li>; })}</ul>}
             </div>
           )}
         </Panel>

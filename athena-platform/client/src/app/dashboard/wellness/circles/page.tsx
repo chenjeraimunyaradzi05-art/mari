@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Plus, Users } from 'lucide-react';
 import { localDay, wellnessApi, wellnessError, type Author } from '@/lib/wellness-api';
@@ -20,6 +21,7 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const title = (s: string) => s.replace(/-/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
 export default function CirclesPage() {
+  const router = useRouter();
   const [mine, setMine] = useState(false);
   const data = useLoad<Data>(() => wellnessApi.circles(mine ? { mine: 'true' } : {}), [mine]);
   const [open, setOpen] = useState(false);
@@ -31,7 +33,7 @@ export default function CirclesPage() {
     try {
       const res = await wellnessApi.createCircle({ ...form, capacity: num(form.capacity, 6), weeks: num(form.weeks, 8), meetingDay: num(form.meetingDay, 2), meetingLink: form.meetingLink || null, location: form.location || null });
       toast.success('Circle started');
-      window.location.assign(`/dashboard/wellness/circles/${res.data?.data?.id}`);
+      router.push(`/dashboard/wellness/circles/${res.data?.data?.id}`);
     } catch (err) { toast.error(wellnessError(err, 'That could not be started.')); } finally { setBusy(false); }
   };
   const join = async (c: Circle) => { try { await wellnessApi.joinCircle(c.id); toast.success(`You are in ${c.name}`); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not work.')); } };

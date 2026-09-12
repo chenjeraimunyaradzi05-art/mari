@@ -11,8 +11,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { CalendarHeart, Check, Droplets, HeartPulse, Leaf, Pill, Stethoscope, Target, Users } from 'lucide-react';
-import { wellnessApi, wellnessError, type Insight } from '@/lib/wellness-api';
-import { CrisisStrip, DayDots, ErrorBox, HealthDisclaimer, InsightCard, Loading, PageTitle, Scale, WellnessNav, fmtDay, fmtWhen, useLoad } from '@/components/wellness/WellnessUi';
+import { wellnessApi, wellnessError, type Badge, type Insight } from '@/lib/wellness-api';
+import { BadgeStrip, CrisisStrip, DayDots, ErrorBox, HealthDisclaimer, InsightCard, Loading, PageTitle, Scale, WellnessNav, fmtDay, fmtWhen, useLoad } from '@/components/wellness/WellnessUi';
 import { Panel, Stat } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +36,7 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 
 export default function WellnessHome() {
   const today = useLoad<Today>(() => wellnessApi.today());
+  const badges = useLoad<{ badges: Badge[]; earned: number }>(() => wellnessApi.badges());
   const [checkin, setCheckin] = useState<{ mood: number | null; stress: number | null; anxiety: number | null; energy: number | null }>({ mood: null, stress: null, anxiety: null, energy: null });
   const [busy, setBusy] = useState(false);
   const d = today.data;
@@ -89,6 +90,9 @@ export default function WellnessHome() {
                   <button type="button" onClick={saveCheckin} disabled={busy || !checkin.mood || !checkin.stress || !checkin.anxiety || !checkin.energy} className="btn-primary inline-flex items-center gap-2 text-sm disabled:opacity-50"><Check className="h-4 w-4" /> Save today</button>
                 </div>
               )}
+              {!d.todays.CHECKIN && d.settings.trackers.checkin === false && (
+                <p className="text-sm text-slate-500">The daily check-in is switched off. <Link href="/dashboard/wellness/settings" className="font-medium text-rose-600 dark:text-rose-400">Switch it on</Link> and the patterns start again.</p>
+              )}
               {d.todays.CHECKIN && (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <Stat label="Sleep last night" value={d.todays.SLEEP ? `${d.todays.SLEEP.payload.hours} h` : '–'} sub={d.todays.SLEEP ? undefined : 'not logged'} />
@@ -102,6 +106,7 @@ export default function WellnessHome() {
                 <Link href="/dashboard/wellness/track#sleep" className="btn-ghost text-sm">Log sleep</Link>
                 <Link href="/dashboard/wellness/track#movement" className="btn-ghost text-sm">Log movement</Link>
                 <Link href="/dashboard/wellness/track#cycle" className="btn-ghost text-sm">Log a period day</Link>
+                <Link href="/dashboard/wellness/import" className="btn-ghost text-sm">Bring in Apple Health or Google Fit</Link>
               </div>
             </Panel>
 
@@ -177,6 +182,13 @@ export default function WellnessHome() {
           </div>
 
           {d.headline && <InsightCard insight={d.headline} />}
+          {badges.data && badges.data.earned > 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Yours so far</span>
+              <BadgeStrip badges={badges.data.badges} compact />
+              <Link href="/dashboard/wellness/habits#badges" className="text-xs font-medium text-rose-600 dark:text-rose-400">The rest</Link>
+            </div>
+          )}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><HealthDisclaimer /><Link href="/dashboard/wellness/settings" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">What is collected, and how to delete it</Link></div>
         </>
       )}

@@ -13,18 +13,19 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Search, Star, Stethoscope, Video } from 'lucide-react';
 import { wellnessApi } from '@/lib/wellness-api';
-import { Chip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, useLoad } from '@/components/wellness/WellnessUi';
+import { Chip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Check, Field, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
 
-type Practitioner = { id: string; slug: string; name: string; kind: string; kindLabel: string; headline: string; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; feeFrom: number | null; feeNote: string | null; phone: string | null; website: string | null; acceptsBookings: boolean; isVerified: boolean; ratingAvg: number; ratingCount: number };
+type Practitioner = { id: string; slug: string; name: string; kind: string; kindLabel: string; headline: string; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; phone: string | null; website: string | null; acceptsBookings: boolean; isVerified: boolean; ratingAvg: number; ratingCount: number; nextFree?: string | null };
 type Data = { practitioners: Practitioner[]; total: number; page: number; kinds: Array<{ key: string; label: string; plural: string }>; modalities: string[]; specialties: string[] };
 const STATES = ['', 'QLD', 'NSW', 'VIC', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
 
 function Directory() {
   const search = useSearchParams();
-  const [f, setF] = useState({ kind: search.get('kind') ?? '', state: '', city: '', q: search.get('q') ?? '', telehealth: false, bulkBilling: false, modality: '', specialty: search.get('specialty') ?? '' });
+  const [f, setF] = useState({ kind: search.get('kind') ?? '', state: '', city: '', q: search.get('q') ?? '', language: '', telehealth: false, inPerson: false, bulkBilling: false, privateHealth: false, acceptsBookings: search.get('acceptsBookings') === 'true', modality: '', specialty: search.get('specialty') ?? '' });
   const [page, setPage] = useState(1);
-  const data = useLoad<Data>(() => wellnessApi.practitioners({ ...f, telehealth: f.telehealth ? 'true' : undefined, bulkBilling: f.bulkBilling ? 'true' : undefined, page }), [JSON.stringify(f), page]);
+  const flag = (v: boolean) => (v ? 'true' : undefined);
+  const data = useLoad<Data>(() => wellnessApi.practitioners({ ...f, telehealth: flag(f.telehealth), inPerson: flag(f.inPerson), bulkBilling: flag(f.bulkBilling), privateHealth: flag(f.privateHealth), acceptsBookings: flag(f.acceptsBookings), language: f.language || undefined, page }), [JSON.stringify(f), page]);
   const set = (k: string, v: string | boolean) => { setPage(1); setF((x) => ({ ...x, [k]: v })); };
 
   return (
@@ -40,7 +41,10 @@ function Directory() {
           <Field label="City or suburb"><input value={f.city} onChange={(e) => set('city', e.target.value)} className={inputClass} placeholder="Brisbane" /></Field>
           <Field label="Search"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={f.q} onChange={(e) => set('q', e.target.value)} className={`${inputClass} pl-8`} placeholder="Name or words" /></div></Field>
         </div>
-        <div className="mt-3 flex flex-wrap gap-4"><Check checked={f.telehealth} onChange={(v) => set('telehealth', v)} label="Telehealth" /><Check checked={f.bulkBilling} onChange={(v) => set('bulkBilling', v)} label="Bulk billing or Medicare rebate" /></div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div className="flex flex-wrap gap-x-4 gap-y-2"><Check checked={f.telehealth} onChange={(v) => set('telehealth', v)} label="Telehealth" /><Check checked={f.inPerson} onChange={(v) => set('inPerson', v)} label="In person" /><Check checked={f.bulkBilling} onChange={(v) => set('bulkBilling', v)} label="Bulk billing or Medicare rebate" /><Check checked={f.privateHealth} onChange={(v) => set('privateHealth', v)} label="Private health" /><Check checked={f.acceptsBookings} onChange={(v) => set('acceptsBookings', v)} label="Book here" /></div>
+          <div className="w-full sm:w-44"><Field label="Language"><input value={f.language} onChange={(e) => set('language', e.target.value)} className={inputClass} placeholder="Mandarin, Arabic…" /></Field></div>
+        </div>
       </div>
       {data.loading && <Loading />}
       <ErrorBox error={data.error} />
@@ -48,7 +52,7 @@ function Directory() {
       <ul className="grid gap-4 md:grid-cols-2">
         {(data.data?.practitioners ?? []).map((p) => (
           <li key={p.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex flex-wrap items-center gap-2"><Chip tone="rose">{p.kindLabel}</Chip>{p.telehealth && <Chip tone="sky"><Video className="mr-1 inline h-3 w-3" />Telehealth</Chip>}{p.inPerson && <Chip>In person</Chip>}{(p.bulkBilling || p.medicareRebate) && <Chip tone="emerald">{p.bulkBilling ? 'Bulk billing' : 'Medicare rebate'}</Chip>}{p.acceptsBookings && <Chip tone="amber">Book here</Chip>}</div>
+            <div className="flex flex-wrap items-center gap-2"><Chip tone="rose">{p.kindLabel}</Chip>{p.telehealth && <Chip tone="sky"><Video className="mr-1 inline h-3 w-3" />Telehealth</Chip>}{p.inPerson && <Chip>In person</Chip>}{(p.bulkBilling || p.medicareRebate) && <Chip tone="emerald">{p.bulkBilling ? 'Bulk billing' : 'Medicare rebate'}</Chip>}{p.privateHealth && <Chip>Private health</Chip>}{p.acceptsBookings && <Chip tone="amber">{p.nextFree ? `Next free ${fmtDay(p.nextFree, { weekday: 'short', day: 'numeric', month: 'short' })}` : 'Book here'}</Chip>}</div>
             <Link href={`/dashboard/wellness/practitioners/${p.slug}`} className="mt-2 block text-lg font-semibold text-slate-900 hover:text-rose-600 dark:text-white">{p.name}</Link>
             <p className="text-sm text-slate-600 dark:text-slate-400">{p.headline}</p>
             <p className="mt-2 text-xs text-slate-500">{[p.suburb || p.city, p.state].filter(Boolean).join(', ') || 'National'}{p.specialties.length ? ` · ${p.specialties.slice(0, 3).join(', ')}` : ''}{p.feeNote ? ` · ${p.feeNote}` : p.feeFrom !== null ? ` · from $${p.feeFrom}` : ''}</p>

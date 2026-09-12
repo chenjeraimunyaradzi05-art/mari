@@ -16,7 +16,7 @@ import { Chip, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtD
 import { Check, Field, Panel, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
 
-type Practitioner = { id: string; slug: string; name: string; kind: string; kindLabel: string; headline: string; bio: string; qualifications: string[]; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; ahpraNumber: string | null; website: string | null; phone: string | null; bookingUrl: string | null; acceptsBookings: boolean; isVerified: boolean; ratingAvg: number; ratingCount: number; slotMinutes: number; isOwner: boolean; reviews: Array<{ id: string; rating: number; comment: string | null; createdAt: string; by: string }>; nextAvailable: Array<{ day: string; slots: number }>; timezone: string };
+type Practitioner = { id: string; slug: string; name: string; kind: string; kindLabel: string; headline: string; bio: string; qualifications: string[]; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; ahpraNumber: string | null; website: string | null; phone: string | null; bookingUrl: string | null; acceptsBookings: boolean; isVerified: boolean; ratingAvg: number; ratingCount: number; slotMinutes: number; isOwner: boolean; canModerate?: boolean; reviews: Array<{ id: string; rating: number; comment: string | null; isHidden?: boolean; createdAt: string; by: string }>; nextAvailable: Array<{ day: string; slots: number }>; timezone: string };
 type Slots = { day: string; slots: Array<{ start: string; end: string; label: string }>; timezone: string };
 type Reference = { shareScopes: Array<{ key: string; label: string }> };
 
@@ -33,6 +33,10 @@ export default function PractitionerPage() {
   const [share, setShare] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const p = data.data;
+
+  const moderate = async (id: string, isHidden: boolean) => {
+    try { await wellnessApi.moderateReview(id, isHidden); toast.success(isHidden ? 'Taken out of the average' : 'Back in the average'); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be changed.')); }
+  };
 
   const book = async () => {
     if (!p || !slot) return;
@@ -71,7 +75,7 @@ export default function PractitionerPage() {
                 <div className="mt-4 flex flex-wrap gap-3 text-sm">{p.phone && <a href={`tel:${p.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 text-rose-600"><Phone className="h-4 w-4" /> {p.phone}</a>}{p.website && <a href={p.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-rose-600"><Globe className="h-4 w-4" /> Website</a>}{!p.acceptsBookings && p.bookingUrl && <a href={p.bookingUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Contact or book on their site</a>}</div>
               </Panel>
               {p.reviews.length > 0 && <Panel title="From women who went" intro="Only a completed visit can leave one of these.">
-                <ul className="space-y-3">{p.reviews.map((r) => <li key={r.id} className="text-sm"><p className="inline-flex items-center gap-1 text-amber-600">{Array.from({ length: r.rating }).map((_, i) => <Star key={i} className="h-3.5 w-3.5 fill-current" />)}<span className="ml-2 text-xs text-slate-500">{r.by} · {new Date(r.createdAt).toLocaleDateString('en-AU')}</span></p>{r.comment && <p className="mt-1 text-slate-700 dark:text-slate-300">{r.comment}</p>}</li>)}</ul>
+                <ul className="space-y-3">{p.reviews.map((r) => <li key={r.id} className={cn('text-sm', r.isHidden && 'opacity-60')}><p className="inline-flex flex-wrap items-center gap-1 text-amber-600">{Array.from({ length: r.rating }).map((_, i) => <Star key={i} className="h-3.5 w-3.5 fill-current" />)}<span className="ml-2 text-xs text-slate-500">{r.by} · {new Date(r.createdAt).toLocaleDateString('en-AU')}</span>{r.isHidden && <Chip tone="rose">Hidden</Chip>}{p.canModerate && <button type="button" onClick={() => moderate(r.id, !r.isHidden)} className="ml-2 text-xs text-slate-500 underline-offset-2 hover:underline">{r.isHidden ? 'Show it' : 'Hide it'}</button>}</p>{r.comment && <p className="mt-1 text-slate-700 dark:text-slate-300">{r.comment}</p>}</li>)}</ul>
               </Panel>}
             </div>
             <div>

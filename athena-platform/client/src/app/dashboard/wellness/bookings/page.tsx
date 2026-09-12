@@ -4,40 +4,49 @@
  * Appointments: what is coming, what happened, and after a visit the
  * follow-up: how it went, a rating that only a real visit can leave, a
  * note of what was said, a symptom to keep an eye on, and the next one
- * booked with the same practitioner.
+ * booked with the same practitioner. A confirmed appointment goes into
+ * her own calendar as a file.
  */
 
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { CalendarCheck, Link2, Star } from 'lucide-react';
+import { CalendarCheck, CalendarPlus, Link2, Star } from 'lucide-react';
 import { wellnessApi, wellnessError } from '@/lib/wellness-api';
 import { Chip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, Scale, WellnessNav, fmtWhen, useLoad } from '@/components/wellness/WellnessUi';
 import { Field, inputClass } from '@/components/strategy/StrategyUi';
+import { downloadText } from '@/lib/download';
 import { cn } from '@/lib/utils';
 
 type Booking = { id: string; scheduledAt: string; durationMinutes: number; mode: string; status: string; reason: string | null; practitionerNote: string | null; meetingLink: string | null; followUpOfId: string | null; practitioner: { id: string; slug: string; name: string; kind: string; headline: string }; review: { rating: number; comment: string | null } | null; canCancel: boolean; share: { token: string; expiresAt: string; revokedAt: string | null; openedCount: number } | null; noteCount: number };
 type Data = { upcoming: Booking[]; past: Booking[] };
 const STATUS: Record<string, { label: string; tone: 'sky' | 'emerald' | 'slate' | 'rose' | 'amber' }> = { REQUESTED: { label: 'Requested', tone: 'sky' }, CONFIRMED: { label: 'Confirmed', tone: 'emerald' }, DECLINED: { label: 'Declined', tone: 'rose' }, CANCELLED: { label: 'Cancelled', tone: 'slate' }, COMPLETED: { label: 'Done', tone: 'emerald' }, NO_SHOW: { label: 'Missed', tone: 'amber' } };
 
-function Bookings() {
-  const search = useSearchParams();
-  const highlight = search.get('visit');
-  const data = useLoad<Data>(() => wellnessApi.bookings());
-  const [rating, setRating] = useState<Record<string, number>>({});
-  const [comment, setComment] = useState<Record<string, string>>({});
-  const [note, setNote] = useState<Record<string, string>>({});
-  const [symptom, setSymptom] = useState<Record<string, { name: string; severity: number | null }>>({});
+/**
+ * One appointment. The follow-up forms keep their own state here, so a
+ * keystroke re-renders this card and nothing else; and the card is a
+ * component in its own right rather than one recreated on every render of
+ * the page, which used to unmount the inputs under the cursor.
+ */
+function BookingCard({ b, highlight, onChanged }: { b: Booking; highlight: boolean; onChanged: () => void }) {
+  const [rating, setRating] = useState<number | null>(null);
+  const [comment, setComment] = useState('');
+  const [note, setNote] = useState('');
+  const [symptom, setSymptom] = useState<{ name: string; severity: number | null }>({ name: '', severity: null });
+  const upcoming = ['REQUESTED', 'CONFIRMED'].includes(b.status) && new Date(b.scheduledAt).getTime() > Date.now();
 
-  const act = async (fn: () => Promise<unknown>, done: string) => { try { await fn(); toast.success(done); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not work.')); } };
-  const cancel = (b: Booking) => { if (window.confirm('Cancel this appointment?')) act(() => wellnessApi.cancelBooking(b.id), 'Cancelled'); };
-  const review = (b: Booking) => act(() => wellnessApi.reviewBooking(b.id, { rating: rating[b.id], comment: comment[b.id] || undefined }), 'Thank you. That helps the next woman looking.');
-  const saveNote = (b: Booking) => act(async () => { await wellnessApi.addNote({ title: `${b.practitioner.name}, ${new Date(b.scheduledAt).toLocaleDateString('en-AU')}`, body: note[b.id], bookingId: b.id }); setNote((n) => ({ ...n, [b.id]: '' })); }, 'Note kept');
-  const logSymptom = (b: Booking) => { const s = symptom[b.id]; if (!s?.name || !s.severity) return; act(async () => { await wellnessApi.addEntry({ kind: 'SYMPTOM', payload: { name: s.name, severity: s.severity, bookingId: b.id } }); setSymptom((x) => ({ ...x, [b.id]: { name: '', severity: null } })); }, 'Logged'); };
+  const act = async (fn: () => Promise<unknown>, done: string) => { try { await fn(); toast.success(done); onChanged(); } catch (err) { toast.error(wellnessError(err, 'That did not work.')); } };
+  const cancel = () => { if (window.confirm('Cancel this appointment?')) act(() => wellnessApi.cancelBooking(b.id), 'Cancelled'); };
+  const review = () => { if (rating) act(() => wellnessApi.reviewBooking(b.id, { rating, comment: comment || undefined }), 'Thank you. That helps the next woman looking.'); };
+  const saveNote = () => act(async () => { await wellnessApi.addNote({ title: `${b.practitioner.name}, ${new Date(b.scheduledAt).toLocaleDateString('en-AU')}`, body: note, bookingId: b.id }); setNote(''); }, 'Note kept');
+  const logSymptom = () => { if (!symptom.name.trim() || !symptom.severity) return; act(async () => { await wellnessApi.addEntry({ kind: 'SYMPTOM', payload: { name: symptom.name.trim(), severity: symptom.severity, bookingId: b.id } }); setSymptom({ name: '', severity: null }); }, 'Logged'); };
+  const calendar = async () => {
+    try { const res = await wellnessApi.bookingIcs(b.id); downloadText(`athena-appointment-${b.scheduledAt.slice(0, 10)}.ics`, String(res.data), 'text/calendar;charset=utf-8'); toast.success('Saved as a calendar file'); } catch (err) { toast.error(wellnessError(err, 'The calendar file could not be made.')); }
+  };
 
-  const Card = ({ b }: { b: Booking }) => (
-    <li id={b.id} className={cn('rounded-2xl border bg-white p-4 dark:bg-slate-900', highlight === b.id ? 'border-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-slate-800')}>
+  return (
+    <li id={b.id} className={cn('rounded-2xl border bg-white p-4 dark:bg-slate-900', highlight ? 'border-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-slate-800')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div><Link href={`/dashboard/wellness/practitioners/${b.practitioner.slug}`} className="font-semibold text-slate-900 hover:text-rose-600 dark:text-white">{b.practitioner.name}</Link><p className="text-sm text-slate-600 dark:text-slate-400">{fmtWhen(b.scheduledAt)} · {b.durationMinutes} min · {b.mode === 'TELEHEALTH' ? 'telehealth' : 'in person'}{b.followUpOfId ? ' · follow-up' : ''}</p></div>
         <Chip tone={STATUS[b.status]?.tone ?? 'slate'}>{STATUS[b.status]?.label ?? b.status}</Chip>
@@ -46,7 +55,8 @@ function Bookings() {
       {b.practitionerNote && <p className="mt-1 text-sm text-slate-700 dark:text-slate-300"><span className="text-slate-500">From the practitioner:</span> {b.practitionerNote}</p>}
       <div className="mt-3 flex flex-wrap gap-2 text-sm">
         {b.status === 'CONFIRMED' && b.meetingLink && <a href={b.meetingLink} target="_blank" rel="noopener noreferrer" className="btn-primary text-sm">Join the call</a>}
-        {b.canCancel && <button type="button" onClick={() => cancel(b)} className="btn-ghost text-sm">Cancel</button>}
+        {upcoming && <button type="button" onClick={calendar} className="btn-secondary inline-flex items-center gap-1.5 text-sm"><CalendarPlus className="h-4 w-4" /> Add to calendar</button>}
+        {b.canCancel && <button type="button" onClick={cancel} className="btn-ghost text-sm">Cancel</button>}
         {b.share && !b.share.revokedAt && <span className="inline-flex items-center gap-1 self-center text-xs text-slate-500"><Link2 className="h-3.5 w-3.5" /> Summary shared · opened {b.share.openedCount}×</span>}
         {b.noteCount > 0 && <Link href="/dashboard/wellness/medications" className="self-center text-xs text-slate-500 underline">{b.noteCount} note{b.noteCount === 1 ? '' : 's'}</Link>}
       </div>
@@ -55,23 +65,29 @@ function Bookings() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How did it go?</p>
             {b.review ? <p className="mt-1 inline-flex items-center gap-1 text-sm text-amber-600">{Array.from({ length: b.review.rating }).map((_, i) => <Star key={i} className="h-4 w-4 fill-current" />)}<span className="ml-1 text-xs text-slate-500">rated</span></p> : (
-              <div className="mt-1 space-y-2"><Scale label="Rating" value={rating[b.id] ?? null} onChange={(v) => setRating((r) => ({ ...r, [b.id]: v }))} /><input value={comment[b.id] ?? ''} onChange={(e) => setComment((c) => ({ ...c, [b.id]: e.target.value }))} maxLength={1000} className={inputClass} placeholder="What the next woman should know" /><button type="button" onClick={() => review(b)} disabled={!rating[b.id]} className="btn-secondary text-xs disabled:opacity-50">Rate the visit</button></div>
+              <div className="mt-1 space-y-2"><Scale label="Rating" value={rating} onChange={setRating} /><input value={comment} onChange={(e) => setComment(e.target.value)} maxLength={1000} className={inputClass} placeholder="What the next woman should know" /><button type="button" onClick={review} disabled={!rating} className="btn-secondary text-xs disabled:opacity-50">Rate the visit</button></div>
             )}
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">What was said</p>
-            <textarea value={note[b.id] ?? ''} onChange={(e) => setNote((n) => ({ ...n, [b.id]: e.target.value }))} rows={3} maxLength={5000} className={`${inputClass} mt-1`} placeholder="The plan, the next test, the thing to watch." />
-            <button type="button" onClick={() => saveNote(b)} disabled={!note[b.id]?.trim()} className="btn-secondary mt-1 text-xs disabled:opacity-50">Keep a note</button>
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={5000} className={`${inputClass} mt-1`} placeholder="The plan, the next test, the thing to watch." />
+            <button type="button" onClick={saveNote} disabled={!note.trim()} className="btn-secondary mt-1 text-xs disabled:opacity-50">Keep a note</button>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Something to watch</p>
-            <div className="mt-1 space-y-2"><input value={symptom[b.id]?.name ?? ''} onChange={(e) => setSymptom((s) => ({ ...s, [b.id]: { name: e.target.value, severity: s[b.id]?.severity ?? null } }))} maxLength={60} className={inputClass} placeholder="Headaches after the new dose" /><Scale label="How bad" words="severity" value={symptom[b.id]?.severity ?? null} onChange={(v) => setSymptom((s) => ({ ...s, [b.id]: { name: s[b.id]?.name ?? '', severity: v } }))} /><button type="button" onClick={() => logSymptom(b)} className="btn-secondary text-xs">Log symptom</button></div>
-            <FollowUp b={b} onDone={data.reload} />
+            <div className="mt-1 space-y-2"><input value={symptom.name} onChange={(e) => setSymptom((s) => ({ ...s, name: e.target.value }))} maxLength={60} className={inputClass} placeholder="Headaches after the new dose" /><Scale label="How bad" words="severity" value={symptom.severity} onChange={(v) => setSymptom((s) => ({ ...s, severity: v }))} /><button type="button" onClick={logSymptom} disabled={!symptom.name.trim() || !symptom.severity} className="btn-secondary text-xs disabled:opacity-50">Log symptom</button></div>
+            <FollowUp b={b} onDone={onChanged} />
           </div>
         </div>
       )}
     </li>
   );
+}
+
+function Bookings() {
+  const search = useSearchParams();
+  const highlight = search.get('visit');
+  const data = useLoad<Data>(() => wellnessApi.bookings());
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -81,8 +97,8 @@ function Bookings() {
       <ErrorBox error={data.error} />
       {data.data && (
         <>
-          <section><h2 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">Coming up</h2>{data.data.upcoming.length ? <ul className="space-y-3">{data.data.upcoming.map((b) => <Card key={b.id} b={b} />)}</ul> : <Empty title="Nothing booked" body="Find a GP, psychologist or specialist and request a time." action={<Link href="/dashboard/wellness/practitioners" className="btn-primary text-sm">Find care</Link>} />}</section>
-          {data.data.past.length > 0 && <section><h2 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">Past</h2><ul className="space-y-3">{data.data.past.map((b) => <Card key={b.id} b={b} />)}</ul></section>}
+          <section><h2 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">Coming up</h2>{data.data.upcoming.length ? <ul className="space-y-3">{data.data.upcoming.map((b) => <BookingCard key={b.id} b={b} highlight={highlight === b.id} onChanged={data.reload} />)}</ul> : <Empty title="Nothing booked" body="Find a GP, psychologist or specialist and request a time." action={<Link href="/dashboard/wellness/practitioners" className="btn-primary text-sm">Find care</Link>} />}</section>
+          {data.data.past.length > 0 && <section><h2 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">Past</h2><ul className="space-y-3">{data.data.past.map((b) => <BookingCard key={b.id} b={b} highlight={highlight === b.id} onChanged={data.reload} />)}</ul></section>}
         </>
       )}
       <HealthDisclaimer />

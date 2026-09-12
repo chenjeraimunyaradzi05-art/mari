@@ -6,18 +6,18 @@
  * crisis puts the lines in front of its author the moment it is up.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Heart, MessageCircleHeart, Pin, Plus } from 'lucide-react';
 import { wellnessApi, wellnessError, type Author, type CrisisLine } from '@/lib/wellness-api';
-import { Chip, CrisisStrip, Empty, ErrorBox, Loading, PageTitle, WarningFold, WellnessNav, useLoad } from '@/components/wellness/WellnessUi';
+import { AuthorChips, Chip, CrisisStrip, Empty, ErrorBox, Loading, PageTitle, WarningFold, WellnessNav, foldsFor, useLoad } from '@/components/wellness/WellnessUi';
 import { Check, Field, Panel, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
 import { formatRelativeTime } from '@/lib/utils';
 
 type Post = { id: string; title: string; body: string; contentWarning: string | null; isHidden: boolean; isPinned: boolean; isLocked: boolean; replyCount: number; supportCount: number; lastReplyAt: string | null; createdAt: string; author: Author; supportedByMe: boolean };
-type Data = { forum: { slug: string; name: string; description: string; guidelines: string }; posts: Post[]; page: number; total: number; isModerator: boolean; crisisLines: CrisisLine[] };
+type Data = { forum: { slug: string; name: string; description: string; guidelines: string }; posts: Post[]; page: number; total: number; isModerator: boolean; crisisLines: CrisisLine[]; viewer?: { hiddenWarnings: string[]; anonymousByDefault: boolean } };
 type Reference = { contentWarnings: string[] };
 
 export default function ForumPage() {
@@ -29,6 +29,11 @@ export default function ForumPage() {
   const [form, setForm] = useState({ title: '', body: '', isAnonymous: false, contentWarning: '' });
   const [busy, setBusy] = useState(false);
   const [crisis, setCrisis] = useState<{ message: string; lines: CrisisLine[] } | null>(null);
+  const folded = foldsFor(data.data?.viewer?.hiddenWarnings);
+
+  // Her privacy setting decides how a new post starts; she can still change it on each one.
+  const anonymousByDefault = data.data?.viewer?.anonymousByDefault ?? false;
+  useEffect(() => { setForm((f) => ({ ...f, isAnonymous: anonymousByDefault })); }, [anonymousByDefault]);
 
   const post = async () => {
     setBusy(true);
@@ -36,7 +41,7 @@ export default function ForumPage() {
       const res = await wellnessApi.createPost(params.slug, { title: form.title.trim(), body: form.body.trim(), isAnonymous: form.isAnonymous, contentWarning: form.contentWarning || null });
       if (res.data?.data?.crisis?.flagged) setCrisis(res.data.data.crisis);
       toast.success('Posted');
-      setForm({ title: '', body: '', isAnonymous: false, contentWarning: '' }); setOpen(false); data.reload();
+      setForm({ title: '', body: '', isAnonymous: anonymousByDefault, contentWarning: '' }); setOpen(false); data.reload();
     } catch (err) { toast.error(wellnessError(err, 'That could not be posted.')); } finally { setBusy(false); }
   };
   const support = async (p: Post) => { try { await wellnessApi.support(p.id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not go through.')); } };
@@ -70,10 +75,10 @@ export default function ForumPage() {
         {(data.data?.posts ?? []).map((p) => (
           <li key={p.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-              <span className="font-medium text-slate-700 dark:text-slate-300">{p.author.name}</span>{p.author.isModerator && <Chip tone="sky">Moderator</Chip>}<span>{formatRelativeTime(p.createdAt)}</span>{p.isPinned && <Chip tone="amber"><Pin className="mr-1 inline h-3 w-3" />Pinned</Chip>}{p.isLocked && <Chip>Closed</Chip>}{p.isHidden && <Chip tone="rose">Hidden</Chip>}
+              <AuthorChips author={p.author} /><span>{formatRelativeTime(p.createdAt)}</span>{p.isPinned && <Chip tone="amber"><Pin className="mr-1 inline h-3 w-3" />Pinned</Chip>}{p.isLocked && <Chip>Closed</Chip>}{p.isHidden && <Chip tone="rose">Hidden</Chip>}
             </div>
             <Link href={`/dashboard/wellness/forums/${params.slug}/${p.id}`} className="mt-1 block text-lg font-semibold text-slate-900 hover:text-rose-600 dark:text-white">{p.title}</Link>
-            <div className="mt-1"><WarningFold warning={p.contentWarning}><p className="text-sm leading-6 text-slate-700 dark:text-slate-300">{p.body}</p></WarningFold></div>
+            <div className="mt-1"><WarningFold warning={p.contentWarning} folded={folded(p.contentWarning)}><p className="text-sm leading-6 text-slate-700 dark:text-slate-300">{p.body}</p></WarningFold></div>
             <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
               <button type="button" onClick={() => support(p)} className={`inline-flex items-center gap-1 ${p.supportedByMe ? 'text-rose-600' : 'hover:text-rose-600'}`}><Heart className={`h-4 w-4 ${p.supportedByMe ? 'fill-current' : ''}`} /> {p.supportCount} with you</button>
               <Link href={`/dashboard/wellness/forums/${params.slug}/${p.id}`}>{p.replyCount} repl{p.replyCount === 1 ? 'y' : 'ies'}</Link>

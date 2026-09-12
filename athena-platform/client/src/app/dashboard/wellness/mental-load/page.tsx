@@ -9,10 +9,11 @@
 
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { Copy, Plus, Scale as ScaleIcon, Trash2 } from 'lucide-react';
+import { Copy, Plus, Scale as ScaleIcon, Share2, Trash2 } from 'lucide-react';
 import { localDay, wellnessApi, wellnessError } from '@/lib/wellness-api';
-import { Chip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
+import { Chip, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, Ring, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Bars, Field, LineChart, Notes, NumberInput, Panel, SelectInput, Stat, inputClass, num } from '@/components/strategy/StrategyUi';
+import { shareOrCopy } from '@/lib/download';
 import { cn } from '@/lib/utils';
 
 type Data = {
@@ -37,6 +38,11 @@ export default function MentalLoadPage() {
   };
   const remove = async (id: string) => { try { await wellnessApi.deleteLoad(id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be removed.')); } };
   const copyCard = async () => { if (!a?.conversationCard) return; try { await navigator.clipboard.writeText(a.conversationCard); toast.success('Copied'); } catch { toast.error('Copy did not work; select the text instead.'); } };
+  const shareCard = async () => {
+    if (!a?.conversationCard) return;
+    const outcome = await shareOrCopy({ title: 'The mental load, in a paragraph', text: a.conversationCard, url: `${window.location.origin}/wellness` });
+    toast.success(outcome === 'shared' ? 'Sent' : outcome === 'copied' ? 'Copied; paste it wherever you talk' : 'Select the text and copy it');
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -69,7 +75,7 @@ export default function MentalLoadPage() {
                 </div>
                 <div className="mt-5 grid gap-5 md:grid-cols-2">
                   <div><h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">By category</h3><div className="mt-2"><Bars rows={a.byCategory.map((c) => ({ label: `${c.label}${c.invisible ? ' (invisible)' : ''}`, value: c.hours, display: `${c.hours} h · ${c.share}%`, color: c.invisible ? 'bg-purple-400' : 'bg-rose-400' }))} /></div></div>
-                  <div><h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Who carried it</h3><div className="mt-2"><Bars rows={a.byCarrier.map((c) => ({ label: c.label, value: c.hours, display: `${c.hours} h · ${c.share}%`, color: c.carrier === 'ME' ? 'bg-rose-400' : c.carrier === 'PARTNER' ? 'bg-sky-400' : 'bg-slate-400' }))} /></div>
+                  <div><h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Who carried it</h3><div className="mt-2"><Ring pct={a.myShare} label="Carried by you" sub={`${a.myHours} of ${a.totalHours} hours. Shared work counts half to each of you.`} tone={a.myShare >= 70 ? 'rose' : a.myShare >= 50 ? 'amber' : 'emerald'} size={72} /></div><div className="mt-3"><Bars rows={a.byCarrier.map((c) => ({ label: c.label, value: c.hours, display: `${c.hours} h · ${c.share}%`, color: c.carrier === 'ME' ? 'bg-rose-400' : c.carrier === 'PARTNER' ? 'bg-sky-400' : 'bg-slate-400' }))} /></div>
                     {a.weekly.length > 1 && <div className="mt-4"><h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Your hours by week</h3><div className="mt-2"><LineChart money={false} height={120} labels={a.weekly.map((w) => fmtDay(w.weekStart, { day: 'numeric', month: 'short' }))} series={[{ label: 'Yours', color: '#f43f5e', values: a.weekly.map((w) => w.myHours) }, { label: 'Everyone', color: '#94a3b8', values: a.weekly.map((w) => w.totalHours) }]} /></div></div>}
                   </div>
                 </div>
@@ -97,7 +103,7 @@ export default function MentalLoadPage() {
               )}
 
               {a.conversationCard && (
-                <Panel title="The conversation card" intro="The window in a paragraph, for the person you share a home with." aside={<button type="button" onClick={copyCard} className="btn-secondary inline-flex items-center gap-2 text-sm"><Copy className="h-4 w-4" /> Copy</button>}>
+                <Panel title="The conversation card" intro="The window in a paragraph, for the person you share a home with. Send it, or read it out." aside={<div className="flex gap-2"><button type="button" onClick={shareCard} className="btn-primary inline-flex items-center gap-2 text-sm"><Share2 className="h-4 w-4" /> Send it</button><button type="button" onClick={copyCard} className="btn-secondary inline-flex items-center gap-2 text-sm"><Copy className="h-4 w-4" /> Copy</button></div>}>
                   <blockquote className="rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200">{a.conversationCard}</blockquote>
                 </Panel>
               )}

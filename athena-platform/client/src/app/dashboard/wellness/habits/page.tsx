@@ -10,9 +10,9 @@
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Check as CheckIcon, Flame, Leaf, Plus, Target, Trash2, Trophy, Users } from 'lucide-react';
-import { localDay, wellnessApi, wellnessError, type Author } from '@/lib/wellness-api';
-import { Chip, DayDots, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
+import { Award, Check as CheckIcon, Flame, Leaf, Pencil, Plus, Target, Trash2, Trophy, Users } from 'lucide-react';
+import { localDay, wellnessApi, wellnessError, type Author, type Badge } from '@/lib/wellness-api';
+import { BadgeStrip, Chip, DayDots, Empty, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Field, JumpLinks, NumberInput, Panel, SelectInput, inputClass, num } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
 
@@ -28,7 +28,9 @@ function HabitsInner() {
   const habits = useLoad<Habits>(() => wellnessApi.habits());
   const challenges = useLoad<{ challenges: Challenge[] }>(() => wellnessApi.challenges());
   const goals = useLoad<{ goals: Goal[] }>(() => wellnessApi.goals());
+  const badges = useLoad<{ badges: Badge[]; earned: number; total: number }>(() => wellnessApi.badges());
   const [picking, setPicking] = useState(Boolean(search.get('template')));
+  const [editing, setEditing] = useState<{ id: string; name: string; difficulty: string; targetPerWeek: string; cue: string; reminderTime: string } | null>(null);
   const [custom, setCustom] = useState({ name: '', difficulty: 'MEDIUM', targetPerWeek: '7', cue: '', reminderTime: '' });
   const [newChallenge, setNewChallenge] = useState({ name: '', description: '', habitTemplateKey: '', startsOn: localDay(), endsOn: '', open: false });
   const [newGoal, setNewGoal] = useState({ metric: 'SLEEP_HOURS', target: '7.5', label: '' });
@@ -41,6 +43,8 @@ function HabitsInner() {
   const addCustom = () => act(() => wellnessApi.addHabit({ name: custom.name, difficulty: custom.difficulty, targetPerWeek: num(custom.targetPerWeek, 7), cue: custom.cue || null, reminderTime: custom.reminderTime || null }), 'Added').then(() => { setCustom({ name: '', difficulty: 'MEDIUM', targetPerWeek: '7', cue: '', reminderTime: '' }); setPicking(false); });
   const tick = async (h: Habit, day?: string) => { const res = await wellnessApi.logHabit(h.id, day ? { day, done: !h.week.days.find((d) => d.day === day)?.done } : {}).catch((err) => { toast.error(wellnessError(err, 'That could not be logged.')); return null; }); if (res?.data?.data?.milestone) toast.success(res.data.data.celebration, { duration: 5000 }); habits.reload(); };
   const archive = (h: Habit) => act(() => wellnessApi.updateHabit(h.id, { isArchived: true }), 'Archived');
+  const startEdit = (h: Habit) => setEditing((e) => (e?.id === h.id ? null : { id: h.id, name: h.name, difficulty: h.difficulty, targetPerWeek: String(h.targetPerWeek), cue: h.cue ?? '', reminderTime: h.reminderTime ?? '' }));
+  const saveEdit = () => { if (!editing) return; act(() => wellnessApi.updateHabit(editing.id, { name: editing.name.trim(), difficulty: editing.difficulty, targetPerWeek: num(editing.targetPerWeek, 7), cue: editing.cue.trim() || null, reminderTime: editing.reminderTime || null }), 'Changed', [habits, badges]).then(() => setEditing(null)); };
   const createChallenge = () => act(() => wellnessApi.createChallenge({ name: newChallenge.name, description: newChallenge.description, habitTemplateKey: newChallenge.habitTemplateKey || null, startsOn: newChallenge.startsOn, endsOn: newChallenge.endsOn }), 'Challenge started', [challenges, habits]).then(() => setNewChallenge({ name: '', description: '', habitTemplateKey: '', startsOn: localDay(), endsOn: '', open: false }));
   const openBoard = async (c: Challenge) => { try { const res = await wellnessApi.challenge(c.id); setOpenChallenge(res.data?.data ?? null); } catch (err) { toast.error(wellnessError(err, 'That could not be opened.')); } };
   const addGoal = () => act(() => wellnessApi.addGoal({ metric: newGoal.metric, target: num(newGoal.target), label: newGoal.label || null }), 'Goal set', [goals]);
@@ -51,7 +55,7 @@ function HabitsInner() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <PageTitle icon={Leaf} kicker="Wellness" title="Habits and goals" blurb="Small things, kept. A streak for each habit, a challenge to do one with others, and goals that read from what you actually logged." action={<button type="button" onClick={() => setPicking((v) => !v)} className="btn-primary inline-flex items-center gap-2 text-sm"><Plus className="h-4 w-4" /> New habit</button>} />
       <WellnessNav current="/dashboard/wellness/habits" />
-      <JumpLinks items={[{ id: 'habits', label: 'Habits' }, { id: 'challenges', label: 'Challenges' }, { id: 'goals', label: 'Goals' }]} />
+      <JumpLinks items={[{ id: 'habits', label: 'Habits' }, { id: 'challenges', label: 'Challenges' }, { id: 'goals', label: 'Goals' }, { id: 'badges', label: 'Badges' }]} />
 
       {picking && (
         <Panel title="Pick a habit" intro="Each template links to the research behind it. Or write your own.">
@@ -85,7 +89,17 @@ function HabitsInner() {
                 <button type="button" onClick={() => !h.streak.doneToday && tick(h)} disabled={h.streak.doneToday} className={cn('flex h-10 w-10 items-center justify-center rounded-full transition', h.streak.doneToday ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400 hover:bg-emerald-100 hover:text-emerald-600 dark:bg-slate-800')} aria-label={`Mark ${h.name} done today`}><CheckIcon className="h-5 w-5" /></button>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><DayDots days={h.week.days} onToggle={(day) => tick(h, day)} /><div className="flex items-center gap-3 text-xs text-slate-500">{h.evidenceUrl && <a href={h.evidenceUrl} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline" title={h.evidenceNote ?? ''}>Why this works</a>}<button type="button" onClick={() => archive(h)} className="inline-flex items-center gap-1 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Archive</button></div></div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><DayDots days={h.week.days} onToggle={(day) => tick(h, day)} /><div className="flex items-center gap-3 text-xs text-slate-500">{h.evidenceUrl && <a href={h.evidenceUrl} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline" title={h.evidenceNote ?? ''}>Why this works</a>}<button type="button" onClick={() => startEdit(h)} aria-expanded={editing?.id === h.id} className="inline-flex items-center gap-1 hover:text-rose-600"><Pencil className="h-3.5 w-3.5" /> {editing?.id === h.id ? 'Never mind' : 'Change it'}</button><button type="button" onClick={() => archive(h)} className="inline-flex items-center gap-1 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Archive</button></div></div>
+            {editing?.id === h.id && (
+              <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60 sm:grid-cols-[2fr_1fr_1fr_2fr_1fr_auto] sm:items-end">
+                <Field label="Name"><input value={editing.name} onChange={(e) => setEditing((x) => x && ({ ...x, name: e.target.value }))} maxLength={80} className={inputClass} /></Field>
+                <Field label="Difficulty" hint="Easier when life is full."><SelectInput value={editing.difficulty} onChange={(v) => setEditing((x) => x && ({ ...x, difficulty: v }))} options={[{ value: 'EASY', label: 'Easy' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'HARD', label: 'Hard' }]} /></Field>
+                <Field label="Days a week"><NumberInput value={editing.targetPerWeek} onChange={(v) => setEditing((x) => x && ({ ...x, targetPerWeek: v }))} min={1} max={7} /></Field>
+                <Field label="Cue"><input value={editing.cue} onChange={(e) => setEditing((x) => x && ({ ...x, cue: e.target.value }))} maxLength={160} className={inputClass} /></Field>
+                <Field label="Remind at"><input type="time" value={editing.reminderTime} onChange={(e) => setEditing((x) => x && ({ ...x, reminderTime: e.target.value }))} className={inputClass} /></Field>
+                <button type="button" onClick={saveEdit} disabled={editing.name.trim().length < 2} className="btn-primary mb-1 text-sm disabled:opacity-50">Save</button>
+              </div>
+            )}
           </div>
         ))}
       </section>
@@ -152,6 +166,13 @@ function HabitsInner() {
             ))}
             {goals.data && goals.data.goals.length === 0 && <li className="text-sm text-slate-500">No goals yet. Sleep is the one to start with.</li>}
           </ul>
+        </Panel>
+      </section>
+
+      <section id="badges" className="scroll-mt-24">
+        <Panel icon={Award} title="Badges" intro={badges.data ? `${badges.data.earned} of ${badges.data.total}. A streak, a circle, a month of a goal met: small things, marked.` : 'A streak, a circle, a month of a goal met: small things, marked.'}>
+          {badges.loading && <Loading />}
+          {badges.data && <BadgeStrip badges={badges.data.badges} />}
         </Panel>
       </section>
       <HealthDisclaimer />

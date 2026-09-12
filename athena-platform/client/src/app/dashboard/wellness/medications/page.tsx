@@ -8,6 +8,7 @@
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { Pill, Plus, RefreshCw, StickyNote, Trash2 } from 'lucide-react';
 import { wellnessApi, wellnessError } from '@/lib/wellness-api';
@@ -29,6 +30,7 @@ export default function MedicationsPage() {
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState({ title: '', body: '' });
+  const [refill, setRefill] = useState<{ id: string; next: string } | null>(null);
   const meds = data.data?.medications ?? [];
 
   const add = async () => {
@@ -43,7 +45,7 @@ export default function MedicationsPage() {
   const dose = async (id: string, time: string, status: 'taken' | 'skipped') => { try { await wellnessApi.logDose(id, { time, status }); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be logged.')); } };
   const stop = async (m: Med) => { try { await wellnessApi.updateMedication(m.id, { isActive: !m.isActive }); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be changed.')); } };
   const remove = async (m: Med) => { if (!window.confirm('Remove this medication and its dose history?')) return; try { await wellnessApi.deleteMedication(m.id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be removed.')); } };
-  const refilled = async (m: Med) => { const next = window.prompt('Next refill due (YYYY-MM-DD), or leave blank', ''); try { await wellnessApi.updateMedication(m.id, { nextRefillDue: next || null, repeatsLeft: m.repeatsLeft !== null ? Math.max(0, m.repeatsLeft - 1) : undefined }); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be updated.')); } };
+  const refilled = async (m: Med) => { if (!refill || refill.id !== m.id) return; try { await wellnessApi.updateMedication(m.id, { nextRefillDue: refill.next || null, repeatsLeft: m.repeatsLeft !== null ? Math.max(0, m.repeatsLeft - 1) : undefined }); setRefill(null); toast.success('Noted'); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be updated.')); } };
   const addNote = async () => { if (!note.title.trim()) return; try { await wellnessApi.addNote({ title: note.title.trim(), body: note.body }); setNote({ title: '', body: '' }); notes.reload(); } catch (err) { toast.error(wellnessError(err, 'The note could not be saved.')); } };
   const removeNote = async (id: string) => { try { await wellnessApi.deleteNote(id); notes.reload(); } catch (err) { toast.error(wellnessError(err, 'That could not be removed.')); } };
 
@@ -97,7 +99,21 @@ export default function MedicationsPage() {
                       {m.today.map((t) => <li key={t.time} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60"><span className="font-medium text-slate-800 dark:text-slate-200">{t.time}</span>{t.status ? <span className={cn('text-xs font-semibold', t.status === 'taken' ? 'text-emerald-600' : 'text-amber-600')}>{t.status}</span> : <div className="flex gap-1"><button type="button" onClick={() => dose(m.id, t.time, 'taken')} className="rounded-md bg-emerald-500 px-2 py-1 text-xs font-semibold text-white">Taken</button><button type="button" onClick={() => dose(m.id, t.time, 'skipped')} className="rounded-md bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">Skipped</button></div>}</li>)}
                       {m.today.length === 0 && <li className="text-sm text-slate-500">No times set; nothing to tick.</li>}
                     </ul>
-                    {(m.refillSoon || m.nextRefillDue) && <div className={cn('mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 text-sm', m.refillSoon ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-slate-50 dark:bg-slate-800/60')}><span className="text-slate-800 dark:text-slate-200">{m.nextRefillDue ? `Refill due ${fmtDay(m.nextRefillDue)}` : ''}{m.repeatsLeft !== null ? `${m.nextRefillDue ? ' · ' : ''}${m.repeatsLeft} repeat${m.repeatsLeft === 1 ? '' : 's'} left` : ''}{m.refillSoon && m.repeatsLeft !== null && m.repeatsLeft <= 1 ? ' · book the GP before it runs out' : ''}</span><button type="button" onClick={() => refilled(m)} className="btn-ghost inline-flex items-center gap-1 text-xs"><RefreshCw className="h-3.5 w-3.5" /> Refilled</button></div>}
+                    {(m.refillSoon || m.nextRefillDue) && (
+                      <div className={cn('mt-3 rounded-lg p-3 text-sm', m.refillSoon ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-slate-50 dark:bg-slate-800/60')}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-slate-800 dark:text-slate-200">{m.nextRefillDue ? `Refill due ${fmtDay(m.nextRefillDue)}` : ''}{m.repeatsLeft !== null ? `${m.nextRefillDue ? ' · ' : ''}${m.repeatsLeft} repeat${m.repeatsLeft === 1 ? '' : 's'} left` : ''}{m.refillSoon && m.repeatsLeft !== null && m.repeatsLeft <= 1 ? <> · <Link href="/dashboard/wellness/practitioners?kind=GP&acceptsBookings=true" className="font-medium text-rose-600 dark:text-rose-400">book the GP</Link> for a new script before it runs out</> : ''}</span>
+                          <button type="button" onClick={() => setRefill(refill?.id === m.id ? null : { id: m.id, next: '' })} className="btn-ghost inline-flex items-center gap-1 text-xs"><RefreshCw className="h-3.5 w-3.5" /> Refilled</button>
+                        </div>
+                        {refill?.id === m.id && (
+                          <div className="mt-2 flex flex-wrap items-end gap-2">
+                            <Field label="Next refill due" hint="Leave it blank if you do not know yet."><input type="date" value={refill.next} onChange={(e) => setRefill({ id: m.id, next: e.target.value })} className={inputClass} /></Field>
+                            <button type="button" onClick={() => refilled(m)} className="btn-primary mb-1 text-xs">Save</button>
+                            <button type="button" onClick={() => setRefill(null)} className="btn-ghost mb-1 text-xs">Cancel</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div><Ring pct={a?.pct ?? 0} label={`${a?.pct ?? 0}% taken`} sub={a ? `${a.taken} of ${a.expected} doses in ${data.data!.adherence.days} days${a.skipped ? `, ${a.skipped} skipped` : ''}` : 'No doses logged yet'} tone={(a?.pct ?? 0) >= 80 ? 'emerald' : 'amber'} /></div>
                 </div>

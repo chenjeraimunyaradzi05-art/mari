@@ -9,10 +9,11 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Users, Video } from 'lucide-react';
+import { CalendarPlus, Users, Video } from 'lucide-react';
 import { wellnessApi, wellnessError, type Author } from '@/lib/wellness-api';
 import { Chip, ErrorBox, Loading, PageTitle, Scale, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Field, Panel, inputClass } from '@/components/strategy/StrategyUi';
+import { downloadText } from '@/lib/download';
 import { cn } from '@/lib/utils';
 
 type CheckIn = { id: string; week: number; mood: number; wins: string; blockers: string; nextStep: string; createdAt: string; author?: Author };
@@ -25,12 +26,17 @@ export default function CirclePage() {
   const data = useLoad<Data>(() => wellnessApi.circle(params.id), [params.id]);
   const [form, setForm] = useState({ mood: null as number | null, wins: '', blockers: '', nextStep: '' });
   const [busy, setBusy] = useState(false);
+  const [linkEdit, setLinkEdit] = useState<string | null>(null);
   const c = data.data;
   const mine = c?.currentWeek ? c.myCheckIns.find((x) => x.week === c.currentWeek) : undefined;
 
   const act = async (fn: () => Promise<unknown>, done?: string) => { setBusy(true); try { await fn(); if (done) toast.success(done); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not work.')); } finally { setBusy(false); } };
   const checkIn = () => act(() => wellnessApi.circleCheckIn(params.id, { mood: form.mood, wins: form.wins, blockers: form.blockers, nextStep: form.nextStep }), 'Checked in');
   const leave = () => { if (window.confirm('Leave this circle?')) act(async () => { await wellnessApi.leaveCircle(params.id); router.push('/dashboard/wellness/circles'); }); };
+  const addToCalendar = async () => {
+    if (!c) return;
+    try { const res = await wellnessApi.circleIcs(c.id); downloadText(`athena-circle-${c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'circle'}.ics`, String(res.data), 'text/calendar;charset=utf-8'); toast.success('Every meeting, as a calendar file'); } catch (err) { toast.error(wellnessError(err, 'The calendar file could not be made.')); }
+  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -44,6 +50,7 @@ export default function CirclePage() {
               {!c.isMember && c.spotsLeft > 0 && (c.status === 'OPEN' || c.status === 'RUNNING') && <button type="button" disabled={busy} onClick={() => act(() => wellnessApi.joinCircle(c.id), 'You are in')} className="btn-primary text-sm">Join this circle</button>}
               {c.isMember && !c.isFacilitator && <button type="button" disabled={busy} onClick={leave} className="btn-ghost text-sm">Leave</button>}
               {c.isMember && c.meetingLink && <a href={c.meetingLink} target="_blank" rel="noopener noreferrer" className="btn-secondary inline-flex items-center gap-2 text-sm"><Video className="h-4 w-4" /> Join the call</a>}
+              {c.isMember && c.status !== 'COMPLETED' && c.status !== 'CANCELLED' && <button type="button" onClick={addToCalendar} className="btn-ghost inline-flex items-center gap-2 text-sm"><CalendarPlus className="h-4 w-4" /> Add the weeks to my calendar</button>}
             </div>
           } />
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
@@ -97,9 +104,17 @@ export default function CirclePage() {
             <Panel title="Who is here" intro="Names are shown to members only.">
               <ul className="flex flex-wrap gap-2">{c.members.map((m) => <li key={m.id ?? m.name} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">{m.name}{m.role === 'FACILITATOR' ? ' · facilitator' : ''}</li>)}</ul>
               {c.isFacilitator && (
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-                  {c.status !== 'COMPLETED' && <button type="button" disabled={busy} onClick={() => act(() => wellnessApi.updateCircle(c.id, { status: 'COMPLETED' }), 'Circle closed')} className="btn-ghost text-xs">Close the circle</button>}
-                  <button type="button" disabled={busy} onClick={() => { const link = window.prompt('Meeting link', c.meetingLink ?? ''); if (link !== null) act(() => wellnessApi.updateCircle(c.id, { meetingLink: link || null }), 'Saved'); }} className="btn-ghost text-xs">Change the meeting link</button>
+                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <div className="flex flex-wrap gap-2">
+                    {c.status !== 'COMPLETED' && <button type="button" disabled={busy} onClick={() => act(() => wellnessApi.updateCircle(c.id, { status: 'COMPLETED' }), 'Circle closed')} className="btn-ghost text-xs">Close the circle</button>}
+                    <button type="button" disabled={busy} onClick={() => setLinkEdit((v) => (v === null ? c.meetingLink ?? '' : null))} className="btn-ghost text-xs">{linkEdit === null ? 'Change the meeting link' : 'Never mind'}</button>
+                  </div>
+                  {linkEdit !== null && (
+                    <div className="mt-3 flex flex-wrap items-end gap-2">
+                      <div className="min-w-[16rem] flex-1"><Field label="Meeting link" hint="Members see it; nobody else does. Leave it empty to remove it."><input value={linkEdit} onChange={(e) => setLinkEdit(e.target.value)} className={inputClass} placeholder="https://meet…" /></Field></div>
+                      <button type="button" disabled={busy} onClick={() => act(() => wellnessApi.updateCircle(c.id, { meetingLink: linkEdit.trim() || null }), 'Saved').then(() => setLinkEdit(null))} className="btn-primary mb-1 text-xs">Save</button>
+                    </div>
+                  )}
                 </div>
               )}
             </Panel>
