@@ -12,6 +12,12 @@ jest.mock('../../utils/prisma', () => ({
     businessRegistration: { count: jest.fn(async () => 0) },
     grant: { findMany: jest.fn(async () => []) },
     investor: { findMany: jest.fn(async () => []) },
+    vendor: { findMany: jest.fn(async () => []) },
+    acceleratorEnrollment: { findUnique: jest.fn(async () => null) },
+    giftTransaction: { findMany: jest.fn(async () => []) },
+    mentorSession: { findMany: jest.fn(async () => []) },
+    creatorProfile: { findUnique: jest.fn(async () => null) },
+    creatorPayout: { findMany: jest.fn(async () => []) },
     user: { count: jest.fn(async () => 3) },
     bankConnection: { findMany: jest.fn(async () => []) },
     bankTransaction: { findMany: jest.fn(async () => []) },
@@ -165,6 +171,54 @@ describe('The strategy routes', () => {
     const res = await request(app).get('/api/strategy/business/investor-matches?stage=Seed&industry=Health&state=QLD&raiseAmount=200000&investorTypes=ANGEL').set(as('ana')).expect(200);
     expect(res.body.data.matches[0].id).toBe('i1');
     expect(res.body.data.matches[0].match.score).toBeGreaterThan(res.body.data.matches[1].match.score);
+  });
+
+  it('keeps the valuation history on a business plan as it is saved', async () => {
+    prisma.strategyPlan.findUnique.mockResolvedValue({ result: { valuationHistory: [{ date: '2026-06-01', valuationMid: 400000 }] } });
+    prisma.strategyPlan.upsert.mockImplementation(async ({ create }: any) => ({ id: 'p2', ...create }));
+    const res = await request(app).put('/api/strategy/plans/business').set(as('ana')).send({ inputs: { revenue: '500000', annualProfit: '120000' }, result: { valuationMid: 450000 } }).expect(200);
+    const history = res.body.data.result.valuationHistory;
+    expect(history).toHaveLength(2);
+    expect(history[0]).toEqual({ date: '2026-06-01', valuationMid: 400000 });
+    expect(history[1]).toMatchObject({ valuationMid: 450000, revenue: 500000, profit: 120000 });
+  });
+
+  it('assembles the launch package from the checklist and the listed vendors', async () => {
+    prisma.vendor.findMany.mockResolvedValue([{ id: 'v1', name: 'Books & Co', category: 'ACCOUNTING_TAX', isPartner: true, discountPct: 15, avgRating: '4.8', reviewCount: 12 }]);
+    const res = await request(app).get('/api/strategy/business/launch-package?structure=COMPANY&employees=true').expect(200);
+    expect(res.body.data.checklist.map((s: any) => s.key)).toContain('asic');
+    expect(res.body.data.checklist.map((s: any) => s.key)).toContain('payroll');
+    const accounting = res.body.data.vendors.find((g: any) => g.category === 'ACCOUNTING_TAX');
+    expect(accounting.picks[0]).toMatchObject({ name: 'Books & Co', discountPct: 15, isPartner: true });
+  });
+
+  it('turns the pitch into a deck outline', async () => {
+    const res = await request(app).post('/api/strategy/business/deck-outline').send({ businessName: 'Bright Path', sections: { ask: 'We are raising $600,000.' } }).expect(200);
+    expect(res.body.data.slides).toHaveLength(12);
+    expect(res.body.data.markdown).toMatch(/# Bright Path: pitch deck outline/);
+  });
+
+  it('issues an accelerator certificate only for a completed enrolment', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e1', status: 'ENROLLED', completedAt: null, completedWeeks: 4, cohort: { name: 'Cohort 3', startDate: new Date('2026-02-01'), endDate: new Date('2026-04-26') }, user: { firstName: 'Ana', lastName: 'Silva' } });
+    await request(app).get('/api/strategy/business/accelerator-certificates/e1').expect(404);
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e1', status: 'COMPLETED', completedAt: new Date('2026-04-26'), completedWeeks: 12, cohort: { name: 'Cohort 3', startDate: new Date('2026-02-01'), endDate: new Date('2026-04-26') }, user: { firstName: 'Ana', lastName: 'Silva' } });
+    const res = await request(app).get('/api/strategy/business/accelerator-certificates/e1').expect(200);
+    expect(res.body.data).toMatchObject({ code: 'e1', holder: 'Ana Silva', weeks: 12 });
+  });
+
+  it('sums what the platform paid the member for a financial year', async () => {
+    prisma.giftTransaction.findMany.mockResolvedValue([{ giftValue: 10000, creatorShare: 7000, platformShare: 3000 }, { giftValue: 5000, creatorShare: 3500, platformShare: 1500 }]);
+    prisma.mentorSession.findMany.mockResolvedValue([{ sessionAmount: '150', platformFee: '22.5', mentorPayout: '127.5' }]);
+    prisma.creatorProfile.findUnique.mockResolvedValue({ id: 'cp1' });
+    prisma.creatorPayout.findMany.mockResolvedValue([{ amount: 90 }]);
+    const res = await request(app).get('/api/strategy/tax/earnings-statement?fy=2026').set(as('ana')).expect(200);
+    expect(res.body.data.fy).toBe('FY2026');
+    expect(res.body.data.from).toBe('2025-07-01');
+    expect(res.body.data.assessableIncome).toBe(105 + 127.5);
+    expect(res.body.data.platformFees).toBe(45 + 22.5);
+    expect(res.body.data.paidToBank).toBe(90);
+    expect(prisma.giftTransaction.findMany.mock.calls[0][0].where.receiverId).toBe('ana');
+    expect(prisma.mentorSession.findMany.mock.calls[0][0].where.mentorProfile).toEqual({ userId: 'ana' });
   });
 
   it('builds the roadmap from the member’s own records', async () => {

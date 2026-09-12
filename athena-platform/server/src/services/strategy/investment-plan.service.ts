@@ -133,10 +133,24 @@ export interface HoldingLike {
 export interface NetWorthInput {
   holdings: HoldingLike[];
   superBalance?: number;
+  superAccounts?: Array<{ balance: unknown; investmentOpt?: string | null }>;
   savingsBalance?: number;
   profile?: RiskProfile;
   emergencyFundTarget?: number;
 }
+
+/** The growth share a super fund's option implies, from its name. */
+export function superOptionGrowthPct(option: string | null | undefined): number {
+  const o = (option ?? '').toLowerCase();
+  if (/high/.test(o)) return 90;
+  if (/growth|aggressive/.test(o)) return 75;
+  if (/conservative|stable|defensive|cash/.test(o)) return 30;
+  if (/index|ethical|sustainable|socially/.test(o)) return 70;
+  return 60;
+}
+
+/** Typical income yields by category, for the estimate of what the holdings pay. */
+export const INCOME_YIELDS: Partial<Record<WealthCategory, number>> = { CASH: 4.5, BONDS: 4.0, AU_SHARES: 4.0, INTL_SHARES: 2.0, PROPERTY: 4.0 };
 
 export interface NetWorthResult {
   asAt: string;
@@ -149,6 +163,8 @@ export interface NetWorthResult {
   crypto: number;
   suggestions: string[];
   warnings: string[];
+  wholeOfWealth: { growthPct: number; defensivePct: number; targetGrowthPct: number; superGrowthPct: number | null; superBalance: number; note: string };
+  incomeEstimate: { annual: number; monthly: number; byCategory: Array<{ category: WealthCategory; label: string; value: number; yieldPct: number; income: number }>; note: string };
 }
 
 export function assessNetWorth(input: NetWorthInput): NetWorthResult {
@@ -206,6 +222,41 @@ export function assessNetWorth(input: NetWorthInput): NetWorthResult {
   if (cc > 0) warnings.push('Card debt costs around 20% a year; paying it down beats any investment return.');
   if (emergency > 0 && (totals.get('CASH') ?? 0) < emergency) warnings.push('Cash is below your emergency fund target; fill that before investing more.');
 
+  // Super and personal investments together: the diversification the blueprint
+  // asks for is the growth share across the whole of what she has.
+  const superAccounts = input.superAccounts ?? [];
+  const superTotal = superAccounts.reduce((s, a) => s + clamp0(Number(a.balance) || 0), 0) || clamp0(input.superBalance ?? 0);
+  const superGrowthDollars = superAccounts.length
+    ? superAccounts.reduce((s, a) => s + clamp0(Number(a.balance) || 0) * (superOptionGrowthPct(a.investmentOpt) / 100), 0)
+    : superTotal * 0.6;
+  const investableGrowthDollars = classValues.auShares + classValues.intlShares + classValues.property + crypto;
+  const whole = investable + crypto + superTotal;
+  const wholeGrowthPct = whole > 0 ? ((investableGrowthDollars + superGrowthDollars) / whole) * 100 : 0;
+  const targetGrowthPct = PROFILES[input.profile ?? 'balanced'].growthPct;
+  const wholeOfWealth = {
+    growthPct: round2(wholeGrowthPct),
+    defensivePct: round2(whole > 0 ? 100 - wholeGrowthPct : 0),
+    targetGrowthPct,
+    superGrowthPct: superAccounts.length ? round2((superGrowthDollars / Math.max(1, superTotal)) * 100) : null,
+    superBalance: round(superTotal),
+    note: whole === 0 ? 'Add holdings or a super account to see the split.' : Math.abs(wholeGrowthPct - targetGrowthPct) <= 10 ? `Across super and everything else you are ${round(wholeGrowthPct)}% in growth assets, close to the ${targetGrowthPct}% your mix points to.` : wholeGrowthPct > targetGrowthPct ? `Across super and everything else you are ${round(wholeGrowthPct)}% in growth assets, above the ${targetGrowthPct}% your mix points to; the super option is the easiest lever.` : `Across super and everything else you are ${round(wholeGrowthPct)}% in growth assets, below the ${targetGrowthPct}% your mix points to; check the super option before moving anything else.`,
+  };
+
+  const incomeByCategory = (Object.keys(INCOME_YIELDS) as WealthCategory[])
+    .map((category) => {
+      const value = totals.get(category) ?? 0;
+      const yieldPct = INCOME_YIELDS[category] ?? 0;
+      return { category, label: CATEGORY_LABELS[category], value: round(value), yieldPct, income: round(value * (yieldPct / 100)) };
+    })
+    .filter((r) => r.value > 0);
+  const annualIncome = incomeByCategory.reduce((s, r) => s + r.income, 0);
+  const incomeEstimate = {
+    annual: round(annualIncome),
+    monthly: round(annualIncome / 12),
+    byCategory: incomeByCategory,
+    note: 'Typical yields, not your funds’ figures: cash and bonds at today’s rates, Australian shares before franking credits, international shares lower, property net of costs. Super is not counted because it cannot be drawn.',
+  };
+
   return {
     asAt: RATES_AS_AT,
     totalAssets: round(assets),
@@ -217,6 +268,8 @@ export function assessNetWorth(input: NetWorthInput): NetWorthResult {
     crypto: round(crypto),
     suggestions,
     warnings,
+    wholeOfWealth,
+    incomeEstimate,
   };
 }
 

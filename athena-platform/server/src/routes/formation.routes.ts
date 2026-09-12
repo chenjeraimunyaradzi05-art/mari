@@ -2,9 +2,18 @@ import { Router, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth'; // Assuming this exists
 import * as FormationService from '../services/formation.service';
 import * as Abr from '../services/abr.service';
-import { BusinessType } from '@prisma/client';
+import { BusinessType, Prisma } from '@prisma/client';
+import { prisma } from '../utils/prisma';
+import { ApiError } from '../middleware/errorHandler';
+import { generateFormationDocuments, type FormationDocument } from '../services/strategy/formation-documents.service';
 
 const router = Router();
+
+type StoredDocuments = { generatedAt: string; items: FormationDocument[] } | null;
+const storedDocuments = (value: unknown): StoredDocuments => {
+  const v = value as { generatedAt?: unknown; items?: unknown } | null;
+  return v && typeof v.generatedAt === 'string' && Array.isArray(v.items) ? (v as { generatedAt: string; items: FormationDocument[] }) : null;
+};
 
 // Protect all routes
 router.use(authenticate);
@@ -70,6 +79,44 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       businessName
     );
     res.status(201).json(registration);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The documents a registration needs, drawn from its details. Generating
+// keeps them on the registration; the list shows what is there and what
+// would be produced; a single document downloads as Markdown.
+router.get('/:id/documents', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const registration = await FormationService.getRegistration(req.user!.id, req.params.id);
+    const stored = storedDocuments(registration.documents);
+    const available = generateFormationDocuments(registration).map(({ key, title, purpose }) => ({ key, title, purpose }));
+    res.json({ success: true, data: { generatedAt: stored?.generatedAt ?? null, items: (stored?.items ?? []).map(({ key, title, purpose }) => ({ key, title, purpose })), available } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/documents', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const registration = await FormationService.getRegistration(req.user!.id, req.params.id);
+    const items = generateFormationDocuments(registration);
+    const generatedAt = new Date().toISOString();
+    await prisma.businessRegistration.update({ where: { id: registration.id }, data: { documents: { generatedAt, items } as unknown as Prisma.InputJsonValue } });
+    res.status(201).json({ success: true, data: { generatedAt, items: items.map(({ key, title, purpose }) => ({ key, title, purpose })) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/documents/:key', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const registration = await FormationService.getRegistration(req.user!.id, req.params.id);
+    const stored = storedDocuments(registration.documents);
+    const item = (stored?.items ?? generateFormationDocuments(registration)).find((d) => d.key === req.params.key);
+    if (!item) throw new ApiError(404, 'No document with that name for this registration');
+    res.type('text/markdown').attachment(`${(registration.businessName || 'business').replace(/[^\w-]+/g, '-').toLowerCase()}-${item.key}.md`).send(item.content);
   } catch (error) {
     next(error);
   }

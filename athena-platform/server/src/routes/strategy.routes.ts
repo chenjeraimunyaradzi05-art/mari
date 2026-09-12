@@ -55,6 +55,9 @@ import { scanForDeductions } from '../services/strategy/deduction-finder.service
 import { planDebtPayoff } from '../services/strategy/debt-payoff.service';
 import { assessInsuranceNeeds, planGoal, projectSuper, reviewHoldings, roundUpPotential } from '../services/strategy/wealth-tools.service';
 import { buildRoadmap, peerSnapshot } from '../services/strategy/roadmap.service';
+import { launchChecklist, pickVendors, type Structure } from '../services/strategy/launch-package.service';
+import { buildDeckOutline } from '../services/strategy/deck-outline.service';
+import { buildEarningsStatement } from '../services/strategy/earnings-statement.service';
 import { listTransactions } from '../services/open-banking.service';
 import { logger } from '../utils/logger';
 
@@ -114,10 +117,31 @@ router.put('/plans/:area', authenticate, async (req: AuthRequest, res: Response,
     const area = parse(areaSchema, req.params.area.toUpperCase());
     const data = parse(savePlanSchema, req.body);
     const userId = req.user!.id;
+    const result: Record<string, unknown> = { ...data.result };
+
+    // A business plan keeps the valuation each time it is saved, so the
+    // founder can see what the business has been worth over the months.
+    if (area === 'BUSINESS') {
+      const existing = await prisma.strategyPlan.findUnique({ where: { userId_area: { userId, area } } });
+      const previous = ((existing?.result as { valuationHistory?: unknown } | null)?.valuationHistory ?? []) as Array<{ date: string; valuationMid: number; revenue?: number; profit?: number }>;
+      const mid = Number(result.valuationMid);
+      const inputs = data.inputs as Record<string, unknown>;
+      const history = Array.isArray(previous) ? previous.filter((h) => h && typeof h.date === 'string') : [];
+      if (Number.isFinite(mid) && mid > 0) {
+        const today = new Date().toISOString().slice(0, 10);
+        const entry = { date: today, valuationMid: mid, revenue: Number(inputs.revenue) || undefined, profit: Number(inputs.annualProfit) || undefined };
+        const kept = history.filter((h) => h.date !== today);
+        kept.push(entry);
+        result.valuationHistory = kept.slice(-36);
+      } else {
+        result.valuationHistory = history;
+      }
+    }
+
     const plan = await prisma.strategyPlan.upsert({
       where: { userId_area: { userId, area } },
-      create: { userId, area, title: data.title, inputs: data.inputs as object, result: data.result as object },
-      update: { title: data.title, inputs: data.inputs as object, result: data.result as object },
+      create: { userId, area, title: data.title, inputs: data.inputs as object, result: result as object },
+      update: { title: data.title, inputs: data.inputs as object, result: result as object },
     });
     ok(res, plan);
   } catch (error) {
@@ -381,6 +405,7 @@ router.get('/investing/net-worth', authenticate, async (req: AuthRequest, res: R
     const result = assessNetWorth({
       holdings: holdings.map((h) => ({ id: h.id, name: h.name, kind: h.kind, category: h.category, value: Number(h.value) })),
       superBalance: superAccounts.reduce((s, a) => s + Number(a.balance), 0),
+      superAccounts: superAccounts.map((a) => ({ balance: a.balance, investmentOpt: a.investmentOpt })),
       savingsBalance: goals.reduce((s, g) => s + Number(g.currentAmount), 0),
       profile,
       emergencyFundTarget: q.emergencyFundTarget ?? (emergencyGoal ? Number(emergencyGoal.targetAmount) : undefined),
@@ -557,6 +582,55 @@ router.post('/investing/super-projection', async (req: AuthRequest, res: Respons
   try {
     const input = parse(z.object({ age: z.coerce.number().min(15).max(80), retirementAge: z.coerce.number().min(55).max(80).optional(), balance: money, salary: money, salaryGrowthPct: z.coerce.number().min(-10).max(30).optional(), extraMonthly: optMoney, returnPct: z.coerce.number().min(0).max(20).optional(), feesPct: z.coerce.number().min(0).max(5).optional(), inflationPct: z.coerce.number().min(0).max(15).optional(), careerBreakYears: z.coerce.number().min(0).max(20).optional(), breakAtAge: z.coerce.number().min(15).max(80).optional(), partTimeYears: z.coerce.number().min(0).max(30).optional(), partTimeFraction: z.coerce.number().min(0.1).max(1).optional() }), req.body);
     ok(res, projectSuper(input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --------------------------------------------------------- launch and pitch
+
+router.get('/business/launch-package', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parse(z.object({ structure: z.enum(['SOLE_TRADER', 'PARTNERSHIP', 'COMPANY', 'TRUST']).optional(), online: optBool, employees: optBool, premises: optBool }), req.query);
+    const checklist = launchChecklist((q.structure ?? 'SOLE_TRADER') as Structure, { online: q.online, employees: q.employees, premises: q.premises });
+    const categories = [...new Set(checklist.map((s) => s.vendorCategory).filter((c): c is string => Boolean(c)))];
+    const vendors = await prisma.vendor.findMany({ where: { category: { in: categories as never[] } }, orderBy: [{ isPartner: 'desc' }, { avgRating: 'desc' }], take: 200 });
+    ok(res, { structure: q.structure ?? 'SOLE_TRADER', checklist, vendors: pickVendors(vendors, categories) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/business/deck-outline', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parse(z.object({ businessName: z.string().max(120).optional(), text: z.string().max(20000).optional(), sections: z.record(z.string().max(4000)).optional() }), req.body);
+    ok(res, buildDeckOutline(input as Parameters<typeof buildDeckOutline>[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// A completion certificate anyone can check, keyed on the enrolment.
+router.get('/business/accelerator-certificates/:enrollmentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const enrollment = await prisma.acceleratorEnrollment.findUnique({
+      where: { id: req.params.enrollmentId },
+      include: { cohort: { select: { name: true, startDate: true, endDate: true, curriculum: true } }, user: { select: { firstName: true, lastName: true } } },
+    });
+    if (!enrollment || enrollment.status !== 'COMPLETED' || !enrollment.completedAt) throw new ApiError(404, 'No certificate for that enrolment');
+    const holder = [enrollment.user.firstName, enrollment.user.lastName].filter(Boolean).join(' ') || 'A founder';
+    ok(res, { code: enrollment.id, holder, cohort: { name: enrollment.cohort.name, startDate: enrollment.cohort.startDate, endDate: enrollment.cohort.endDate }, completedAt: enrollment.completedAt, weeks: Math.max(enrollment.completedWeeks, 12) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ------------------------------------------------------ what the platform paid
+
+router.get('/tax/earnings-statement', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parse(z.object({ fy: z.coerce.number().min(2020).max(2100).optional() }), req.query);
+    ok(res, await buildEarningsStatement(req.user!.id, q.fy));
   } catch (error) {
     next(error);
   }

@@ -76,6 +76,7 @@ import livestreamRoutes from './routes/livestream.routes';
 import channelRoutes from './routes/channel.routes';
 import { startMessageExpirySweeper } from './services/message-expiry.service';
 import { startGrantReminderSweeper } from './services/strategy/grant-reminders.service';
+import { startWealthNudgeSweeper } from './services/strategy/wealth-nudges.service';
 import apprenticeshipRoutes from './routes/apprenticeship.routes';
 import skillsMarketplaceRoutes from './routes/skills-marketplace.routes';
 import safetyRoutes from './routes/safety.routes';
@@ -742,6 +743,8 @@ export async function startServer() {
     startMessageExpirySweeper();
     // Grant applications left in draft: a nudge a week out and the day before.
     startGrantReminderSweeper();
+    // Insurance a year on, and a mix that has drifted: a nudge each, daily sweep.
+    startWealthNudgeSweeper();
     // Wellness: doses due, refills, the day-after-a-visit check-in, circle check-ins, goal reviews.
     startWellnessSweeper();
     startWellnessCatalogue();
