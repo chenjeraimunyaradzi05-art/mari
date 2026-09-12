@@ -1,7 +1,7 @@
 {
   "comment": "Broken documentation references, recorded so CI fails only on new ones. Burn this list down; do not add to it. Regenerate with: node scripts/check-doc-references.js --update-baseline",
-  "generated": "2026-09-05",
-  "count": 29,
+  "generated": "2026-09-12",
+  "count": 25,
   "known": [
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/.github/workflows/security-audit.yml",
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/.github/workflows/web.yml",
@@ -12,10 +12,6 @@
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|athena-platform/.github/workflows/web.yml",
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|docs/strategy/",
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|src/__tests__/validation.test.ts",
-    "athena-platform/docs/UNREFERENCED-UI-COMPONENTS.md|components/gdpr/",
-    "athena-platform/docs/UNREFERENCED-UI-COMPONENTS.md|components/privacy/",
-    "athena-platform/docs/UNREFERENCED-UI-COMPONENTS.md|privacy/CookieBanner.tsx",
-    "athena-platform/docs/UNREFERENCED-UI-COMPONENTS.md|privacy/GranularCookieBanner.tsx",
     "athena-platform/docs/compliance/GDPR_COMPLIANCE_CHECKLIST.md|../client/src/app/privacy-center/page.tsx",
     "athena-platform/docs/compliance/GDPR_COMPLIANCE_CHECKLIST.md|../client/src/components/CookieConsentBanner.tsx",
     "athena-platform/docs/compliance/GDPR_COMPLIANCE_CHECKLIST.md|../client/src/lib/contexts/GDPRContext.tsx",

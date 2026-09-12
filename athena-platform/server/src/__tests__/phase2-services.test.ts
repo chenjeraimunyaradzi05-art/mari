@@ -13,7 +13,6 @@ import { opportunityVerseMixer, getMixedFeed } from '../services/opportunity-ver
 import { coldStartAlgorithm } from '../services/cold-start.service';
 import { chatStorageService } from '../services/chat-storage.service';
 import { groupChatService, validatePermission } from '../services/group-chat.service';
-import { gdprWorker } from '../workers/gdpr.worker';
 import { formationStateMachine, getProgressPercentage, getStateDescription } from '../services/formation-state-machine.service';
 import { invoiceService } from '../services/invoice.service';
 import { referenceCheckService } from '../services/reference-check.service';
@@ -88,15 +87,6 @@ describe('Phase 2: Backend Logic & Integrations', () => {
       expect(typeof groupChatService.removeMember).toBe('function');
       expect(typeof groupChatService.muteMember).toBe('function');
       expect(typeof groupChatService.banMember).toBe('function');
-    });
-  });
-  
-  describe('GDPR Worker (Steps 32-33)', () => {
-    test('should export GDPR functions', () => {
-      expect(gdprWorker).toBeDefined();
-      expect(typeof gdprWorker.processExportRequests).toBe('function');
-      expect(typeof gdprWorker.processDeletionRequests).toBe('function');
-      expect(typeof gdprWorker.cleanupExpiredExports).toBe('function');
     });
   });
   
@@ -184,7 +174,6 @@ describe('Phase 2 Service Integration', () => {
       safetyScoreService,
       chatStorageService,
       groupChatService,
-      gdprWorker,
       formationStateMachine,
       invoiceService,
       referenceCheckService,

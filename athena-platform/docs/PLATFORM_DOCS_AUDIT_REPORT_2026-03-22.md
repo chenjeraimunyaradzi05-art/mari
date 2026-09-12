@@ -135,7 +135,7 @@ Payment and payout code exists, but multiple paths still simulate behavior when 
 
 Observed gaps:
 
-- `server/src/services/payment.service.ts` simulates customers and checkout sessions without Stripe keys.
+- server/src/services/payment.service.ts simulated customers and checkout sessions without Stripe keys (removed 2026-09-13: nothing imported it; Stripe Connect and the payments orchestration service are the live paths).
 - `server/src/services/stripe-connect.service.ts` returns mock accounts, mock payment intents, and mock payouts in fallback mode.
 - `client/src/app/dashboard/settings/billing/page.tsx` still contains regional payment placeholders marked "coming soon".
 

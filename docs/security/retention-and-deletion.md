@@ -1,5 +1,5 @@
 # ATHENA Retention & Deletion Schedule
-_Version 1.0 — 2026-08-18. Enforcement code: `athena-platform/server/src/scripts/data-retention.ts`, `gdpr.service.ts`, `gdpr.worker.ts`, session cleanup (`cleanupExpiredSessions`). Statuses: **enforced** (code runs it) vs **policy** (needs wiring/decision)._
+_Version 1.0 — 2026-08-18. Enforcement code: `athena-platform/server/src/scripts/data-retention.ts`, `gdpr.service.ts`, the export job in `workers.service.ts`, session cleanup (`cleanupExpiredSessions`). The dormant `gdpr.worker.ts` was removed 2026-09-13; nothing ever started it. Statuses: **enforced** (code runs it) vs **policy** (needs wiring/decision)._
 
 | Data | Retention | Trigger | Status |
 |---|---|---|---|
