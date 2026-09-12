@@ -6,7 +6,7 @@
  * dashboard. Below the large breakpoint the links fold into a menu.
  */
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -15,7 +15,20 @@ import { LayoutDashboard, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/hooks';
 import ThemeSwitch from '@/components/theme/ThemeSwitch';
+import { WellnessMenuList, WellnessPanel, WellnessTrigger, useWellnessMenu } from '@/components/wellness/WellnessMenu';
+import { isWellnessPath } from '@/lib/wellness-nav';
 import { HOME_NAV } from './nav';
+
+/** The wellness superlink sits after this item in the header; the phone's bottom bar is untouched. */
+const WELLNESS_AFTER = '/mentors';
+
+/**
+ * Between the large and extra-large breakpoints the bar is too narrow for
+ * ten labelled items beside the wordmark and the sign-in buttons, so these
+ * show their icon alone there, with the label as a tooltip, and get their
+ * words back at extra-large.
+ */
+const ICON_ONLY_UNTIL_XL = new Set(['/explore', '/search', '/learning', '/events', '/salary-insights']);
 
 function initialsOf(first?: string | null, last?: string | null): string {
   return [first, last]
@@ -30,6 +43,8 @@ export function HomeHeader() {
   const { isAuthenticated, user } = useAuth();
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
+  const wellness = useWellnessMenu();
+  const wellnessActive = isWellnessPath(pathname);
 
   // The menu closes on navigation, and never survives a resize to desktop.
   useEffect(() => setOpen(false), [pathname]);
@@ -69,13 +84,13 @@ export function HomeHeader() {
   );
 
   return (
-    <header className="sticky top-0 z-40 border-b border-rose-100/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
+    <header ref={wellness.rootRef} className="sticky top-0 z-40 border-b border-rose-100/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       {/* A hairline of the brand gradient along the top edge. */}
       <div aria-hidden className="h-[2px] w-full bg-[linear-gradient(90deg,#f43f5e_0%,#a855f7_50%,#f59e0b_100%)] opacity-80" />
       <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-3 xl:px-5">
         <Link href="/" className="focusable mr-1 flex flex-shrink-0 items-center gap-2 rounded-lg">
           <Image src="/icon.svg" alt="ATHENA" width={32} height={32} className="rounded-lg" priority />
-          <span className="hidden text-lg font-bold tracking-tight gradient-text-feminine sm:inline">ATHENA</span>
+          <span className="hidden text-lg font-bold tracking-tight gradient-text-feminine sm:inline lg:hidden xl:inline">ATHENA</span>
         </Link>
 
         <nav aria-label="Primary" className="hidden min-w-0 flex-1 items-center justify-center lg:flex">
@@ -83,27 +98,51 @@ export function HomeHeader() {
             {HOME_NAV.map((item) => {
               const active = isActive(item.href);
               return (
-                <li key={item.href} className="relative">
-                  <Link
-                    href={item.href}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'focusable relative z-10 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors xl:text-sm',
-                      active ? 'text-white' : 'text-slate-600 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white'
+                <Fragment key={item.href}>
+                  <li className="relative">
+                    <Link
+                      href={item.href}
+                      aria-current={active ? 'page' : undefined}
+                      aria-label={ICON_ONLY_UNTIL_XL.has(item.href) ? item.label : undefined}
+                      title={ICON_ONLY_UNTIL_XL.has(item.href) ? item.label : undefined}
+                      className={cn(
+                        'focusable relative z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[13px] font-medium transition-colors xl:px-3 xl:text-sm',
+                        active ? 'text-white' : 'text-slate-600 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white'
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span className={cn(ICON_ONLY_UNTIL_XL.has(item.href) && 'hidden xl:inline')}>{item.label}</span>
+                    </Link>
+                    {active && (
+                      <motion.span
+                        layoutId={reduce ? undefined : 'home-nav-active'}
+                        aria-hidden
+                        className="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] shadow-[0_6px_18px_-8px_rgba(168,85,247,0.8)]"
+                        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                      />
                     )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span className={cn(item.href === '/search' && 'hidden xl:inline')}>{item.label}</span>
-                  </Link>
-                  {active && (
-                    <motion.span
-                      layoutId={reduce ? undefined : 'home-nav-active'}
-                      aria-hidden
-                      className="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] shadow-[0_6px_18px_-8px_rgba(168,85,247,0.8)]"
-                      transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                    />
+                  </li>
+                  {item.href === WELLNESS_AFTER && (
+                    <li className="relative" {...wellness.hoverProps}>
+                      <WellnessTrigger
+                        menu={wellness}
+                        active={wellnessActive}
+                        className={cn(
+                          'relative z-10 px-2.5 py-1.5 text-[13px] font-medium xl:px-3 xl:text-sm',
+                          wellnessActive ? 'text-white' : wellness.open ? 'text-rose-600 dark:text-rose-300' : 'text-slate-600 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white'
+                        )}
+                      />
+                      {wellnessActive && (
+                        <motion.span
+                          layoutId={reduce ? undefined : 'home-nav-active'}
+                          aria-hidden
+                          className="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] shadow-[0_6px_18px_-8px_rgba(168,85,247,0.8)]"
+                          transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                        />
+                      )}
+                    </li>
                   )}
-                </li>
+                </Fragment>
               );
             })}
           </ul>
@@ -124,6 +163,9 @@ export function HomeHeader() {
           </button>
         </div>
       </div>
+
+      {/* The wellness menu, full width under the bar. Desktop only; the phone menu lists it instead. */}
+      <WellnessPanel menu={wellness} className="hidden lg:block" />
 
       <AnimatePresence>
         {open && (
@@ -156,6 +198,10 @@ export function HomeHeader() {
                   );
                 })}
               </ul>
+              <div className="mt-3 border-t border-rose-100/60 pt-3 dark:border-white/10">
+                <p className="font-display text-sm italic text-rose-700 dark:text-rose-300">Wellness</p>
+                <div className="mt-2"><WellnessMenuList onNavigate={() => setOpen(false)} /></div>
+              </div>
               <div className="mt-3 flex items-center gap-2 border-t border-rose-100/60 pt-3 dark:border-white/10">{authControls}</div>
             </nav>
           </motion.div>

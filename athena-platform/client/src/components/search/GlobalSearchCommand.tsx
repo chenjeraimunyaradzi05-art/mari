@@ -12,10 +12,12 @@ import {
   DollarSign,
   FileText,
   GraduationCap,
+  MessageCircleHeart,
   PlayCircle,
   Search,
   ShieldCheck,
   Sparkles,
+  Stethoscope,
   Users,
   X,
 } from 'lucide-react';
@@ -73,6 +75,18 @@ const quickLaunches = [
     description: 'Cycle, mood and sleep tracking, forums, circles, and health practitioners for women',
     href: '/dashboard/wellness',
     icon: HeartPulse,
+  },
+  {
+    label: 'Find care',
+    description: 'GPs, psychologists and specialists, telehealth marked, rated only by real visits',
+    href: '/dashboard/wellness/practitioners',
+    icon: Stethoscope,
+  },
+  {
+    label: 'Wellness forums and circles',
+    description: 'Anxiety, low mood, burnout, motherhood and grief, anonymous if you want',
+    href: '/dashboard/wellness/forums',
+    icon: MessageCircleHeart,
   },
   {
     label: 'Mentor Network',

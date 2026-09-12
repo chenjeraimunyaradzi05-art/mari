@@ -35,6 +35,8 @@ import { useAuth, useNotifications, useUnreadMessageCount } from '@/lib/hooks';
 import { useUIStore } from '@/lib/store';
 import { cn, getFullName, getInitials } from '@/lib/utils';
 import { trackEvent } from '@/lib/analytics';
+import { WellnessPanel, WellnessTrigger, useWellnessMenu } from '@/components/wellness/WellnessMenu';
+import { WELLNESS_PILLS, isWellnessPath } from '@/lib/wellness-nav';
 
 type AppMode = 'social' | 'professional' | 'learning';
 type NavigationItem = { name: string; href: string; icon: LucideIcon };
@@ -82,6 +84,8 @@ export default function DashboardLayout({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('social');
+  const wellness = useWellnessMenu();
+  const wellnessActive = isWellnessPath(pathname);
 
   useEffect(() => {
     const savedMode = window.localStorage.getItem('athena-mode') as AppMode | null;
@@ -133,7 +137,7 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-transform duration-300 lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-transform duration-300 lg:translate-x-0 print:hidden',
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
           !isSidebarOpen && 'lg:w-20'
         )}
@@ -173,6 +177,20 @@ export default function DashboardLayout({
                     <item.icon className="w-5 h-5 flex-shrink-0" />
                     {isSidebarOpen && <span className="font-medium">{item.name}</span>}
                   </Link>
+                  {item.href === '/dashboard/wellness' && wellnessActive && isSidebarOpen && (
+                    <ul className="ml-5 mt-1 space-y-0.5 border-l border-rose-100 pl-3 dark:border-rose-900/40" aria-label="Wellness pages">
+                      {WELLNESS_PILLS.map((p) => {
+                        const on = pathname === p.href || (p.href !== '/dashboard/wellness' && pathname.startsWith(`${p.href}/`));
+                        return (
+                          <li key={p.href}>
+                            <Link href={p.href} aria-current={on ? 'page' : undefined} className={cn('block rounded-md px-2 py-1 text-sm transition-colors', on ? 'font-medium text-rose-600 dark:text-rose-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white')}>
+                              {p.label}
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </li>
               );
             })}
@@ -328,9 +346,9 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <div className={cn('lg:pl-64 transition-all', !isSidebarOpen && 'lg:pl-20')}>
+      <div className={cn('lg:pl-64 transition-all print:pl-0', !isSidebarOpen && 'lg:pl-20')}>
         {/* Top navbar */}
-        <header className="sticky top-0 z-30 h-16 bg-white/80 dark:bg-slate-950/80 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800">
+        <header ref={wellness.rootRef} className="sticky top-0 z-30 h-16 bg-white/80 dark:bg-slate-950/80 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800 print:hidden">
           <div className="flex items-center justify-between h-full px-4 sm:px-6">
             <div className="flex items-center space-x-4">
               <button
@@ -353,6 +371,18 @@ export default function DashboardLayout({
                   type="text"
                   placeholder="Search jobs, people, companies..."
                   className="w-80 pl-10 pr-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* The wellness superlink: every wellness page from one place. */}
+              <div className="hidden lg:block" {...wellness.hoverProps}>
+                <WellnessTrigger
+                  menu={wellness}
+                  active={wellnessActive}
+                  className={cn(
+                    'px-3 py-2 text-sm font-medium',
+                    wellnessActive || wellness.open ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-300' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+                  )}
                 />
               </div>
             </div>
@@ -411,6 +441,7 @@ export default function DashboardLayout({
               </Link>
             </div>
           </div>
+          <WellnessPanel menu={wellness} className="hidden lg:block" />
         </header>
 
         {/* Page content */}

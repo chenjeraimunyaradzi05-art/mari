@@ -10,27 +10,16 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Activity, ArrowRight, BookOpen, CalendarHeart, HeartPulse, Leaf, MessageCircleHeart, Moon, Scale as ScaleIcon, Stethoscope, Users, type LucideIcon } from 'lucide-react';
+import { ArrowRight, BookOpen, Moon } from 'lucide-react';
 import { PageHero, PageShell, Section } from '@/components/layout/PageShell';
 import { wellnessApi, wellnessError, type CrisisLine } from '@/lib/wellness-api';
 import { CrisisStrip, HealthDisclaimer, useLoad } from '@/components/wellness/WellnessUi';
+import { WELLNESS_GROUPS, WELLNESS_TONES } from '@/lib/wellness-nav';
 import { cn } from '@/lib/utils';
 
 type Reference = { crisisLines: CrisisLine[]; k10: { questions: Array<{ id: number; text: string }>; options: Array<{ value: number; label: string }> } };
 type Library = { topics: Array<{ key: string; name: string; blurb: string; items: Array<{ key: string; title: string; summary: string; source: string; url: string; kind: string }> }> };
 type K10 = { score: number; band: string; label: string; meaning: string; nextStep: string; crisisLines: CrisisLine[] };
-
-const TILES: Array<{ href: string; title: string; blurb: string; icon: LucideIcon; gated?: boolean }> = [
-  { href: '/dashboard/wellness/track', title: 'The health dashboard', blurb: 'Your cycle, mood, sleep, movement and water, kept encrypted and read only by you.', icon: HeartPulse, gated: true },
-  { href: '/dashboard/wellness/insights', title: 'What the days are saying', blurb: 'Patterns between one thing and another, and a report you can hand a doctor.', icon: Activity, gated: true },
-  { href: '/dashboard/wellness/forums', title: 'Forums', blurb: 'Anxiety, low mood, burnout, motherhood, grief. Anonymous if you want, moderated always.', icon: MessageCircleHeart, gated: true },
-  { href: '/dashboard/wellness/circles', title: 'Support circles', blurb: 'Four to six women, one topic, eight weeks of weekly check-ins.', icon: Users, gated: true },
-  { href: '/dashboard/wellness/practitioners', title: 'Find care', blurb: 'GPs, psychologists, gynaecologists and more, with telehealth marked and ratings from real visits.', icon: Stethoscope, gated: true },
-  { href: '/dashboard/wellness/mental-load', title: 'The mental load', blurb: 'Log the invisible work, see who carries it, and get the words to hand some over.', icon: ScaleIcon, gated: true },
-  { href: '/dashboard/wellness/habits', title: 'Habits and goals', blurb: 'Streaks, peer challenges and goals read from what you actually logged.', icon: Leaf, gated: true },
-  { href: '/dashboard/wellness/medications', title: 'Medications', blurb: 'Doses, reminders, refills and how a script went, in one place.', icon: CalendarHeart, gated: true },
-  { href: '#library', title: 'The library', blurb: 'Sleep, eating, movement, stress, hormones and more, from Australian sources.', icon: BookOpen },
-];
 
 export default function WellnessPage() {
   const ref = useLoad<Reference>(() => wellnessApi.reference());
@@ -69,21 +58,32 @@ export default function WellnessPage() {
       <div className="mt-6"><CrisisStrip lines={ref.data?.crisisLines} /></div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {TILES.map((t) => (
-            <li key={t.href}>
-              <Link href={t.href} className="tile-soft group flex h-full flex-col p-4">
-                <t.icon className="h-5 w-5 text-rose-500" />
-                <h2 className="mt-3 font-semibold text-slate-900 dark:text-white">{t.title}</h2>
-                <p className="mt-1 flex-1 text-sm leading-6 text-slate-600 dark:text-slate-400">{t.blurb}</p>
-                <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
-                  {t.gated ? 'Sign in and open' : 'Open'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-                </span>
-              </Link>
-            </li>
+        <div className="space-y-6">
+          {WELLNESS_GROUPS.map((g) => (
+            <section key={g.key} aria-labelledby={`wellness-${g.key}`}>
+              <h2 id={`wellness-${g.key}`} className="rail-title">{g.title}</h2>
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">{g.intro}</p>
+              <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+                {g.items.map((t) => (
+                  <li key={t.href}>
+                    <Link href={t.href} className="tile-soft group flex h-full items-start gap-3 p-4">
+                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', WELLNESS_TONES[g.tone])}><t.icon className="h-4 w-4" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-semibold text-slate-900 dark:text-white">{t.label}</span>
+                        <span className="mt-0.5 block text-sm leading-6 text-slate-600 dark:text-slate-400">{t.blurb}</span>
+                        <span className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
+                          {t.gated ? 'Sign in and open' : 'Open'} <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
 
+        <div id="check" className="scroll-mt-24">
         <Section icon={Moon} title="How have the last four weeks been?" description="The K10, the ten questions used in the national health survey. Nothing you answer here is stored.">
           {result ? (
             <div className="space-y-3">
@@ -120,6 +120,7 @@ export default function WellnessPage() {
             </div>
           )}
         </Section>
+        </div>
       </div>
 
       <section id="library" className="mt-10 scroll-mt-24">

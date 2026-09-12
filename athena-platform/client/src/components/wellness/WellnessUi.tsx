@@ -17,7 +17,8 @@ import Link from 'next/link';
 import type { AxiosResponse } from 'axios';
 import { ChevronDown, Loader2, Phone, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { wellnessError, type CrisisLine } from '@/lib/wellness-api';
+import { wellnessError, type Author, type Badge, type CrisisLine } from '@/lib/wellness-api';
+import { WELLNESS_PILLS } from '@/lib/wellness-nav';
 
 export const DEFAULT_CRISIS: CrisisLine[] = [
   { key: 'emergency', name: 'Emergency', phone: '000', url: 'https://www.triplezero.gov.au', when: '24/7', who: 'Immediate danger' },
@@ -43,30 +44,42 @@ export function CrisisStrip({ lines, compact = false, title = 'If today is hard'
   );
 }
 
-const NAV: Array<{ href: string; label: string }> = [
-  { href: '/dashboard/wellness', label: 'Today' },
-  { href: '/dashboard/wellness/track', label: 'Track' },
-  { href: '/dashboard/wellness/insights', label: 'Insights' },
-  { href: '/dashboard/wellness/habits', label: 'Habits and goals' },
-  { href: '/dashboard/wellness/medications', label: 'Medications' },
-  { href: '/dashboard/wellness/mental-load', label: 'Mental load' },
-  { href: '/dashboard/wellness/forums', label: 'Forums' },
-  { href: '/dashboard/wellness/circles', label: 'Circles' },
-  { href: '/dashboard/wellness/practitioners', label: 'Find care' },
-  { href: '/dashboard/wellness/bookings', label: 'Appointments' },
-  { href: '/dashboard/wellness/library', label: 'Library' },
-  { href: '/dashboard/wellness/settings', label: 'Privacy' },
-];
-
+/** The pill navigation across the wellness pages, from the same map the header's menu reads. */
 export function WellnessNav({ current }: { current: string }) {
   return (
-    <nav aria-label="Wellness" className="flex flex-wrap gap-2">
-      {NAV.map((n) => (
-        <Link key={n.href} href={n.href} className={cn('rounded-full px-3 py-1.5 text-xs font-medium transition', current === n.href ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-700 hover:bg-rose-100 hover:text-rose-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-900/30')}>
+    <nav aria-label="Wellness" className="flex flex-wrap gap-2 print:hidden">
+      {WELLNESS_PILLS.map((n) => (
+        <Link key={n.href} href={n.href} aria-current={current === n.href ? 'page' : undefined} className={cn('rounded-full px-3 py-1.5 text-xs font-medium transition', current === n.href ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-700 hover:bg-rose-100 hover:text-rose-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-900/30')}>
           {n.label}
         </Link>
       ))}
     </nav>
+  );
+}
+
+/** Who wrote it, with the marks that matter: a moderator, or a practitioner the platform has verified. */
+export function AuthorChips({ author }: { author: Author }) {
+  return (
+    <>
+      <span className="font-medium text-slate-700 dark:text-slate-300">{author.name}</span>
+      {author.isModerator && <Chip tone="sky">Moderator</Chip>}
+      {author.isPractitioner && <Chip tone="emerald" title="A registered practitioner whose profile ATHENA has verified. Still not your clinician, and still not a diagnosis.">Registered {author.practitionerKind?.toLowerCase() ?? 'practitioner'}</Chip>}
+    </>
+  );
+}
+
+/** The wellness badges: earned ones in colour, the rest as what is still to come. */
+export function BadgeStrip({ badges, compact = false }: { badges: Badge[]; compact?: boolean }) {
+  const shown = compact ? badges.filter((b) => b.earned) : badges;
+  if (shown.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-2" aria-label="Wellness badges">
+      {shown.map((b) => (
+        <li key={b.id} title={`${b.description}${b.earned && b.earnedAt ? `, earned ${new Date(b.earnedAt).toLocaleDateString('en-AU')}` : ''}`} className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium', b.earned ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200' : 'border-dashed border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-500')}>
+          <span aria-hidden className={cn(!b.earned && 'grayscale opacity-60')}>{b.icon}</span> {b.name}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -92,7 +105,8 @@ const SCALE_WORDS: Record<string, string[]> = {
   anxiety: ['Calm', 'A little', 'Some', 'A lot', 'Panicky'],
   energy: ['Drained', 'Low', 'Okay', 'Good', 'Full'],
   quality: ['Awful', 'Poor', 'Okay', 'Good', 'Great'],
-  pain: ['None', 'Mild', 'Noticeable', 'Bad', 'Severe'],
+  // A scale that starts at zero has six steps, so its words do too.
+  pain: ['None', 'Mild', 'Noticeable', 'Bad', 'Severe', 'Worst'],
   severity: ['Mild', 'Noticeable', 'Bad', 'Severe', 'Worst'],
   generic: ['1', '2', '3', '4', '5'],
 };
@@ -100,11 +114,12 @@ const SCALE_WORDS: Record<string, string[]> = {
 export function Scale({ label, value, onChange, words = 'generic', min = 1 }: { label: string; value: number | null; onChange: (v: number) => void; words?: keyof typeof SCALE_WORDS; min?: number }) {
   const w = SCALE_WORDS[words] ?? SCALE_WORDS.generic;
   const values = min === 0 ? [0, 1, 2, 3, 4, 5] : [1, 2, 3, 4, 5];
+  const word = value === null ? 'Tap one' : w[min === 0 ? value : value - 1] ?? String(value);
   return (
     <div>
       <div className="flex items-baseline justify-between">
         <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
-        <span className="text-xs text-slate-500 dark:text-slate-400">{value === null ? 'Tap one' : w[Math.max(0, Math.min(4, (min === 0 ? value - 1 : value - 1)))] ?? value}</span>
+        <span className="text-xs text-slate-500 dark:text-slate-400">{word}</span>
       </div>
       <div className="mt-1.5 grid gap-1.5" style={{ gridTemplateColumns: `repeat(${values.length}, minmax(0, 1fr))` }} role="radiogroup" aria-label={label}>
         {values.map((v) => (
@@ -150,13 +165,21 @@ export function DayDots({ days, onToggle }: { days: Array<{ day: string; done: b
   );
 }
 
-export function Chip({ children, tone = 'slate' }: { children: ReactNode; tone?: 'slate' | 'rose' | 'emerald' | 'amber' | 'sky' }) {
+export function Chip({ children, tone = 'slate', title }: { children: ReactNode; tone?: 'slate' | 'rose' | 'emerald' | 'amber' | 'sky'; title?: string }) {
   const tones = { slate: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300', rose: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300', emerald: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', sky: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' };
-  return <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', tones[tone])}>{children}</span>;
+  return <span title={title} className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', tones[tone])}>{children}</span>;
 }
 
-export function WarningFold({ warning, children }: { warning: string | null | undefined; children: ReactNode }) {
-  const [open, setOpen] = useState(!warning);
+/**
+ * Which warned posts open folded for this reader: with nothing chosen in
+ * her privacy settings, all of them; with some chosen, only those.
+ */
+export function foldsFor(hiddenWarnings: string[] | undefined | null): (warning: string | null | undefined) => boolean {
+  return (warning) => Boolean(warning) && (!hiddenWarnings || hiddenWarnings.length === 0 || hiddenWarnings.includes(warning as string));
+}
+
+export function WarningFold({ warning, folded = true, children }: { warning: string | null | undefined; folded?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(!warning || !folded);
   if (!warning) return <>{children}</>;
   return (
     <div>

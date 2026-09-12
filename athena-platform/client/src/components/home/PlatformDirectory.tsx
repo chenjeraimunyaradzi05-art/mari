@@ -171,6 +171,10 @@ const GROUPS: Group[] = [
       { href: '/dashboard/wellness/mental-load', label: 'The mental load', blurb: 'Log the invisible work and hand some over', gated: true },
       { href: '/dashboard/wellness/habits', label: 'Habits and goals', blurb: 'Streaks, challenges, and goals read from what you logged', gated: true },
       { href: '/dashboard/wellness/medications', label: 'Medications', blurb: 'Doses, reminders and refills', gated: true },
+      { href: '/dashboard/wellness/bookings', label: 'Appointments', blurb: 'What is coming, what happened, and the follow-up', gated: true },
+      { href: '/dashboard/wellness/library', label: 'The library', blurb: 'Sleep, eating, movement, stress and hormones, from Australian sources', gated: true },
+      { href: '/dashboard/wellness/import', label: 'Bring your data', blurb: 'Apple Health, Google Fit, or a CSV you exported before', gated: true },
+      { href: '/dashboard/wellness/settings', label: 'Privacy', blurb: 'Every tracker can be switched off; everything can be deleted', gated: true },
     ],
   },
   {

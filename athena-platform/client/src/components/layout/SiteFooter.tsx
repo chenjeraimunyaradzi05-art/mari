@@ -75,6 +75,8 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { href: '/dashboard/wellness/circles', label: 'Support circles' },
       { href: '/dashboard/wellness/practitioners', label: 'Find care' },
       { href: '/dashboard/wellness/mental-load', label: 'The mental load' },
+      { href: '/dashboard/wellness/habits', label: 'Habits and goals' },
+      { href: '/dashboard/wellness/library', label: 'The library' },
     ],
   },
   {

@@ -96,6 +96,11 @@ export const wellnessApi = {
   cancelBooking: (id: string) => api.patch(`/wellness/bookings/${id}`, { status: 'CANCELLED' }),
   reviewBooking: (id: string, data: Body) => api.post(`/wellness/bookings/${id}/review`, data),
   followUp: (id: string, data: Body) => api.post(`/wellness/bookings/${id}/follow-up`, data),
+  bookingIcs: (id: string) => api.get(`/wellness/bookings/${id}/ics`, { responseType: 'text' }),
+  circleIcs: (id: string) => api.get(`/wellness/circles/${id}/ics`, { responseType: 'text' }),
+  moderateReview: (id: string, isHidden: boolean) => api.patch(`/wellness/reviews/${id}`, { isHidden }),
+
+  badges: () => api.get('/wellness/badges'),
 
   habits: () => api.get('/wellness/habits', { params: t() }),
   addHabit: (data: Body) => api.post('/wellness/habits', data, { params: t() }),
@@ -124,4 +129,5 @@ export function wellnessError(err: unknown, fallback: string): string {
 export type CrisisLine = { key: string; name: string; phone: string; url: string; when: string; who: string };
 export type Insight = { key: string; kind: 'pattern' | 'trend' | 'risk' | 'recommendation'; title: string; body: string; strength?: string; source?: { name: string; url: string }; action?: { label: string; href: string }; crisis?: boolean };
 export type Entry = { id: string; kind: string; day: string; at: string; refId: string | null; payload: Record<string, unknown> | null };
-export type Author = { id: string | null; name: string; avatar: string | null; isAnonymous: boolean; isYou: boolean; isModerator: boolean };
+export type Author = { id: string | null; name: string; avatar: string | null; isAnonymous: boolean; isYou: boolean; isModerator: boolean; isPractitioner?: boolean; practitionerKind?: string | null };
+export type Badge = { id: string; name: string; description: string; icon: string; xp: number; earned: boolean; earnedAt: string | null };
