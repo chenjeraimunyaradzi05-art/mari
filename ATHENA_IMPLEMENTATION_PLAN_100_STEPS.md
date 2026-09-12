@@ -21,15 +21,15 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 4.  ✅ **Setup Redis Cluster**: Created `server/src/utils/redis.ts` with caching helpers, distributed locks, and rate limiting.
 5.  ✅ **Configure BullMQ**: Created `server/src/utils/queue.ts` with 7 queues and `server/src/services/workers.service.ts` with all workers.
 6.  ✅ **OpenSearch Core indexing**: Created `server/src/scripts/init-opensearch.ts` for index initialization.
-7.  ✅ **OpenSearch Sync Strategies**: Created `server/src/middleware/opensearch-sync.ts` with Prisma middleware hooks.
-8.  ✅ **Video infrastructure (Uploads)**: Created `server/src/utils/storage.ts` with S3 presigned URLs and multipart upload support.
+7.  ✅ **OpenSearch Sync Strategies**: Created server/src/middleware/opensearch-sync.ts (deleted 2026-09-13) with Prisma middleware hooks.
+8.  ✅ **Video infrastructure (Uploads)**: Created server/src/utils/storage.ts (deleted 2026-09-13) with S3 presigned URLs and multipart upload support.
 9.  ✅ **Video Processing Pipeline**: Created video processing worker in `workers.service.ts` with transcoding job handler.
 10. ✅ **CDN Configuration**: Added CloudFront signed URL generation in `storage.ts`.
 11. ✅ **WebSocket Server Init**: Socket.io already initialized in `index.ts`, enhanced with typed handlers.
 12. ✅ **WebSocket Auth**: JWT verification exists in `socket.service.ts`.
 13. ✅ **Real-time Presence**: Created `server/src/services/presence.service.ts` with Redis-backed user status tracking.
 14. ✅ **Database Indexing Audit**: Schema includes indices; comprehensive schema already has proper indexing.
-15. ✅ **Data Pipeline ETL**: Created `server/src/services/etl.service.ts` for ML training data extraction.
+15. ✅ **Data Pipeline ETL**: Created server/src/services/etl.service.ts (deleted 2026-09-13) for ML training data extraction.
 16. ✅ **Secrets Management**: Updated `.env.example` with all required environment variables.
 17. ✅ **Logging Aggregation**: Winston logger with structured JSON logging already in place.
 18. ✅ **Application Monitoring (APM)**: Prometheus metrics in `server/src/utils/metrics.ts`, Sentry DSN configured.
@@ -44,13 +44,13 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 - `server/src/services/ml.service.ts` - Node-ML bridge
 - `server/src/utils/queue.ts` - BullMQ configuration
 - `server/src/services/workers.service.ts` - Background job workers
-- `server/src/middleware/opensearch-sync.ts` - Search sync middleware
+- server/src/middleware/opensearch-sync.ts (deleted 2026-09-13) - Search sync middleware
 - `server/src/scripts/init-opensearch.ts` - OpenSearch initialization
 - `server/src/services/presence.service.ts` - Real-time presence
-- `server/src/utils/storage.ts` - S3/CDN storage service
+- server/src/utils/storage.ts (deleted 2026-09-13) - S3/CDN storage service
 - `server/src/routes/health.routes.ts` - Health check endpoints
 - `server/src/middleware/rateLimiter.ts` - Advanced rate limiting
-- `server/src/services/etl.service.ts` - Data pipeline for ML
+- server/src/services/etl.service.ts (deleted 2026-09-13) - Data pipeline for ML
 - `server/src/utils/redis.ts` - Redis client utilities
 - `server/src/workers/index.ts` - Standalone worker entry point
 - `server/Dockerfile` - Node.js server container
@@ -173,15 +173,15 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 4. ✅ Setup Redis Cluster — [athena-platform/server/src/utils/redis.ts](athena-platform/server/src/utils/redis.ts)
 5. ✅ Configure BullMQ — [athena-platform/server/src/utils/queue.ts](athena-platform/server/src/utils/queue.ts), [athena-platform/server/src/services/workers.service.ts](athena-platform/server/src/services/workers.service.ts)
 6. ✅ OpenSearch Core Indexing — [athena-platform/server/src/scripts/init-opensearch.ts](athena-platform/server/src/scripts/init-opensearch.ts)
-7. ✅ OpenSearch Sync Strategies — [athena-platform/server/src/middleware/opensearch-sync.ts](athena-platform/server/src/middleware/opensearch-sync.ts)
-8. ✅ Video Infrastructure (Uploads) — [athena-platform/server/src/utils/storage.ts](athena-platform/server/src/utils/storage.ts)
+7. ✅ OpenSearch Sync Strategies — athena-platform/server/src/middleware/opensearch-sync.ts (deleted 2026-09-13)
+8. ✅ Video Infrastructure (Uploads) — athena-platform/server/src/utils/storage.ts (deleted 2026-09-13)
 9. ✅ Video Processing Pipeline — [athena-platform/server/src/services/workers.service.ts](athena-platform/server/src/services/workers.service.ts)
-10. ✅ CDN Configuration — [athena-platform/server/src/utils/storage.ts](athena-platform/server/src/utils/storage.ts)
+10. ✅ CDN Configuration — athena-platform/server/src/utils/storage.ts (deleted 2026-09-13)
 11. ✅ WebSocket Server Init — [athena-platform/server/src/services/socket.service.ts](athena-platform/server/src/services/socket.service.ts)
 12. ✅ WebSocket Auth — [athena-platform/server/src/services/socket.service.ts](athena-platform/server/src/services/socket.service.ts)
 13. ✅ Real-time Presence — [athena-platform/server/src/services/presence.service.ts](athena-platform/server/src/services/presence.service.ts)
 14. ✅ Database Indexing Audit — [athena-platform/server/prisma/schema.prisma](athena-platform/server/prisma/schema.prisma)
-15. ✅ Data Pipeline ETL — [athena-platform/server/src/services/etl.service.ts](athena-platform/server/src/services/etl.service.ts)
+15. ✅ Data Pipeline ETL — athena-platform/server/src/services/etl.service.ts (deleted 2026-09-13)
 16. ✅ Secrets Management — [athena-platform/server/.env.example](athena-platform/server/.env.example)
 17. ✅ Logging Aggregation — [athena-platform/server/src/utils/logger.ts](athena-platform/server/src/utils/logger.ts)
 18. ✅ Application Monitoring (APM) — [athena-platform/server/src/utils/metrics.ts](athena-platform/server/src/utils/metrics.ts)
@@ -219,9 +219,9 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 46. ✅ Chat Layout (3-pane) — list, thread and details panes, collapsing to one pane on a phone. Evidence: [athena-platform/client/src/app/dashboard/messages/layout.tsx](athena-platform/client/src/app/dashboard/messages/layout.tsx). (The unmounted chat/ChatLayout draft was removed on 2026-09-04.)
 47. ✅ Real-time Message Bubbles — socket-delivered bubbles with status ticks, replies and reactions. Evidence: [athena-platform/client/src/components/chat/ChatWindow.tsx](athena-platform/client/src/components/chat/ChatWindow.tsx). (The unmounted chat/MessageBubbles draft was removed on 2026-09-04.)
 48. ✅ Chat Media Attachments — [athena-platform/client/src/components/chat/ChatWindow.tsx](athena-platform/client/src/components/chat/ChatWindow.tsx)
-49. ✅ Notification Center UI — bell dropdown plus the full page. Evidence: [athena-platform/client/src/components/NotificationDropdown.tsx](athena-platform/client/src/components/NotificationDropdown.tsx), [athena-platform/client/src/app/dashboard/notifications/page.tsx](athena-platform/client/src/app/dashboard/notifications/page.tsx). (The unmounted super-app/NotificationCenter draft was removed on 2026-09-04.)
-50. ✅ Global Search Bar — [athena-platform/client/src/components/search/GlobalSearchCommand.tsx](athena-platform/client/src/components/search/GlobalSearchCommand.tsx)
-51. ✅ Super App Navigation — mode switching implemented in SuperAppNav. Evidence: [athena-platform/client/src/components/super-app/SuperAppNav.tsx](athena-platform/client/src/components/super-app/SuperAppNav.tsx)
+49. ✅ Notification Center UI — bell dropdown plus the full page. Evidence: athena-platform/client/src/components/NotificationDropdown.tsx (deleted 2026-09-13), [athena-platform/client/src/app/dashboard/notifications/page.tsx](athena-platform/client/src/app/dashboard/notifications/page.tsx). (The unmounted super-app/NotificationCenter draft was removed on 2026-09-04.)
+50. ✅ Global Search Bar — athena-platform/client/src/components/search/GlobalSearchCommand.tsx (deleted 2026-09-13)
+51. ✅ Super App Navigation — mode switching implemented in SuperAppNav. Evidence: athena-platform/client/src/components/super-app/SuperAppNav.tsx (deleted 2026-09-13)
 52. ✅ Creator Upload Studio — uploads the file and publishes the reel. Evidence: [athena-platform/client/src/app/dashboard/creator-studio/page.tsx](athena-platform/client/src/app/dashboard/creator-studio/page.tsx). (The unmounted super-app/CreatorUploadStudio draft was removed on 2026-09-04.)
 53. ✅ Rich Text Editor — Tiptap-based editor implemented. Evidence: [athena-platform/client/src/components/ui/RichTextEditor.tsx](athena-platform/client/src/components/ui/RichTextEditor.tsx)
 54. ✅ Comment Threading — replies, creator pin and delete on reels; replies on posts. Evidence: [athena-platform/client/src/components/video/VideoComments.tsx](athena-platform/client/src/components/video/VideoComments.tsx), [athena-platform/client/src/components/community/CommentSection.tsx](athena-platform/client/src/components/community/CommentSection.tsx). (The unmounted super-app/CommentThread draft was removed on 2026-09-04.)
@@ -229,27 +229,27 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 56. ✅ Skeleton Loading States — [athena-platform/client/src/components/ui/loading.tsx](athena-platform/client/src/components/ui/loading.tsx)
 57. ✅ PWA Configuration — manifests, service worker, and install prompt wired. Evidence: [athena-platform/client/public/sw.ts](athena-platform/client/public/sw.ts), [athena-platform/client/src/components/super-app/PWAInstallPrompt.tsx](athena-platform/client/src/components/super-app/PWAInstallPrompt.tsx)
 58. ✅ Accessibility Audit (A11y) — skip links, announcer, and keyboard shortcuts providers integrated. Evidence: [athena-platform/client/src/lib/accessibility.tsx](athena-platform/client/src/lib/accessibility.tsx), [athena-platform/client/src/app/providers.tsx](athena-platform/client/src/app/providers.tsx)
-59. ✅ Design System Standardization — shared UI components and design tokens implemented. Evidence: [athena-platform/client/src/components/ui/index.ts](athena-platform/client/src/components/ui/index.ts), [athena-platform/client/src/styles/design-tokens.ts](athena-platform/client/src/styles/design-tokens.ts)
-60. ✅ Dark Mode Polish — theme sync and provider implemented. Evidence: [athena-platform/client/src/app/providers.tsx](athena-platform/client/src/app/providers.tsx), [athena-platform/client/src/components/providers/ThemeProvider.tsx](athena-platform/client/src/components/providers/ThemeProvider.tsx)
+59. ✅ Design System Standardization — shared UI components and design tokens implemented. Evidence: [athena-platform/client/src/components/ui/index.ts](athena-platform/client/src/components/ui/index.ts), athena-platform/client/src/styles/design-tokens.ts (deleted 2026-09-13)
+60. ✅ Dark Mode Polish — theme sync and provider implemented. Evidence: [athena-platform/client/src/app/providers.tsx](athena-platform/client/src/app/providers.tsx), athena-platform/client/src/components/providers/ThemeProvider.tsx (deleted 2026-09-13)
 
 ### PHASE 4: WEB CLIENT - PERSONA STUDIOS (Steps 61-80)
-61. ✅ Formation Studio Dashboard — [athena-platform/client/src/components/studios/formation/FormationDashboard.tsx](athena-platform/client/src/components/studios/formation/FormationDashboard.tsx)
-62. ✅ Step-by-Step Incorporation UI — [athena-platform/client/src/components/studios/formation/IncorporationWizard.tsx](athena-platform/client/src/components/studios/formation/IncorporationWizard.tsx)
-63. ✅ Co-founder Matching UI — [athena-platform/client/src/components/studios/formation/CofounderMatching.tsx](athena-platform/client/src/components/studios/formation/CofounderMatching.tsx)
-64. ✅ Mentor Dashboard Calendar — [athena-platform/client/src/components/studios/mentor/MentorCalendar.tsx](athena-platform/client/src/components/studios/mentor/MentorCalendar.tsx)
-65. ✅ Session Management UI — [athena-platform/client/src/components/studios/mentor/SessionManagement.tsx](athena-platform/client/src/components/studios/mentor/SessionManagement.tsx)
+61. ✅ Formation Studio Dashboard — athena-platform/client/src/components/studios/formation/FormationDashboard.tsx (deleted 2026-09-13)
+62. ✅ Step-by-Step Incorporation UI — athena-platform/client/src/components/studios/formation/IncorporationWizard.tsx (deleted 2026-09-13)
+63. ✅ Co-founder Matching UI — athena-platform/client/src/components/studios/formation/CofounderMatching.tsx (deleted 2026-09-13)
+64. ✅ Mentor Dashboard Calendar — athena-platform/client/src/components/studios/mentor/MentorCalendar.tsx (deleted 2026-09-13)
+65. ✅ Session Management UI — athena-platform/client/src/components/studios/mentor/SessionManagement.tsx (deleted 2026-09-13)
 66. ✅ Earnings Dashboard — [athena-platform/client/src/components/studios/mentor/EarningsDashboard.tsx](athena-platform/client/src/components/studios/mentor/EarningsDashboard.tsx)
-67. ✅ Jobs Manager (Employer Kanban) — [athena-platform/client/src/components/studios/employer/JobsManagerKanban.tsx](athena-platform/client/src/components/studios/employer/JobsManagerKanban.tsx)
-68. ✅ Candidate Profile Viewer — [athena-platform/client/src/components/studios/employer/CandidateProfileViewer.tsx](athena-platform/client/src/components/studios/employer/CandidateProfileViewer.tsx)
-69. ✅ Education Portal Course Builder — [athena-platform/client/src/components/studios/educator/CourseBuilderPortal.tsx](athena-platform/client/src/components/studios/educator/CourseBuilderPortal.tsx)
-70. ✅ Student Classroom View — [athena-platform/client/src/components/studios/learner/StudentClassroomView.tsx](athena-platform/client/src/components/studios/learner/StudentClassroomView.tsx)
-71. ✅ Skills Assessment UI — [athena-platform/client/src/components/studios/learner/SkillsAssessmentUI.tsx](athena-platform/client/src/components/studios/learner/SkillsAssessmentUI.tsx)
-72. ✅ Badge Wallet — [athena-platform/client/src/components/studios/learner/BadgeWallet.tsx](athena-platform/client/src/components/studios/learner/BadgeWallet.tsx)
+67. ✅ Jobs Manager (Employer Kanban) — athena-platform/client/src/components/studios/employer/JobsManagerKanban.tsx (deleted 2026-09-13)
+68. ✅ Candidate Profile Viewer — athena-platform/client/src/components/studios/employer/CandidateProfileViewer.tsx (deleted 2026-09-13)
+69. ✅ Education Portal Course Builder — athena-platform/client/src/components/studios/educator/CourseBuilderPortal.tsx (deleted 2026-09-13)
+70. ✅ Student Classroom View — athena-platform/client/src/components/studios/learner/StudentClassroomView.tsx (deleted 2026-09-13)
+71. ✅ Skills Assessment UI — athena-platform/client/src/components/studios/learner/SkillsAssessmentUI.tsx (deleted 2026-09-13)
+72. ✅ Badge Wallet — athena-platform/client/src/components/studios/learner/BadgeWallet.tsx (deleted 2026-09-13)
 73. ✅ Privacy Center Dashboard — [athena-platform/client/src/app/privacy-center/page.tsx](athena-platform/client/src/app/privacy-center/page.tsx)
 74. ✅ Safety Center Access — [athena-platform/client/src/app/safety-center/page.tsx](athena-platform/client/src/app/safety-center/page.tsx)
-75. ✅ Organization Page — [athena-platform/client/src/components/studios/organization/OrganizationPage.tsx](athena-platform/client/src/components/studios/organization/OrganizationPage.tsx)
-76. ✅ Community/Group Home — [athena-platform/client/src/components/studios/community/CommunityGroupHome.tsx](athena-platform/client/src/components/studios/community/CommunityGroupHome.tsx)
-77. ✅ Events Calendar — [athena-platform/client/src/components/studios/events/EventsCalendar.tsx](athena-platform/client/src/components/studios/events/EventsCalendar.tsx)
+75. ✅ Organization Page — athena-platform/client/src/components/studios/organization/OrganizationPage.tsx (deleted 2026-09-13)
+76. ✅ Community/Group Home — athena-platform/client/src/components/studios/community/CommunityGroupHome.tsx (deleted 2026-09-13)
+77. ✅ Events Calendar — athena-platform/client/src/components/studios/events/EventsCalendar.tsx (deleted 2026-09-13)
 78. ✅ Financial Wellness Dashboard — [athena-platform/client/src/app/dashboard/finance/page.tsx](athena-platform/client/src/app/dashboard/finance/page.tsx)
 79. ✅ Settings & Preferences — comprehensive settings pages implemented. Evidence: [athena-platform/client/src/app/dashboard/settings/page.tsx](athena-platform/client/src/app/dashboard/settings/page.tsx)
 80. ✅ Onboarding Flow — multi-step onboarding with goals and persona routing. Evidence: [athena-platform/client/src/app/onboarding/page.tsx](athena-platform/client/src/app/onboarding/page.tsx)

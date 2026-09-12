@@ -13,7 +13,7 @@ This document summarizes the GDPR and UK Online Safety Act compliance features i
 
 ## 1. Frontend Components
 
-### GDPR Hooks (`client/src/lib/hooks/useGDPR.ts`)
+### GDPR Hooks (client/src/lib/hooks/useGDPR.ts, removed 2026-09-13: nothing imported it; the context below is what the app uses)
 - `useConsent()` - Manage user consent preferences
 - `useCookieConsent()` - Cookie consent management
 - `useDSAR()` - Data Subject Access Request handling
@@ -33,7 +33,7 @@ This document summarizes the GDPR and UK Online Safety Act compliance features i
 
 ### Compliance Services
 - `client/src/lib/services/compliance.service.ts` - Regional compliance API
-- `client/src/lib/services/gdpr.service.ts` - GDPR-specific API calls
+- client/src/lib/services/gdpr.service.ts - GDPR-specific API calls (removed 2026-09-13: nothing imported it; the privacy centre uses the compliance service and the GDPR context)
 
 ---
 
@@ -209,10 +209,10 @@ model UserSafetySettings {
 ## Files Modified/Created
 
 ### Created
-- `client/src/lib/hooks/useGDPR.ts`
+- client/src/lib/hooks/useGDPR.ts (removed 2026-09-13, never imported)
 - `client/src/lib/contexts/GDPRContext.tsx`
 - `client/src/lib/services/compliance.service.ts`
-- `client/src/lib/services/gdpr.service.ts`
+- client/src/lib/services/gdpr.service.ts (removed 2026-09-13, never imported)
 - `client/src/app/report/page.tsx`
 - `client/src/app/help/transparency-report/page.tsx`
 - `client/src/app/help/community-guidelines/page.tsx`

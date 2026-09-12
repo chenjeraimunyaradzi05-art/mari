@@ -1,73 +1,77 @@
 # Unreferenced UI components
 
-Generated 2026-08-23. **32 of 106** component files under `client/src/components`
-(~19,300 lines) are never imported by any page, component, or hook.
+Generated 2026-08-23; the backlog it listed was deleted on 2026-09-13.
 
-They are excluded from the production bundle by tree-shaking, so this is not a
-performance problem. It matters for two other reasons:
+On 2026-08-23, **32 of 106** component files under `client/src/components`
+(~19,300 lines) were never imported by any page, component or hook. They were
+excluded from the production bundle by tree-shaking, so this was never a
+performance problem. It mattered for two other reasons:
 
-1. **They look finished but are not wired to anything.** Several contain no-op
-   handlers (`onClick={() => {}}`, `onSetDefault={() => {}}`) that would be bugs
-   if the component were mounted. Do not assume a component works because it
-   exists and compiles.
-2. **Grepping the codebase for a feature finds these first.** `EarningsDashboard`,
-   `SessionManagement` and `MentorCalendar` all look like the mentor tooling is
-   built. No route renders any of them.
+1. **They looked finished but were not wired to anything.** Several contained
+   no-op handlers (`onClick={() => {}}`, `onSetDefault={() => {}}`) that would
+   have been bugs if the component were mounted.
+2. **Grepping the codebase for a feature found these first.** `EarningsDashboard`,
+   `SessionManagement` and `MentorCalendar` all looked like the mentor tooling
+   was built. No route rendered any of them.
 
-## How this was determined
+## What happened to them
 
-For each component file, every exported `PascalCase` symbol was searched across
-all other `.ts`/`.tsx` files under `src`, along with a path-based import match on
-the filename. A file is listed only when nothing matched.
+Four unmounted chat drafts (ChatLayout, MessageBubbles, ChatInput,
+MediaAttachmentUpload) and five super-app drafts (CreatorUploadStudio,
+UserProfileHeader, CommentThread, NotificationCenter, FeedInteraction) were
+deleted on 2026-09-04, each replaced by the component that actually renders.
 
-Two known-good sanity checks: the cookie banner that actually renders is
-`components/CookieConsentBanner.tsx` (imported by `app/providers.tsx`) — the two
-files under `components/privacy/` really are unused, and there is a second,
-duplicate `CookieConsentBanner` under `components/gdpr/` that is also unused.
+`EarningsDashboard`, `PageShell`, the two cookie banners under `components/privacy`
+and the second `CookieConsentBanner` under `components/gdpr` were mounted or
+consolidated between then and September and are no longer on this list.
 
-## The list
+Everything else was deleted on 2026-09-13, after two independent reachability
+walks (the project's own `client/scripts/check-dead-interactions.js --reach`
+and a second import graph built from every `from`, `import()`, `require()` and
+`jest.mock()` specifier) agreed that no app entry point reached them,
+directly or transitively:
 
-| Lines | File |
-|------:|------|
-| 1111 | `studios/formation/IncorporationWizard.tsx` |
-| 979 | `studios/educator/CourseBuilderPortal.tsx` |
-| 909 | `studios/mentor/SessionManagement.tsx` |
-| 867 | `studios/events/EventsCalendar.tsx` |
-| 863 | `studios/settings/PrivacyCenterDashboard.tsx` |
-| 854 | `studios/mentor/MentorCalendar.tsx` |
-| 833 | `studios/employer/CandidateProfileViewer.tsx` |
-| 826 | `studios/learner/SkillsAssessmentUI.tsx` |
-| 798 | `studios/learner/StudentClassroomView.tsx` |
-| 784 | `studios/employer/JobsManagerKanban.tsx` |
-| 744 | super-app/CreatorUploadStudio.tsx (deleted 2026-09-04; the reel publisher is the creator-studio page) |
-| 727 | `studios/settings/SafetyCenterAccess.tsx` |
-| 700 | `studios/mentor/EarningsDashboard.tsx` |
-| 649 | `studios/formation/FormationDashboard.tsx` |
-| 648 | `studios/formation/CofounderMatching.tsx` |
-| 630 | `studios/community/CommunityGroupHome.tsx` |
-| 609 | `studios/organization/OrganizationPage.tsx` |
-| 585 | `studios/learner/BadgeWallet.tsx` |
-| 581 | super-app/UserProfileHeader.tsx (deleted 2026-09-04; the profile header lives in components/profile) |
-| 522 | chat/MessageBubbles.tsx (deleted 2026-09-04; bubbles are rendered by chat/ChatWindow) |
-| 514 | super-app/CommentThread.tsx (deleted 2026-09-04; threads are in components/video and components/community) |
-| 510 | chat/ChatInput.tsx (deleted 2026-09-04; the composer lives in chat/ChatWindow) |
-| 466 | chat/MediaAttachmentUpload.tsx (deleted 2026-09-04; attachments upload through chat/ChatWindow) |
-| 412 | `super-app/GlobalSearch.tsx` |
-| 411 | super-app/NotificationCenter.tsx (deleted 2026-09-04; NotificationDropdown is the mounted one) |
-| 404 | super-app/FeedInteraction.tsx (deleted 2026-09-04; the overlay is in VideoPlayer) |
-| 364 | `privacy/GranularCookieBanner.tsx` |
-| 341 | chat/ChatLayout.tsx (deleted 2026-09-04; the layout is app/dashboard/messages/layout.tsx) |
-| 204 | `ai/FloatingAIButton.tsx` |
-| 187 | `layout/PageShell.tsx` |
-| 175 | `ui/share-dialog.tsx` |
-| 127 | `privacy/CookieBanner.tsx` |
+- the seventeen studio drafts: studios/community/CommunityGroupHome,
+  studios/educator/CourseBuilderPortal, studios/employer/CandidateProfileViewer
+  and JobsManagerKanban, studios/events/EventsCalendar,
+  studios/formation/AbnLookup, CofounderMatching, FormationDashboard and
+  IncorporationWizard, studios/learner/BadgeWallet, SkillsAssessmentUI and
+  StudentClassroomView, studios/mentor/MentorCalendar and SessionManagement,
+  studios/organization/OrganizationPage, studios/settings/PrivacyCenterDashboard
+  and SafetyCenterAccess (about 13,000 lines);
+- the super-app drafts GlobalSearch, RichTextEditor (the live editor is
+  `components/ui/RichTextEditor.tsx`) and SuperAppNav, and ai/FloatingAIButton;
+- the superseded dashboard header set DashboardHeader, NotificationDropdown,
+  UserMenuDropdown and Providers, and search/GlobalSearchCommand, which only
+  that header mounted (the dashboard layout renders its own header, search box,
+  notifications and user menu);
+- the provider drafts providers/AppProviders and providers/ThemeProvider (the
+  app's providers live in `app/providers.tsx`);
+- the barrel files components/index.ts, components/chat/index.ts,
+  components/providers/index.ts, lib/hooks/index.ts and lib/stores/index.ts,
+  which nothing imported (pages import the modules directly);
+- the UI primitives only those drafts used: accordion, checkbox, popover,
+  progress, radio-group, scroll-area, share-dialog, sheet, skeletons, slider,
+  switch, textarea, toast, toggle and tooltip;
+- the library files only those drafts used: lib/api-fetch, the hooks under
+  lib/hooks (use-debounce, use-intersection, use-local-storage, use-media-query,
+  use-scroll-position, useCommunity, useCompliance, useGDPR, useMentor; the
+  hooks the app uses are in `lib/hooks.ts`), lib/services/gdpr.service, the
+  formation, jobs and mentor stores, styles/design-tokens, and the two-line
+  app/api/_utils/neon.ts stub.
 
-The four unmounted drafts under chat/ (ChatLayout, MessageBubbles, ChatInput
-and MediaAttachmentUpload, 1,839 lines) were deleted on 2026-09-04. The three
-files that remain there (ConversationList, ChatWindow, ConversationDetails)
-are the messaging UI in use.
+The same pass removed the server modules nothing imported: the bandwidth
+profile service, the ETL pipeline and its storage util and event-stream
+consumer (all excluded from the build since January), the pre-ffmpeg
+video-processing service (replaced by `video-pipeline.service.ts`), the
+payment service that simulated Stripe (Stripe Connect and the payments
+orchestration service are the live paths), the verification service that
+its route never called, the disabled OpenSearch sync middleware, and the
+GDPR worker that no worker process started.
 
-## This is now checked
+They are all in git history: `git log --diff-filter=D --stat` names the commit.
+
+## This is checked
 
 ```bash
 npm --prefix athena-platform/client run check:dead-interactions
@@ -75,36 +79,12 @@ npm --prefix athena-platform/client run check:dead-interactions
 
 `client/scripts/check-dead-interactions.js` computes which files are reachable
 from an `app/` entry point and fails the build on a dead interaction in any of
-them — an empty handler, a log-only handler, `href="#"`, a "coming soon" notice.
-It runs in CI.
+them: an empty handler, a log-only handler, `href="#"`, a "coming soon" notice.
+It runs in CI. `--reach` prints the reachable set; anything under `client/src`
+that is not in it and is not an entry file is a candidate for this list.
 
-The reachable set is currently **clean**: every no-op below sits in a component
-no route renders, which is why they are a backlog rather than a bug. Mounting one
-of these files without wiring its handlers will now fail CI. `--all` lists the
-unmounted findings too.
-
-## Known no-op handlers inside these files
-
-These are the reason the list is worth keeping rather than ignoring:
-
-- `studios/educator/CourseBuilderPortal.tsx` — `onEditLesson`, `onEditModule`
-- `studios/formation/CofounderMatching.tsx` — the "Apply Filters" button. The
-  filter checkboxes already call `onFiltersChange` as they change, so the button
-  only needs to dismiss the sheet (`SheetClose` is exported from `ui/sheet`).
-- `studios/mentor/EarningsDashboard.tsx` — `onSetDefault` for payout methods.
-  The client helper `paymentsApi` exposes only `getMethods`, but the server has
-  more than that: `POST /api/payments/payout`, `/process`, `/convert` and
-  `GET /pricing`, `/currencies`, `/best-provider` all exist and no client code
-  calls them. There is still no *set default method* route, which is what
-  `onSetDefault` specifically needs.
-
-**Updated 2026-08-24.** The API gaps this used to depend on are closed, so
-wiring these up is now mostly a client-side job — see
-[CLIENT-API-SURFACE-GAPS.md](./api/CLIENT-API-SURFACE-GAPS.md) for the current
-contract and the CI check that keeps it honest.
-
-To find server capability that no client helper reaches yet, which is the usual
-blocker for a component like `EarningsDashboard`:
+To find server capability that no client helper reaches yet, which is the
+usual reason a component like the old `EarningsDashboard` sat unmounted:
 
 ```bash
 node athena-platform/server/scripts/check-api-contract.js --unreachable
