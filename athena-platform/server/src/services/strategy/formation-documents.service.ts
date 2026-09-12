@@ -120,7 +120,7 @@ function directorConsents(reg: RegistrationLike, data: Record<string, unknown>, 
     key: 'director-consents',
     title: 'Consent to act as director',
     purpose: 'Each director signs one before the company is registered; ASIC requires the company to hold them.',
-    content: `# ${name}: director consents\n\n${consents}\n---\n*Section 201D of the Corporations Act requires a signed consent from each director before appointment. Keep the originals with the company's records. Every director needs a director ID from abrs.gov.au.*\n`,
+    content: `# ${name}: director consents\n\nPrepared ${fmtDate(now)}.\n\n${consents}\n---\n*Section 201D of the Corporations Act requires a signed consent from each director before appointment. Keep the originals with the company's records. Every director needs a director ID from abrs.gov.au.*\n`,
   };
 }
 
