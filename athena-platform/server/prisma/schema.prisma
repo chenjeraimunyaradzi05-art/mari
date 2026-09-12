@@ -5854,6 +5854,7 @@ model HealthShare {
   label        String?
   bookingId    String?
   days         Int       @default(90)
+  anonymous    Boolean   @default(false)
   expiresAt    DateTime
   revokedAt    DateTime?
   openedCount  Int       @default(0)

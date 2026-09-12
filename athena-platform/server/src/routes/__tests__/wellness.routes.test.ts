@@ -5,7 +5,7 @@ const store: { entries: any[]; settings: any; posts: any[]; habits: any[]; logs:
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    user: { findUnique: jest.fn(async () => ({ timezone: 'Australia/Brisbane' })), update: jest.fn(async () => ({})), count: jest.fn(async () => 1) },
+    user: { findUnique: jest.fn(async () => ({ timezone: 'Australia/Brisbane' })), findMany: jest.fn(async ({ where }: any) => (where?.id?.in ?? []).map((id: string) => ({ id, timezone: 'Australia/Brisbane' }))), update: jest.fn(async () => ({})), count: jest.fn(async () => 1) },
     healthSettings: {
       findUnique: jest.fn(async () => store.settings),
       create: jest.fn(async ({ data }: any) => { store.settings = { id: 's1', cycleLengthHint: null, periodLengthHint: null, hiddenWarnings: [], anonymousByDefault: false, checkInReminderHour: null, shareWithPractitioners: true, ...data }; return store.settings; }),
@@ -17,13 +17,13 @@ jest.mock('../../utils/prisma', () => ({
       findFirst: jest.fn(async ({ where }: any) => store.entries.find((e) => e.kind === where.kind && e.day.getTime() === where.day.getTime()) ?? null),
       create: jest.fn(async ({ data }: any) => { const row = { id: `e${store.entries.length + 1}`, at: new Date(), refId: null, ...data }; store.entries.push(row); return row; }),
       update: jest.fn(async ({ where, data }: any) => { const row = store.entries.find((e) => e.id === where.id); Object.assign(row, data); return row; }),
-      deleteMany: jest.fn(async () => ({ count: 1 })),
+      deleteMany: jest.fn(async ({ where }: any) => { const before = store.entries.length; store.entries = store.entries.filter((e) => !(where?.id?.in ? where.id.in.includes(e.id) : where?.id ? e.id === where.id : true)); return { count: before - store.entries.length }; }),
     },
     medication: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), count: jest.fn(async () => 0), create: jest.fn(), deleteMany: jest.fn(async () => ({ count: 1 })) },
     healthNote: { findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []), deleteMany: jest.fn(async () => ({ count: 1 })) },
     healthShare: {
       findMany: jest.fn(async () => []), create: jest.fn(async ({ data }: any) => ({ id: 'sh1', ...data })), update: jest.fn(async () => ({})), deleteMany: jest.fn(async () => ({ count: 1 })),
-      findUnique: jest.fn(async ({ where }: any) => (where.token === 'live' ? { id: 'sh1', userId: 'member', scope: ['checkins', 'sleep'], days: 30, label: 'Dr K', expiresAt: new Date(Date.now() + 86400000), revokedAt: null, user: { firstName: 'Mei', lastName: 'Lin', timezone: 'Australia/Brisbane' } } : where.token === 'dead' ? { id: 'sh2', userId: 'member', scope: [], days: 30, expiresAt: new Date(Date.now() - 1), revokedAt: null, user: { firstName: 'Mei', lastName: 'Lin', timezone: 'Australia/Brisbane' } } : null)),
+      findUnique: jest.fn(async ({ where }: any) => (where.token === 'live' || where.token === 'anon' ? { id: 'sh1', userId: 'member', scope: ['checkins', 'sleep'], days: 30, label: 'Dr K', anonymous: where.token === 'anon', expiresAt: new Date(Date.now() + 86400000), revokedAt: null, user: { firstName: 'Mei', lastName: 'Lin', timezone: 'Australia/Brisbane' } } : where.token === 'dead' ? { id: 'sh2', userId: 'member', scope: [], days: 30, anonymous: false, expiresAt: new Date(Date.now() - 1), revokedAt: null, user: { firstName: 'Mei', lastName: 'Lin', timezone: 'Australia/Brisbane' } } : null)),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
     mentalLoadEntry: { findMany: jest.fn(async () => []), create: jest.fn(async ({ data }: any) => ({ id: 'ml1', createdAt: new Date(), ...data })), deleteMany: jest.fn(async () => ({ count: 1 })) },
@@ -34,7 +34,7 @@ jest.mock('../../utils/prisma', () => ({
     },
     wellnessPost: {
       groupBy: jest.fn(async () => []), findMany: jest.fn(async () => store.posts), count: jest.fn(async () => store.posts.length),
-      create: jest.fn(async ({ data }: any) => { const row = { id: `p${store.posts.length + 1}`, isHidden: false, hiddenReason: null, isPinned: false, isLocked: false, replyCount: 0, supportCount: 0, lastReplyAt: null, createdAt: new Date(), updatedAt: new Date(), author: { id: data.authorId, firstName: 'Mei', lastName: 'Lin', displayName: null, avatar: null, role: 'USER' }, forum: { slug: 'anxiety', name: 'Anxiety' }, ...data }; store.posts.push(row); return row; }),
+      create: jest.fn(async ({ data }: any) => { const row = { id: `p${store.posts.length + 1}`, isHidden: false, hiddenReason: null, isPinned: false, isLocked: false, replyCount: 0, supportCount: 0, lastReplyAt: null, createdAt: new Date(), updatedAt: new Date(), author: { id: data.authorId, firstName: data.authorId === 'doctor' ? 'Kate' : 'Mei', lastName: 'Lin', displayName: null, avatar: null, role: 'USER', practitionerProfile: data.authorId === 'doctor' ? { isVerified: true, kind: 'GP' } : null }, forum: { slug: 'anxiety', name: 'Anxiety' }, ...data }; store.posts.push(row); return row; }),
       findUnique: jest.fn(async ({ where }: any) => store.posts.find((p) => p.id === where.id) ?? null),
       update: jest.fn(async ({ where, data }: any) => { const row = store.posts.find((p) => p.id === where.id); Object.assign(row, { supportCount: row.supportCount + (data.supportCount?.increment ?? 0) - (data.supportCount?.decrement ?? 0) }); return row; }),
     },
@@ -43,7 +43,7 @@ jest.mock('../../utils/prisma', () => ({
     adminFlag: { create: jest.fn(async () => ({})) },
     contentReport: { create: jest.fn(async ({ data }: any) => ({ id: 'r1', status: 'PENDING', ...data })) },
     notification: { create: jest.fn(async () => ({})), findMany: jest.fn(async () => []) },
-    userAchievement: { findFirst: jest.fn(async () => ({ id: 'already' })), create: jest.fn() },
+    userAchievement: { findFirst: jest.fn(async () => ({ id: 'already' })), findMany: jest.fn(async () => [{ achievementId: 'first_checkin', earnedAt: new Date('2026-09-01T00:00:00Z') }, { achievementId: 'first_post', earnedAt: new Date('2026-09-01T00:00:00Z') }]), create: jest.fn() },
     habit: {
       findMany: jest.fn(async () => store.habits), findFirst: jest.fn(async ({ where }: any) => store.habits.find((h) => h.id === where.id) ?? null), count: jest.fn(async () => store.habits.length),
       create: jest.fn(async ({ data }: any) => { const row = { id: `h${store.habits.length + 1}`, isArchived: false, createdAt: new Date(), cue: null, reminderTime: null, evidenceNote: null, evidenceUrl: null, templateKey: null, ...data }; store.habits.push(row); return row; }),
@@ -62,17 +62,18 @@ jest.mock('../../utils/prisma', () => ({
     wellnessCircleMember: { count: jest.fn(async () => 0), findMany: jest.fn(async () => []), upsert: jest.fn(async ({ create }: any) => { const c = store.circles.find((x) => x.id === create.circleId); c.members.push({ userId: create.userId, leftAt: null }); return create; }), findUnique: jest.fn(async () => null), updateMany: jest.fn(async () => ({ count: 1 })) },
     wellnessChallenge: { findMany: jest.fn(async () => []) },
     healthPractitioner: {
-      findMany: jest.fn(async () => []), count: jest.fn(async () => 0),
+      findMany: jest.fn(async ({ where }: any) => (where?.acceptsBookings === false ? [] : [practitioner])), count: jest.fn(async () => 1),
       findUnique: jest.fn(async ({ where }: any) => (where.id === 'pr1' ? practitioner : where.ownerUserId === 'doctor' ? { ...practitioner, ownerUserId: 'doctor' } : null)),
       findFirst: jest.fn(async ({ where }: any) => (where.OR?.some((o: any) => o.slug === 'dr-k' || o.id === 'pr1') ? practitioner : null)),
       update: jest.fn(async () => practitioner),
     },
     healthBooking: {
-      findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), groupBy: jest.fn(async () => []),
+      findMany: jest.fn(async () => []), groupBy: jest.fn(async () => []),
+      findFirst: jest.fn(async ({ where }: any) => (where.id === 'b-ics' && where.userId === 'member' ? { id: 'b-ics', userId: 'member', scheduledAt: new Date('2026-09-15T23:00:00.000Z'), durationMinutes: 50, mode: 'TELEHEALTH', meetingLink: 'https://meet.example.com/x', practitioner: { name: 'Dr K, women\'s health', kind: 'GP', suburb: null, city: 'Brisbane', state: 'QLD' } } : null)),
       create: jest.fn(async ({ data }: any) => ({ id: 'b1', status: 'REQUESTED', createdAt: new Date(), practitionerNote: null, meetingLink: null, shareId: null, followUpOfId: null, ...data, practitioner: { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'GP', telehealth: true, inPerson: false, ownerUserId: 'doctor' }, review: null })),
       update: jest.fn(async () => ({})),
     },
-    healthReview: { findMany: jest.fn(async () => []) },
+    healthReview: { findMany: jest.fn(async () => [{ rating: 5, isHidden: true }, { rating: 3, isHidden: false }]), findUnique: jest.fn(async ({ where }: any) => (where.id === 'r1' ? { id: 'r1', practitionerId: 'pr1' } : null)), update: jest.fn(async ({ where, data }: any) => ({ id: where.id, isHidden: data.isHidden })) },
     article: { findMany: jest.fn(async () => []) },
     $transaction: jest.fn(async (ops: any[]) => Promise.all(ops)),
   },
@@ -228,5 +229,77 @@ describe('The wellness routes', () => {
     expect(mine.body.data.profile.slug).toBe('dr-k');
     await request(app).patch('/api/wellness/practice/bookings/b1').set(as('doctor')).send({ status: 'CONFIRMED' }).expect(404);
     await request(app).put('/api/wellness/practice').set(as('member')).send({ name: 'x', kind: 'SERVICE', headline: 'nope', bio: 'short' }).expect(400);
+  });
+
+  it('imports a file twice and keeps one copy, because a sourced record replaces its own earlier rows', async () => {
+    const batch = { entries: [{ kind: 'ACTIVITY', day: '2026-09-10', payload: { type: 'other', minutes: 0, steps: 8200, source: 'apple-health' } }, { kind: 'SLEEP', day: '2026-09-10', payload: { hours: 7.2, source: 'apple-health' } }] };
+    const first = await request(app).post('/api/wellness/entries/import').set(as('member')).query({ today: TODAY }).send(batch).expect(201);
+    expect(first.body.data).toMatchObject({ imported: 2, failed: 0, replaced: 0 });
+    const second = await request(app).post('/api/wellness/entries/import').set(as('member')).query({ today: TODAY }).send(batch).expect(201);
+    expect(second.body.data).toMatchObject({ imported: 2, failed: 0, replaced: 1 });
+    expect(store.entries.filter((e) => e.kind === 'ACTIVITY')).toHaveLength(1);
+    expect(store.entries.filter((e) => e.kind === 'SLEEP')).toHaveLength(1);
+    const typed = await request(app).post('/api/wellness/entries').set(as('member')).query({ today: TODAY }).send({ kind: 'ACTIVITY', payload: { type: 'walk', minutes: 0 } }).expect(400);
+    expect(typed.body.message ?? typed.body.error).toMatch(/minute|step/);
+  });
+
+  it('marks a verified practitioner in the forums, and only when she is not anonymous', async () => {
+    await request(app).post('/api/wellness/forums/anxiety/posts').set(as('doctor')).send({ title: 'What a GP actually does with a mental health plan', body: 'A plain explanation of the steps, the rebate and what to ask for at the appointment.' }).expect(201);
+    await request(app).post('/api/wellness/forums/anxiety/posts').set(as('doctor')).send({ title: 'Speaking for myself for once', body: 'Some things I would rather say without the title attached, because I carry them too.', isAnonymous: true }).expect(201);
+    const list = await request(app).get('/api/wellness/forums/anxiety').set(as('member')).expect(200);
+    expect(list.body.data.posts[0].author).toMatchObject({ isPractitioner: true, practitionerKind: 'GP', name: 'Kate Lin' });
+    expect(list.body.data.posts[1].author).toMatchObject({ isPractitioner: false, practitionerKind: null, name: 'A member' });
+    expect(list.body.data.viewer).toEqual({ hiddenWarnings: [], anonymousByDefault: false });
+  });
+
+  it('leaves the name off an anonymous share link', async () => {
+    await request(app).post('/api/wellness/shares').set(as('member')).send({ scope: ['checkins'], anonymous: true }).expect(201);
+    expect(prisma.healthShare.create.mock.calls[0][0].data.anonymous).toBe(true);
+    const anon = await request(app).get('/api/wellness/share/anon').expect(200);
+    expect(anon.body.data.memberName).toBe('A member');
+    expect(anon.body.data.anonymous).toBe(true);
+    const named = await request(app).get('/api/wellness/share/live').expect(200);
+    expect(named.body.data.memberName).toBe('Mei Lin');
+  });
+
+  it('writes an appointment and a circle as calendar files, for the member only', async () => {
+    const ics = await request(app).get('/api/wellness/bookings/b-ics/ics').set(as('member')).expect(200);
+    expect(ics.headers['content-type']).toMatch(/text\/calendar/);
+    expect(ics.text).toContain('DTSTART:20260915T230000Z');
+    expect(ics.text).toContain('DURATION:PT50M');
+    expect(ics.text).toContain('SUMMARY:Dr K\\, women\'s health (GP)');
+    expect(ics.text).toContain('URL:https://meet.example.com/x');
+    await request(app).get('/api/wellness/bookings/b-ics/ics').set(as('other')).expect(404);
+    const circle = await request(app).post('/api/wellness/circles').set(as('member')).query({ today: TODAY }).send({ name: 'Grief, gently', topic: 'grief', description: 'Eight weeks of walking beside each other, one evening a week.', startsOn: TODAY, meetingDay: 3, meetingTime: '19:30' }).expect(201);
+    const series = await request(app).get(`/api/wellness/circles/${circle.body.data.id}/ics`).set(as('member')).expect(200);
+    expect(series.text).toContain('RRULE:FREQ=WEEKLY;COUNT=8');
+    expect(series.text).toContain('DTSTART:20260916T193000');
+    expect(series.text).toContain('SUMMARY:Grief\\, gently (support circle)');
+    await request(app).get('/api/wellness/circles/nope/ics').set(as('member')).expect(404);
+  });
+
+  it('shows the wellness badges with the earned ones first', async () => {
+    const res = await request(app).get('/api/wellness/badges').set(as('member')).expect(200);
+    expect(res.body.data.total).toBe(8);
+    expect(res.body.data.earned).toBe(1);
+    expect(res.body.data.badges[0]).toMatchObject({ id: 'first_checkin', earned: true });
+    expect(res.body.data.badges.some((b: any) => b.id === 'first_post')).toBe(false);
+  });
+
+  it('lets a moderator, and only a moderator, take a review out of the average', async () => {
+    await request(app).patch('/api/wellness/reviews/r1').set(as('member')).send({ isHidden: true }).expect(403);
+    const res = await request(app).patch('/api/wellness/reviews/r1').set(as('mod', 'MODERATOR')).send({ isHidden: true }).expect(200);
+    expect(res.body.data).toEqual({ id: 'r1', isHidden: true });
+    expect(prisma.healthPractitioner.update).toHaveBeenCalledWith(expect.objectContaining({ data: { ratingAvg: 3, ratingCount: 1 } }));
+    await request(app).patch('/api/wellness/reviews/none').set(as('mod', 'MODERATOR')).send({ isHidden: true }).expect(404);
+  });
+
+  it('says when a bookable practitioner is next free, and filters on booking here', async () => {
+    const res = await request(app).get('/api/wellness/practitioners').set(as('member')).query({ acceptsBookings: 'true', language: 'english' }).expect(200);
+    expect(res.body.data.practitioners[0].slug).toBe('dr-k');
+    expect(res.body.data.practitioners[0].nextFree).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const where = prisma.healthPractitioner.findMany.mock.calls[0][0].where;
+    expect(where.acceptsBookings).toBe(true);
+    expect(where.languages.hasSome).toContain('English');
   });
 });

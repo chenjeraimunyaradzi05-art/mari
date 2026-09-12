@@ -9,6 +9,7 @@ import { detectCrisisLanguage, normaliseWarning, presentAuthor } from '../forum.
 import { availableSlots, canCancel, normaliseAvailability, recomputeRating } from '../practitioners.service';
 import { checkInRemindersDue, circleCheckInsDue, currentWeek, dosesDue, goalReviewsDue, habitRemindersDue, refillsDue, visitFollowUps } from '../wellness-reminders.service';
 import { CRISIS_LINES, FORUM_SEEDS, HABIT_TEMPLATES, LIBRARY, SERVICE_SEEDS } from '../wellness-library';
+import { buildBookingIcs, buildCircleIcs, firstMeetingDay, foldLine, icsEscape } from '../wellness-calendar';
 
 describe('days and zones', () => {
   it('does day arithmetic on ISO days and finds the Monday', () => {
@@ -233,6 +234,11 @@ describe('the forums', () => {
     expect(presentAuthor(author, true, 'u1').name).toBe('You, anonymously');
     expect(presentAuthor(author, true, 'u2').id).toBeNull();
     expect(presentAuthor(author, false, 'u2').name).toBe('Mei Lin');
+    expect(presentAuthor(author, false, 'u2').isPractitioner).toBe(false);
+    const gp = { ...author, practitionerProfile: { isVerified: true, kind: 'GP' } };
+    expect(presentAuthor(gp, false, 'u2')).toMatchObject({ isPractitioner: true, practitionerKind: 'GP' });
+    expect(presentAuthor(gp, true, 'u2')).toMatchObject({ isPractitioner: false, practitionerKind: null, name: 'A member' });
+    expect(presentAuthor({ ...author, practitionerProfile: { isVerified: false, kind: 'GP' } }, false, 'u2').isPractitioner).toBe(false);
     expect(normaliseWarning('pregnancy loss')).toBe('Pregnancy loss');
     expect(normaliseWarning('')).toBeNull();
   });
@@ -293,6 +299,33 @@ describe('the reminders', () => {
     expect(checkInRemindersDue([{ userId: 'u1', checkInReminderHour: 8, timezone: 'Australia/Brisbane' }], new Set(['u1:2026-09-15']), now)).toHaveLength(0);
     expect(habitRemindersDue([{ id: 'h1', userId: 'u1', name: 'Walk', reminderTime: '08:45', timezone: 'Australia/Brisbane', isArchived: false }], new Set(), now)).toHaveLength(1);
     expect(habitRemindersDue([{ id: 'h1', userId: 'u1', name: 'Walk', reminderTime: '12:00', timezone: 'Australia/Brisbane', isArchived: false }], new Set(), now)).toHaveLength(0);
+  });
+});
+
+describe('calendar files', () => {
+  it('writes an appointment as one UTC event and a circle as a floating weekly series', () => {
+    const booking = buildBookingIcs({ id: 'b1', scheduledAt: '2026-09-15T23:00:00.000Z', durationMinutes: 50, mode: 'TELEHEALTH', practitionerName: 'Dr K', kindLabel: 'GP', meetingLink: 'https://meet.example.com/x' });
+    expect(booking).toContain('BEGIN:VCALENDAR');
+    expect(booking).toContain('DTSTART:20260915T230000Z');
+    expect(booking).toContain('DURATION:PT50M');
+    expect(booking).toContain('SUMMARY:Dr K (GP)');
+    expect(booking).toContain('LOCATION:https://meet.example.com/x');
+    expect(booking).not.toContain('RRULE');
+    expect(firstMeetingDay('2026-09-11', 3)).toBe('2026-09-16');
+    expect(firstMeetingDay('2026-09-16', 3)).toBe('2026-09-16');
+    const circle = buildCircleIcs({ id: 'c1', name: 'Grief, gently', topic: 'grief', startsOn: '2026-09-11', weeks: 8, meetingDay: 3, meetingTime: '19:30', format: 'VIDEO', meetingLink: 'https://meet.example.com/c' });
+    expect(circle).toContain('DTSTART:20260916T193000');
+    expect(circle).not.toContain('DTSTART:20260916T193000Z');
+    expect(circle).toContain('RRULE:FREQ=WEEKLY;COUNT=8');
+    expect(circle).toContain('SUMMARY:Grief\\, gently (support circle)');
+  });
+
+  it('escapes what the standard asks and folds long lines at 75 octets', () => {
+    expect(icsEscape('a, b; c\\d\nnext')).toBe('a\\, b\\; c\\\\d\\nnext');
+    const long = `DESCRIPTION:${'x'.repeat(200)}`;
+    const folded = foldLine(long);
+    expect(folded.split('\r\n').every((l, i) => Buffer.byteLength(l, 'utf8') <= 75 && (i === 0 || l.startsWith(' ')))).toBe(true);
+    expect(folded.replace(/\r\n /g, '')).toBe(long);
   });
 });
 

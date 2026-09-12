@@ -20,8 +20,9 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import { logger } from '../utils/logger';
-import { awardAchievement } from '../services/engagement.service';
+import { awardAchievement, getUserAchievements } from '../services/engagement.service';
 import { encryptJson, decryptJson } from '../services/wellness/health-crypto';
+import { buildBookingIcs, buildCircleIcs } from '../services/wellness/wellness-calendar';
 import { addDays, dayDate, daysBetween, isoDay, localParts, weekStart } from '../services/wellness/wellness-dates';
 import { predictCycle, type PeriodDayLike } from '../services/wellness/cycle.service';
 import { assessK10, buildDoctorReport, buildInsights, entriesToCsv, type ActivityLog, type CheckInLog, type HydrationLog, type SleepLog, type SymptomLog } from '../services/wellness/health-insights.service';
@@ -49,6 +50,9 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data });
+
+/** Where the web app lives, for links written into files that leave the app. */
+const clientBase = () => (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 const isoDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'a day as YYYY-MM-DD');
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'a time as HH:MM');
@@ -80,14 +84,19 @@ const KINDS: Kind[] = ['CHECKIN', 'SLEEP', 'ACTIVITY', 'NUTRITION', 'HYDRATION',
 const DAILY_KINDS = new Set<Kind>(['CHECKIN', 'SLEEP', 'HYDRATION', 'PERIOD']);
 const TRACKER_FOR: Record<Kind, keyof typeof DEFAULT_TRACKERS | null> = { CHECKIN: 'checkin', SLEEP: 'sleep', ACTIVITY: 'activity', NUTRITION: 'nutrition', HYDRATION: 'hydration', PERIOD: 'cycle', SYMPTOM: null, MEDICATION_DOSE: 'medications' };
 
+/** Where a record came from when it was not typed in: apple-health, google-fit, athena-csv. Imports replace their own earlier rows by it. */
+const source = z.string().max(30).optional();
+
 const PAYLOADS: Record<Kind, z.ZodTypeAny> = {
-  CHECKIN: z.object({ mood: scale, stress: scale, anxiety: scale, energy: scale, note: z.string().max(500).optional(), tags: z.array(z.string().max(30)).max(10).optional() }),
-  SLEEP: z.object({ hours: z.coerce.number().min(0).max(24), quality: scale.optional(), bedtime: hhmm.optional(), wakeTime: hhmm.optional(), note: z.string().max(300).optional() }),
-  ACTIVITY: z.object({ type: z.string().min(1).max(30), minutes: z.coerce.number().int().min(1).max(600), intensity: z.enum(['light', 'moderate', 'vigorous']).optional(), steps: z.coerce.number().int().min(0).max(100000).optional(), note: z.string().max(300).optional() }),
-  NUTRITION: z.object({ meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']), description: z.string().max(200).optional(), calories: z.coerce.number().min(0).max(5000).optional(), protein: z.coerce.number().min(0).max(500).optional(), carbs: z.coerce.number().min(0).max(1000).optional(), fat: z.coerce.number().min(0).max(500).optional(), vegServes: z.coerce.number().min(0).max(20).optional() }),
-  HYDRATION: z.object({ glasses: z.coerce.number().min(0).max(30) }),
-  PERIOD: z.object({ flow: z.enum(['spotting', 'light', 'medium', 'heavy']), pain: z.coerce.number().int().min(0).max(5).optional(), symptoms: z.array(z.string().max(30)).max(12).optional(), note: z.string().max(300).optional() }),
-  SYMPTOM: z.object({ name: z.string().min(1).max(60), severity: scale, note: z.string().max(300).optional(), bookingId: uuid.optional() }),
+  CHECKIN: z.object({ mood: scale, stress: scale, anxiety: scale, energy: scale, note: z.string().max(500).optional(), tags: z.array(z.string().max(30)).max(10).optional(), source }),
+  SLEEP: z.object({ hours: z.coerce.number().min(0).max(24), quality: scale.optional(), bedtime: hhmm.optional(), wakeTime: hhmm.optional(), note: z.string().max(300).optional(), source }),
+  // A day's step count from a phone is movement without a session, so minutes may be zero when steps are given.
+  ACTIVITY: z.object({ type: z.string().min(1).max(30), minutes: z.coerce.number().int().min(0).max(600), intensity: z.enum(['light', 'moderate', 'vigorous']).optional(), steps: z.coerce.number().int().min(0).max(100000).optional(), note: z.string().max(300).optional(), source })
+    .refine((a) => a.minutes >= 1 || (a.steps ?? 0) >= 1, { message: 'minutes: at least a minute, or a step count', path: ['minutes'] }),
+  NUTRITION: z.object({ meal: z.enum(['breakfast', 'lunch', 'dinner', 'snack']), description: z.string().max(200).optional(), calories: z.coerce.number().min(0).max(5000).optional(), protein: z.coerce.number().min(0).max(500).optional(), carbs: z.coerce.number().min(0).max(1000).optional(), fat: z.coerce.number().min(0).max(500).optional(), vegServes: z.coerce.number().min(0).max(20).optional(), source }),
+  HYDRATION: z.object({ glasses: z.coerce.number().min(0).max(30), source }),
+  PERIOD: z.object({ flow: z.enum(['spotting', 'light', 'medium', 'heavy']), pain: z.coerce.number().int().min(0).max(5).optional(), symptoms: z.array(z.string().max(30)).max(12).optional(), note: z.string().max(300).optional(), source }),
+  SYMPTOM: z.object({ name: z.string().min(1).max(60), severity: scale, note: z.string().max(300).optional(), bookingId: uuid.optional(), source }),
   MEDICATION_DOSE: z.object({ medicationId: uuid, time: hhmm, status: z.enum(['taken', 'skipped']) }),
 };
 
@@ -135,7 +144,7 @@ async function checkinStreakAward(userId: string, today: string) {
   return streak;
 }
 
-const AUTHOR_SELECT = { id: true, firstName: true, lastName: true, displayName: true, avatar: true, role: true } as const;
+const AUTHOR_SELECT = { id: true, firstName: true, lastName: true, displayName: true, avatar: true, role: true, practitionerProfile: { select: { isVerified: true, kind: true } } } as const;
 
 // ---------------------------------------------------------------- reference
 
@@ -268,17 +277,45 @@ router.post('/entries', authenticate, async (req: AuthRequest, res: Response, ne
   } catch (error) { next(error); }
 });
 
+/**
+ * A batch from an Apple Health or Google Fit export, or the app's own CSV.
+ * Records that carry a source replace the earlier rows from that same source
+ * on the same day, so a file imported twice leaves one copy, not two. The
+ * daily kinds (a check-in, a night's sleep, water, a period day) replace
+ * themselves regardless.
+ */
 router.post('/entries/import', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { entries } = parse(z.object({ entries: z.array(entrySchema.omit({ add: true })).min(1).max(500) }), req.body);
     const today = await memberDay(req);
     const settings = await getSettings(req.user!.id);
+    const userId = req.user!.id;
+
+    const sourced = new Map<string, { kind: Kind; source: string; days: Set<string> }>();
+    for (const e of entries) {
+      const src = typeof e.payload?.source === 'string' ? e.payload.source : null;
+      if (!src || DAILY_KINDS.has(e.kind) || e.kind === 'MEDICATION_DOSE') continue;
+      const key = `${e.kind}:${src}`;
+      const group = sourced.get(key) ?? { kind: e.kind, source: src, days: new Set<string>() };
+      group.days.add(e.day ?? today);
+      sourced.set(key, group);
+    }
+    let replaced = 0;
+    for (const group of sourced.values()) {
+      const rows = await prisma.healthEntry.findMany({ where: { userId, kind: group.kind, day: { in: Array.from(group.days).map(dayDate) } }, select: { id: true, payload: true } });
+      const stale = rows.filter((r) => decryptJson<{ source?: string }>(r.payload)?.source === group.source).map((r) => r.id);
+      if (stale.length) {
+        const r = await prisma.healthEntry.deleteMany({ where: { id: { in: stale }, userId } });
+        replaced += r.count;
+      }
+    }
+
     let imported = 0;
     const errors: string[] = [];
     for (const e of entries) {
-      try { await saveEntry(req.user!.id, e, today, settings.trackers as Record<string, boolean>); imported += 1; } catch (err) { if (errors.length < 10) errors.push(`${e.kind} ${e.day ?? ''}: ${(err as Error).message}`); }
+      try { await saveEntry(userId, e, today, settings.trackers as Record<string, boolean>); imported += 1; } catch (err) { if (errors.length < 10) errors.push(`${e.kind} ${e.day ?? ''}: ${(err as Error).message}`); }
     }
-    ok(res, { imported, failed: entries.length - imported, errors }, 201);
+    ok(res, { imported, failed: entries.length - imported, replaced, errors }, 201);
   } catch (error) { next(error); }
 });
 
@@ -391,7 +428,7 @@ router.get('/shares', authenticate, async (req: AuthRequest, res: Response, next
   try { ok(res, await prisma.healthShare.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' }, take: 50 })); } catch (error) { next(error); }
 });
 
-const shareSchema = z.object({ scope: z.array(z.enum(SHARE_SCOPES.map((s) => s.key) as [string, ...string[]])).min(1), days: z.coerce.number().int().min(14).max(365).optional(), expiresInDays: z.coerce.number().int().min(1).max(30).optional(), label: z.string().max(80).optional(), bookingId: uuid.optional() });
+const shareSchema = z.object({ scope: z.array(z.enum(SHARE_SCOPES.map((s) => s.key) as [string, ...string[]])).min(1), days: z.coerce.number().int().min(14).max(365).optional(), expiresInDays: z.coerce.number().int().min(1).max(30).optional(), label: z.string().max(80).optional(), bookingId: uuid.optional(), anonymous: z.boolean().optional() });
 
 router.post('/shares', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -402,7 +439,7 @@ router.post('/shares', authenticate, async (req: AuthRequest, res: Response, nex
       const booking = await prisma.healthBooking.findFirst({ where: { id: data.bookingId, userId: req.user!.id } });
       if (!booking) throw new ApiError(404, 'Booking not found');
     }
-    const share = await prisma.healthShare.create({ data: { userId: req.user!.id, token: randomBytes(24).toString('base64url'), scope: data.scope, days: data.days ?? 90, label: data.label, bookingId: data.bookingId, expiresAt: new Date(Date.now() + (data.expiresInDays ?? 7) * 86400000) } });
+    const share = await prisma.healthShare.create({ data: { userId: req.user!.id, token: randomBytes(24).toString('base64url'), scope: data.scope, days: data.days ?? 90, label: data.label, bookingId: data.bookingId, anonymous: data.anonymous ?? false, expiresAt: new Date(Date.now() + (data.expiresInDays ?? 7) * 86400000) } });
     if (data.bookingId) await prisma.healthBooking.update({ where: { id: data.bookingId }, data: { shareId: share.id } });
     ok(res, share, 201);
   } catch (error) { next(error); }
@@ -440,7 +477,8 @@ router.get('/share/:token', async (req: AuthRequest, res: Response, next: NextFu
       mentalLoad = analyseMentalLoad(rows.map((r) => ({ day: isoDay(r.day), category: r.category, task: r.task, minutes: r.minutes, carriedBy: r.carriedBy })), { today, weeks: 4 });
     }
     await prisma.healthShare.update({ where: { id: share.id }, data: { openedCount: { increment: 1 }, lastOpenedAt: new Date() } });
-    ok(res, { memberName: [share.user.firstName, share.user.lastName].filter(Boolean).join(' '), label: share.label, scope: share.scope, expiresAt: share.expiresAt, report, mentalLoad });
+    const memberName = share.anonymous ? 'A member' : [share.user.firstName, share.user.lastName].filter(Boolean).join(' ') || 'A member';
+    ok(res, { memberName, anonymous: share.anonymous, label: share.label, scope: share.scope, expiresAt: share.expiresAt, report, mentalLoad });
   } catch (error) { next(error); }
 });
 
@@ -652,7 +690,8 @@ router.get('/forums/:slug', authenticate, async (req: AuthRequest, res: Response
       prisma.wellnessPost.count({ where }),
     ]);
     const supported = new Set((await prisma.wellnessSupport.findMany({ where: { userId: req.user!.id, postId: { in: posts.map((p) => p.id) } }, select: { postId: true } })).map((s) => s.postId));
-    ok(res, { forum, posts: posts.map((p) => presentPost(p, req.user!.id, false, supported)), page, limit, total, isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6) });
+    const settings = await getSettings(req.user!.id);
+    ok(res, { forum, posts: posts.map((p) => presentPost(p, req.user!.id, false, supported)), page, limit, total, isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6), viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault } });
   } catch (error) { next(error); }
 });
 
@@ -681,10 +720,11 @@ router.get('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Respo
     if (!post || (post.isHidden && !moderator && post.authorId !== req.user!.id)) throw new ApiError(404, 'Post not found');
     const replies = await prisma.wellnessReply.findMany({ where: { postId: post.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }) }, orderBy: { createdAt: 'asc' }, include: { author: { select: AUTHOR_SELECT } } });
     const supported = await prisma.wellnessSupport.findFirst({ where: { postId: post.id, userId: req.user!.id }, select: { id: true } });
+    const settings = await getSettings(req.user!.id);
     ok(res, {
       post: presentPost(post, req.user!.id, true, new Set(supported ? [post.id] : [])),
       replies: replies.map((r) => ({ id: r.id, body: r.body, isHidden: r.isHidden, isFromModerator: r.isFromModerator, createdAt: r.createdAt, author: presentAuthor(r.author, r.isAnonymous, req.user!.id, r.isFromModerator), canEdit: r.authorId === req.user!.id })),
-      isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6), guidelines: post.forum,
+      isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6), guidelines: post.forum, viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault },
     });
   } catch (error) { next(error); }
 });
@@ -860,6 +900,21 @@ router.get('/circles/:id', authenticate, async (req: AuthRequest, res: Response,
   } catch (error) { next(error); }
 });
 
+/** The circle's meetings as a weekly series, for a member's calendar. */
+router.get('/circles/:id/ics', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const circle = await prisma.wellnessCircle.findUnique({ where: { id: req.params.id }, include: { members: { where: { userId: req.user!.id, leftAt: null }, select: { id: true } } } });
+    if (!circle || circle.members.length === 0) throw new ApiError(404, 'Circle not found');
+    const ics = buildCircleIcs({
+      id: circle.id, name: circle.name, topic: circle.topic, startsOn: isoDay(circle.startsOn), weeks: circle.weeks, meetingDay: circle.meetingDay, meetingTime: circle.meetingTime,
+      format: circle.format, meetingLink: circle.meetingLink, location: circle.location, appUrl: `${clientBase()}/dashboard/wellness/circles/${circle.id}`,
+    });
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="athena-circle-${circle.id.slice(0, 8)}.ics"`);
+    res.send(ics);
+  } catch (error) { next(error); }
+});
+
 router.post('/circles/:id/join', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const circle = await prisma.wellnessCircle.findUnique({ where: { id: req.params.id }, include: circleInclude });
@@ -934,21 +989,39 @@ const practitionerCard = (p: { id: string; slug: string; name: string; kind: str
 
 router.get('/practitioners', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const q = parse(z.object({ kind: z.string().optional(), state: z.string().max(3).optional(), city: z.string().max(60).optional(), q: z.string().max(80).optional(), telehealth: z.string().optional(), inPerson: z.string().optional(), bulkBilling: z.string().optional(), modality: z.string().max(40).optional(), specialty: z.string().max(40).optional(), language: z.string().max(40).optional(), page: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(50).optional() }), req.query);
+    const q = parse(z.object({ kind: z.string().optional(), state: z.string().max(3).optional(), city: z.string().max(60).optional(), q: z.string().max(80).optional(), telehealth: z.string().optional(), inPerson: z.string().optional(), bulkBilling: z.string().optional(), privateHealth: z.string().optional(), acceptsBookings: z.string().optional(), modality: z.string().max(40).optional(), specialty: z.string().max(40).optional(), language: z.string().max(40).optional(), page: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(50).optional() }), req.query);
     const page = q.page ?? 1; const limit = q.limit ?? 20;
+    const and: Prisma.HealthPractitionerWhereInput[] = [];
+    if (q.bulkBilling === 'true') and.push({ OR: [{ bulkBilling: true }, { medicareRebate: true }] });
+    if (q.q) and.push({ OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { headline: { contains: q.q, mode: 'insensitive' } }, { bio: { contains: q.q, mode: 'insensitive' } }, { specialties: { has: q.q } }] });
     const where: Prisma.HealthPractitionerWhereInput = {
       isActive: true, isVerified: true,
       ...(q.kind && PRACTITIONER_KINDS.some((k) => k.key === q.kind) ? { kind: q.kind as never } : {}),
       ...(q.state ? { state: q.state.toUpperCase() } : {}), ...(q.city ? { city: { contains: q.city, mode: 'insensitive' } } : {}),
-      ...(q.telehealth === 'true' ? { telehealth: true } : {}), ...(q.inPerson === 'true' ? { inPerson: true } : {}), ...(q.bulkBilling === 'true' ? { OR: [{ bulkBilling: true }, { medicareRebate: true }] } : {}),
-      ...(q.modality ? { modalities: { has: q.modality } } : {}), ...(q.specialty ? { specialties: { has: q.specialty } } : {}), ...(q.language ? { languages: { has: q.language } } : {}),
-      ...(q.q ? { OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { headline: { contains: q.q, mode: 'insensitive' } }, { bio: { contains: q.q, mode: 'insensitive' } }, { specialties: { has: q.q } }] } : {}),
+      ...(q.telehealth === 'true' ? { telehealth: true } : {}), ...(q.inPerson === 'true' ? { inPerson: true } : {}), ...(q.privateHealth === 'true' ? { privateHealth: true } : {}), ...(q.acceptsBookings === 'true' ? { acceptsBookings: true } : {}),
+      ...(q.modality ? { modalities: { has: q.modality } } : {}), ...(q.specialty ? { specialties: { has: q.specialty } } : {}), ...(q.language ? { languages: { hasSome: Array.from(new Set([q.language, q.language.toLowerCase(), q.language.charAt(0).toUpperCase() + q.language.slice(1).toLowerCase()])) } } : {}),
+      ...(and.length ? { AND: and } : {}),
     };
     const [rows, total] = await Promise.all([
       prisma.healthPractitioner.findMany({ where, orderBy: [{ acceptsBookings: 'desc' }, { ratingAvg: 'desc' }, { ratingCount: 'desc' }, { name: 'asc' }], skip: (page - 1) * limit, take: limit }),
       prisma.healthPractitioner.count({ where }),
     ]);
-    ok(res, { practitioners: rows.map(practitionerCard), page, limit, total, kinds: PRACTITIONER_KINDS, modalities: MODALITIES, specialties: SPECIALTIES });
+    // For the ones that take bookings here, the first day with a free slot in the next fortnight.
+    const bookable = rows.filter((r) => r.acceptsBookings);
+    const nextFree = new Map<string, string | null>();
+    if (bookable.length) {
+      const today = await memberDay(req);
+      const ownerIds = bookable.map((r) => r.ownerUserId).filter((x): x is string => Boolean(x));
+      const [owners, booked] = await Promise.all([
+        ownerIds.length ? prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, timezone: true } }) : Promise.resolve([] as Array<{ id: string; timezone: string }>),
+        prisma.healthBooking.findMany({ where: { practitionerId: { in: bookable.map((r) => r.id) }, status: { in: ['REQUESTED', 'CONFIRMED'] }, scheduledAt: { gte: new Date() } }, select: { practitionerId: true, scheduledAt: true, durationMinutes: true } }),
+      ]);
+      for (const r of bookable) {
+        const tz = owners.find((o) => o.id === r.ownerUserId)?.timezone;
+        nextFree.set(r.id, nextAvailableDays({ availability: r.availability as Availability | null, slotMinutes: r.slotMinutes, timezone: tz, booked: booked.filter((b) => b.practitionerId === r.id), from: today, days: 14 })[0]?.day ?? null);
+      }
+    }
+    ok(res, { practitioners: rows.map((r) => ({ ...practitionerCard(r), nextFree: nextFree.get(r.id) ?? null })), page, limit, total, kinds: PRACTITIONER_KINDS, modalities: MODALITIES, specialties: SPECIALTIES });
   } catch (error) { next(error); }
 });
 
@@ -958,13 +1031,14 @@ router.get('/practitioners/:slug', authenticate, async (req: AuthRequest, res: R
     if (!p || (!p.isVerified && p.ownerUserId !== req.user!.id && !isModeratorRole(req.user!.role))) throw new ApiError(404, 'Practitioner not found');
     const today = await memberDay(req);
     const tz = p.ownerUserId ? await memberTimezone(p.ownerUserId) : undefined;
+    const moderator = isModeratorRole(req.user!.role);
     const [reviews, booked] = await Promise.all([
-      prisma.healthReview.findMany({ where: { practitionerId: p.id, isHidden: false }, orderBy: { createdAt: 'desc' }, take: 5, include: { user: { select: { firstName: true } } } }),
+      prisma.healthReview.findMany({ where: { practitionerId: p.id, ...(moderator ? {} : { isHidden: false }) }, orderBy: { createdAt: 'desc' }, take: 5, include: { user: { select: { firstName: true } } } }),
       p.acceptsBookings ? prisma.healthBooking.findMany({ where: { practitionerId: p.id, status: { in: ['REQUESTED', 'CONFIRMED'] }, scheduledAt: { gte: new Date() } }, select: { scheduledAt: true, durationMinutes: true } }) : Promise.resolve([]),
     ]);
     ok(res, {
-      ...practitionerCard(p), bio: p.bio, ahpraNumber: p.ahpraNumber, slotMinutes: p.slotMinutes, availability: p.availability, isOwner: p.ownerUserId === req.user!.id,
-      reviews: reviews.map((r) => ({ id: r.id, rating: r.rating, comment: r.comment, createdAt: r.createdAt, by: r.user.firstName ? `${r.user.firstName.slice(0, 1)}.` : 'A member' })),
+      ...practitionerCard(p), bio: p.bio, ahpraNumber: p.ahpraNumber, slotMinutes: p.slotMinutes, availability: p.availability, isOwner: p.ownerUserId === req.user!.id, canModerate: moderator,
+      reviews: reviews.map((r) => ({ id: r.id, rating: r.rating, comment: r.comment, isHidden: r.isHidden, createdAt: r.createdAt, by: r.user.firstName ? `${r.user.firstName.slice(0, 1)}.` : 'A member' })),
       nextAvailable: p.acceptsBookings ? nextAvailableDays({ availability: p.availability as Availability | null, slotMinutes: p.slotMinutes, timezone: tz, booked, from: today, days: 14 }) : [],
       timezone: tz ?? 'Australia/Brisbane',
     });
@@ -1127,6 +1201,37 @@ router.patch('/bookings/:id', authenticate, async (req: AuthRequest, res: Respon
   } catch (error) { next(error); }
 });
 
+/** The appointment as a calendar file, for the member's own calendar. */
+router.get('/bookings/:id/ics', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, userId: req.user!.id }, include: { practitioner: { select: { name: true, kind: true, suburb: true, city: true, state: true } } } });
+    if (!booking) throw new ApiError(404, 'Booking not found');
+    const p = booking.practitioner;
+    const ics = buildBookingIcs({
+      id: booking.id, scheduledAt: booking.scheduledAt, durationMinutes: booking.durationMinutes, mode: booking.mode, practitionerName: p.name,
+      kindLabel: PRACTITIONER_KINDS.find((k) => k.key === p.kind)?.label, meetingLink: booking.meetingLink, location: [p.suburb, p.city, p.state].filter(Boolean).join(', ') || null,
+      appUrl: `${clientBase()}/dashboard/wellness/bookings?visit=${booking.id}`,
+    });
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="athena-appointment-${isoDay(booking.scheduledAt)}.ics"`);
+    res.send(ics);
+  } catch (error) { next(error); }
+});
+
+/** A moderator can take a review out of the average without deleting the visit it came from. */
+router.patch('/reviews/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!isModeratorRole(req.user!.role)) throw new ApiError(403, 'Only a moderator can hide a review');
+    const { isHidden } = parse(z.object({ isHidden: z.boolean() }), req.body);
+    const existing = await prisma.healthReview.findUnique({ where: { id: req.params.id }, select: { id: true, practitionerId: true } });
+    if (!existing) throw new ApiError(404, 'Review not found');
+    const review = await prisma.healthReview.update({ where: { id: existing.id }, data: { isHidden } });
+    const all = await prisma.healthReview.findMany({ where: { practitionerId: existing.practitionerId }, select: { rating: true, isHidden: true } });
+    await prisma.healthPractitioner.update({ where: { id: existing.practitionerId }, data: recomputeRating(all) });
+    ok(res, { id: review.id, isHidden: review.isHidden });
+  } catch (error) { next(error); }
+});
+
 router.post('/bookings/:id/review', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
@@ -1155,6 +1260,18 @@ router.post('/bookings/:id/follow-up', authenticate, async (req: AuthRequest, re
     const booking = await prisma.healthBooking.create({ data: { practitionerId: p.id, userId: req.user!.id, scheduledAt: start, durationMinutes: p.slotMinutes, mode: data.mode ?? original.mode, reason: encryptJson({ text: 'Follow-up' }), followUpOfId: original.id }, include: bookingInclude });
     if (p.ownerUserId) await prisma.notification.create({ data: { userId: p.ownerUserId, type: 'SYSTEM', title: 'A follow-up booking request', message: 'Confirm it from your practice page.', link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING', bookingId: booking.id } } }).catch(() => null);
     ok(res, presentBooking(booking), 201);
+  } catch (error) { next(error); }
+});
+
+// ------------------------------------------------------------------- badges
+
+/** The wellness badges: the streaks, the circle, the month of a goal met. Earned ones first. */
+router.get('/badges', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const all = await getUserAchievements(req.user!.id);
+    const badges = all.achievements.filter((a) => a.category === 'wellness').map((a) => ({ id: a.id, name: a.name, description: a.description, icon: a.icon, xp: a.xp, earned: a.earned, earnedAt: a.earnedAt ?? null }))
+      .sort((a, b) => Number(b.earned) - Number(a.earned));
+    ok(res, { badges, earned: badges.filter((b) => b.earned).length, total: badges.length });
   } catch (error) { next(error); }
 });
 

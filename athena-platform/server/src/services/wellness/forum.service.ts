@@ -5,7 +5,7 @@
  * a reader can choose to keep folded.
  */
 
-import { CONTENT_WARNINGS } from './wellness-library';
+import { CONTENT_WARNINGS, PRACTITIONER_KINDS } from './wellness-library';
 
 export interface AuthorLike {
   id: string;
@@ -14,6 +14,8 @@ export interface AuthorLike {
   displayName?: string | null;
   avatar?: string | null;
   role?: string | null;
+  /** A verified practitioner profile, when the author has one. */
+  practitionerProfile?: { isVerified: boolean; kind: string } | null;
 }
 
 export interface PublicAuthor {
@@ -23,16 +25,25 @@ export interface PublicAuthor {
   isAnonymous: boolean;
   isYou: boolean;
   isModerator: boolean;
+  /** A registered practitioner whose profile the platform has verified. Never shown on an anonymous post. */
+  isPractitioner: boolean;
+  practitionerKind: string | null;
 }
 
-/** An anonymous author is "A member" to everyone, and "You (anonymous)" to herself. */
+/**
+ * An anonymous author is "A member" to everyone, and "You (anonymous)" to
+ * herself. A verified practitioner is marked as one, so a reader can tell
+ * a professional's reply from a peer's without anyone being diagnosed.
+ */
 export function presentAuthor(author: AuthorLike, isAnonymous: boolean, viewerId: string | null, isModerator = false): PublicAuthor {
   const isYou = viewerId !== null && author.id === viewerId;
   if (isAnonymous) {
-    return { id: null, name: isYou ? 'You, anonymously' : 'A member', avatar: null, isAnonymous: true, isYou, isModerator: false };
+    return { id: null, name: isYou ? 'You, anonymously' : 'A member', avatar: null, isAnonymous: true, isYou, isModerator: false, isPractitioner: false, practitionerKind: null };
   }
   const name = author.displayName || [author.firstName, author.lastName].filter(Boolean).join(' ') || 'A member';
-  return { id: author.id, name, avatar: author.avatar ?? null, isAnonymous: false, isYou, isModerator };
+  const profile = author.practitionerProfile && author.practitionerProfile.isVerified && author.practitionerProfile.kind !== 'SERVICE' ? author.practitionerProfile : null;
+  const kindLabel = profile ? PRACTITIONER_KINDS.find((k) => k.key === profile.kind)?.label ?? profile.kind : null;
+  return { id: author.id, name, avatar: author.avatar ?? null, isAnonymous: false, isYou, isModerator, isPractitioner: Boolean(profile), practitionerKind: kindLabel };
 }
 
 const CRISIS_PATTERNS: RegExp[] = [

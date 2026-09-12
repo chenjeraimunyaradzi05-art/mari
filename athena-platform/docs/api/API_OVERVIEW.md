@@ -55,7 +55,7 @@ All protected endpoints require: `Authorization: Bearer <accessToken>`
 | Housing | `/api/housing/*` | Bearer | Safe housing listings |
 | Finance | `/api/finance/*` | Bearer | Savings, insurance, superannuation |
 | Strategy | `/api/strategy/*` | Mixed | Housing, business, tax and investment calculators (open); saved plans, holdings, net worth and grant matching (Bearer) |
-| Wellness | `/api/wellness/*` | Mixed | Health trackers (encrypted), cycle, insights, doctor report and share links, medications, mental load, forums, support circles, practitioner directory with bookings and verified reviews, habits, challenges and goals (Bearer); reference, library, K10 and share links by token (open) |
+| Wellness | `/api/wellness/*` | Mixed | Health trackers (encrypted) with imports from Apple Health, Google Fit or CSV, cycle, insights, doctor report and share links (optionally anonymous), medications, mental load, forums (verified practitioners marked), support circles, practitioner directory with bookings, calendar files, verified and moderated reviews, habits, challenges, goals and badges (Bearer); reference, library, K10 and share links by token (open) |
 | Impact | `/api/impact/*` | Bearer | Social impact metrics, DV services |
 | Community Support | `/api/community-support/*` | Bearer | Support programs, indigenous communities |
 | GDPR | `/api/gdpr/*` | Bearer | DSAR, consents, cookie preferences |
