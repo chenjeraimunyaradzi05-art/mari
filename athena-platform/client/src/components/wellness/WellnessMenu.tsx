@@ -15,7 +15,7 @@
  * this at 2am will see them first.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -28,12 +28,18 @@ const GRADIENT = 'bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%
 
 const hoverCapable = () => typeof window !== 'undefined' && window.matchMedia?.('(hover: hover)').matches;
 
-export function useWellnessMenu() {
+/**
+ * The state of one area menu in the header. A second area (cars) shares the
+ * mechanics, so the prefix names the panel and the header can hand every
+ * menu the same root element for the outside-click check.
+ */
+export function useAreaMenu(prefix: string, sharedRoot?: MutableRefObject<HTMLElement | null>) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const reactId = useId();
-  const panelId = `wellness-menu-${reactId.replace(/[^a-zA-Z0-9-]/g, '')}`;
-  const rootRef = useRef<HTMLElement | null>(null);
+  const panelId = `${prefix}-${reactId.replace(/[^a-zA-Z0-9-]/g, '')}`;
+  const ownRoot = useRef<HTMLElement | null>(null);
+  const rootRef = sharedRoot ?? ownRoot;
   const timers = useRef<{ open?: number; close?: number }>({});
   const hoverOpenedAt = useRef(0);
 
@@ -82,7 +88,13 @@ export function useWellnessMenu() {
   return { open, setOpen, toggle, panelId, rootRef, hoverProps };
 }
 
-export type WellnessMenuState = ReturnType<typeof useWellnessMenu>;
+export type AreaMenuState = ReturnType<typeof useAreaMenu>;
+
+export function useWellnessMenu(sharedRoot?: MutableRefObject<HTMLElement | null>) {
+  return useAreaMenu('wellness-menu', sharedRoot);
+}
+
+export type WellnessMenuState = AreaMenuState;
 
 export function WellnessTrigger({ menu, active, className }: { menu: WellnessMenuState; active?: boolean; className?: string }) {
   return (

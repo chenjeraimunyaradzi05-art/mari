@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Banknote, Bot, Briefcase, Building2, Compass, GraduationCap, Heart, LayoutGrid, Lock, Search, ShieldCheck, Users, X } from 'lucide-react';
+import { ArrowRight, Banknote, Bot, Briefcase, Building2, Car, Compass, GraduationCap, Heart, LayoutGrid, Lock, Search, ShieldCheck, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Rail } from './RailShell';
 
@@ -175,6 +175,27 @@ const GROUPS: Group[] = [
       { href: '/dashboard/wellness/library', label: 'The library', blurb: 'Sleep, eating, movement, stress and hormones, from Australian sources', gated: true },
       { href: '/dashboard/wellness/import', label: 'Bring your data', blurb: 'Apple Health, Google Fit, or a CSV you exported before', gated: true },
       { href: '/dashboard/wellness/settings', label: 'Privacy', blurb: 'Every tracker can be switched off; everything can be deleted', gated: true },
+    ],
+  },
+  {
+    id: 'cars',
+    title: 'Cars',
+    intro: 'Safety before the badge, running costs before the sticker, and a used car bought with the money held.',
+    icon: Car,
+    tint: 'from-amber-400 to-rose-500',
+    items: [
+      { href: '/cars', label: 'Cars', blurb: 'The map of it, and what a loan or your car is worth before you sign up' },
+      { href: '/cars/new', label: 'New cars', blurb: 'ANCAP dated, running costs worked out, reviews from women' },
+      { href: '/cars/preloved', label: 'Pre-loved', blurb: 'Used cars with a price guide, history checks and buyer protection' },
+      { href: '/cars/mechanics', label: 'Find a mechanic', blurb: 'Women-owned workshops, prices shown, rated by real jobs' },
+      { href: '/cars/finance', label: 'Car finance', blurb: 'Repayments, loans compared, and what you can carry' },
+      { href: '/cars/insurance', label: 'Car insurance', blurb: 'A fair premium and the claims process' },
+      { href: '/cars/value', label: 'What is it worth', blurb: 'Your car\x27s value and the changeover to the next one' },
+      { href: '/cars/safety', label: 'Safety, explained', blurb: 'What every acronym on the spec sheet does for you' },
+      { href: '/cars/dealerships', label: 'Dealerships', blurb: 'Test drives and trade-in quotes' },
+      { href: '/dashboard/cars', label: 'Your cars', blurb: 'The garage, reminders, purchases, bookings and pre-approval', gated: true },
+      { href: '/dashboard/cars/garage', label: 'Your garage', blurb: 'Service history, warranty, rego and insurance reminders', gated: true },
+      { href: '/dashboard/cars/sell', label: 'Sell a car', blurb: 'List it with a price guide and buyer protection', gated: true },
     ],
   },
   {

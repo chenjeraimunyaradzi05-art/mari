@@ -80,6 +80,19 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     ],
   },
   {
+    title: 'Cars',
+    links: [
+      { href: '/cars', label: 'Cars' },
+      { href: '/cars/new', label: 'New cars' },
+      { href: '/cars/preloved', label: 'Pre-loved' },
+      { href: '/cars/mechanics', label: 'Find a mechanic' },
+      { href: '/cars/finance', label: 'Car finance' },
+      { href: '/cars/insurance', label: 'Car insurance' },
+      { href: '/cars/value', label: 'What is it worth' },
+      { href: '/cars/safety', label: 'Safety, explained' },
+    ],
+  },
+  {
     title: 'Safety and privacy',
     links: [
       { href: '/safety-center', label: 'Safety centre' },

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy, CreditCard } from 'lucide-react';
+import { Calculator, Receipt, Package, Banknote, ArrowRight, PiggyBank, Shield, TrendingUp, HeartPulse, Landmark, Home, LifeBuoy, CreditCard, Car } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { RoadmapStrip } from '@/components/strategy/RoadmapStrip';
 
@@ -60,6 +60,13 @@ const tiles = [
     description: 'Cycle, mood, sleep, habits, the mental load, and care that takes you seriously.',
     href: '/dashboard/wellness',
     icon: HeartPulse,
+    highlight: true,
+  },
+  {
+    title: 'Car finance',
+    description: 'Repayments, loans compared, what you can carry, and a pre-approval to walk in with.',
+    href: '/dashboard/cars/finance',
+    icon: Car,
     highlight: true,
   },
   {

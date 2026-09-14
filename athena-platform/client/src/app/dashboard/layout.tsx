@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   Home,
   HeartPulse,
+  Car,
   Briefcase,
   Users,
   BookOpen,
@@ -47,6 +48,7 @@ const modeNavigation: Record<AppMode, NavigationItem[]> = {
     { name: 'Community', href: '/dashboard/community', icon: Users },
     { name: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
     { name: 'Wellness', href: '/dashboard/wellness', icon: HeartPulse },
+    { name: 'Cars', href: '/dashboard/cars', icon: Car },
     { name: 'Saved', href: '/dashboard/saved', icon: Bookmark },
     { name: 'Creator Studio', href: '/dashboard/creator-studio', icon: PenSquare },
     { name: 'Go Live', href: '/dashboard/live', icon: Radio },
@@ -57,12 +59,14 @@ const modeNavigation: Record<AppMode, NavigationItem[]> = {
     { name: 'Mentors', href: '/dashboard/mentors', icon: GraduationCap },
     { name: 'Companies', href: '/dashboard/companies', icon: Building2 },
     { name: 'Wellness', href: '/dashboard/wellness', icon: HeartPulse },
+    { name: 'Cars', href: '/dashboard/cars', icon: Car },
     { name: 'AI Tools', href: '/dashboard/ai', icon: Sparkles },
   ],
   learning: [
     { name: 'Learn', href: '/dashboard/learn', icon: BookOpen },
     { name: 'Courses', href: '/dashboard/learn', icon: BookOpen },
     { name: 'Wellness', href: '/dashboard/wellness', icon: HeartPulse },
+    { name: 'Cars', href: '/dashboard/cars', icon: Car },
     { name: 'Community', href: '/dashboard/community', icon: Users },
   ],
 };

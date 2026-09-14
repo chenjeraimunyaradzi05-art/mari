@@ -6,7 +6,7 @@
  * dashboard. Below the large breakpoint the links fold into a menu.
  */
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -17,9 +17,11 @@ import { useAuth } from '@/lib/hooks';
 import ThemeSwitch from '@/components/theme/ThemeSwitch';
 import { WellnessMenuList, WellnessPanel, WellnessTrigger, useWellnessMenu } from '@/components/wellness/WellnessMenu';
 import { isWellnessPath } from '@/lib/wellness-nav';
+import { CarsMenuList, CarsPanel, CarsTrigger, useCarsMenu } from '@/components/automotive/CarsMenu';
+import { isCarsPath } from '@/lib/automotive-nav';
 import { HOME_NAV } from './nav';
 
-/** The wellness superlink sits after this item in the header; the phone's bottom bar is untouched. */
+/** The wellness superlink sits after this item in the header, and the cars superlink after it; the phone's bottom bar is untouched. */
 const WELLNESS_AFTER = '/mentors';
 
 /**
@@ -43,8 +45,16 @@ export function HomeHeader() {
   const { isAuthenticated, user } = useAuth();
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
-  const wellness = useWellnessMenu();
+  // Both area menus watch the same header for a click outside, and only one of them is open at a time.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const wellness = useWellnessMenu(rootRef);
+  const cars = useCarsMenu(rootRef);
   const wellnessActive = isWellnessPath(pathname);
+  const carsActive = isCarsPath(pathname);
+  const { open: wellnessOpen, setOpen: setWellnessOpen } = wellness;
+  const { open: carsOpen, setOpen: setCarsOpen } = cars;
+  useEffect(() => { if (wellnessOpen) setCarsOpen(false); }, [wellnessOpen, setCarsOpen]);
+  useEffect(() => { if (carsOpen) setWellnessOpen(false); }, [carsOpen, setWellnessOpen]);
 
   // The menu closes on navigation, and never survives a resize to desktop.
   useEffect(() => setOpen(false), [pathname]);
@@ -84,7 +94,7 @@ export function HomeHeader() {
   );
 
   return (
-    <header ref={wellness.rootRef} className="sticky top-0 z-40 border-b border-rose-100/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
+    <header ref={rootRef} className="sticky top-0 z-40 border-b border-rose-100/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       {/* A hairline of the brand gradient along the top edge. */}
       <div aria-hidden className="h-[2px] w-full bg-[linear-gradient(90deg,#f43f5e_0%,#a855f7_50%,#f59e0b_100%)] opacity-80" />
       <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-3 xl:px-5">
@@ -142,6 +152,26 @@ export function HomeHeader() {
                       )}
                     </li>
                   )}
+                  {item.href === WELLNESS_AFTER && (
+                    <li className="relative" {...cars.hoverProps}>
+                      <CarsTrigger
+                        menu={cars}
+                        active={carsActive}
+                        className={cn(
+                          'relative z-10 px-2.5 py-1.5 text-[13px] font-medium xl:px-3 xl:text-sm',
+                          carsActive ? 'text-white' : cars.open ? 'text-rose-600 dark:text-rose-300' : 'text-slate-600 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white'
+                        )}
+                      />
+                      {carsActive && (
+                        <motion.span
+                          layoutId={reduce ? undefined : 'home-nav-active'}
+                          aria-hidden
+                          className="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#f43f5e_0%,#a855f7_55%,#f59e0b_100%)] shadow-[0_6px_18px_-8px_rgba(168,85,247,0.8)]"
+                          transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                        />
+                      )}
+                    </li>
+                  )}
                 </Fragment>
               );
             })}
@@ -164,8 +194,9 @@ export function HomeHeader() {
         </div>
       </div>
 
-      {/* The wellness menu, full width under the bar. Desktop only; the phone menu lists it instead. */}
+      {/* The area menus, full width under the bar. Desktop only; the phone menu lists them instead. */}
       <WellnessPanel menu={wellness} className="hidden lg:block" />
+      <CarsPanel menu={cars} className="hidden lg:block" />
 
       <AnimatePresence>
         {open && (
@@ -201,6 +232,10 @@ export function HomeHeader() {
               <div className="mt-3 border-t border-rose-100/60 pt-3 dark:border-white/10">
                 <p className="font-display text-sm italic text-rose-700 dark:text-rose-300">Wellness</p>
                 <div className="mt-2"><WellnessMenuList onNavigate={() => setOpen(false)} /></div>
+              </div>
+              <div className="mt-3 border-t border-rose-100/60 pt-3 dark:border-white/10">
+                <p className="font-display text-sm italic text-rose-700 dark:text-rose-300">Cars</p>
+                <div className="mt-2"><CarsMenuList onNavigate={() => setOpen(false)} /></div>
               </div>
               <div className="mt-3 flex items-center gap-2 border-t border-rose-100/60 pt-3 dark:border-white/10">{authControls}</div>
             </nav>
