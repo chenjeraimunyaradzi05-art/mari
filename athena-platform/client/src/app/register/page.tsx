@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { safeRedirect } from '@/lib/safe-redirect';
 import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -120,8 +121,8 @@ function RegisterContent() {
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated) {
-      const redirect = searchParams?.get('redirect');
-      if (redirect && redirect.startsWith('/')) {
+      const redirect = safeRedirect(searchParams?.get('redirect'));
+      if (redirect) {
         router.replace(redirect);
       } else {
         router.replace('/dashboard/persona');
@@ -164,8 +165,8 @@ function RegisterContent() {
       },
       {
         onSuccess: () => {
-          const redirect = searchParams?.get('redirect');
-          if (redirect && redirect.startsWith('/')) {
+          const redirect = safeRedirect(searchParams?.get('redirect'));
+          if (redirect) {
             router.push(redirect);
             return;
           }
@@ -470,8 +471,8 @@ function RegisterContent() {
                 inviteCode={inviteCodeValue?.trim() || undefined}
                 onError={(message) => setServerError(message)}
                 onSuccess={() => {
-                  const redirect = searchParams?.get('redirect');
-                  if (redirect && redirect.startsWith('/')) {
+                  const redirect = safeRedirect(searchParams?.get('redirect'));
+                  if (redirect) {
                     router.push(redirect);
                     return;
                   }
@@ -486,8 +487,8 @@ function RegisterContent() {
                   inviteCode={inviteCodeValue?.trim() || undefined}
                   onError={(message) => setServerError(message)}
                   onSuccess={() => {
-                    const redirect = searchParams?.get('redirect');
-                    if (redirect && redirect.startsWith('/')) {
+                    const redirect = safeRedirect(searchParams?.get('redirect'));
+                    if (redirect) {
                       router.push(redirect);
                       return;
                     }
