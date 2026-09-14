@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { ForbiddenError, UnauthorizedError } from './errorHandler';
 import { verifyToken } from '../utils/jwt';
 import { sessionService } from '../services/session.service';
+import { staffTwoFactorRefusal } from './roles';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -11,6 +12,8 @@ export interface AuthRequest extends Request {
     email: string;
     role: string;
     persona: string;
+    /** Whether a second factor is enrolled; the role middleware insists on it for staff. */
+    twoFactorEnabled?: boolean;
   };
 }
 
@@ -44,6 +47,7 @@ async function resolveAuthenticatedUser(token: string) {
       role: true,
       persona: true,
       isSuspended: true,
+      twoFactorEnabled: true,
     },
   });
 
@@ -68,7 +72,7 @@ export async function authenticateSocketToken(token: string): Promise<Authentica
   if (user.isSuspended) {
     throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
   }
-  return { id: user.id, email: user.email, role: user.role, persona: user.persona };
+  return { id: user.id, email: user.email, role: user.role, persona: user.persona, twoFactorEnabled: user.twoFactorEnabled };
 }
 
 export const authenticate = async (
@@ -100,6 +104,7 @@ export const authenticate = async (
       email: user.email,
       role: user.role,
       persona: user.persona,
+      twoFactorEnabled: user.twoFactorEnabled,
     };
 
     next();
@@ -136,6 +141,7 @@ export const optionalAuth = async (
             email: user.email,
             role: user.role,
             persona: user.persona,
+            twoFactorEnabled: user.twoFactorEnabled,
           };
         }
       }
@@ -149,13 +155,19 @@ export const optionalAuth = async (
 };
 
 export const requireRole = (...roles: string[]) => {
-  return (req: AuthRequest, _res: Response, next: NextFunction) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return next(UnauthorizedError('Authentication required'));
     }
 
     if (!roles.includes(req.user.role)) {
       return next(ForbiddenError('Insufficient permissions'));
+    }
+
+    // A staff role is only as safe as its second factor.
+    const refusal = staffTwoFactorRefusal(req.user);
+    if (refusal) {
+      return res.status(403).json(refusal);
     }
 
     next();

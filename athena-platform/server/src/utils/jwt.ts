@@ -14,7 +14,11 @@ export function getJwtSecretOrThrow(): string {
 
   return 'dev-only-secret-not-for-production';
 }
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+// An access token is a bearer token: whoever holds it is the member until it
+// expires, and nothing but the session check stands in the way. An hour keeps
+// a token copied from a log or a proxy short-lived; the clients refresh on
+// the first 401 without the member noticing.
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
 
 interface TokenPayload {

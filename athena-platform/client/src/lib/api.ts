@@ -50,6 +50,15 @@ api.interceptors.response.use(
     const requestUrl = String(originalRequest?.url || '');
     const shouldSkipRefresh = authPathsToSkipRefresh.some((path) => requestUrl.includes(path));
 
+    // A staff account without a second factor is sent to enrol one; the
+    // server refuses every elevated route until it has.
+    if (error.response?.status === 403 && error.response?.data?.code === 'TWO_FACTOR_REQUIRED' && typeof window !== 'undefined') {
+      const setup = '/dashboard/settings/security';
+      if (!window.location.pathname.startsWith(setup)) {
+        window.location.href = `${setup}?required=staff`;
+      }
+    }
+
     // If 401 and we haven't already tried to refresh
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !shouldSkipRefresh) {
       originalRequest._retry = true;
