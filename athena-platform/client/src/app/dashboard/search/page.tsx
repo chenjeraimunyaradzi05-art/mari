@@ -15,6 +15,7 @@ import {
 import { cn, formatSalary, formatRelativeTime, formatCurrency } from '@/lib/utils';
 import { Avatar, Badge } from '@/components/ui';
 import { searchApi } from '@/lib/api';
+import { safeHref } from '@/lib/safe-href';
 
 type SearchCategory = 'all' | 'jobs' | 'people' | 'mentors' | 'videos' | 'courses' | 'companies' | 'posts';
 type ApiSearchType = 'all' | 'users' | 'posts' | 'jobs' | 'courses' | 'videos' | 'mentors';
@@ -409,7 +410,7 @@ function SearchContent() {
             return (
               <Link
                 key={result.id}
-                href={result.url}
+                href={safeHref(result.url) ?? '#'}
                 className="card-hover block"
               >
                 <div className="flex items-start space-x-4">

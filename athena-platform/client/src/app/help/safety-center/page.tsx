@@ -10,6 +10,7 @@
 import { Shield, AlertTriangle, Lock, Eye, Phone, Heart, Users, BookOpen, ExternalLink, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { Metadata } from 'next';
+import { safeHref } from '@/lib/safe-href';
 
 export const metadata: Metadata = {
   title: 'Safety Center | ATHENA',
@@ -300,7 +301,7 @@ export default function SafetyCenterPage() {
                       </a>
                     )}
                     <a
-                      href={resource.website}
+                      href={safeHref(resource.website)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-sm"

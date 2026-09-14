@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Heart, Loader2, Users, ExternalLink, BookOpen } from 'lucide-react';
 import { communitySupportApi } from '@/lib/api';
+import { safeHref } from '@/lib/safe-href';
 
 type IndigenousCommunity = {
   id: string;
@@ -225,7 +226,7 @@ export default function IndigenousPage() {
 
                     {resource.url && (
                       <a
-                        href={resource.url}
+                        href={safeHref(resource.url)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-auto inline-flex items-center gap-1 text-sm text-amber-600 hover:underline"

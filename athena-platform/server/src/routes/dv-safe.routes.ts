@@ -7,6 +7,7 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
+import { httpUrl } from '../utils/http-url';
 import dvSafeService from '../services/dv-safe.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
@@ -44,7 +45,7 @@ const updateSettingsSchema = z.object({
   hideFromSearch: z.boolean().optional(),
   allowMessages: z.boolean().optional(),
   safeExitEnabled: z.boolean().optional(),
-  safeExitUrl: z.string().url().max(2048).optional(),
+  safeExitUrl: httpUrl(2048).optional(),
   panicButtonEnabled: z.boolean().optional(),
   activityLogEnabled: z.boolean().optional(),
   disguisedAppIcon: z.boolean().optional(),

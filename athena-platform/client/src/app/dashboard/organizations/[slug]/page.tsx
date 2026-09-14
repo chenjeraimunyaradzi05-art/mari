@@ -19,6 +19,7 @@ import { organizationApi, jobApi } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
 import { Loading, CardSkeleton } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
+import { safeHref } from '@/lib/safe-href';
 
 export default function OrganizationDetailPage() {
   const params = useParams();
@@ -163,7 +164,7 @@ export default function OrganizationDetailPage() {
               </div>
               {org.website && (
                 <a
-                  href={org.website}
+                  href={safeHref(org.website)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-outline px-4 py-2 flex items-center space-x-2"
@@ -346,7 +347,7 @@ export default function OrganizationDetailPage() {
                 Connect
               </h2>
               <a
-                href={org.website}
+                href={safeHref(org.website)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center text-slate-600 dark:text-slate-300 hover:text-primary-600 transition"

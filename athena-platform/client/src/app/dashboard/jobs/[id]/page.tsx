@@ -37,6 +37,7 @@ import {
 import { Loading } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
 import { sanitizeHtml } from '@/lib/utils/sanitize';
+import { safeHref } from '@/lib/safe-href';
 
 type JobLike = Record<string, any>;
 
@@ -404,7 +405,7 @@ export default function JobDetailPage() {
               )}
               {job.organization?.website && (
                 <a
-                  href={job.organization.website}
+                  href={safeHref(job.organization.website)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center text-primary-600 hover:underline"

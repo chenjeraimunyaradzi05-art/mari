@@ -16,6 +16,7 @@ import { wellnessApi, wellnessError, type CrisisLine } from '@/lib/wellness-api'
 import { CrisisStrip, HealthDisclaimer, useLoad } from '@/components/wellness/WellnessUi';
 import { WELLNESS_GROUPS, WELLNESS_TONES } from '@/lib/wellness-nav';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Reference = { crisisLines: CrisisLine[]; k10: { questions: Array<{ id: number; text: string }>; options: Array<{ value: number; label: string }> } };
 type Library = { topics: Array<{ key: string; name: string; blurb: string; items: Array<{ key: string; title: string; summary: string; source: string; url: string; kind: string }> }> };
@@ -134,7 +135,7 @@ export default function WellnessPage() {
               <ul className="mt-3 space-y-2">
                 {t.items.slice(0, 3).map((i) => (
                   <li key={i.key}>
-                    <a href={i.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-slate-800 hover:text-rose-600 dark:text-slate-200">{i.title}</a>
+                    <a href={safeHref(i.url)} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-slate-800 hover:text-rose-600 dark:text-slate-200">{i.title}</a>
                     <p className="text-[11px] text-slate-500">{i.source}</p>
                   </li>
                 ))}

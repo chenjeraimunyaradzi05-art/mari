@@ -1095,9 +1095,9 @@ router.patch(
   authenticate,
   [
     body('aboutMe').optional().trim(),
-    body('linkedinUrl').optional().isURL(),
-    body('websiteUrl').optional().isURL(),
-    body('twitterUrl').optional().isURL(),
+    body('linkedinUrl').optional().isURL({ protocols: ['http', 'https'] }),
+    body('websiteUrl').optional().isURL({ protocols: ['http', 'https'] }),
+    body('twitterUrl').optional().isURL({ protocols: ['http', 'https'] }),
     body('openToWork').optional().isBoolean(),
     body('salaryMin').optional().isInt({ min: 0 }),
     body('salaryMax').optional().isInt({ min: 0 }),

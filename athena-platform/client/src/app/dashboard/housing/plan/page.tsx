@@ -15,6 +15,7 @@ import { strategyApi, apiMessage } from '@/lib/strategy-api';
 import { financeApi } from '@/lib/api';
 import { Bars, Check, Disclaimer, Field, JumpLinks, LineChart, Notes, NumberInput, Panel, Pending, SavePlanBar, SelectInput, Stat, aud, inputClass, num, opt, pct, useCalc } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 const STATES = ['QLD', 'NSW', 'VIC', 'WA', 'SA', 'TAS', 'ACT', 'NT'].map((s) => ({ value: s, label: s }));
 
@@ -299,12 +300,12 @@ export default function HousingPlanPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{bondHelp.state}: {bondHelp.scheme}</p>
               <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">{bondHelp.what}</p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">For {bondHelp.who.charAt(0).toLowerCase()}{bondHelp.who.slice(1)}</p>
-              <a href={bondHelp.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">How to apply</a>
+              <a href={safeHref(bondHelp.url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">How to apply</a>
             </div>
             <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-4 dark:border-rose-900/40 dark:bg-rose-900/10">
               <p className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-300">If you are leaving violence</p>
               <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">{bondHelp.leavingViolence}</p>
-              {rentHelp.result && <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{rentHelp.result.leavingViolence.name}: {rentHelp.result.leavingViolence.what} <a href={rentHelp.result.leavingViolence.url} target="_blank" rel="noreferrer" className="font-medium text-rose-600 hover:underline dark:text-rose-400">{rentHelp.result.leavingViolence.phone}</a></p>}
+              {rentHelp.result && <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{rentHelp.result.leavingViolence.name}: {rentHelp.result.leavingViolence.what} <a href={safeHref(rentHelp.result.leavingViolence.url)} target="_blank" rel="noreferrer" className="font-medium text-rose-600 hover:underline dark:text-rose-400">{rentHelp.result.leavingViolence.phone}</a></p>}
             </div>
           </div>
         )}

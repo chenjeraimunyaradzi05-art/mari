@@ -96,7 +96,7 @@ router.post(
     body('name').notEmpty().trim(),
     body('type').isIn(['company', 'university', 'tafe', 'government', 'ngo']),
     body('description').optional().trim(),
-    body('website').optional().isURL(),
+    body('website').optional().isURL({ protocols: ['http', 'https'] }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {

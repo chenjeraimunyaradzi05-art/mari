@@ -2,6 +2,7 @@
 
 import { ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 /**
  * The Open Graph card for the first link in a post, fetched by the server
@@ -27,7 +28,7 @@ export function LinkPreviewCard({ preview, className }: { preview: LinkPreview |
   if (!preview || (!preview.title && !preview.description && !preview.image)) return null;
   return (
     <a
-      href={preview.url}
+      href={safeHref(preview.url)}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}

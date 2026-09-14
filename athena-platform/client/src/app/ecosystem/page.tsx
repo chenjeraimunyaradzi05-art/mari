@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Globe, Users2, ArrowRight, CheckCircle, Sparkles } from 'lucide-react';
+import { safeHref } from '@/lib/safe-href';
 
 export default function EcosystemPage() {
   const benefits = [
@@ -91,7 +92,7 @@ export default function EcosystemPage() {
                 ))}
               </ul>
               <Link
-                href={type.link}
+                href={safeHref(type.link) ?? '#'}
                 className="w-full py-2 bg-purple-600 text-white text-center rounded-lg hover:bg-purple-700 transition font-medium"
               >
                 {type.cta}

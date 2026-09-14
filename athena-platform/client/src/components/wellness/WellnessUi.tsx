@@ -19,6 +19,7 @@ import { ChevronDown, Loader2, Phone, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { wellnessError, type Author, type Badge, type CrisisLine } from '@/lib/wellness-api';
 import { WELLNESS_PILLS } from '@/lib/wellness-nav';
+import { safeHref } from '@/lib/safe-href';
 
 export const DEFAULT_CRISIS: CrisisLine[] = [
   { key: 'emergency', name: 'Emergency', phone: '000', url: 'https://www.triplezero.gov.au', when: '24/7', who: 'Immediate danger' },
@@ -212,7 +213,7 @@ export function InsightCard({ insight }: { insight: { kind: string; title: strin
       </div>
       <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{insight.body}</p>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-        {insight.source && <a href={insight.source.url} target="_blank" rel="noopener noreferrer" className="text-slate-500 underline-offset-2 hover:underline dark:text-slate-400">Source: {insight.source.name}</a>}
+        {insight.source && <a href={safeHref(insight.source.url)} target="_blank" rel="noopener noreferrer" className="text-slate-500 underline-offset-2 hover:underline dark:text-slate-400">Source: {insight.source.name}</a>}
         {insight.action && (external
           ? <a href={insight.action.href} target="_blank" rel="noopener noreferrer" className="font-semibold text-rose-600 dark:text-rose-400">{insight.action.label}</a>
           : <Link href={insight.action.href} className="font-semibold text-rose-600 dark:text-rose-400">{insight.action.label}</Link>)}

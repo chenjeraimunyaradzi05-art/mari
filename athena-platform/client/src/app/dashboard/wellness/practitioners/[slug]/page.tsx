@@ -15,6 +15,7 @@ import { wellnessApi, wellnessError } from '@/lib/wellness-api';
 import { Chip, ErrorBox, HealthDisclaimer, Loading, PageTitle, WellnessNav, fmtDay, useLoad } from '@/components/wellness/WellnessUi';
 import { Check, Field, Panel, SelectInput, inputClass } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Practitioner = { id: string; slug: string; name: string; kind: string; kindLabel: string; headline: string; bio: string; qualifications: string[]; modalities: string[]; specialties: string[]; languages: string[]; suburb: string | null; city: string | null; state: string | null; telehealth: boolean; inPerson: boolean; bulkBilling: boolean; medicareRebate: boolean; privateHealth: boolean; feeFrom: number | null; feeNote: string | null; ahpraNumber: string | null; website: string | null; phone: string | null; bookingUrl: string | null; acceptsBookings: boolean; isVerified: boolean; ratingAvg: number; ratingCount: number; slotMinutes: number; isOwner: boolean; canModerate?: boolean; reviews: Array<{ id: string; rating: number; comment: string | null; isHidden?: boolean; createdAt: string; by: string }>; nextAvailable: Array<{ day: string; slots: number }>; timezone: string };
 type Slots = { day: string; slots: Array<{ start: string; end: string; label: string }>; timezone: string };
@@ -72,7 +73,7 @@ export default function PractitionerPage() {
                   <div><dt className="text-xs uppercase tracking-wide text-slate-500">Fees</dt><dd className="text-slate-800 dark:text-slate-200">{p.feeNote || (p.feeFrom !== null ? `From $${p.feeFrom}` : 'Ask when booking')}</dd></div>
                   {p.ahpraNumber && <div><dt className="text-xs uppercase tracking-wide text-slate-500">AHPRA</dt><dd className="text-slate-800 dark:text-slate-200">{p.ahpraNumber}</dd></div>}
                 </dl>
-                <div className="mt-4 flex flex-wrap gap-3 text-sm">{p.phone && <a href={`tel:${p.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 text-rose-600"><Phone className="h-4 w-4" /> {p.phone}</a>}{p.website && <a href={p.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-rose-600"><Globe className="h-4 w-4" /> Website</a>}{!p.acceptsBookings && p.bookingUrl && <a href={p.bookingUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Contact or book on their site</a>}</div>
+                <div className="mt-4 flex flex-wrap gap-3 text-sm">{p.phone && <a href={`tel:${p.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 text-rose-600"><Phone className="h-4 w-4" /> {p.phone}</a>}{p.website && <a href={safeHref(p.website)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-rose-600"><Globe className="h-4 w-4" /> Website</a>}{!p.acceptsBookings && p.bookingUrl && <a href={safeHref(p.bookingUrl)} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Contact or book on their site</a>}</div>
               </Panel>
               {p.reviews.length > 0 && <Panel title="From women who went" intro="Only a completed visit can leave one of these.">
                 <ul className="space-y-3">{p.reviews.map((r) => <li key={r.id} className={cn('text-sm', r.isHidden && 'opacity-60')}><p className="inline-flex flex-wrap items-center gap-1 text-amber-600">{Array.from({ length: r.rating }).map((_, i) => <Star key={i} className="h-3.5 w-3.5 fill-current" />)}<span className="ml-2 text-xs text-slate-500">{r.by} · {new Date(r.createdAt).toLocaleDateString('en-AU')}</span>{r.isHidden && <Chip tone="rose">Hidden</Chip>}{p.canModerate && <button type="button" onClick={() => moderate(r.id, !r.isHidden)} className="ml-2 text-xs text-slate-500 underline-offset-2 hover:underline">{r.isHidden ? 'Show it' : 'Hide it'}</button>}</p>{r.comment && <p className="mt-1 text-slate-700 dark:text-slate-300">{r.comment}</p>}</li>)}</ul>
@@ -99,7 +100,7 @@ export default function PractitionerPage() {
               ) : (
                 <Panel title={p.isOwner ? 'This is you' : 'Reach them directly'} intro={p.isOwner ? 'Members see the booking panel here.' : 'This entry takes bookings by phone or on its own site.'}>
                   {p.phone && <a href={`tel:${p.phone.replace(/\s+/g, '')}`} className="btn-primary inline-flex items-center gap-2 text-sm"><Phone className="h-4 w-4" /> Call {p.phone}</a>}
-                  {p.bookingUrl && <div className="mt-2"><a href={p.bookingUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Open their site</a></div>}
+                  {p.bookingUrl && <div className="mt-2"><a href={safeHref(p.bookingUrl)} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Open their site</a></div>}
                 </Panel>
               )}
             </div>

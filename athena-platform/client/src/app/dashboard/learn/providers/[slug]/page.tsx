@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { ExternalLink, GraduationCap } from 'lucide-react';
 import { useCreateEducationApplication, useEducationProvider } from '@/lib/hooks';
 import { CardSkeleton } from '@/components/ui/loading';
+import { safeHref } from '@/lib/safe-href';
 
 export default function EducationProviderDetailPage() {
   const params = useParams<{ slug: string }>();
@@ -79,7 +80,7 @@ export default function EducationProviderDetailPage() {
           </div>
           {provider.website ? (
             <a
-              href={provider.website}
+              href={safeHref(provider.website)}
               target="_blank"
               rel="noreferrer"
               className="btn-outline px-4 py-2 flex items-center gap-2"

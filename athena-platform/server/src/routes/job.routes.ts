@@ -451,7 +451,7 @@ router.post(
   authenticate,
   [
     body('coverLetter').optional().trim(),
-    body('resumeUrl').optional().isURL(),
+    body('resumeUrl').optional().isURL({ protocols: ['http', 'https'] }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {

@@ -20,6 +20,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { ArrowLeft, Briefcase, Download, Eye, FileText, LayoutGrid, List, Mail, Search, Star, User, UserCheck, X } from 'lucide-react';
 import { api, referenceApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Stage = 'PENDING' | 'REVIEWED' | 'SHORTLISTED' | 'INTERVIEW' | 'OFFERED' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN';
 
@@ -402,7 +403,7 @@ function CandidatePanel({ app, onClose, onMove, moving }: { app: Application; on
           <Mail className="h-4 w-4" />
         </a>
         {app.resumeUrl && (
-          <a href={app.resumeUrl} target="_blank" rel="noopener noreferrer" className="btn-outline inline-flex items-center justify-center gap-1 px-3 py-2 text-sm" aria-label={`Open ${name}'s resume`}>
+          <a href={safeHref(app.resumeUrl)} target="_blank" rel="noopener noreferrer" className="btn-outline inline-flex items-center justify-center gap-1 px-3 py-2 text-sm" aria-label={`Open ${name}'s resume`}>
             <Download className="h-4 w-4" /> Resume
           </a>
         )}

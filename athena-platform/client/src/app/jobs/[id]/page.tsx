@@ -22,6 +22,7 @@ import { Separator } from '@/components/ui/separator';
 import { Spinner as LoadingSpinner } from '@/components/ui/loading';
 import { Modal, ModalContent, ModalFooter } from '@/components/ui/modal';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
+import { safeHref } from '@/lib/safe-href';
 
 export default function JobDetailsPage() {
   const params = useParams();
@@ -239,7 +240,7 @@ export default function JobDetailsPage() {
               
               {job.organization?.website && (
                  <a 
-                   href={job.organization.website} 
+                   href={safeHref(job.organization.website)} 
                    target="_blank" 
                    rel="noopener noreferrer"
                    className="text-primary hover:underline text-sm flex items-center gap-1"

@@ -12,6 +12,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 export default function ConversationDetails() {
   const { activeConversationId, conversations, messages, setDisappearingTtl } = useChatStore();
@@ -217,7 +218,7 @@ export default function ConversationDetails() {
               {sharedMedia.map((attachment) => (
                 <a
                   key={attachment.id}
-                  href={attachment.url}
+                  href={safeHref(attachment.url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="aspect-square overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"

@@ -13,6 +13,7 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url';
 import { randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
@@ -838,7 +839,7 @@ router.delete('/forum-replies/:id', authenticate, async (req: AuthRequest, res: 
 
 const circleSchema = z.object({
   name: z.string().min(3).max(80), topic: z.string().min(2).max(40), description: z.string().min(10).max(1500), capacity: z.coerce.number().int().min(3).max(8).optional(), weeks: z.coerce.number().int().min(4).max(12).optional(),
-  startsOn: isoDaySchema, meetingDay: z.coerce.number().int().min(0).max(6), meetingTime: hhmm, format: z.enum(['VIDEO', 'ASYNC', 'IN_PERSON']).optional(), meetingLink: z.string().url().max(300).nullable().optional(), location: z.string().max(160).nullable().optional(),
+  startsOn: isoDaySchema, meetingDay: z.coerce.number().int().min(0).max(6), meetingTime: hhmm, format: z.enum(['VIDEO', 'ASYNC', 'IN_PERSON']).optional(), meetingLink: httpUrl(300).nullable().optional(), location: z.string().max(160).nullable().optional(),
 });
 
 function presentCircle(c: { id: string; name: string; topic: string; description: string; facilitatorId: string; capacity: number; weeks: number; startsOn: Date; meetingDay: number; meetingTime: string; format: string; meetingLink: string | null; location: string | null; status: string; isFeatured: boolean; createdAt: Date; facilitator: { id: string; firstName: string | null; lastName: string | null; displayName: string | null; avatar: string | null; role: string }; members: Array<{ userId: string; leftAt: Date | null }> }, viewerId: string, today: string) {
@@ -971,7 +972,7 @@ router.patch('/circles/:id', authenticate, async (req: AuthRequest, res: Respons
     const circle = await prisma.wellnessCircle.findUnique({ where: { id: req.params.id }, select: { id: true, facilitatorId: true, weeks: true } });
     if (!circle) throw new ApiError(404, 'Circle not found');
     if (circle.facilitatorId !== req.user!.id && !isModeratorRole(req.user!.role)) throw new ApiError(403, 'Only the facilitator can change a circle');
-    const data = parse(z.object({ name: z.string().min(3).max(80).optional(), description: z.string().min(10).max(1500).optional(), status: z.enum(['OPEN', 'RUNNING', 'COMPLETED', 'CANCELLED']).optional(), meetingLink: z.string().url().max(300).nullable().optional(), location: z.string().max(160).nullable().optional(), meetingTime: hhmm.optional(), extendWeeks: z.coerce.number().int().min(1).max(12).optional(), isFeatured: z.boolean().optional() }), req.body);
+    const data = parse(z.object({ name: z.string().min(3).max(80).optional(), description: z.string().min(10).max(1500).optional(), status: z.enum(['OPEN', 'RUNNING', 'COMPLETED', 'CANCELLED']).optional(), meetingLink: httpUrl(300).nullable().optional(), location: z.string().max(160).nullable().optional(), meetingTime: hhmm.optional(), extendWeeks: z.coerce.number().int().min(1).max(12).optional(), isFeatured: z.boolean().optional() }), req.body);
     const { extendWeeks, isFeatured, ...rest } = data;
     const updated = await prisma.wellnessCircle.update({ where: { id: circle.id }, data: { ...rest, ...(extendWeeks ? { weeks: Math.min(52, circle.weeks + extendWeeks), status: 'RUNNING' } : {}), ...(isFeatured !== undefined && isModeratorRole(req.user!.role) ? { isFeatured } : {}) }, include: circleInclude });
     if (extendWeeks) await prisma.wellnessCircleMember.updateMany({ where: { circleId: circle.id }, data: { continueRequested: false } });
@@ -1119,7 +1120,7 @@ const practiceSchema = z.object({
   qualifications: z.array(z.string().max(80)).max(10).optional(), modalities: z.array(z.string().max(40)).max(12).optional(), specialties: z.array(z.string().max(40)).max(15).optional(), languages: z.array(z.string().max(40)).max(10).optional(),
   suburb: z.string().max(60).nullable().optional(), city: z.string().max(60).nullable().optional(), state: z.string().max(3).nullable().optional(),
   telehealth: z.boolean().optional(), inPerson: z.boolean().optional(), bulkBilling: z.boolean().optional(), medicareRebate: z.boolean().optional(), privateHealth: z.boolean().optional(),
-  feeFrom: z.coerce.number().min(0).max(5000).nullable().optional(), feeNote: z.string().max(160).nullable().optional(), ahpraNumber: z.string().max(20).nullable().optional(), website: z.string().url().max(300).nullable().optional(), phone: z.string().max(30).nullable().optional(), bookingUrl: z.string().url().max(300).nullable().optional(),
+  feeFrom: z.coerce.number().min(0).max(5000).nullable().optional(), feeNote: z.string().max(160).nullable().optional(), ahpraNumber: z.string().max(20).nullable().optional(), website: httpUrl(300).nullable().optional(), phone: z.string().max(30).nullable().optional(), bookingUrl: httpUrl(300).nullable().optional(),
   availability: z.record(z.array(z.tuple([hhmm, hhmm]))).optional(), slotMinutes: z.coerce.number().int().min(10).max(180).optional(), acceptsBookings: z.boolean().optional(),
 });
 
@@ -1165,7 +1166,7 @@ router.patch('/practice/bookings/:id', authenticate, async (req: AuthRequest, re
     if (!p) throw new ApiError(404, 'You have no practice profile yet');
     const booking = await prisma.healthBooking.findFirst({ where: { id: req.params.id, practitionerId: p.id } });
     if (!booking) throw new ApiError(404, 'Booking not found');
-    const data = parse(z.object({ status: z.enum(['CONFIRMED', 'DECLINED', 'COMPLETED', 'NO_SHOW']).optional(), meetingLink: z.string().url().max(300).nullable().optional(), practitionerNote: z.string().max(1000).nullable().optional() }), req.body);
+    const data = parse(z.object({ status: z.enum(['CONFIRMED', 'DECLINED', 'COMPLETED', 'NO_SHOW']).optional(), meetingLink: httpUrl(300).nullable().optional(), practitionerNote: z.string().max(1000).nullable().optional() }), req.body);
     const updated = await prisma.healthBooking.update({ where: { id: booking.id }, data, include: bookingInclude });
     if (data.status && data.status !== booking.status) {
       const words: Record<string, string> = { CONFIRMED: 'confirmed', DECLINED: 'declined', COMPLETED: 'marked as done', NO_SHOW: 'marked as missed' };

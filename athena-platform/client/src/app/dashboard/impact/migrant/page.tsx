@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Globe, Loader2, Plus, GraduationCap, FileCheck, Languages, ExternalLink } from 'lucide-react';
 import { communitySupportApi } from '@/lib/api';
+import { safeHref } from '@/lib/safe-href';
 
 type LanguageProfile = {
   id: string;
@@ -400,7 +401,7 @@ export default function MigrantPage() {
 
                     {program.url && (
                       <a
-                        href={program.url}
+                        href={safeHref(program.url)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-3 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"

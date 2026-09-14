@@ -13,6 +13,7 @@ import { HeartHandshake, Home, Key, Landmark, PiggyBank, ShieldCheck } from 'luc
 import { PageHero, PageShell, Section } from '@/components/layout/PageShell';
 import { strategyApi } from '@/lib/strategy-api';
 import { Check, Disclaimer, Field, NumberInput, Pending, SelectInput, Stat, aud, num, useCalc } from '@/components/strategy/StrategyUi';
+import { safeHref } from '@/lib/safe-href';
 
 const STATES = ['QLD', 'NSW', 'VIC', 'WA', 'SA', 'TAS', 'ACT', 'NT'].map((s) => ({ value: s, label: s }));
 
@@ -155,14 +156,14 @@ export default function HousingPage() {
                 <div className="tile-soft p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-rose-500">{bond.state}: {bond.scheme}</p>
                   <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{bond.what}</p>
-                  <a href={bond.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400">How to apply</a>
+                  <a href={safeHref(bond.url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400">How to apply</a>
                 </div>
               )}
               {help.result && (
                 <div className="tile-soft p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-rose-500">If you are leaving violence</p>
                   <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{bond?.leavingViolence} {help.result.leavingViolence.name}: {help.result.leavingViolence.what}</p>
-                  <a href={help.result.leavingViolence.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400">{help.result.leavingViolence.phone}</a>
+                  <a href={safeHref(help.result.leavingViolence.url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-rose-600 dark:text-rose-400">{help.result.leavingViolence.phone}</a>
                 </div>
               )}
             </div>

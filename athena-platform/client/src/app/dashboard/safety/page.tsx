@@ -33,6 +33,7 @@ import {
 import { dvSafeApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Contact = { id: string; name: string; phone: string; email?: string; relationship: string; notifyOnPanic: boolean };
 type Settings = {
@@ -621,7 +622,7 @@ export default function SafetyPage() {
                     <a href={`tel:${r.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1 font-semibold text-rose-700 hover:underline dark:text-rose-300">
                       <Phone className="h-3.5 w-3.5" /> {r.phone}
                     </a>
-                    <a href={r.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-slate-500 hover:underline">
+                    <a href={safeHref(r.website)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-slate-500 hover:underline">
                       <ExternalLink className="h-3.5 w-3.5" /> Website
                     </a>
                     <span className="text-xs text-slate-400">{r.available}</span>

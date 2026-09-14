@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { Gauge, ShieldCheck } from 'lucide-react';
 import { PageHero, PageShell, Section } from '@/components/layout/PageShell';
 import { AutoDisclaimer, Loading, useReference } from '@/components/automotive/AutoUi';
+import { safeHref } from '@/lib/safe-href';
 
 export default function SafetyPage() {
   const ref = useReference();
@@ -25,7 +26,7 @@ export default function SafetyPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               {[['What it is', r.ancap.what], ['The date stamp', r.ancap.dateStamp], ['Why ratings lapse', r.ancap.expiry], ['Unrated', r.ancap.unrated]].map(([t, b]) => <div key={t} className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60"><p className="text-sm font-semibold text-slate-900 dark:text-white">{t}</p><p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{b}</p></div>)}
             </div>
-            <a href={r.ancap.url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm font-semibold text-rose-600">Look a car up on ancap.com.au</a>
+            <a href={safeHref(r.ancap.url)} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm font-semibold text-rose-600">Look a car up on ancap.com.au</a>
           </Section>
 
           <section id="features">

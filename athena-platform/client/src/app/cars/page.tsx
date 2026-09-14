@@ -17,6 +17,7 @@ import { autoApi, aud0, km, type CarCard, type ListingCard } from '@/lib/automot
 import { AncapBadge, AutoDisclaimer, Stars, VerdictChip, useLoad, useReference } from '@/components/automotive/AutoUi';
 import { Field, NumberInput, Pending, SelectInput, Stat, num, useCalc } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Repayment = { repayment: number; totalInterest: number; weekly: number };
 type Valuation = { low: number; mid: number; high: number; tradeIn: number; newPriceAssumed: boolean };
@@ -131,7 +132,7 @@ export default function CarsPage() {
       <section className="mt-10">
         <div className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-rose-500" /><h2 className="rail-title">Where the numbers come from</h2></div>
         <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {(ref.data?.sources ?? []).slice(0, 8).map((s) => <li key={s.key} className="surface p-3"><a href={s.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-slate-900 hover:text-rose-600 dark:text-white">{s.name}</a><p className="mt-0.5 text-xs leading-5 text-slate-500">{s.what}</p></li>)}
+          {(ref.data?.sources ?? []).slice(0, 8).map((s) => <li key={s.key} className="surface p-3"><a href={safeHref(s.url)} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-slate-900 hover:text-rose-600 dark:text-white">{s.name}</a><p className="mt-0.5 text-xs leading-5 text-slate-500">{s.what}</p></li>)}
         </ul>
         <div className="mt-4"><AutoDisclaimer /></div>
       </section>

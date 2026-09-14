@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { renderSocialText } from '@/lib/social-text';
+import { safeHref } from '@/lib/safe-href';
 
 /**
  * The message pane of a community channel.
@@ -510,7 +511,7 @@ export function ChatArea({
                       <div className="mt-2 flex flex-wrap gap-2">
                         {message.attachments.map((att) =>
                           att.type === 'image' ? (
-                            <a key={att.id} href={att.url} target="_blank" rel="noopener noreferrer">
+                            <a key={att.id} href={safeHref(att.url)} target="_blank" rel="noopener noreferrer">
                               {/* eslint-disable-next-line @next/next/no-img-element -- media CDN, outside the image config */}
                               <img
                                 src={att.url}
@@ -529,7 +530,7 @@ export function ChatArea({
                           ) : (
                             <a
                               key={att.id}
-                              href={att.url}
+                              href={safeHref(att.url)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-sm text-primary-500 hover:underline flex items-center gap-1"

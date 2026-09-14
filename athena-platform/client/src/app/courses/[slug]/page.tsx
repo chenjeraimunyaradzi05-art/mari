@@ -18,6 +18,7 @@ import { ArrowRight, BookOpen, Calendar, CheckCircle, Clock, GraduationCap, Load
 import { useCourse, useEnrollCourse } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/store';
 import { EmptyState, PageShell, Section } from '@/components/layout/PageShell';
+import { safeHref } from '@/lib/safe-href';
 
 type Lesson = { id: string; title: string; type: string; durationMinutes?: number | null; isPreview: boolean; locked?: boolean };
 type Course = {
@@ -126,7 +127,7 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
           {course.organization?.website && (
             <>
               {' · '}
-              <a href={course.organization.website} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
+              <a href={safeHref(course.organization.website)} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
                 provider site
               </a>
             </>

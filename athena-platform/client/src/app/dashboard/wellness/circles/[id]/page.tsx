@@ -15,6 +15,7 @@ import { Chip, ErrorBox, Loading, PageTitle, Scale, WellnessNav, fmtDay, useLoad
 import { Field, Panel, inputClass } from '@/components/strategy/StrategyUi';
 import { downloadText } from '@/lib/download';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type CheckIn = { id: string; week: number; mood: number; wins: string; blockers: string; nextStep: string; createdAt: string; author?: Author };
 type Data = { id: string; name: string; topic: string; description: string; capacity: number; weeks: number; startsOn: string; endsOn: string; meetingDay: number; meetingTime: string; format: string; meetingLink: string | null; location: string | null; status: string; facilitator: Author; memberCount: number; spotsLeft: number; isMember: boolean; isFacilitator: boolean; currentWeek: number | null; strategies: Array<{ key: string; name: string; minutes: number; how: string[]; source: string; url: string }>; schedule: Array<{ week: number; day: string; time: string }>; members: Array<Author & { role: string; continueRequested: boolean }>; checkIns: CheckIn[]; myCheckIns: CheckIn[]; continueRequests?: number };
@@ -96,7 +97,7 @@ export default function CirclePage() {
               )}
             </Panel>
             <Panel title="Strategies for this topic" intro="Evidence-based, and each one from the place that teaches it.">
-              <ul className="space-y-3">{c.strategies.map((s) => <li key={s.key}><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{s.name} <span className="font-normal text-slate-500">· {s.minutes} min</span></p><ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-slate-600 dark:text-slate-400">{s.how.map((h) => <li key={h}>{h}</li>)}</ol><a href={s.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 underline-offset-2 hover:underline">{s.source}</a></li>)}</ul>
+              <ul className="space-y-3">{c.strategies.map((s) => <li key={s.key}><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{s.name} <span className="font-normal text-slate-500">· {s.minutes} min</span></p><ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-slate-600 dark:text-slate-400">{s.how.map((h) => <li key={h}>{h}</li>)}</ol><a href={safeHref(s.url)} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 underline-offset-2 hover:underline">{s.source}</a></li>)}</ul>
             </Panel>
           </div>
 

@@ -19,6 +19,7 @@ import { autoApi, autoError, aud0, type MechanicCard, type VehicleCard } from '@
 import { AutoDisclaimer, Chip, ErrorBox, Loading, PageTitle, fmtDay, useLoad } from '@/components/automotive/AutoUi';
 import { Check, Field, NumberInput, Panel, SelectInput, inputClass, num } from '@/components/strategy/StrategyUi';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Detail = MechanicCard & { about: string; address: string | null; licenceNumber: string | null; isOwner: boolean; canModerate: boolean; timezone: string; prices: Array<{ kind: string; label: string; from: number | null; to: number | null; note: string | null; own: boolean }>; reviews: Array<{ id: string; rating: number; transparency: number; comment: string | null; isHidden: boolean; by: string; job: string; createdAt: string }>; nextAvailable: Array<{ day: string; slots: number }> };
 type Slots = { day: string; slots: Array<{ start: string; end: string; label: string }>; timezone: string; minutes: number };
@@ -75,7 +76,7 @@ function Workshop() {
                   {m.address && <div><dt className="text-xs uppercase tracking-wide text-slate-500">Address</dt><dd className="text-slate-800 dark:text-slate-200">{m.address}</dd></div>}
                   {m.licenceNumber && <div><dt className="text-xs uppercase tracking-wide text-slate-500">Licence</dt><dd className="text-slate-800 dark:text-slate-200">{m.licenceNumber}</dd></div>}
                 </dl>
-                <div className="mt-4 flex flex-wrap gap-3 text-sm">{m.phone && <a href={`tel:${m.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 text-rose-600"><Phone className="h-4 w-4" /> {m.phone}</a>}{m.website && <a href={m.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-rose-600"><Globe className="h-4 w-4" /> Website</a>}{m.contactUserId && !m.isOwner && (isAuthenticated ? <a href={`/dashboard/messages?user=${m.contactUserId}`} className="inline-flex items-center gap-1.5 text-rose-600"><MessageSquare className="h-4 w-4" /> Message the workshop</a> : <Link href={`/login?redirect=/cars/mechanics/${m.slug}`} className="inline-flex items-center gap-1.5 text-slate-500"><MessageSquare className="h-4 w-4" /> Sign in to message them</Link>)}</div>
+                <div className="mt-4 flex flex-wrap gap-3 text-sm">{m.phone && <a href={`tel:${m.phone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 text-rose-600"><Phone className="h-4 w-4" /> {m.phone}</a>}{m.website && <a href={safeHref(m.website)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-rose-600"><Globe className="h-4 w-4" /> Website</a>}{m.contactUserId && !m.isOwner && (isAuthenticated ? <a href={`/dashboard/messages?user=${m.contactUserId}`} className="inline-flex items-center gap-1.5 text-rose-600"><MessageSquare className="h-4 w-4" /> Message the workshop</a> : <Link href={`/login?redirect=/cars/mechanics/${m.slug}`} className="inline-flex items-center gap-1.5 text-slate-500"><MessageSquare className="h-4 w-4" /> Sign in to message them</Link>)}</div>
               </Panel>
               <Panel title="Prices" intro="Theirs where they have given one, the typical range where they have not. The quote before the work is the number.">
                 <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">{m.prices.map((p) => <li key={p.kind} className="flex items-center justify-between gap-2 py-2"><span className="text-slate-800 dark:text-slate-200">{p.label}</span><span className="text-right"><span className="font-medium text-slate-900 dark:text-white">{p.from !== null ? `${aud0(p.from)}${p.to ? ` to ${aud0(p.to)}` : '+'}` : 'Quoted'}</span><span className="block text-[11px] text-slate-500">{p.own ? p.note ?? 'their price' : 'typical range'}</span></span></li>)}</ul>
@@ -113,7 +114,7 @@ function Workshop() {
               ) : (
                 <Panel title={m.isOwner ? 'This is you' : 'Reach them directly'} intro={m.isOwner ? 'Members see the booking panel here.' : 'This workshop takes bookings by phone or on its own site.'}>
                   {m.phone && <a href={`tel:${m.phone.replace(/\s+/g, '')}`} className="btn-primary inline-flex items-center gap-2 text-sm"><Phone className="h-4 w-4" /> Call {m.phone}</a>}
-                  {m.bookingUrl && <div className="mt-2"><a href={m.bookingUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Open their booking page</a></div>}
+                  {m.bookingUrl && <div className="mt-2"><a href={safeHref(m.bookingUrl)} target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">Open their booking page</a></div>}
                 </Panel>
               )}
             </div>

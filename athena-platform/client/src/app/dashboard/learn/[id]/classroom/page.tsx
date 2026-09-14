@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import { ArrowLeft, Award, CheckCircle2, Circle, ExternalLink, FileText, Loader2, PlayCircle } from 'lucide-react';
 import { courseApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 type Lesson = {
   id: string;
@@ -203,7 +204,7 @@ export default function ClassroomPage({ params }: { params: Promise<{ id: string
                   </div>
                 )}
                 {current.type === 'RESOURCE' && current.resourceUrl && (
-                  <a href={current.resourceUrl} target="_blank" rel="noopener noreferrer" className="btn-outline mt-4 inline-flex items-center gap-2">
+                  <a href={safeHref(current.resourceUrl)} target="_blank" rel="noopener noreferrer" className="btn-outline mt-4 inline-flex items-center gap-2">
                     <ExternalLink className="h-4 w-4" /> Open the resource
                   </a>
                 )}

@@ -43,6 +43,7 @@ import { VoiceRecorder } from './VoiceRecorder';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { safeHref } from '@/lib/safe-href';
 
 interface ChatWindowProps {
   conversationId: string;
@@ -779,7 +780,7 @@ function MessageAttachment({ attachment }: { attachment: NonNullable<StoreMessag
 
   return (
     <a
-      href={attachment.url}
+      href={safeHref(attachment.url)}
       target="_blank"
       rel="noopener noreferrer"
       className="flex items-center gap-2 text-sm underline"

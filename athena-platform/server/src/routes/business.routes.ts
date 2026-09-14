@@ -692,7 +692,7 @@ router.post(
   [
     body('weekNumber').isInt({ min: 1 }),
     body('note').optional().isString().isLength({ max: 2000 }),
-    body('deliverableUrl').optional().isURL(),
+    body('deliverableUrl').optional().isURL({ protocols: ['http', 'https'] }),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {

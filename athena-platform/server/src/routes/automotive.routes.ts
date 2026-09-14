@@ -22,6 +22,7 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url';
 import { randomBytes } from 'crypto';
 import { Prisma, type CarModel, type Mechanic, type Dealership, type Vehicle, type CarFinanceApplication } from '@prisma/client';
 import { prisma } from '../utils/prisma';
@@ -339,7 +340,7 @@ router.get('/catalogue/:slug/reviews', async (req: AuthRequest, res: Response, n
   } catch (error) { next(error); }
 });
 
-const reviewSchema = z.object({ rating: z.coerce.number().int().min(1).max(5), reliability: z.coerce.number().int().min(1).max(5), safetyFeel: z.coerce.number().int().min(1).max(5), runningCosts: z.coerce.number().int().min(1).max(5), title: z.string().trim().min(3).max(120), body: z.string().trim().min(20).max(4000), ownedMonths: z.coerce.number().int().min(0).max(600).nullable().optional(), videoUrl: z.string().url().max(300).nullable().optional() });
+const reviewSchema = z.object({ rating: z.coerce.number().int().min(1).max(5), reliability: z.coerce.number().int().min(1).max(5), safetyFeel: z.coerce.number().int().min(1).max(5), runningCosts: z.coerce.number().int().min(1).max(5), title: z.string().trim().min(3).max(120), body: z.string().trim().min(20).max(4000), ownedMonths: z.coerce.number().int().min(0).max(600).nullable().optional(), videoUrl: httpUrl(300).nullable().optional() });
 
 router.post('/catalogue/:slug/reviews', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -576,7 +577,7 @@ router.delete('/garage/:id', authenticate, async (req: AuthRequest, res: Respons
   } catch (error) { next(error); }
 });
 
-const serviceRecordSchema = z.object({ date: isoDaySchema, odometerKm: z.coerce.number().int().min(0).max(1_500_000).nullable().optional(), kind: z.string().trim().min(1).max(30), title: z.string().trim().min(2).max(120), workshop: z.string().trim().max(80).nullable().optional(), cost: money.nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), partsWarrantyMonths: z.coerce.number().int().min(0).max(120).nullable().optional(), labourWarrantyMonths: z.coerce.number().int().min(0).max(120).nullable().optional(), invoiceUrl: z.string().url().max(300).nullable().optional() });
+const serviceRecordSchema = z.object({ date: isoDaySchema, odometerKm: z.coerce.number().int().min(0).max(1_500_000).nullable().optional(), kind: z.string().trim().min(1).max(30), title: z.string().trim().min(2).max(120), workshop: z.string().trim().max(80).nullable().optional(), cost: money.nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), partsWarrantyMonths: z.coerce.number().int().min(0).max(120).nullable().optional(), labourWarrantyMonths: z.coerce.number().int().min(0).max(120).nullable().optional(), invoiceUrl: httpUrl(300).nullable().optional() });
 const SERVICE_KINDS_THAT_RESET = new Set(['logbook', 'oil', 'ev_service']);
 
 router.post('/garage/:id/services', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -607,9 +608,9 @@ router.delete('/garage/services/:id', authenticate, async (req: AuthRequest, res
 const listingSchema = z.object({
   title: z.string().trim().min(6).max(120), make: z.string().trim().min(1).max(40), model: z.string().trim().min(1).max(60), year: z.coerce.number().int().min(1960).max(new Date().getFullYear() + 1), variant: z.string().trim().max(80).nullable().optional(), bodyType: bodyEnum, fuelType: fuelEnum, transmission: transmissionEnum.optional(),
   odometerKm: z.coerce.number().int().min(0).max(1_500_000), price: z.coerce.number().int().min(500).max(2_000_000), colour: z.string().trim().max(30).nullable().optional(), seats: z.coerce.number().int().min(2).max(9).nullable().optional(), description: z.string().trim().min(30).max(6000), features: z.array(z.string().trim().max(60)).max(40).optional(),
-  photos: z.array(z.string().url().max(500)).max(20).optional(), videoUrl: z.string().url().max(300).nullable().optional(), suburb: z.string().trim().max(60).nullable().optional(), city: z.string().trim().max(60).nullable().optional(), state: stateEnum, postcode: z.string().trim().max(4).nullable().optional(),
+  photos: z.array(httpUrl(500)).max(20).optional(), videoUrl: httpUrl(300).nullable().optional(), suburb: z.string().trim().max(60).nullable().optional(), city: z.string().trim().max(60).nullable().optional(), state: stateEnum, postcode: z.string().trim().max(4).nullable().optional(),
   vin: z.string().trim().max(17).nullable().optional(), rego: z.string().trim().max(10).nullable().optional(), regoExpires: isoDaySchema.nullable().optional(), serviceHistory: z.enum(['FULL', 'PARTIAL', 'NONE', 'UNKNOWN']).optional(), accidentHistory: z.enum(['NONE', 'MINOR_REPAIRED', 'MAJOR_REPAIRED', 'UNKNOWN']).optional(), ownersCount: z.coerce.number().int().min(1).max(20).nullable().optional(),
-  ppsrChecked: z.boolean().optional(), ppsrCertificateUrl: z.string().url().max(500).nullable().optional(), roadworthy: z.boolean().optional(), warranty: z.enum(['NONE', 'BALANCE_OF_NEW_CAR', 'STATUTORY', 'DEALER', 'EXTENDED']).optional(), warrantyNote: z.string().trim().max(300).nullable().optional(),
+  ppsrChecked: z.boolean().optional(), ppsrCertificateUrl: httpUrl(500).nullable().optional(), roadworthy: z.boolean().optional(), warranty: z.enum(['NONE', 'BALANCE_OF_NEW_CAR', 'STATUTORY', 'DEALER', 'EXTENDED']).optional(), warrantyNote: z.string().trim().max(300).nullable().optional(),
   vehicleId: uuid.nullable().optional(), condition: conditionEnum.optional(), newPrice: money.nullable().optional(), publish: z.boolean().optional(),
 });
 
@@ -798,7 +799,7 @@ router.post('/listings/:id/inspections', authenticate, async (req: AuthRequest, 
   try {
     const l = await prisma.vehicleListing.findUnique({ where: { id: req.params.id }, select: { id: true, title: true, sellerId: true, state: true, status: true } });
     if (!l || !['ACTIVE', 'UNDER_OFFER'].includes(l.status)) throw new ApiError(404, 'Listing not found');
-    const data = parse(z.object({ kind: z.enum(['ATHENA_VETTED', 'INDEPENDENT', 'SELLER_PROVIDED']).optional(), note: z.string().trim().max(1000).optional(), reportUrl: z.string().url().max(500).optional() }), req.body);
+    const data = parse(z.object({ kind: z.enum(['ATHENA_VETTED', 'INDEPENDENT', 'SELLER_PROVIDED']).optional(), note: z.string().trim().max(1000).optional(), reportUrl: httpUrl(500).optional() }), req.body);
     const isSeller = l.sellerId === req.user!.id;
     const kind = isSeller ? 'SELLER_PROVIDED' : data.kind === 'INDEPENDENT' ? 'INDEPENDENT' : 'ATHENA_VETTED';
     const purchase = isSeller ? null : await prisma.vehiclePurchase.findFirst({ where: { listingId: l.id, buyerId: req.user!.id, status: { in: ['OFFERED', 'ACCEPTED', 'PAID_HELD'] } }, select: { id: true } });
@@ -878,7 +879,7 @@ router.patch('/inspections/:id', authenticate, async (req: AuthRequest, res: Res
     const isRequester = i.requestedById === req.user!.id;
     const isInspector = Boolean(i.inspector?.ownerUserId && i.inspector.ownerUserId === req.user!.id);
     if (!isRequester && !isInspector && !isAdmin(req)) throw new ApiError(403, 'Not yours');
-    const data = parse(z.object({ status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED']).optional(), scheduledAt: z.string().datetime().nullable().optional(), report: z.array(z.object({ key: z.string(), result: z.enum(['PASS', 'ADVISORY', 'FAIL']), notes: z.string().max(2000).optional() })).optional(), summary: z.string().trim().max(3000).nullable().optional(), reportUrl: z.string().url().max(500).nullable().optional() }), req.body);
+    const data = parse(z.object({ status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED']).optional(), scheduledAt: z.string().datetime().nullable().optional(), report: z.array(z.object({ key: z.string(), result: z.enum(['PASS', 'ADVISORY', 'FAIL']), notes: z.string().max(2000).optional() })).optional(), summary: z.string().trim().max(3000).nullable().optional(), reportUrl: httpUrl(500).nullable().optional() }), req.body);
     if (isRequester && !isInspector && !isAdmin(req) && data.status && data.status !== 'CANCELLED') throw new ApiError(403, 'Only the workshop writes the report');
     if (data.status === 'CANCELLED' && i.status === 'COMPLETED') throw new ApiError(400, 'A completed inspection stays');
     const report = data.report ? normaliseInspectionReport(data.report) : undefined;
@@ -1259,7 +1260,7 @@ router.post('/bookings/:id/review', authenticate, async (req: AuthRequest, res: 
 const workshopSchema = z.object({
   name: z.string().trim().min(2).max(80), headline: z.string().trim().min(5).max(140), about: z.string().trim().min(20).max(4000), womenOwned: z.boolean().optional(), womenMechanics: z.boolean().optional(), services: z.array(z.string().trim().max(30)).max(20).optional(), makes: z.array(z.string().trim().max(40)).max(30).optional(),
   evCapable: z.boolean().optional(), mobile: z.boolean().optional(), loanCar: z.boolean().optional(), afterHours: z.boolean().optional(), doesInspections: z.boolean().optional(), languages: z.array(z.string().trim().max(40)).max(10).optional(),
-  suburb: z.string().trim().max(60).nullable().optional(), city: z.string().trim().max(60).nullable().optional(), state: stateEnum.nullable().optional(), postcode: z.string().trim().max(4).nullable().optional(), address: z.string().trim().max(200).nullable().optional(), phone: z.string().trim().max(20).nullable().optional(), website: z.string().url().max(300).nullable().optional(), bookingUrl: z.string().url().max(300).nullable().optional(), licenceNumber: z.string().trim().max(30).nullable().optional(),
+  suburb: z.string().trim().max(60).nullable().optional(), city: z.string().trim().max(60).nullable().optional(), state: stateEnum.nullable().optional(), postcode: z.string().trim().max(4).nullable().optional(), address: z.string().trim().max(200).nullable().optional(), phone: z.string().trim().max(20).nullable().optional(), website: httpUrl(300).nullable().optional(), bookingUrl: httpUrl(300).nullable().optional(), licenceNumber: z.string().trim().max(30).nullable().optional(),
   priceList: z.array(z.object({ kind: z.string(), from: z.coerce.number().min(0), to: z.coerce.number().min(0).nullable().optional(), note: z.string().max(160).nullable().optional() })).max(30).optional(), labourRateHour: z.coerce.number().int().min(0).max(1000).nullable().optional(), partsWarrantyMonths: z.coerce.number().int().min(0).max(120).nullable().optional(), labourWarrantyMonths: z.coerce.number().int().min(0).max(120).nullable().optional(), warrantyNote: z.string().trim().max(300).nullable().optional(),
   availability: z.record(z.array(z.tuple([z.string(), z.string()]))).optional(), slotMinutes: z.coerce.number().int().min(15).max(480).optional(), acceptsBookings: z.boolean().optional(),
 });
@@ -1335,7 +1336,7 @@ router.patch('/workshop/bookings/:id', authenticate, async (req: AuthRequest, re
 
 // ------------------------------------------------------------- dealerships
 
-const dealershipSchema = z.object({ name: z.string().trim().min(2).max(80), headline: z.string().trim().min(5).max(140), about: z.string().trim().max(4000).nullable().optional(), brands: z.array(z.string().trim().max(40)).max(20).optional(), suburb: z.string().trim().max(60).nullable().optional(), city: z.string().trim().max(60).nullable().optional(), state: stateEnum.nullable().optional(), postcode: z.string().trim().max(4).nullable().optional(), address: z.string().trim().max(200).nullable().optional(), phone: z.string().trim().max(20).nullable().optional(), website: z.string().url().max(300).nullable().optional(), email: z.string().email().max(120).nullable().optional(), womenLed: z.boolean().optional(), financeAvailable: z.boolean().optional(), financePartners: z.array(z.string().trim().max(60)).max(10).optional(), hours: z.record(z.array(z.tuple([z.string(), z.string()]))).optional() });
+const dealershipSchema = z.object({ name: z.string().trim().min(2).max(80), headline: z.string().trim().min(5).max(140), about: z.string().trim().max(4000).nullable().optional(), brands: z.array(z.string().trim().max(40)).max(20).optional(), suburb: z.string().trim().max(60).nullable().optional(), city: z.string().trim().max(60).nullable().optional(), state: stateEnum.nullable().optional(), postcode: z.string().trim().max(4).nullable().optional(), address: z.string().trim().max(200).nullable().optional(), phone: z.string().trim().max(20).nullable().optional(), website: httpUrl(300).nullable().optional(), email: z.string().email().max(120).nullable().optional(), womenLed: z.boolean().optional(), financeAvailable: z.boolean().optional(), financePartners: z.array(z.string().trim().max(60)).max(10).optional(), hours: z.record(z.array(z.tuple([z.string(), z.string()]))).optional() });
 
 router.get('/dealerships', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -1482,7 +1483,7 @@ router.patch('/test-drives/:id', authenticate, async (req: AuthRequest, res: Res
 
 router.post('/trade-ins', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const data = parse(z.object({ vehicleId: uuid.optional(), dealershipId: uuid.optional(), make: z.string().trim().max(40).optional(), model: z.string().trim().max(60).optional(), year: z.coerce.number().int().min(1960).max(new Date().getFullYear() + 1).optional(), variant: z.string().trim().max(80).optional(), odometerKm: z.coerce.number().int().min(0).max(1_500_000).optional(), condition: conditionEnum, notes: z.string().trim().max(1000).optional(), photos: z.array(z.string().url().max(500)).max(12).optional(), newPrice: money.optional() }), req.body);
+    const data = parse(z.object({ vehicleId: uuid.optional(), dealershipId: uuid.optional(), make: z.string().trim().max(40).optional(), model: z.string().trim().max(60).optional(), year: z.coerce.number().int().min(1960).max(new Date().getFullYear() + 1).optional(), variant: z.string().trim().max(80).optional(), odometerKm: z.coerce.number().int().min(0).max(1_500_000).optional(), condition: conditionEnum, notes: z.string().trim().max(1000).optional(), photos: z.array(httpUrl(500)).max(12).optional(), newPrice: money.optional() }), req.body);
     let make = data.make; let model = data.model; let year = data.year; let km = data.odometerKm; let variant = data.variant ?? null; let body: BodyKey | null = null; let fuel: FuelKey | null = null; let newPrice = data.newPrice ?? null;
     if (data.vehicleId) { const v = await ownVehicle(req, data.vehicleId); make = v.make; model = v.model; year = v.year; km = km ?? projectedOdometer(v) ?? 0; variant = variant ?? v.variant; body = v.bodyType as BodyKey | null; fuel = v.fuelType as FuelKey; newPrice = newPrice ?? v.newPrice ?? (v.boughtNew ? v.purchasePrice : null); }
     if (!make || !model || !year || km === undefined) throw new ApiError(400, 'The make, model, year and kilometres are needed, or a car from your garage');

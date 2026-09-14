@@ -7,6 +7,7 @@ import Link from 'next/link';
 import complianceService from '@/lib/services/compliance.service';
 import type { LegalDocument, LegalAgreementRecord } from '@/lib/services/compliance.service';
 import { contactLink } from '@/lib/contact';
+import { safeHref } from '@/lib/safe-href';
 
 interface ConsentState {
   MARKETING_EMAIL: boolean;
@@ -472,7 +473,7 @@ export default function PrivacyCenterPage() {
                       {request.status}
                     </span>
                     {request.downloadUrl && (
-                      <a href={request.downloadUrl} className="text-purple-600 hover:underline text-sm">
+                      <a href={safeHref(request.downloadUrl)} className="text-purple-600 hover:underline text-sm">
                         Download
                       </a>
                     )}

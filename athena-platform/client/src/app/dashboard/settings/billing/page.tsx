@@ -19,6 +19,7 @@ import {
   usePaymentMethods,
 } from '@/lib/hooks';
 import { formatCurrency, formatDate, cn, getStoredPreference } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 const plans = [
   {
@@ -471,7 +472,7 @@ function BillingContent() {
                     </td>
                     <td className="py-3 text-right">
                       <a
-                        href={invoice.invoiceUrl}
+                        href={safeHref(invoice.invoiceUrl)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-primary-600 hover:text-primary-700"

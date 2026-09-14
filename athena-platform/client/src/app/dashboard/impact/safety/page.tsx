@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Shield, Loader2, Phone, MapPin, Lock, FileText, AlertTriangle } from 'lucide-react';
 import { impactApi } from '@/lib/api';
 import { SafeModeBanner } from '@/components/safety/SafeModeBanner';
+import { safeHref } from '@/lib/safe-href';
 
 type SafetyPlan = {
   id: string;
@@ -309,7 +310,7 @@ export default function SafetyPage() {
                       )}
                       {service.website && (
                         <a
-                          href={service.website}
+                          href={safeHref(service.website)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"

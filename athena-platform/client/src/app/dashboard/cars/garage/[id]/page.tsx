@@ -17,6 +17,7 @@ import { autoApi, autoError, aud0, type BookingCard, type CarCard, type Reminder
 import { AncapBadge, AutoNav, Confirm, ErrorBox, Loading, PageTitle, StatusChip, fmtDay, fmtWhen, useLoad, useReference } from '@/components/automotive/AutoUi';
 import { Check, Field, Notes, NumberInput, Panel, SelectInput, Stat, inputClass, num } from '@/components/strategy/StrategyUi';
 import { ReminderList } from '../../page';
+import { safeHref } from '@/lib/safe-href';
 
 type Service = { id: string; date: string; odometerKm: number | null; kind: string; kindLabel: string; title: string; workshop: string | null; mechanicSlug: string | null; cost: number | null; notes: string | null; partsWarrantyMonths: number | null; labourWarrantyMonths: number | null; invoiceUrl: string | null; bookingId: string | null; warrantyUntil: string | null };
 type Detail = VehicleCard & { valuation: { low: number; mid: number; high: number; tradeIn: number; assumptions: string[]; newPriceAssumed: boolean }; catalogue: CarCard | null; services: Service[]; spent: number; bookings: BookingCard[]; tradeIns: Array<{ id: string; status: string; estimateMid: number; expiresAt: string; quotes: number }>; maintenance: Array<{ key: string; title: string; every: string; what: string; cost: string }> };
@@ -103,7 +104,7 @@ export default function VehiclePage() {
                       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-900 dark:text-white">{r.title} <span className="font-normal text-slate-500">· {r.kindLabel}</span></p><span className="text-sm tabular-nums text-slate-800 dark:text-slate-200">{r.cost !== null ? aud0(r.cost) : ''}</span></div>
                       <p className="text-xs text-slate-500">{fmtDay(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}{r.odometerKm ? ` · ${r.odometerKm.toLocaleString('en-AU')} km` : ''}{r.workshop ? ` · ${r.mechanicSlug ? '' : ''}${r.workshop}` : ''}{r.warrantyUntil ? ` · warranty on this work until ${fmtDay(r.warrantyUntil, { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</p>
                       {r.notes && <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">{r.notes}</p>}
-                      <div className="mt-1 flex gap-3 text-xs">{r.invoiceUrl && <a href={r.invoiceUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-rose-600">Invoice</a>}{r.mechanicSlug && <Link href={`/cars/mechanics/${r.mechanicSlug}`} className="font-semibold text-rose-600">The workshop</Link>}{!r.bookingId && <button type="button" onClick={() => removeService(r.id)} className="text-slate-500 hover:text-rose-600">Remove</button>}</div>
+                      <div className="mt-1 flex gap-3 text-xs">{r.invoiceUrl && <a href={safeHref(r.invoiceUrl)} target="_blank" rel="noopener noreferrer" className="font-semibold text-rose-600">Invoice</a>}{r.mechanicSlug && <Link href={`/cars/mechanics/${r.mechanicSlug}`} className="font-semibold text-rose-600">The workshop</Link>}{!r.bookingId && <button type="button" onClick={() => removeService(r.id)} className="text-slate-500 hover:text-rose-600">Remove</button>}</div>
                     </li>
                   ))}
                 </ul>
