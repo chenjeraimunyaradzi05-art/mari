@@ -8,6 +8,7 @@
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
 import { assessNetWorth, type RiskProfile } from './investment-plan.service';
+import { runExclusively } from '../../utils/redis';
 
 const DAY = 86400000;
 const REVIEW_AFTER_DAYS = 335;
@@ -108,7 +109,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startWealthNudgeSweeper(intervalMs = DAY): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => sendWealthNudges().then((r) => { if (r.insuranceReviews + r.rebalances > 0) logger.info('Wealth nudges sent', r); }).catch((err) => logger.warn('Wealth nudge sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('wealth-nudges', () => sendWealthNudges()).then((r) => { if (r && r.insuranceReviews + r.rebalances > 0) logger.info('Wealth nudges sent', r); }).catch((err) => logger.warn('Wealth nudge sweep failed', { error: (err as Error).message }));
   setTimeout(run, 120_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();

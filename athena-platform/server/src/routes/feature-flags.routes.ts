@@ -1,4 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
+import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest, optionalAuth, requireRole } from '../middleware/auth';
 import {
   listFeatureFlags,
@@ -62,20 +64,35 @@ router.get('/:key', async (req: AuthRequest, res: Response, next: NextFunction) 
  * POST /feature-flags
  * Create or update a feature flag
  */
+const flagKey = z.string().trim().regex(/^[a-z0-9][a-z0-9_.-]{1,79}$/i, 'A flag key is letters, digits, dots, dashes and underscores');
+const idList = z.array(z.string().trim().min(1).max(120)).max(500);
+const flagFields = {
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(1000).nullable().optional(),
+  enabled: z.boolean().optional(),
+  rolloutPercentage: z.coerce.number().min(0).max(100).optional(),
+  allowList: idList.optional(),
+  denyList: idList.optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
+  // Free-form, but bounded: a flag's notes, not a place to store documents.
+  metadata: z.record(z.unknown()).nullable().optional().refine((m) => !m || JSON.stringify(m).length <= 4000, 'metadata is limited to 4000 characters'),
+};
+const createFlagSchema = z.object({ key: flagKey, ...flagFields });
+const updateFlagSchema = z.object({ ...flagFields, name: flagFields.name.optional() });
+
+function parseFlag<T>(schema: z.ZodType<T>, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new ApiError(400, issue ? `${issue.path.join('.') || 'input'}: ${issue.message}` : 'Invalid input');
+  }
+  return parsed.data;
+}
+
 router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const flag = await upsertFeatureFlag({
-      key: req.body.key,
-      name: req.body.name,
-      description: req.body.description,
-      enabled: req.body.enabled,
-      rolloutPercentage: req.body.rolloutPercentage,
-      allowList: req.body.allowList,
-      denyList: req.body.denyList,
-      tags: req.body.tags,
-      metadata: req.body.metadata,
-      createdById: req.user?.id,
-    });
+    const data = parseFlag(createFlagSchema, req.body);
+    const flag = await upsertFeatureFlag({ ...data, description: data.description ?? undefined, createdById: req.user?.id });
 
     res.status(201).json(flag);
   } catch (error) {
@@ -89,16 +106,8 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
  */
 router.patch('/:key', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const flag = await updateFeatureFlag(req.params.key, {
-      name: req.body.name,
-      description: req.body.description,
-      enabled: req.body.enabled,
-      rolloutPercentage: req.body.rolloutPercentage,
-      allowList: req.body.allowList,
-      denyList: req.body.denyList,
-      tags: req.body.tags,
-      metadata: req.body.metadata,
-    });
+    const data = parseFlag(updateFlagSchema, req.body);
+    const flag = await updateFeatureFlag(req.params.key, { ...data, description: data.description ?? undefined });
 
     res.json(flag);
   } catch (error) {

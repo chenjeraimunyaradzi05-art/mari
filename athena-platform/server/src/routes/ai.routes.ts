@@ -509,10 +509,18 @@ router.get('/chat/usage', authenticate, async (req: AuthRequest, res, next) => {
 
 router.post('/chat', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const { message, context } = req.body;
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    const context = req.body?.context;
 
     if (!message) {
       throw new ApiError(400, 'Message is required');
+    }
+    if (message.length > 4000) {
+      throw new ApiError(400, 'Message is too long (4000 characters at most)');
+    }
+    // The context is the conversation so far: a short list of role and content pairs, nothing else.
+    if (context !== undefined && (!Array.isArray(context) || context.length > 40 || context.some((turn) => !turn || typeof turn !== 'object' || typeof (turn as { role?: unknown }).role !== 'string' || typeof (turn as { content?: unknown }).content !== 'string' || ((turn as { content: string }).content).length > 8000))) {
+      throw new ApiError(400, 'Context must be a list of up to 40 turns, each with a role and content');
     }
 
     // Check usage limits for free tier

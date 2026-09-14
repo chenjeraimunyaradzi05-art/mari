@@ -240,6 +240,26 @@ export async function withLock<T>(
   }
 }
 
+let warnedNoRedisForSweeps = false;
+
+/**
+ * A scheduled sweep (reminders, expiries, scheduled posts) runs on one
+ * instance at a time. With Redis the lock decides and the instances that
+ * lose it skip the round; without Redis there is nothing to coordinate
+ * with, so the sweep runs here on the assumption of a single instance,
+ * and says so once.
+ */
+export async function runExclusively<T>(key: string, fn: () => Promise<T>, ttlMs = 10 * 60 * 1000): Promise<T | null> {
+  if (!isRedisAvailable()) {
+    if (!warnedNoRedisForSweeps) {
+      warnedNoRedisForSweeps = true;
+      logger.warn('Redis is not available: scheduled sweeps run unlocked, which is only safe on a single instance');
+    }
+    return fn();
+  }
+  return withLock(`sweep:${key}`, fn, ttlMs);
+}
+
 // ===========================================
 // RATE LIMITING HELPERS
 // ===========================================

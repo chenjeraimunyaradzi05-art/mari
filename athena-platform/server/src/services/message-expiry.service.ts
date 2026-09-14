@@ -13,6 +13,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { emitToUserRoom } from './socket.service';
+import { runExclusively } from '../utils/redis';
 
 /** 1 hour, 24 hours, 7 days, 90 days. */
 export const DISAPPEARING_TTL_OPTIONS = [3600, 86400, 604800, 7776000] as const;
@@ -182,7 +183,7 @@ export async function sweepExpiredMessages(now = new Date()): Promise<number> {
 /** Runs the sweep on an interval. Returns a function that stops it. */
 export function startMessageExpirySweeper(intervalMs = 60_000): () => void {
   const run = () =>
-    sweepExpiredMessages().catch((error) => {
+    runExclusively('message-expiry', () => sweepExpiredMessages(), 5 * 60 * 1000).catch((error) => {
       logger.error('Message expiry sweep failed', {
         error: error instanceof Error ? error.message : String(error),
       });

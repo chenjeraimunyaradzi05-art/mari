@@ -6,12 +6,11 @@
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import Stripe from 'stripe';
+import { getStripe } from '../utils/stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { sendNotification } from './socket.service';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
-  apiVersion: '2023-10-16',
-});
+const stripe = getStripe();
 
 // ==========================================
 // TYPES

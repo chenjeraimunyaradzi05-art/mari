@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
+import { getStripe } from '../utils/stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -13,9 +14,7 @@ const TRIAL_DAYS = 14;
 
 const router = Router();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
-  apiVersion: '2023-10-16',
-});
+const stripe = getStripe();
 
 const VALID_TIERS: SubscriptionTierKey[] = [
   'PREMIUM_CAREER',

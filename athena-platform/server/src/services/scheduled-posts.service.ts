@@ -12,6 +12,7 @@
 
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { runExclusively } from '../utils/redis';
 
 export const SCHEDULE_MIN_MINUTES = 5;
 export const SCHEDULE_MAX_DAYS = 30;
@@ -52,7 +53,7 @@ export async function publishDuePosts(now = new Date()): Promise<number> {
 
 export function startScheduledPostPublisher(intervalMs = 60_000): () => void {
   const run = () =>
-    publishDuePosts().catch((error) => {
+    runExclusively('scheduled-posts', () => publishDuePosts(), 5 * 60 * 1000).catch((error) => {
       logger.error('Publishing scheduled posts failed', {
         error: error instanceof Error ? error.message : String(error),
       });

@@ -14,6 +14,7 @@
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
 import { addDays, daysBetween, isoDay, localParts, minutesOf } from './wellness-dates';
+import { runExclusively } from '../../utils/redis';
 
 const DAY = 86400000;
 
@@ -236,7 +237,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startWellnessSweeper(intervalMs = 30 * 60 * 1000): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => runWellnessSweep().then((r) => { if (r.sent > 0) logger.info('Wellness reminders sent', r); }).catch((err) => logger.warn('Wellness reminder sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('wellness', () => runWellnessSweep()).then((r) => { if (r && r.sent > 0) logger.info('Wellness reminders sent', r); }).catch((err) => logger.warn('Wellness reminder sweep failed', { error: (err as Error).message }));
   setTimeout(run, 90_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();

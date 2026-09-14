@@ -197,11 +197,13 @@ class MLServiceClient {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
+      // The ML service answers only callers that carry the shared key, once one is configured on both sides.
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
+          ...(process.env.ML_SERVICE_KEY ? { 'x-ml-key': process.env.ML_SERVICE_KEY } : {}),
           ...options.headers,
         },
       });

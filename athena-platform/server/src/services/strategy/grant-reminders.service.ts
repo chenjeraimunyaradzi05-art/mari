@@ -11,6 +11,7 @@
 
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
+import { runExclusively } from '../../utils/redis';
 
 const DAY = 86400000;
 
@@ -87,7 +88,7 @@ let timer: NodeJS.Timeout | null = null;
 /** Once a day, after a minute's grace at start-up. */
 export function startGrantReminderSweeper(intervalMs = DAY): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => sendGrantDeadlineReminders().then((r) => { if (r.sent > 0) logger.info('Grant deadline reminders sent', r); }).catch((err) => logger.warn('Grant reminder sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('grant-reminders', () => sendGrantDeadlineReminders()).then((r) => { if (r && r.sent > 0) logger.info('Grant deadline reminders sent', r); }).catch((err) => logger.warn('Grant reminder sweep failed', { error: (err as Error).message }));
   setTimeout(run, 60_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();

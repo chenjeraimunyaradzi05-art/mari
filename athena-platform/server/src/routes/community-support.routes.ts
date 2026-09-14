@@ -70,7 +70,12 @@ router.post('/programs/:id/enroll', authenticate, async (req: AuthRequest, res: 
   try {
     const { id } = req.params;
     const userId = req.user!.id;
-    const { goalsSet } = req.body;
+    // Goals are a short list of sentences the member wrote; anything else is refused rather than stored.
+    const rawGoals = req.body?.goalsSet;
+    if (rawGoals !== undefined && (!Array.isArray(rawGoals) || rawGoals.length > 20 || rawGoals.some((g) => typeof g !== 'string' || g.trim().length === 0 || g.length > 300))) {
+      return res.status(400).json({ success: false, error: 'goalsSet must be a list of up to 20 short sentences' });
+    }
+    const goalsSet = rawGoals === undefined ? undefined : (rawGoals as string[]).map((g) => g.trim());
 
     // Check if program exists and has capacity
     const program = await prisma.communitySupportProgram.findUnique({

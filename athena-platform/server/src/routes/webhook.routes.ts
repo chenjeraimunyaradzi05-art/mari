@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import Stripe from 'stripe';
+import { getStripe } from '../utils/stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { confirmGiftPurchaseFromPaymentIntent } from '../services/creator.service';
@@ -24,9 +25,7 @@ function paymentIntentIdOf(value: string | { id: string } | null | undefined): s
   return typeof value === 'string' ? value : value.id;
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
-  apiVersion: '2023-10-16',
-});
+const stripe = getStripe();
 
 const PRICE_IDS = {
   PREMIUM_CAREER: process.env.STRIPE_PRICE_CAREER || 'price_career',

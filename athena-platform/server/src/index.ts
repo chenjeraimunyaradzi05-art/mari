@@ -278,7 +278,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // Rate limiting
-const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED !== 'false';
+// The switch exists for local tooling; production never runs without limits.
+const rateLimitEnabled = process.env.NODE_ENV === 'production' || process.env.RATE_LIMIT_ENABLED !== 'false';
 const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10);
 // Production keeps the strict budget. Outside production it is relaxed, the way
 // authLimiter below already does: one homepage load fans out to six API calls,
@@ -744,6 +745,11 @@ export async function startServer() {
     sessionService.cleanupExpiredSessions().catch(() => {});
 
     // Disappearing messages: delete what has expired, once a minute.
+    // Without Redis the rate limits, the locks and the caches are per process,
+    // which holds on one instance and quietly stops holding on two.
+    if (process.env.NODE_ENV === 'production' && !process.env.REDIS_URL) {
+      logger.error('REDIS_URL is not set: rate limits and scheduled-sweep locks are per instance on this deployment');
+    }
     startMessageExpirySweeper();
     // Grant applications left in draft: a nudge a week out and the day before.
     startGrantReminderSweeper();

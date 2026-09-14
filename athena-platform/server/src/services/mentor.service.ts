@@ -9,11 +9,10 @@ import { ApiError } from '../middleware/errorHandler';
 // import { sendNotification } from './socket.service'; // Deprecated
 import { notificationService } from './notification.service';
 import Stripe from 'stripe';
+import { getStripe } from '../utils/stripe';
 import { logger } from '../utils/logger';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_not_configured', {
-  apiVersion: '2023-10-16',
-});
+const stripe = getStripe();
 
 const MENTOR_PLATFORM_FEE_RATE = 0.2;
 const SUPPORTED_SESSION_CURRENCIES = new Set([

@@ -58,6 +58,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# The service is meant to sit on a private network behind the Node API. When a
+# shared key is configured (ML_SERVICE_KEY, the same value the API sends as
+# X-ML-Key) every request except the health check has to carry it, so an
+# exposed port cannot be driven by anyone else.
+ML_SERVICE_KEY = os.environ.get("ML_SERVICE_KEY", "").strip()
+
+
+@app.middleware("http")
+async def require_shared_key(request: Request, call_next):
+    if ML_SERVICE_KEY and request.url.path not in ("/health", "/docs", "/redoc", "/openapi.json"):
+        if request.headers.get("x-ml-key", "") != ML_SERVICE_KEY:
+            return JSONResponse(status_code=401, content={"detail": "A valid X-ML-Key header is required"})
+    return await call_next(request)
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,

@@ -12,6 +12,7 @@ import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
 import { captureEscrowPayment } from '../stripe-connect.service';
 import { markSent, shouldSend, vehicleReminders } from './garage.service';
+import { runExclusively } from '../../utils/redis';
 
 const DAY = 86400000;
 
@@ -103,7 +104,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startAutomotiveSweeper(intervalMs = 6 * 60 * 60 * 1000): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => runAutomotiveSweep().then((r) => { if (r.garage.sent || r.purchases.released || r.purchases.nudged || r.expiries.nudged) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.expiries.nudged)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
   setTimeout(run, 120_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();
