@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import Script from 'next/script';
 import { Fraunces } from 'next/font/google';
 import './globals.css';
@@ -61,17 +62,20 @@ export const viewport: Viewport = {
   themeColor: '#7c3aed',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // The per-request nonce the middleware minted; the theme script below
+  // carries it so the content security policy lets it run.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${fraunces.variable} min-h-screen antialiased`} suppressHydrationWarning>
         {/* The stored theme, applied before the page becomes interactive so a
             dark reader never sees a white flash. Mirrors ThemeSync in providers.tsx. */}
-        <Script id="athena-theme-init" strategy="beforeInteractive">
+        <Script id="athena-theme-init" strategy="beforeInteractive" nonce={nonce}>
           {"(function(){try{var s=JSON.parse(localStorage.getItem('athena-ui')||'{}').state;var t=s&&s.theme;var d=t==='dark'||((!t||t==='system')&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);}catch(e){}})();"}
         </Script>
         <Providers>

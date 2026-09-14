@@ -23,8 +23,58 @@ const authRoutes = [
   '/forgot-password',
 ];
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+/**
+ * The content security policy, minted per request with a nonce. Only the
+ * scripts Next.js renders with this nonce run, and the scripts they load
+ * (Stripe.js, Google sign-in, PostHog) are trusted through 'strict-dynamic';
+ * an inline script injected into the page has no nonce and does not run.
+ * The 'unsafe-inline' and https: at the end are ignored by any browser that
+ * understands nonces and only keep very old ones working.
+ */
+function buildContentSecurityPolicy(nonce: string): string {
+  const scriptSrc = [`'self'`, `'nonce-${nonce}'`, `'strict-dynamic'`, isProduction ? '' : `'unsafe-eval'`, `'unsafe-inline'`, 'https:']
+    .filter(Boolean)
+    .join(' ');
+  const connectSrc = ['\'self\'', 'https:', 'wss:', isProduction ? '' : 'http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*']
+    .filter(Boolean)
+    .join(' ');
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "form-action 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    `connect-src ${connectSrc}`,
+    "media-src 'self' blob: https:",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com",
+    isProduction ? 'upgrade-insecure-requests' : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // A fresh nonce for this response. It travels on the request too, so the
+  // app router can put it on the scripts it renders.
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const contentSecurityPolicy = buildContentSecurityPolicy(nonce);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', contentSecurityPolicy);
+  const withPolicy = (response: NextResponse) => {
+    response.headers.set('Content-Security-Policy', contentSecurityPolicy);
+    return response;
+  };
 
   // ── API Proxy ────────────────────────────────────────────────────
   // Rewrite /api/* and /uploads/* to the API host at NEXT_PUBLIC_API_URL.
@@ -58,7 +108,7 @@ export function middleware(request: NextRequest) {
   if (maintenanceMode && !pathname.startsWith('/maintenance')) {
     const url = request.nextUrl.clone();
     url.pathname = '/maintenance';
-    return NextResponse.rewrite(url);
+    return withPolicy(NextResponse.rewrite(url, { request: { headers: requestHeaders } }));
   }
 
   const locales = registry?.locales || [];
@@ -79,7 +129,7 @@ export function middleware(request: NextRequest) {
 
       const url = request.nextUrl.clone();
       url.pathname = rest === '' ? '/' : rest.startsWith('/') ? rest : `/${rest}`;
-      const response = NextResponse.rewrite(url);
+      const response = withPolicy(NextResponse.rewrite(url, { request: { headers: requestHeaders } }));
       response.headers.set('x-athena-locale', locale);
       return response;
     }
@@ -110,7 +160,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  return NextResponse.next();
+  return withPolicy(NextResponse.next({ request: { headers: requestHeaders } }));
 }
 
 export const config = {
