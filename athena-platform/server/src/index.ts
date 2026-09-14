@@ -105,6 +105,9 @@ import groupChatRoutes from './routes/group-chat.routes';
 import gdprRoutes from './routes/gdpr.routes';
 import strategyRoutes from './routes/strategy.routes';
 import wellnessRoutes from './routes/wellness.routes';
+import automotiveRoutes from './routes/automotive.routes';
+import { startAutomotiveSweeper } from './services/automotive/automotive-reminders.service';
+import { startCarCatalogue } from './services/automotive/automotive-catalogue';
 import { startWellnessSweeper } from './services/wellness/wellness-reminders.service';
 import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
 import complianceRoutes from './routes/compliance.routes';
@@ -615,6 +618,7 @@ app.use('/api/housing', housingRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/strategy', strategyRoutes);
 app.use('/api/wellness', wellnessRoutes);
+app.use('/api/automotive', automotiveRoutes);
 app.use('/api/impact', impactRoutes);
 app.use('/api/community-support', communitySupportRoutes);
 app.use('/api/ai-algorithms', aiAlgorithmsRoutes);
@@ -748,6 +752,8 @@ export async function startServer() {
     // Wellness: doses due, refills, the day-after-a-visit check-in, circle check-ins, goal reviews.
     startWellnessSweeper();
     startWellnessCatalogue();
+    startAutomotiveSweeper();
+    startCarCatalogue();
     // Scheduled posts: publish what has come due, once a minute.
     startScheduledPostPublisher();
   });

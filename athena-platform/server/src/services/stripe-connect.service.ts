@@ -64,7 +64,9 @@ export interface EscrowPaymentInput {
   currency: string;
   description: string;
   metadata?: Record<string, string>;
-  sessionType?: 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order';
+  sessionType?: 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order' | 'vehicle_purchase' | 'car_service' | 'vehicle_inspection';
+  /** The platform's cut for this hold, when it differs from the default (a car sale carries a smaller percentage than a session). */
+  platformFeePercent?: number;
 }
 
 /**
@@ -241,7 +243,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     throw new ApiError(400, 'Seller payment account is not fully verified');
   }
 
-  const platformFee = Math.round(input.amount * (PLATFORM_FEE_PERCENT / 100));
+  const platformFee = Math.round(input.amount * ((input.platformFeePercent ?? PLATFORM_FEE_PERCENT) / 100));
 
   if (canUseMockStripe('Creating an escrow payment')) {
     const mockId = `pi_mock_${Date.now()}`;

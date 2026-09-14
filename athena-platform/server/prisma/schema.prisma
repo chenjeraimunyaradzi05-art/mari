@@ -758,6 +758,23 @@ model User {
   challengeMemberships WellnessChallengeMember[] @relation("ChallengeMemberships")
   wellnessGoals        WellnessGoal[]            @relation("WellnessGoals")
 
+  // Pillar 7: Automotive
+  carReviews             CarReview[]             @relation("CarReviews")
+  dealership             Dealership?             @relation("DealershipOwner")
+  testDrives             TestDriveRequest[]      @relation("TestDrives")
+  tradeIns               TradeInRequest[]        @relation("TradeIns")
+  vehicles               Vehicle[]               @relation("Vehicles")
+  vehicleListings        VehicleListing[]        @relation("VehicleListings")
+  vehicleListingSaves    VehicleListingSave[]    @relation("VehicleListingSaves")
+  inspectionsRequested   VehicleInspection[]     @relation("InspectionsRequested")
+  vehiclePurchasesBought VehiclePurchase[]       @relation("VehiclePurchasesAsBuyer")
+  vehiclePurchasesSold   VehiclePurchase[]       @relation("VehiclePurchasesAsSeller")
+  mechanicProfile        Mechanic?               @relation("MechanicOwner")
+  mechanicBookings       MechanicBooking[]       @relation("MechanicBookings")
+  mechanicReviews        MechanicReview[]        @relation("MechanicReviews")
+  carFinanceApplications CarFinanceApplication[] @relation("CarFinanceApplications")
+  carReferrals           CarReferral[]           @relation("CarReferrals")
+
   // Phase 11: Social Impact & Scale
   programEnrollments       ProgramEnrollment[]
   indigenousMemberships    IndigenousCommunityMember[]
@@ -907,18 +924,18 @@ model PushToken {
 }
 
 model EscrowPayment {
-  id                    String        @id @default(uuid())
+  id                    String             @id @default(uuid())
   buyerId               String
-  buyer                 User          @relation("EscrowBuyer", fields: [buyerId], references: [id])
+  buyer                 User               @relation("EscrowBuyer", fields: [buyerId], references: [id])
   sellerId              String
-  seller                User          @relation("EscrowSeller", fields: [sellerId], references: [id])
+  seller                User               @relation("EscrowSeller", fields: [sellerId], references: [id])
   amount                Int // in cents
-  platformFee           Int           @default(0)
-  currency              String        @default("AUD")
-  status                String        @default("PENDING") // PENDING, AUTHORIZED, CAPTURED, REFUNDED, FAILED, CANCELED
-  stripePaymentIntentId String?       @unique
+  platformFee           Int                @default(0)
+  currency              String             @default("AUD")
+  status                String             @default("PENDING") // PENDING, AUTHORIZED, CAPTURED, REFUNDED, FAILED, CANCELED
+  stripePaymentIntentId String?            @unique
   stripeTransferId      String?
-  paymentIntentId       String?       @unique // Alias for lookup
+  paymentIntentId       String?            @unique // Alias for lookup
   description           String?
   metadata              Json?
   sessionType           String? // 'mentor_session' | 'course_purchase' | 'creator_content' | 'service_order'
@@ -927,8 +944,11 @@ model EscrowPayment {
   capturedAt            DateTime?
   canceledAt            DateTime?
   cancelReason          String?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  vehicleInspection     VehicleInspection?
+  vehiclePurchase       VehiclePurchase?
+  mechanicBooking       MechanicBooking?
 
   @@index([buyerId])
   @@index([sellerId])
@@ -6304,4 +6324,764 @@ model WellnessGoal {
   updatedAt DateTime @updatedAt
 
   @@index([userId, status])
+}
+
+// =====================================================================
+// Pillar 7: Automotive Marketplace (Australia)
+//
+// The new-car catalogue with reviews from women, dealerships that take
+// test drives and trade-in requests, a garage (the member's own cars,
+// which the service reminders, the warranty and the trade-in estimate
+// hang off), the pre-loved marketplace with inspections and a purchase
+// held under buyer protection, the mechanic directory with bookings,
+// quotes and verified reviews, and car finance pre-approval.
+// =====================================================================
+
+enum CarBodyType {
+  HATCH
+  SEDAN
+  WAGON
+  SUV
+  UTE
+  VAN
+  PEOPLE_MOVER
+  COUPE
+  CONVERTIBLE
+}
+
+enum CarFuelType {
+  PETROL
+  DIESEL
+  HYBRID
+  PLUG_IN_HYBRID
+  ELECTRIC
+}
+
+enum CarTransmission {
+  AUTOMATIC
+  MANUAL
+}
+
+/// A model in the new-car catalogue. Platform content, kept as at a date
+/// with its source, so a rating is never shown without saying when it was
+/// given and where to check it.
+model CarModel {
+  id                    String          @id @default(uuid())
+  slug                  String          @unique
+  make                  String
+  model                 String
+  variant               String?
+  year                  Int
+  bodyType              CarBodyType
+  fuelType              CarFuelType
+  transmission          CarTransmission @default(AUTOMATIC)
+  seats                 Int             @default(5)
+  priceFrom             Int
+  ancapStars            Int?
+  ancapYear             Int?
+  fuelPer100            Decimal?
+  kwhPer100             Decimal?
+  rangeKm               Int?
+  co2GramsKm            Int?
+  warrantyYears         Int?
+  warrantyKm            Int?
+  serviceIntervalMonths Int?
+  serviceIntervalKm     Int?
+  servicingCostYear     Int?
+  safetyFeatures        String[]        @default([])
+  highlights            String[]        @default([])
+  sourceUrl             String?
+  asAt                  String?
+  isActive              Boolean         @default(true)
+  ratingAvg             Decimal         @default(0)
+  ratingCount           Int             @default(0)
+  reliabilityAvg        Decimal         @default(0)
+
+  reviews    CarReview[]
+  vehicles   Vehicle[]
+  testDrives TestDriveRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([make, model])
+  @@index([bodyType, fuelType])
+  @@index([isActive])
+}
+
+/// A review from a woman who owns or has driven the car, rated as a whole
+/// and on reliability, how safe it feels and what it costs to run.
+model CarReview {
+  id           String  @id @default(uuid())
+  carModelId   String
+  userId       String
+  rating       Int
+  reliability  Int
+  safetyFeel   Int
+  runningCosts Int
+  title        String
+  body         String
+  ownedMonths  Int?
+  videoUrl     String?
+  isOwner      Boolean @default(false)
+  isHidden     Boolean @default(false)
+  helpfulCount Int     @default(0)
+
+  carModel CarModel @relation(fields: [carModelId], references: [id], onDelete: Cascade)
+  user     User     @relation("CarReviews", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([carModelId, userId])
+  @@index([carModelId, isHidden])
+}
+
+/// A dealership, claimable by the member who runs it. Takes test drives
+/// and trade-in requests, and can list stock as a dealer.
+model Dealership {
+  id               String    @id @default(uuid())
+  slug             String    @unique
+  name             String
+  ownerUserId      String?   @unique
+  brands           String[]  @default([])
+  headline         String
+  about            String?
+  suburb           String?
+  city             String?
+  state            String?
+  postcode         String?
+  address          String?
+  phone            String?
+  website          String?
+  email            String?
+  womenLed         Boolean   @default(false)
+  financeAvailable Boolean   @default(false)
+  financePartners  String[]  @default([])
+  hours            Json?
+  isVerified       Boolean   @default(false)
+  isActive         Boolean   @default(true)
+  isFeatured       Boolean   @default(false)
+  featuredUntil    DateTime?
+  ratingAvg        Decimal   @default(0)
+  ratingCount      Int       @default(0)
+
+  owner      User?              @relation("DealershipOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  testDrives TestDriveRequest[]
+  tradeIns   TradeInRequest[]
+  listings   VehicleListing[]
+  referrals  CarReferral[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([state, isActive])
+}
+
+enum TestDriveStatus {
+  REQUESTED
+  CONFIRMED
+  DECLINED
+  COMPLETED
+  CANCELLED
+}
+
+model TestDriveRequest {
+  id            String          @id @default(uuid())
+  userId        String
+  dealershipId  String?
+  carModelId    String?
+  listingId     String?
+  preferredAt   DateTime
+  alternativeAt DateTime?
+  note          String?
+  status        TestDriveStatus @default(REQUESTED)
+  dealerNote    String?
+  confirmedAt   DateTime?
+
+  user       User            @relation("TestDrives", fields: [userId], references: [id], onDelete: Cascade)
+  dealership Dealership?     @relation(fields: [dealershipId], references: [id], onDelete: SetNull)
+  carModel   CarModel?       @relation(fields: [carModelId], references: [id], onDelete: SetNull)
+  listing    VehicleListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([dealershipId, status])
+}
+
+enum TradeInStatus {
+  OPEN
+  QUOTED
+  ACCEPTED
+  EXPIRED
+  WITHDRAWN
+}
+
+/// A trade-in request. The platform's own estimate is written in at once;
+/// a dealership can add a quote against it while it is open.
+model TradeInRequest {
+  id           String        @id @default(uuid())
+  userId       String
+  vehicleId    String?
+  dealershipId String?
+  make         String
+  model        String
+  year         Int
+  variant      String?
+  odometerKm   Int
+  condition    String
+  photos       Json?
+  notes        String?
+  estimateLow  Int
+  estimateMid  Int
+  estimateHigh Int
+  status       TradeInStatus @default(OPEN)
+  quotes       Json?
+  expiresAt    DateTime
+
+  user       User        @relation("TradeIns", fields: [userId], references: [id], onDelete: Cascade)
+  vehicle    Vehicle?    @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  dealership Dealership? @relation(fields: [dealershipId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+/// A car in a member's garage. The reminders (service, registration,
+/// insurance, warranty), the service history and the trade-in estimate
+/// all hang off it.
+model Vehicle {
+  id                    String       @id @default(uuid())
+  userId                String
+  carModelId            String?
+  nickname              String?
+  make                  String
+  model                 String
+  year                  Int
+  variant               String?
+  bodyType              CarBodyType?
+  fuelType              CarFuelType  @default(PETROL)
+  colour                String?
+  rego                  String?
+  regoState             String?
+  vin                   String?
+  odometerKm            Int?
+  odometerAt            DateTime?
+  kmPerYear             Int?
+  purchasePrice         Int?
+  purchasedAt           DateTime?    @db.Date
+  boughtNew             Boolean      @default(false)
+  newPrice              Int?
+  warrantyEndsAt        DateTime?    @db.Date
+  warrantyEndsKm        Int?
+  regoDueAt             DateTime?    @db.Date
+  insuranceRenewsAt     DateTime?    @db.Date
+  insurer               String?
+  insurancePremium      Int?
+  nextServiceDueAt      DateTime?    @db.Date
+  nextServiceDueKm      Int?
+  serviceIntervalMonths Int          @default(12)
+  serviceIntervalKm     Int          @default(15000)
+  notes                 String?
+  isActive              Boolean      @default(true)
+  lastReminderKeys      Json?
+
+  user     User                   @relation("Vehicles", fields: [userId], references: [id], onDelete: Cascade)
+  carModel CarModel?              @relation(fields: [carModelId], references: [id], onDelete: SetNull)
+  services VehicleServiceRecord[]
+  bookings MechanicBooking[]
+  tradeIns TradeInRequest[]
+  listings VehicleListing[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isActive])
+}
+
+model VehicleServiceRecord {
+  id                   String   @id @default(uuid())
+  vehicleId            String
+  bookingId            String?  @unique
+  mechanicId           String?
+  date                 DateTime @db.Date
+  odometerKm           Int?
+  kind                 String
+  title                String
+  workshop             String?
+  cost                 Int?
+  notes                String?
+  partsWarrantyMonths  Int?
+  labourWarrantyMonths Int?
+  invoiceUrl           String?
+
+  vehicle  Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  booking  MechanicBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  mechanic Mechanic?        @relation(fields: [mechanicId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId, date])
+}
+
+enum SellerKind {
+  PRIVATE
+  DEALER
+}
+
+enum ServiceHistoryKind {
+  FULL
+  PARTIAL
+  NONE
+  UNKNOWN
+}
+
+enum VehicleListingStatus {
+  DRAFT
+  ACTIVE
+  UNDER_OFFER
+  SOLD
+  WITHDRAWN
+  SUSPENDED
+}
+
+enum ListingWarranty {
+  NONE
+  BALANCE_OF_NEW_CAR
+  STATUTORY
+  DEALER
+  EXTENDED
+}
+
+/// A pre-loved car for sale, from a member or a dealership.
+model VehicleListing {
+  id                 String               @id @default(uuid())
+  sellerId           String
+  sellerKind         SellerKind           @default(PRIVATE)
+  dealershipId       String?
+  vehicleId          String?
+  title              String
+  make               String
+  model              String
+  year               Int
+  variant            String?
+  bodyType           CarBodyType
+  fuelType           CarFuelType
+  transmission       CarTransmission      @default(AUTOMATIC)
+  odometerKm         Int
+  price              Int
+  priceGuideLow      Int?
+  priceGuideHigh     Int?
+  priceVerdict       String?
+  colour             String?
+  seats              Int?
+  description        String
+  features           String[]             @default([])
+  photos             Json?
+  videoUrl           String?
+  suburb             String?
+  city               String?
+  state              String
+  postcode           String?
+  vin                String?
+  rego               String?
+  regoExpires        DateTime?            @db.Date
+  serviceHistory     ServiceHistoryKind   @default(UNKNOWN)
+  accidentHistory    String               @default("NONE")
+  ownersCount        Int?
+  ppsrChecked        Boolean              @default(false)
+  ppsrCertificateUrl String?
+  roadworthy         Boolean              @default(false)
+  warranty           ListingWarranty      @default(NONE)
+  warrantyNote       String?
+  status             VehicleListingStatus @default(DRAFT)
+  riskFlags          String[]             @default([])
+  riskScore          Int                  @default(0)
+  isFeatured         Boolean              @default(false)
+  featuredUntil      DateTime?
+  viewCount          Int                  @default(0)
+  saveCount          Int                  @default(0)
+  soldAt             DateTime?
+  suspendedReason    String?
+
+  seller      User                 @relation("VehicleListings", fields: [sellerId], references: [id], onDelete: Cascade)
+  dealership  Dealership?          @relation(fields: [dealershipId], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?             @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  inspections VehicleInspection[]
+  purchases   VehiclePurchase[]
+  saves       VehicleListingSave[]
+  testDrives  TestDriveRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, state])
+  @@index([make, model])
+  @@index([sellerId])
+  @@index([price])
+}
+
+model VehicleListingSave {
+  id        String @id @default(uuid())
+  listingId String
+  userId    String
+
+  listing VehicleListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user    User           @relation("VehicleListingSaves", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([listingId, userId])
+  @@index([userId])
+}
+
+enum InspectionKind {
+  ATHENA_VETTED
+  INDEPENDENT
+  SELLER_PROVIDED
+}
+
+enum InspectionStatus {
+  REQUESTED
+  ASSIGNED
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum InspectionOutcome {
+  PASS
+  ADVISORIES
+  FAIL
+}
+
+/// An inspection of a listed car: requested by a buyer or offered by the
+/// seller, carried out by a workshop in the directory, reported section
+/// by section.
+model VehicleInspection {
+  id              String             @id @default(uuid())
+  listingId       String
+  requestedById   String
+  purchaseId      String?
+  inspectorId     String?
+  kind            InspectionKind     @default(ATHENA_VETTED)
+  status          InspectionStatus   @default(REQUESTED)
+  fee             Int                @default(0)
+  scheduledAt     DateTime?
+  completedAt     DateTime?
+  outcome         InspectionOutcome?
+  summary         String?
+  report          Json?
+  reportUrl       String?
+  escrowPaymentId String?            @unique
+
+  listing     VehicleListing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  requestedBy User             @relation("InspectionsRequested", fields: [requestedById], references: [id], onDelete: Cascade)
+  inspector   Mechanic?        @relation(fields: [inspectorId], references: [id], onDelete: SetNull)
+  purchase    VehiclePurchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  escrow      EscrowPayment?   @relation(fields: [escrowPaymentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([listingId])
+  @@index([status])
+}
+
+enum VehiclePurchaseStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  PAID_HELD
+  HANDED_OVER
+  RELEASED
+  DISPUTED
+  REFUNDED
+  CANCELLED
+}
+
+/// A purchase under buyer protection. The money is held from the moment
+/// the buyer pays until the inspection period after handover has passed
+/// without a dispute, or the buyer releases it sooner.
+model VehiclePurchase {
+  id                String                @id @default(uuid())
+  listingId         String
+  buyerId           String
+  sellerId          String
+  offerAmount       Int
+  agreedAmount      Int?
+  platformFee       Int                   @default(0)
+  status            VehiclePurchaseStatus @default(OFFERED)
+  message           String?
+  sellerMessage     String?
+  escrowPaymentId   String?               @unique
+  paidAt            DateTime?
+  handedOverAt      DateTime?
+  inspectionEndsAt  DateTime?
+  releasedAt        DateTime?
+  disputeReason     String?
+  disputeOpenedAt   DateTime?
+  disputeResolution String?
+  resolvedAt        DateTime?
+  resolvedById      String?
+  transferNote      String?
+  cancelledAt       DateTime?
+  cancelReason      String?
+  reviewRating      Int?
+  reviewComment     String?
+
+  listing     VehicleListing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer       User                @relation("VehiclePurchasesAsBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller      User                @relation("VehiclePurchasesAsSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  escrow      EscrowPayment?      @relation(fields: [escrowPaymentId], references: [id])
+  inspections VehicleInspection[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+}
+
+/// A workshop or mechanic in the directory: women-owned and women
+/// mechanics marked, services and makes, prices from, the warranty on the
+/// work, hours for bookings, and ratings only from completed jobs.
+model Mechanic {
+  id                   String    @id @default(uuid())
+  slug                 String    @unique
+  name                 String
+  ownerUserId          String?   @unique
+  headline             String
+  about                String
+  womenOwned           Boolean   @default(false)
+  womenMechanics       Boolean   @default(false)
+  services             String[]  @default([])
+  makes                String[]  @default([])
+  evCapable            Boolean   @default(false)
+  mobile               Boolean   @default(false)
+  loanCar              Boolean   @default(false)
+  afterHours           Boolean   @default(false)
+  doesInspections      Boolean   @default(false)
+  languages            String[]  @default(["English"])
+  suburb               String?
+  city                 String?
+  state                String?
+  postcode             String?
+  address              String?
+  phone                String?
+  website              String?
+  bookingUrl           String?
+  licenceNumber        String?
+  priceList            Json?
+  labourRateHour       Int?
+  partsWarrantyMonths  Int?
+  labourWarrantyMonths Int?
+  warrantyNote         String?
+  availability         Json?
+  slotMinutes          Int       @default(60)
+  acceptsBookings      Boolean   @default(true)
+  isVerified           Boolean   @default(false)
+  isActive             Boolean   @default(true)
+  isFeatured           Boolean   @default(false)
+  featuredUntil        DateTime?
+  ratingAvg            Decimal   @default(0)
+  ratingCount          Int       @default(0)
+  transparencyAvg      Decimal   @default(0)
+
+  owner          User?                  @relation("MechanicOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  bookings       MechanicBooking[]
+  reviews        MechanicReview[]
+  inspections    VehicleInspection[]
+  serviceRecords VehicleServiceRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([state, isActive])
+  @@index([isActive, isVerified])
+}
+
+enum MechanicBookingStatus {
+  REQUESTED
+  QUOTED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  DECLINED
+  CANCELLED
+  NO_SHOW
+}
+
+/// A service or repair booked with a workshop: requested, quoted line by
+/// line, accepted, done, and paid through the platform when the workshop
+/// takes payment here.
+model MechanicBooking {
+  id                   String                @id @default(uuid())
+  mechanicId           String
+  userId               String
+  vehicleId            String?
+  kind                 String
+  scheduledAt          DateTime
+  durationMinutes      Int                   @default(60)
+  dropOff              Boolean               @default(true)
+  address              String?
+  concern              String?
+  odometerKm           Int?
+  status               MechanicBookingStatus @default(REQUESTED)
+  quoteAmount          Int?
+  quoteLines           Json?
+  quoteNote            String?
+  quotedAt             DateTime?
+  quoteAcceptedAt      DateTime?
+  partsRequested       Json?
+  finalAmount          Int?
+  escrowPaymentId      String?               @unique
+  paidAt               DateTime?
+  workshopNote         String?
+  completedAt          DateTime?
+  partsWarrantyMonths  Int?
+  labourWarrantyMonths Int?
+  cancelReason         String?
+
+  mechanic Mechanic              @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  user     User                  @relation("MechanicBookings", fields: [userId], references: [id], onDelete: Cascade)
+  vehicle  Vehicle?              @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  escrow   EscrowPayment?        @relation(fields: [escrowPaymentId], references: [id])
+  review   MechanicReview?
+  record   VehicleServiceRecord?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mechanicId, scheduledAt])
+  @@index([userId, scheduledAt])
+  @@index([status])
+}
+
+/// A rating from a completed job only, with a second mark for whether the
+/// charges were explained before the work.
+model MechanicReview {
+  id           String  @id @default(uuid())
+  mechanicId   String
+  userId       String
+  bookingId    String  @unique
+  rating       Int
+  transparency Int
+  comment      String?
+  isHidden     Boolean @default(false)
+
+  mechanic Mechanic        @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  user     User            @relation("MechanicReviews", fields: [userId], references: [id], onDelete: Cascade)
+  booking  MechanicBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([mechanicId])
+}
+
+enum CarFinanceStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  PRE_APPROVED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+/// A car finance pre-approval: what she is buying, what she can carry, a
+/// readiness score with what a lender will ask, and the decision tracked.
+model CarFinanceApplication {
+  id                String           @id @default(uuid())
+  userId            String
+  listingId         String?
+  carModelId        String?
+  purpose           String
+  vehiclePrice      Int
+  deposit           Int              @default(0)
+  tradeIn           Int              @default(0)
+  amount            Int
+  termMonths        Int
+  balloonPct        Decimal          @default(0)
+  ratePct           Decimal
+  repaymentMonthly  Int
+  incomeAnnual      Int
+  expensesMonthly   Int
+  otherDebtsMonthly Int              @default(0)
+  dependants        Int              @default(0)
+  employment        String
+  employmentMonths  Int?
+  residency         String?
+  readinessScore    Int
+  readinessNotes    String[]         @default([])
+  status            CarFinanceStatus @default(DRAFT)
+  lender            String?
+  referenceCode     String           @unique
+  submittedAt       DateTime?
+  decisionAt        DateTime?
+  expiresAt         DateTime?
+  decisionNote      String?
+  timeline          Json?
+
+  user User @relation("CarFinanceApplications", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum CarReferralKind {
+  DEALER_SALE
+  FINANCE
+  INSURANCE
+  WARRANTY
+  PARTS
+  FLEET
+}
+
+enum CarReferralStatus {
+  PENDING
+  CONFIRMED
+  PAID
+  VOID
+}
+
+/// What a partner owes ATHENA for an introduction made here: a dealership
+/// sale that began with a test drive, a loan that settled after a
+/// pre-approval, a policy, a warranty or parts. The member never pays
+/// these; the ledger is what the admin reconciles against.
+model CarReferral {
+  id           String            @id @default(uuid())
+  kind         CarReferralKind
+  status       CarReferralStatus @default(PENDING)
+  userId       String?
+  dealershipId String?
+  referenceId  String?
+  partner      String?
+  basisAmount  Int
+  feePercent   Decimal           @default(0)
+  fee          Int
+  note         String?
+  createdById  String?
+  confirmedAt  DateTime?
+  paidAt       DateTime?
+
+  user       User?       @relation("CarReferrals", fields: [userId], references: [id], onDelete: SetNull)
+  dealership Dealership? @relation(fields: [dealershipId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, kind])
+  @@index([dealershipId])
+  @@index([createdAt])
 }
