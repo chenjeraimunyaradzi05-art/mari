@@ -23,7 +23,10 @@ export function validateAuthSessionRoutes(): AuthSessionRouteValidationResult {
       ok:
         /router\.post\(\s*['"]\/change-password/.test(content) &&
         content.includes('Current password is incorrect') &&
-        content.includes('revokedAt: new Date()'),
+        // Either the inline update or the session service's revoke-all with
+        // the current session spared: both end every other device's session.
+        (content.includes('revokedAt: new Date()') ||
+          /revokeAllUserSessions\([\s\S]{0,200}?exceptSessionId/.test(content)),
       details: 'Change-password route should verify current password and revoke other sessions',
     },
     {
