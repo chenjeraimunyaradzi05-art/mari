@@ -56,7 +56,7 @@ const RATE_LIMITS = {
   },
   search: {
     windowMs: 60 * 1000, // 1 minute
-    max: 30, // 30 searches per minute
+    max: 60, // a search a second, typeahead included; a scraper's wall
   },
   upload: {
     windowMs: 60 * 60 * 1000, // 1 hour
@@ -126,10 +126,12 @@ async function slidingWindowRateLimit(
   windowMs: number,
   max: number
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
-  const redis = getRedisClient();
   const now = Date.now();
   const windowStart = now - windowMs;
 
+  // Without REDIS_URL there is nothing to reach; asking would only wait on a
+  // refused socket before falling back anyway.
+  const redis = process.env.REDIS_URL ? getRedisClient() : null;
   if (!redis) {
     noteFallback('Redis is not configured');
     return memorySlidingWindow(key, windowMs, max, now);

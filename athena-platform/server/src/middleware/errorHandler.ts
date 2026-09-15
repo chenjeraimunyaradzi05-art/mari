@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'crypto';
+import multer from 'multer';
+import { ZodError } from 'zod';
 import { logger } from '../utils/logger';
 import { ERROR_KEYS, i18nService, SupportedLocale } from '../services/i18n.service';
 
@@ -23,15 +25,43 @@ export function debugHeaderMatches(header: string | string[] | undefined, secret
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Errors raised by the libraries in front of the handlers, given the status
+ * and wording a member can act on. Without this a file over the size limit,
+ * a body over the JSON limit, malformed JSON and a failed zod parse all
+ * surfaced as 500 "An unexpected error occurred", and were logged as if the
+ * server had broken.
+ */
+export function describeKnownError(err: AppError & { code?: string; type?: string; issues?: Array<{ message?: string; path?: Array<string | number> }> }): { statusCode: number; message: string } | null {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return { statusCode: 413, message: 'The file is larger than this upload allows' };
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') return { statusCode: 400, message: 'Too many files, or a file in an unexpected field' };
+    return { statusCode: 400, message: 'The upload could not be read' };
+  }
+  if (err.type === 'entity.too.large') return { statusCode: 413, message: 'The request body is too large' };
+  if (err.type === 'entity.parse.failed') return { statusCode: 400, message: 'The request body is not valid JSON' };
+  if (err.type === 'encoding.unsupported' || err.type === 'charset.unsupported') return { statusCode: 415, message: 'The request body encoding is not supported' };
+  if (err instanceof ZodError || (err.name === 'ZodError' && Array.isArray(err.issues))) {
+    const first = err.issues?.[0];
+    const where = first?.path?.length ? `${first.path.join('.')}: ` : '';
+    return { statusCode: 400, message: `${where}${first?.message || 'Invalid request'}` };
+  }
+  return null;
+}
+
 export const errorHandler = (
   err: AppError,
   req: Request,
   res: Response,
   _next: NextFunction
 ) => {
-  const statusCode = err.statusCode || 500;
+  // Some library errors keep their message behind a getter, so the answer is
+  // worked out beside the error rather than written onto it.
+  const known = describeKnownError(err);
+  const statusCode = known?.statusCode ?? err.statusCode ?? 500;
+  const operational = known ? true : err.isOperational;
   const locale = ((req as any).locale as SupportedLocale) || 'en';
-  const rawMessage = err.message || 'Internal Server Error';
+  const rawMessage = known?.message ?? (err.message || 'Internal Server Error');
   const inferredKey = rawMessage.startsWith('errors.') ? rawMessage : undefined;
   const i18nKey = err.i18nKey || inferredKey;
 
@@ -40,17 +70,19 @@ export const errorHandler = (
   // Only use the generic "An unexpected error occurred" for 5xx / unknown errors.
   const message = i18nKey
     ? i18nService.tSync(i18nKey, err.i18nParams as Record<string, string | number> | undefined, locale)
-    : (err.isOperational && statusCode < 500)
+    : (operational && statusCode < 500)
       ? rawMessage
       : i18nService.tSync(ERROR_KEYS.SERVER_INTERNAL_ERROR, undefined, locale);
   const requestId = (req as any).requestId as string | undefined;
 
-  logger.error(message, {
+  // A refused request is the member's to fix; only a failure of ours is an error.
+  const log = statusCode >= 500 ? logger.error : logger.warn;
+  log(message, {
     requestId,
     statusCode,
     method: req.method,
     path: req.path,
-    stack: err.stack,
+    ...(statusCode >= 500 ? { stack: err.stack } : {}),
   });
 
   const hasDebugAccess = debugHeaderMatches(req.headers['x-debug-auth'], process.env.DEBUG_SECRET);

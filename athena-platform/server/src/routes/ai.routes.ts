@@ -2,6 +2,7 @@ import { NextFunction, Response, Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest, requirePremium } from '../middleware/auth';
+import { aiLimiter } from '../middleware/rateLimiter';
 import { aiService } from '../services/ai.service';
 import { checkRateLimit, getRateLimitStatus } from '../utils/cache';
 
@@ -188,13 +189,13 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
   }
 }
 
-router.get('/opportunity-radar', authenticate, requirePremium, opportunityRadarHandler);
-router.post('/opportunity-radar', authenticate, requirePremium, opportunityRadarHandler);
+router.get('/opportunity-radar', authenticate, requirePremium, aiLimiter, opportunityRadarHandler);
+router.post('/opportunity-radar', authenticate, requirePremium, aiLimiter, opportunityRadarHandler);
 
 // ===========================================
 // RESUME OPTIMIZER
 // ===========================================
-router.post('/resume-optimizer', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.post('/resume-optimizer', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { resumeText, targetJobId } = req.body;
 
@@ -246,7 +247,7 @@ router.post('/resume-optimizer', authenticate, requirePremium, async (req: AuthR
 // ===========================================
 // INTERVIEW COACH
 // ===========================================
-router.post('/interview-coach', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.post('/interview-coach', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { jobId, questionType = 'mixed' } = req.body;
 
@@ -274,7 +275,7 @@ router.post('/interview-coach', authenticate, requirePremium, async (req: AuthRe
   }
 });
 
-router.post('/interview-coach/feedback', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.post('/interview-coach/feedback', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { question, answer, jobRole, interviewType, difficulty } = req.body;
 
@@ -302,7 +303,7 @@ router.post('/interview-coach/feedback', authenticate, requirePremium, async (re
 // ===========================================
 // CAREER PATH ANALYZER
 // ===========================================
-router.get('/career-path', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.get('/career-path', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
@@ -356,7 +357,7 @@ ${user.education.map(e => `- ${e.degree} in ${e.fieldOfStudy || 'N/A'} from ${e.
 // The GET above derives everything from the stored profile. The career-path page
 // asks the user for a current role, a target role, and years of experience, so
 // this variant plans against the goal they typed rather than only their history.
-router.post('/career-path', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.post('/career-path', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const currentRole = typeof req.body.currentRole === 'string' ? req.body.currentRole.trim() : '';
     const targetRole = typeof req.body.targetRole === 'string' ? req.body.targetRole.trim() : '';
@@ -409,7 +410,7 @@ Skills: ${user.skills.map((s) => `${s.skill.name} (${s.level})`).join(', ') || '
 // ===========================================
 // CONTENT GENERATOR (For Creators)
 // ===========================================
-router.post('/content-generator', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.post('/content-generator', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { contentType, topic, tone, platform, wordCount } = req.body;
 
@@ -437,7 +438,7 @@ router.post('/content-generator', authenticate, requirePremium, async (req: Auth
 // ===========================================
 // BUSINESS IDEA VALIDATOR (For Entrepreneurs)
 // ===========================================
-router.post('/idea-validator', authenticate, requirePremium, async (req: AuthRequest, res, next) => {
+router.post('/idea-validator', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { idea, targetMarket, problemSolved } = req.body;
 

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import multer from 'multer';
 import {
   S3Client,
@@ -14,6 +14,7 @@ import fs from 'fs';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { uploadLimiter } from '../middleware/rateLimiter';
 import { logger } from '../utils/logger';
 import { moderateImage } from '../services/moderation.service';
 import { checkFileContent } from '../utils/file-signature';
@@ -164,13 +165,37 @@ const PRIVATE_UPLOAD_FOLDERS = new Set(
     .map((config) => config.folder)
 );
 
-// Configure multer for memory storage
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB max (for videos)
-  },
-});
+/**
+ * Reads the upload into memory with the ceiling of its own kind, not the
+ * video ceiling for everything: a 400 MB "avatar" used to be buffered in
+ * full before the 5 MB limit was looked at. Multer stops reading at the
+ * limit and its error is answered as 413 by the error handler. An unknown
+ * kind is refused before a byte is read.
+ */
+function receiveUpload(
+  limitFor: (req: AuthRequest) => number | null,
+  field: string,
+  options: { maxFiles?: number } = {}
+) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    const fileSize = limitFor(req);
+    if (!fileSize) {
+      return next(new ApiError(400, 'Invalid upload type'));
+    }
+    const receiver = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize, files: options.maxFiles ?? 1 },
+    });
+    const handler = options.maxFiles ? receiver.array(field, options.maxFiles) : receiver.single(field);
+    handler(req, res, next);
+  };
+}
+
+function configFor(type: unknown): FileConfig | null {
+  return typeof type === 'string' && Object.prototype.hasOwnProperty.call(FILE_CONFIGS, type)
+    ? FILE_CONFIGS[type as keyof typeof FILE_CONFIGS]
+    : null;
+}
 
 function hasS3Credentials(): boolean {
   return !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
@@ -279,7 +304,7 @@ async function deleteLocalFileIfPresent(key: string): Promise<boolean> {
 // ===========================================
 // GET PRESIGNED UPLOAD URL
 // ===========================================
-router.post('/presigned-url', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/presigned-url', authenticate, uploadLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { fileType, fileName, contentType } = req.body;
 
@@ -287,7 +312,13 @@ router.post('/presigned-url', authenticate, async (req: AuthRequest, res, next) 
       throw new ApiError(400, 'fileType, fileName, and contentType are required');
     }
 
-    const config = FILE_CONFIGS[fileType as keyof typeof FILE_CONFIGS];
+    // The name is stored as object metadata, which has a size ceiling of its
+    // own and no business carrying control characters.
+    if (typeof fileName !== 'string' || typeof contentType !== 'string' || fileName.length > 255 || /[ -]/.test(fileName)) {
+      throw new ApiError(400, 'fileName must be a plain name of 255 characters or fewer');
+    }
+
+    const config = configFor(fileType);
     if (!config) {
       throw new ApiError(400, 'Invalid file type');
     }
@@ -328,7 +359,7 @@ router.post('/presigned-url', authenticate, async (req: AuthRequest, res, next) 
 // ===========================================
 // UPLOAD FILE (Direct Upload)
 // ===========================================
-router.post('/upload/:type', authenticate, upload.single('file'), async (req: AuthRequest, res, next) => {
+router.post('/upload/:type', authenticate, uploadLimiter, receiveUpload((req) => configFor(req.params.type)?.maxSize ?? null, 'file'), async (req: AuthRequest, res, next) => {
   try {
     const { type } = req.params;
     const file = req.file;
@@ -581,7 +612,7 @@ router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 // UPLOAD RESUME
 // ===========================================
-router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRequest, res, next) => {
+router.post('/resume', authenticate, uploadLimiter, receiveUpload(() => FILE_CONFIGS.resume.maxSize, 'resume'), async (req: AuthRequest, res, next) => {
   try {
     const file = req.file;
 
@@ -657,7 +688,7 @@ router.post('/resume', authenticate, upload.single('resume'), async (req: AuthRe
 // ===========================================
 // UPLOAD MULTIPLE IMAGES (for posts)
 // ===========================================
-router.post('/post-images', authenticate, upload.array('images', 10), async (req: AuthRequest, res, next) => {
+router.post('/post-images', authenticate, uploadLimiter, receiveUpload(() => FILE_CONFIGS.post.maxSize, 'images', { maxFiles: 10 }), async (req: AuthRequest, res, next) => {
   try {
     const files = req.files as Express.Multer.File[];
 

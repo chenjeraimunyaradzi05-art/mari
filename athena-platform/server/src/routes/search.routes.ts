@@ -5,10 +5,17 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
+import { searchLimiter } from '../middleware/rateLimiter';
 import * as searchService from '../services/search.service';
 import { logger } from '../utils/logger';
 
 const router = Router();
+
+// A search a second per address is plenty for a person typing and a wall
+// for a scraper walking the directory. Keyed by address: the routes below
+// resolve the member themselves, and doing it here too would look the
+// session up twice per search.
+router.use(searchLimiter);
 
 /**
  * GET /api/search

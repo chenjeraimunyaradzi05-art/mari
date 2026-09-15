@@ -22,6 +22,7 @@ import { sessionService } from './services/session.service';
 import cookieParser from 'cookie-parser';
 import { securityHeaders } from './middleware/securityHeaders';
 import { trustedProxyIdentity } from './middleware/trustedProxy';
+import { SharedRateLimitStore } from './utils/rate-limit-store';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -295,6 +296,8 @@ const rateLimitMax = parseInt(
   10
 );
 
+// Counters live in Redis when it is configured, so every instance of the
+// API draws on the same budget per caller; in the process otherwise.
 const limiter = rateLimit({
   windowMs: Number.isFinite(rateLimitWindowMs) ? rateLimitWindowMs : 15 * 60 * 1000,
   max: Number.isFinite(rateLimitMax) ? rateLimitMax : 100,
@@ -303,6 +306,7 @@ const limiter = rateLimit({
   legacyHeaders: false,
   skip: (req: Request) => req.path === '/metrics' || req.path.startsWith('/webhooks'),
   validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:api:'),
 });
 
 // Strict rate limiter for authentication endpoints (brute-force protection)
@@ -313,6 +317,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:auth:'),
 });
 
 // Lenient limiter just for /refresh — high enough not to interfere with
@@ -324,6 +329,7 @@ const refreshLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:refresh:'),
 });
 
 // Stricter limiter for password reset (prevent email enumeration)
@@ -334,6 +340,7 @@ const passwordResetLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:reset:'),
 });
 
 if (rateLimitEnabled) {
