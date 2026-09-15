@@ -8,10 +8,9 @@
  * things on its network that the internet does not.
  */
 
-import dns from 'dns/promises';
-import net from 'net';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { fetchPublic, isFetchableHost } from '../utils/outbound-url';
 
 export interface LinkPreview {
   url: string;
@@ -30,35 +29,6 @@ export function firstLinkIn(text: string | null | undefined): string | null {
   if (!text) return null;
   const match = URL_PATTERN.exec(text);
   return match ? match[0].replace(/[.,;:!?]+$/, '') : null;
-}
-
-function isPrivateAddress(address: string): boolean {
-  if (net.isIPv4(address)) {
-    const [a, b] = address.split('.').map(Number);
-    return (
-      a === 10 ||
-      a === 127 ||
-      a === 0 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127)
-    );
-  }
-  const lower = address.toLowerCase();
-  return lower === '::1' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80') || lower.startsWith('::ffff:');
-}
-
-async function isFetchableHost(hostname: string): Promise<boolean> {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
-  if (net.isIP(host)) return !isPrivateAddress(host);
-  try {
-    const records = await dns.lookup(host, { all: true });
-    return records.length > 0 && records.every((record) => !isPrivateAddress(record.address));
-  } catch {
-    return false;
-  }
 }
 
 function decodeEntities(value: string): string {
@@ -115,43 +85,18 @@ export function parseOpenGraph(html: string, url: string): LinkPreview | null {
   };
 }
 
-const MAX_REDIRECTS = 3;
-
-/**
- * Fetches a page, following at most MAX_REDIRECTS redirects and checking
- * every hop against the private-host rules. Letting fetch follow redirects
- * itself would check only the first URL: a public page could answer with a
- * 302 to an address on this server's own network and be fetched anyway.
- */
+// The page fetch itself (public hosts only, every redirect hop checked) is
+// the shared one in utils/outbound-url, so the video pipeline and anything
+// else that follows a member's link applies the same rules.
 async function fetchPublicPage(start: URL, signal: AbortSignal): Promise<Response | null> {
-  let current = start;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    if (!/^https?:$/.test(current.protocol)) return null;
-    if (!(await isFetchableHost(current.hostname))) return null;
-
-    const response = await fetch(current.toString(), {
-      signal,
-      redirect: 'manual',
-      headers: {
-        'user-agent': 'ATHENA-LinkPreview/1.0 (+https://athena-empress.netlify.app)',
-        accept: 'text/html,application/xhtml+xml',
-      },
-    });
-
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      response.body?.cancel().catch(() => {});
-      if (!location) return null;
-      try {
-        current = new URL(location, current);
-      } catch {
-        return null;
-      }
-      continue;
-    }
-    return response;
-  }
-  return null;
+  return fetchPublic(start, {
+    signal,
+    maxRedirects: 3,
+    headers: {
+      'user-agent': 'ATHENA-LinkPreview/1.0 (+https://athena-empress.netlify.app)',
+      accept: 'text/html,application/xhtml+xml',
+    },
+  });
 }
 
 export async function fetchLinkPreview(url: string): Promise<LinkPreview | null> {

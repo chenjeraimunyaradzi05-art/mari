@@ -27,10 +27,18 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { localPathForUrl, storeFile } from '../utils/media-storage';
+import { fetchPublic } from '../utils/outbound-url';
 import { emitToUserRoom } from './socket.service';
+
+// The most a source video may be: the upload ceiling for videos. Anything
+// larger is refused rather than read into memory or onto the disk.
+const MAX_SOURCE_BYTES = 500 * 1024 * 1024;
+const SOURCE_FETCH_TIMEOUT_MS = 2 * 60 * 1000;
 
 let ffmpegBinary: string | null | undefined;
 
@@ -170,14 +178,47 @@ export function duetFilter(replyHasAudio: boolean, originalHasAudio: boolean): {
   return { filter, maps };
 }
 
+/**
+ * Fetches a source that is not on this host's own storage. The URL came
+ * from the member who posted the reel, so it is fetched like any other
+ * untrusted link: public hosts only, every redirect checked, a timeout, and
+ * the bytes streamed to disk under a ceiling rather than read into memory.
+ */
 async function downloadToTemp(url: string, dir: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Could not fetch the upload (${response.status})`);
-  const ext = path.extname(new URL(url).pathname) || '.bin';
-  const target = path.join(dir, `source${ext}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(target, bytes);
-  return target;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SOURCE_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetchPublic(url, { signal: controller.signal, headers: { accept: 'video/*,*/*;q=0.5' } });
+    if (!response) throw new Error('The source is not a public address this server will fetch');
+    if (!response.ok) throw new Error(`Could not fetch the upload (${response.status})`);
+
+    const declared = Number(response.headers.get('content-length') ?? 0);
+    if (declared > MAX_SOURCE_BYTES) {
+      response.body?.cancel().catch(() => {});
+      throw new Error(`The source is larger than the ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)} MB a reel may be`);
+    }
+    if (!response.body) throw new Error('The source returned no content');
+
+    const ext = (path.extname(new URL(response.url || url).pathname) || '.bin').replace(/[^.a-z0-9]/gi, '').slice(0, 8) || '.bin';
+    const target = path.join(dir, `source${ext}`);
+
+    let received = 0;
+    const ceiling = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.length;
+        if (received > MAX_SOURCE_BYTES) {
+          callback(new Error(`The source is larger than the ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)} MB a reel may be`));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+
+    await pipeline(Readable.fromWeb(response.body as any), ceiling, fs.createWriteStream(target));
+    return target;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function setProgress(videoId: string, authorId: string, processingProgress: number, stage: string) {
