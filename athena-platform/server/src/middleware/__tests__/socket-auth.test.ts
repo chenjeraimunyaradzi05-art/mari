@@ -45,6 +45,7 @@ describe('Socket authentication', () => {
       email: 'u@athena.com',
       role: 'USER',
       persona: 'PROFESSIONAL',
+      sessionId: 's1',
     });
   });
 

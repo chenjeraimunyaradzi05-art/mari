@@ -7,6 +7,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { authenticateSocketToken } from '../middleware/auth';
 import { socketMessageThrottle } from '../middleware/socialLimits';
+import { sessionEvents, SessionRevokedEvent } from '../utils/session-events';
 import { isBlockedRelationship } from '../utils/safety-store';
 import { canOpenConversation } from './message-permissions.service';
 import { assertContentAllowed } from './moderation.service';
@@ -40,14 +41,47 @@ import { LIVE_CHAT_MAX_LENGTH, postChatMessage, recordViewerCount } from './live
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
+  /** The session the handshake token belonged to; a revocation names it. */
+  sessionId?: string;
 }
 
 // Store active connections
 const userSockets = new Map<string, Set<string>>();
 let ioInstance: SocketIOServer | null = null;
 
+/**
+ * Ends the live connections a revocation covers: every socket of the
+ * account, or only the one on the named session, sparing the session that
+ * did the revoking. Without this, logging out everywhere or changing a
+ * password ended the REST access but left the other devices' sockets
+ * receiving messages until they next reconnected.
+ */
+export function disconnectRevokedSockets(io: SocketIOServer, event: SessionRevokedEvent): number {
+  let closed = 0;
+  for (const socket of io.sockets.sockets.values()) {
+    const live = socket as AuthenticatedSocket;
+    if (live.userId !== event.userId) continue;
+    if (event.sessionId && live.sessionId !== event.sessionId) continue;
+    if (event.exceptSessionId && live.sessionId === event.exceptSessionId) continue;
+    live.emit('session:revoked', { reason: event.reason });
+    live.disconnect(true);
+    closed += 1;
+  }
+  if (closed > 0) {
+    logger.info('Sockets closed after session revocation', { userId: event.userId, reason: event.reason, closed });
+  }
+  return closed;
+}
+
 export function initializeSocketHandlers(io: SocketIOServer) {
   ioInstance = io;
+  sessionEvents.onRevoked((event) => {
+    try {
+      disconnectRevokedSockets(io, event);
+    } catch (error) {
+      logger.warn('Could not close sockets after revocation', { error: error instanceof Error ? error.message : String(error) });
+    }
+  });
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
@@ -68,6 +102,7 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       // already have turned away.
       const principal = await authenticateSocketToken(token);
       socket.userId = principal.id;
+      socket.sessionId = principal.sessionId;
       next();
     } catch {
       next(new Error('Authentication failed'));

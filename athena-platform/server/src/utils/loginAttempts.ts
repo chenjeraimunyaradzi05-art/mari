@@ -3,11 +3,14 @@
  * =========================
  * Tracks failed login attempts keyed by email + IP and locks that tuple
  * temporarily after too many failures. Backed by Redis when available;
- * gracefully degrades to a no-op if Redis isn't reachable so the platform
- * keeps working in single-instance dev / minimal infra setups.
+ * without it, or while it is failing, the same counters are kept in this
+ * process so a password-guessing run is still slowed on every instance.
+ * "Allow everything" was the previous fallback, which meant a deployment
+ * without Redis had no lockout at all.
  */
 
 import { getRedisClient } from './cache';
+import { logger } from './logger';
 
 const FAILED_KEY_PREFIX = 'login:fails';
 const LOCK_KEY_PREFIX = 'login:lock';
@@ -42,6 +45,78 @@ export interface LockoutStatus {
   retryAfterSeconds: number;
 }
 
+// ===========================================
+// IN-PROCESS FALLBACK
+// ===========================================
+
+type Counter = { count: number; expiresAt: number };
+const memoryFails = new Map<string, Counter>();
+const memoryLocks = new Map<string, number>();
+const MEMORY_SWEEP_AT = 20_000;
+
+function sweepMemory(now: number): void {
+  if (memoryFails.size + memoryLocks.size < MEMORY_SWEEP_AT) return;
+  for (const [key, counter] of memoryFails) {
+    if (counter.expiresAt <= now) memoryFails.delete(key);
+  }
+  for (const [key, until] of memoryLocks) {
+    if (until <= now) memoryLocks.delete(key);
+  }
+}
+
+function memoryLockStatus(key: string, now: number): LockoutStatus {
+  const until = memoryLocks.get(key);
+  if (until && until > now) {
+    return { locked: true, retryAfterSeconds: Math.ceil((until - now) / 1000) };
+  }
+  if (until) memoryLocks.delete(key);
+  return { locked: false, retryAfterSeconds: 0 };
+}
+
+function memoryRecordFailure(email: string, ipAddress: string | undefined, now: number): LockoutStatus {
+  sweepMemory(now);
+  const key = failKey(email, ipAddress);
+  const existing = memoryFails.get(key);
+  const counter =
+    existing && existing.expiresAt > now
+      ? { count: existing.count + 1, expiresAt: existing.expiresAt }
+      : { count: 1, expiresAt: now + FAILURE_WINDOW_SECONDS * 1000 };
+  memoryFails.set(key, counter);
+
+  if (counter.count >= MAX_FAILURES) {
+    memoryLocks.set(lockKey(email, ipAddress), now + LOCK_DURATION_SECONDS * 1000);
+    memoryFails.delete(key);
+    return { locked: true, retryAfterSeconds: LOCK_DURATION_SECONDS };
+  }
+  return { locked: false, retryAfterSeconds: 0 };
+}
+
+/** For tests. */
+export function resetLoginAttemptMemory(): void {
+  memoryFails.clear();
+  memoryLocks.clear();
+}
+
+// One line a minute when the fallback is carrying the lockout.
+let lastFallbackWarning = 0;
+function noteFallback(reason: string): void {
+  const now = Date.now();
+  if (now - lastFallbackWarning < 60_000) return;
+  lastFallbackWarning = now;
+  logger.warn(`Login lockout is using the in-process fallback: ${reason}`);
+}
+
+function redisOrNull() {
+  // Without REDIS_URL there is nothing to connect to; asking would only wait
+  // on a refused socket before falling back anyway.
+  if (!process.env.REDIS_URL) return null;
+  return getRedisClient();
+}
+
+// ===========================================
+// PUBLIC API
+// ===========================================
+
 /**
  * Returns whether the account is currently locked, and how long the caller
  * should wait before retrying.
@@ -50,8 +125,12 @@ export async function getLockoutStatus(
   email: string,
   ipAddress?: string
 ): Promise<LockoutStatus> {
-  const client = getRedisClient();
-  if (!client) return { locked: false, retryAfterSeconds: 0 };
+  const now = Date.now();
+  const client = redisOrNull();
+  if (!client) {
+    noteFallback('Redis is not configured');
+    return memoryLockStatus(lockKey(email, ipAddress), now);
+  }
 
   try {
     const ttl = await client.ttl(lockKey(email, ipAddress));
@@ -60,8 +139,8 @@ export async function getLockoutStatus(
     }
     return { locked: false, retryAfterSeconds: 0 };
   } catch {
-    // Fail open — never lock users out due to a Redis error.
-    return { locked: false, retryAfterSeconds: 0 };
+    noteFallback('Redis request failed');
+    return memoryLockStatus(lockKey(email, ipAddress), now);
   }
 }
 
@@ -73,8 +152,12 @@ export async function recordFailedLogin(
   email: string,
   ipAddress?: string
 ): Promise<LockoutStatus> {
-  const client = getRedisClient();
-  if (!client) return { locked: false, retryAfterSeconds: 0 };
+  const now = Date.now();
+  const client = redisOrNull();
+  if (!client) {
+    noteFallback('Redis is not configured');
+    return memoryRecordFailure(email, ipAddress, now);
+  }
 
   try {
     const key = failKey(email, ipAddress);
@@ -91,7 +174,8 @@ export async function recordFailedLogin(
 
     return { locked: false, retryAfterSeconds: 0 };
   } catch {
-    return { locked: false, retryAfterSeconds: 0 };
+    noteFallback('Redis request failed');
+    return memoryRecordFailure(email, ipAddress, now);
   }
 }
 
@@ -102,7 +186,10 @@ export async function clearFailedLogins(
   email: string,
   ipAddress?: string
 ): Promise<void> {
-  const client = getRedisClient();
+  memoryFails.delete(failKey(email, ipAddress));
+  memoryLocks.delete(lockKey(email, ipAddress));
+
+  const client = redisOrNull();
   if (!client) return;
   try {
     await client.del(failKey(email, ipAddress));

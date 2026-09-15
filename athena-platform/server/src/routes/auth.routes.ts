@@ -26,9 +26,12 @@ import {
 import {
   buildTotpAuthUrl,
   generateTotpSecret,
+  matchTotpStep,
   normalizeTotpCode,
-  verifyTotpCode,
 } from '../utils/totp';
+import { claimTotpStep } from '../utils/totp-replay';
+import { openSecret, sealSecret } from '../utils/secret-box';
+import { sessionEvents } from '../utils/session-events';
 
 const router = Router();
 
@@ -219,7 +222,7 @@ async function verifySecondFactor(
   submitted: unknown
 ): Promise<boolean> {
   const totpCode = normalizeTotpCode(submitted);
-  if (totpCode && user.twoFactorSecret && verifyTotpCode(totpCode, user.twoFactorSecret)) {
+  if (totpCode && user.twoFactorSecret && (await verifyAuthenticatorCode(user.id, user.twoFactorSecret, totpCode))) {
     return true;
   }
 
@@ -227,6 +230,27 @@ async function verifySecondFactor(
   if (!recoveryCode) return false;
 
   return consumeRecoveryCode(user.id, user.twoFactorRecoveryCodes, recoveryCode);
+}
+
+/**
+ * True when the code is right for the account's authenticator *and* has not
+ * been accepted before: the step it belongs to is claimed, so the same code
+ * read over a shoulder or off a phishing page does not open the account a
+ * second time within its window. The stored secret is opened here; a value
+ * written before sealing existed is read as it is.
+ */
+async function verifyAuthenticatorCode(userId: string, storedSecret: string, code: string): Promise<boolean> {
+  const secret = openSecret(storedSecret);
+  if (!secret) return false;
+
+  const step = matchTotpStep(code, secret);
+  if (step === null) return false;
+
+  const firstUse = await claimTotpStep(userId, step);
+  if (!firstUse) {
+    logger.warn('Two-factor code replayed and refused', { userId });
+  }
+  return firstUse;
 }
 
 async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<globalThis.Response> {
@@ -301,12 +325,14 @@ async function consumeInviteCode(
 function getRefreshTokenCookieBaseOptions() {
   const isProduction = process.env.NODE_ENV === 'production';
   const raw = String(process.env.COOKIE_SAMESITE || '').toLowerCase();
+  // The browser only ever calls this API through the web app's own route
+  // handlers, which is the same site, so Lax holds: the cookie travels on
+  // those calls and on nothing a page elsewhere can send. A deployment where
+  // the browser calls the API origin directly sets COOKIE_SAMESITE=none.
   const sameSite: 'lax' | 'strict' | 'none' =
     raw === 'none' || raw === 'strict' || raw === 'lax'
       ? (raw as 'lax' | 'strict' | 'none')
-      : isProduction
-        ? 'none' // cross-site Netlify -> API origin requires SameSite=None
-        : 'lax';
+      : 'lax';
 
   // SameSite=None mandates Secure cookies (browser requirement).
   const secure = sameSite === 'none' ? true : isProduction;
@@ -1490,8 +1516,9 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new ApiError(400, 'Refresh token required');
     }
 
-    // Verify refresh token
-    const decoded = verifyToken(refreshToken);
+    // Verify refresh token: the signature, the expiry, and that it is a
+    // refresh token rather than an access token wearing the same key.
+    const decoded = verifyToken(refreshToken, 'refresh');
 
     // Find session
     const session = await sessionService.findActiveSessionByRefreshToken(refreshToken);
@@ -1519,7 +1546,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
 
     // A suspension must end the session rather than be renewed through it.
     if (user.isSuspended) {
-      await sessionService.revokeAllUserSessions(user.id);
+      await sessionService.revokeAllUserSessions(user.id, { reason: 'suspended' });
       res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());
       throw new ApiError(403, SUSPENDED_ACCOUNT_MESSAGE);
     }
@@ -1580,7 +1607,7 @@ router.post('/logout', async (req: Request, res: Response, next: NextFunction) =
     try {
       if (accessToken) {
         const session = await sessionService.findActiveSessionByAccessToken(accessToken);
-        if (session) await sessionService.revokeSession(session.id);
+        if (session) await sessionService.revokeSession(session.id, 'logout');
       }
     } catch (err) {
       logger.warn('Logout: access-token session revoke failed', { error: (err as Error)?.message });
@@ -1589,7 +1616,7 @@ router.post('/logout', async (req: Request, res: Response, next: NextFunction) =
     try {
       if (refreshToken) {
         const session = await sessionService.findActiveSessionByRefreshToken(refreshToken);
-        if (session) await sessionService.revokeSession(session.id);
+        if (session) await sessionService.revokeSession(session.id, 'logout');
       }
     } catch (err) {
       logger.warn('Logout: refresh-token session revoke failed', { error: (err as Error)?.message });
@@ -1652,21 +1679,10 @@ router.post(
         data: { passwordHash: nextPasswordHash },
       });
 
-      const authHeader = req.headers.authorization;
-      const accessToken = authHeader?.startsWith('Bearer ')
-        ? authHeader.split(' ')[1]
-        : undefined;
-      const currentSession = accessToken
-        ? await sessionService.findActiveSessionByAccessToken(accessToken)
-        : null;
-
-      await prisma.session.updateMany({
-        where: {
-          userId: user.id,
-          revokedAt: null,
-          ...(currentSession ? { id: { not: currentSession.id } } : {}),
-        },
-        data: { revokedAt: new Date() },
+      // Every other device is signed out, sockets included; this one stays.
+      await sessionService.revokeAllUserSessions(user.id, {
+        reason: 'password-changed',
+        exceptSessionId: req.user!.sessionId,
       });
 
       res.json({
@@ -1732,10 +1748,11 @@ router.post('/2fa/setup', authenticate, async (req: AuthRequest, res: Response, 
     }
 
     const secret = generateTotpSecret();
+    // The seed is sealed at rest; the member's authenticator holds the only plaintext copy.
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        twoFactorSecret: secret,
+        twoFactorSecret: sealSecret(secret),
         twoFactorEnabled: false,
         twoFactorEnabledAt: null,
       },
@@ -1792,7 +1809,7 @@ router.post(
       }
 
       const code = normalizeTotpCode(req.body.code);
-      if (!code || !verifyTotpCode(code, user.twoFactorSecret)) {
+      if (!code || !(await verifyAuthenticatorCode(user.id, user.twoFactorSecret, code))) {
         throw new ApiError(400, 'Invalid two-factor code');
       }
 
@@ -2041,6 +2058,11 @@ router.post(
   [body('email').isEmail().isLength({ max: 254 }).normalizeEmail()],
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
       const { email } = req.body;
 
       const user = await prisma.user.findUnique({ where: { email } });
@@ -2054,7 +2076,7 @@ router.post(
 
         // Generate new reset token
         const resetToken = generateSecureToken();
-        
+
         await prisma.verificationToken.create({
           data: {
             userId: user.id,
@@ -2064,17 +2086,22 @@ router.post(
           },
         });
 
-        // Send password reset email. Keep the public response generic to avoid account enumeration.
-        const sent = await sendPasswordResetEmail(email, user.firstName, resetToken);
-        if (!sent) {
-          logger.error('Password reset email was not accepted by the email provider', {
-            userId: user.id,
-            email,
-          });
-          await prisma.verificationToken.deleteMany({
-            where: { userId: user.id, type: 'PASSWORD_RESET' },
-          });
-        }
+        // The email goes after the answer, so the reply takes the same time
+        // whether or not the address has an account; the mail provider's
+        // round trip would otherwise say which. A token whose mail the
+        // provider refused is withdrawn.
+        sendAfterResponse(res, async () => {
+          const sent = await sendPasswordResetEmail(email, user.firstName, resetToken);
+          if (!sent) {
+            logger.error('Password reset email was not accepted by the email provider', {
+              userId: user.id,
+              email,
+            });
+            await prisma.verificationToken.deleteMany({
+              where: { userId: user.id, type: 'PASSWORD_RESET' },
+            });
+          }
+        }, { userId: user.id, email });
       }
 
       res.json({
@@ -2086,6 +2113,27 @@ router.post(
     }
   }
 );
+
+/**
+ * Runs a delivery once the response has gone out, and never lets it fail
+ * the request. Used where the reply must not reveal whether an account
+ * exists: awaiting the mail provider first would let the timing say so.
+ */
+function sendAfterResponse(res: Response, task: () => Promise<void>, context: AuthEmailContext): void {
+  let started = false;
+  const run = () => {
+    // 'finish' and 'close' both fire on a normal response; the task runs once.
+    if (started) return;
+    started = true;
+    task().catch((error) => logger.error('Deferred auth email failed', { ...context, error }));
+  };
+  if (res.headersSent) {
+    run();
+  } else {
+    res.once('finish', run);
+    res.once('close', run);
+  }
+}
 
 // ===========================================
 // RESET PASSWORD
@@ -2131,10 +2179,11 @@ router.post(
         data: { passwordHash },
       });
 
-      // Delete all sessions (force re-login)
+      // Delete all sessions (force re-login), and drop their live sockets.
       await prisma.session.deleteMany({
         where: { userId: verificationToken.userId },
       });
+      sessionEvents.announceRevoked({ userId: verificationToken.userId, reason: 'password-reset' });
 
       // Delete the used token
       await prisma.verificationToken.delete({
@@ -2224,17 +2273,20 @@ router.post(
       },
     });
 
-    // Send verification email. Keep the public response generic to avoid account enumeration.
-    const sent = await sendVerificationEmail(user.email, user.firstName, verificationToken);
-    if (!sent) {
-      logger.error('Resent verification email was not accepted by the email provider', {
-        userId: user.id,
-        email: user.email,
-      });
-      await prisma.verificationToken.deleteMany({
-        where: { userId: user.id, type: 'EMAIL_VERIFICATION' },
-      });
-    }
+    // Sent after the answer, so the reply's timing says nothing about whether
+    // the address has an unverified account. A refused mail withdraws the token.
+    sendAfterResponse(res, async () => {
+      const sent = await sendVerificationEmail(user.email, user.firstName, verificationToken);
+      if (!sent) {
+        logger.error('Resent verification email was not accepted by the email provider', {
+          userId: user.id,
+          email: user.email,
+        });
+        await prisma.verificationToken.deleteMany({
+          where: { userId: user.id, type: 'EMAIL_VERIFICATION' },
+        });
+      }
+    }, { userId: user.id, email: user.email });
 
     res.json({
       success: true,
@@ -2302,8 +2354,8 @@ router.delete('/sessions/:sessionId', authenticate, async (req: AuthRequest, res
 // ===========================================
 router.post('/logout-all', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    // Revoke all sessions for the user
-    await sessionService.revokeAllUserSessions(req.user!.id);
+    // Revoke all sessions for the user, this device's included.
+    await sessionService.revokeAllUserSessions(req.user!.id, { reason: 'logout' });
 
     // Clear refresh token cookie
     res.clearCookie('refreshToken', getRefreshTokenClearCookieOptions());

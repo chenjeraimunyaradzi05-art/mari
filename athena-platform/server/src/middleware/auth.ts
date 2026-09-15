@@ -14,6 +14,8 @@ export interface AuthRequest extends Request {
     persona: string;
     /** Whether a second factor is enrolled; the role middleware insists on it for staff. */
     twoFactorEnabled?: boolean;
+    /** The session behind this request, so a revocation can name it. */
+    sessionId?: string;
   };
 }
 
@@ -31,8 +33,21 @@ interface JwtPayload {
 export const SUSPENDED_ACCOUNT_MESSAGE =
   'This account has been suspended. Contact support if you believe this is a mistake.';
 
+/**
+ * What a staff member without a second factor may still reach: the routes
+ * that enrol one, and the ones that read or end their own session. Every
+ * other authenticated route is refused until the factor is enrolled, whether
+ * it checks the role through the role middleware or inline. The client reads
+ * the refusal's code and opens the security settings.
+ */
+const TWO_FACTOR_ENROLMENT_PREFIX = '/api/auth/';
+
+export function isTwoFactorEnrolmentPath(path: string): boolean {
+  return path.startsWith(TWO_FACTOR_ENROLMENT_PREFIX);
+}
+
 async function resolveAuthenticatedUser(token: string) {
-  const decoded = verifyToken(token) as JwtPayload;
+  const decoded = verifyToken(token, 'access') as JwtPayload;
   const session = await sessionService.findActiveSessionByAccessToken(token);
 
   if (!session || session.userId !== decoded.userId) {
@@ -55,7 +70,7 @@ async function resolveAuthenticatedUser(token: string) {
     throw UnauthorizedError('User not found');
   }
 
-  return user;
+  return { user, sessionId: session.id };
 }
 
 /**
@@ -68,16 +83,23 @@ async function resolveAuthenticatedUser(token: string) {
 export type AuthenticatedPrincipal = NonNullable<AuthRequest['user']>;
 
 export async function authenticateSocketToken(token: string): Promise<AuthenticatedPrincipal> {
-  const user = await resolveAuthenticatedUser(token);
+  const { user, sessionId } = await resolveAuthenticatedUser(token);
   if (user.isSuspended) {
     throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
   }
-  return { id: user.id, email: user.email, role: user.role, persona: user.persona, twoFactorEnabled: user.twoFactorEnabled };
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    persona: user.persona,
+    twoFactorEnabled: user.twoFactorEnabled,
+    sessionId,
+  };
 }
 
 export const authenticate = async (
   req: AuthRequest,
-  _res: Response,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -93,7 +115,7 @@ export const authenticate = async (
       throw UnauthorizedError('No token provided');
     }
 
-    const user = await resolveAuthenticatedUser(token);
+    const { user, sessionId } = await resolveAuthenticatedUser(token);
 
     if (user.isSuspended) {
       throw ForbiddenError(SUSPENDED_ACCOUNT_MESSAGE);
@@ -105,14 +127,23 @@ export const authenticate = async (
       role: user.role,
       persona: user.persona,
       twoFactorEnabled: user.twoFactorEnabled,
+      sessionId,
     };
+
+    // A staff account is only as safe as its second factor. The role
+    // middlewares refuse without one, but forty-odd routes check the role
+    // inline, so the refusal has to happen here, before any handler runs.
+    const refusal = staffTwoFactorRefusal(req.user);
+    if (refusal && !isTwoFactorEnrolmentPath(req.originalUrl.split('?')[0])) {
+      return res.status(403).json(refusal);
+    }
 
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      next(UnauthorizedError('Invalid token'));
-    } else if (error instanceof jwt.TokenExpiredError) {
+    if (error instanceof jwt.TokenExpiredError) {
       next(UnauthorizedError('Token expired'));
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      next(UnauthorizedError('Invalid token'));
     } else {
       next(error);
     }
@@ -131,7 +162,7 @@ export const optionalAuth = async (
       const token = authHeader.split(' ')[1];
 
       if (token) {
-        const user = await resolveAuthenticatedUser(token);
+        const { user, sessionId } = await resolveAuthenticatedUser(token);
 
         // A suspended account reads public surfaces as a stranger would rather
         // than failing the request outright.
@@ -142,6 +173,7 @@ export const optionalAuth = async (
             role: user.role,
             persona: user.persona,
             twoFactorEnabled: user.twoFactorEnabled,
+            sessionId,
           };
         }
       }

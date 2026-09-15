@@ -2,6 +2,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { hashOpaqueToken } from '../utils/opaqueToken';
 import { getTokenExpiresInSeconds } from '../utils/jwt';
+import { sessionEvents, SessionRevokedEvent } from '../utils/session-events';
 
 /**
  * Session Management Service
@@ -128,30 +129,42 @@ export const sessionService = {
   /**
    * Revoke a specific session
    */
-  async revokeSession(sessionId: string) {
+  async revokeSession(sessionId: string, reason: SessionRevokedEvent['reason'] = 'revoked') {
     const session = await prisma.session.update({
       where: { id: sessionId },
       data: { revokedAt: new Date() },
     });
 
     logger.info(`Session revoked: ${sessionId}`, { userId: session.userId });
+    // A live socket on this session is told to go; the REST API already refuses it.
+    sessionEvents.announceRevoked({ userId: session.userId, sessionId, reason });
     return session;
   },
 
   /**
    * Revoke all sessions for a user (logout all devices)
    */
-  async revokeAllUserSessions(userId: string) {
+  async revokeAllUserSessions(
+    userId: string,
+    options: { reason?: SessionRevokedEvent['reason']; exceptSessionId?: string } = {}
+  ) {
     const sessions = await prisma.session.updateMany({
       where: {
         userId,
         revokedAt: null, // Only revoke active sessions
+        ...(options.exceptSessionId ? { id: { not: options.exceptSessionId } } : {}),
       },
       data: { revokedAt: new Date() },
     });
 
     logger.info(`All sessions revoked for user ${userId}`, {
       count: sessions.count,
+    });
+
+    sessionEvents.announceRevoked({
+      userId,
+      exceptSessionId: options.exceptSessionId,
+      reason: options.reason ?? 'revoked',
     });
 
     return sessions;
@@ -233,6 +246,8 @@ export const sessionService = {
       revokedSessionId: revoked.id,
       sessionsRevoked: result.count,
     });
+
+    sessionEvents.announceRevoked({ userId: revoked.userId, reason: 'reuse-detected' });
 
     return revoked.userId;
   },

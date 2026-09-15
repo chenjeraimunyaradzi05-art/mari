@@ -21,6 +21,20 @@ export function getJwtSecretOrThrow(): string {
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
 
+// The only algorithm this server signs with, and therefore the only one it
+// verifies: a token that names another is refused before its signature is
+// looked at.
+const JWT_ALGORITHM = 'HS256' as const;
+
+/**
+ * Which door a token opens. An access token and a refresh token are signed
+ * with the same key, so without this claim each would verify as the other;
+ * the session lookup catches that today, and the claim makes it a refusal on
+ * its own. Refresh tokens issued before the claim existed carry none and are
+ * still accepted as refresh tokens until they expire.
+ */
+export type TokenType = 'access' | 'refresh';
+
 interface TokenPayload {
   userId: string;
   email: string;
@@ -29,6 +43,7 @@ interface TokenPayload {
 }
 
 interface DecodedTokenPayload extends TokenPayload {
+  typ?: TokenType;
   exp?: number;
   iat?: number;
   jti?: string;
@@ -36,23 +51,43 @@ interface DecodedTokenPayload extends TokenPayload {
 
 export const generateAccessToken = (payload: TokenPayload): string => {
   const options: SignOptions = {
+    algorithm: JWT_ALGORITHM,
     expiresIn: JWT_EXPIRES_IN as any,
     jwtid: randomUUID(),
   };
-  return jwt.sign(payload, getJwtSecretOrThrow(), options);
+  return jwt.sign({ ...payload, typ: 'access' as TokenType }, getJwtSecretOrThrow(), options);
 };
 
 export const generateRefreshToken = (payload: TokenPayload): string => {
   const options: SignOptions = {
+    algorithm: JWT_ALGORITHM,
     expiresIn: JWT_REFRESH_EXPIRES_IN as any,
     jwtid: randomUUID(),
   };
-  return jwt.sign(payload, getJwtSecretOrThrow(), options);
+  return jwt.sign({ ...payload, typ: 'refresh' as TokenType }, getJwtSecretOrThrow(), options);
 };
 
-export const verifyToken = (token: string): TokenPayload => {
-  return jwt.verify(token, getJwtSecretOrThrow()) as TokenPayload;
+/**
+ * Verifies the signature and expiry and, when told which kind of token is
+ * expected, that the token is of that kind. The error is the same
+ * JsonWebTokenError the signature check raises, so callers treat a token of
+ * the wrong kind exactly as they treat a forged one.
+ */
+export const verifyToken = (token: string, expected?: TokenType): TokenPayload => {
+  const decoded = jwt.verify(token, getJwtSecretOrThrow(), { algorithms: [JWT_ALGORITHM] }) as DecodedTokenPayload;
+
+  if (expected && !isTokenOfType(decoded, expected)) {
+    throw new jwt.JsonWebTokenError(`token is not a ${expected} token`);
+  }
+
+  return decoded;
 };
+
+/** A refresh token from before the claim existed carries no type and still counts. */
+export function isTokenOfType(decoded: { typ?: TokenType }, expected: TokenType): boolean {
+  if (expected === 'access') return decoded.typ === 'access';
+  return decoded.typ === 'refresh' || decoded.typ === undefined;
+}
 
 export const decodeToken = (token: string): DecodedTokenPayload | null => {
   try {

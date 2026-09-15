@@ -27,27 +27,38 @@ export function buildTotpAuthUrl(params: {
 }
 
 export function verifyTotpCode(code: string, secret: string, now = Date.now()): boolean {
+  return matchTotpStep(code, secret, now) !== null;
+}
+
+/**
+ * The time step the code belongs to, or null when it matches none within the
+ * window. A code is only ever right for one step, so remembering the step it
+ * was accepted for is what stops the same code being accepted twice.
+ */
+export function matchTotpStep(code: string, secret: string, now = Date.now()): number | null {
   const normalizedCode = normalizeTotpCode(code);
-  if (!normalizedCode) return false;
+  if (!normalizedCode) return null;
 
+  let matched: number | null = null;
   for (let offset = -TOTP_WINDOW; offset <= TOTP_WINDOW; offset += 1) {
-    const candidate = generateTotpCode(
-      secret,
-      now + offset * TOTP_STEP_SECONDS * 1000
-    );
+    const at = now + offset * TOTP_STEP_SECONDS * 1000;
+    const candidate = generateTotpCode(secret, at);
 
-    if (
-      crypto.timingSafeEqual(
-        Buffer.from(candidate),
-        Buffer.from(normalizedCode)
-      )
-    ) {
-      return true;
+    // Every candidate is compared, so timing does not say which step matched.
+    if (crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(normalizedCode)) && matched === null) {
+      matched = stepOf(at);
     }
   }
 
-  return false;
+  return matched;
 }
+
+export function stepOf(now: number): number {
+  return Math.floor(now / 1000 / TOTP_STEP_SECONDS);
+}
+
+/** How long a step stays within the acceptance window, for the replay record. */
+export const TOTP_REPLAY_TTL_SECONDS = TOTP_STEP_SECONDS * (2 * TOTP_WINDOW + 1) + TOTP_STEP_SECONDS;
 
 export function normalizeTotpCode(code: unknown): string | null {
   if (typeof code !== 'string') return null;
