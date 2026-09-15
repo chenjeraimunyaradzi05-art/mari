@@ -602,7 +602,16 @@ router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'File not found');
     }
 
+    // A private document is handed over as a download, sandboxed and never
+    // sniffed: a PDF or Word file rendered inline under this origin could
+    // otherwise run script with the API's cookies in reach.
     res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${path.basename(filePath).replace(/[^A-Za-z0-9._-]/g, '_')}"`
+    );
     res.sendFile(filePath);
   } catch (error) {
     next(error);

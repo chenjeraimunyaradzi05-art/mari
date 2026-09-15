@@ -23,6 +23,7 @@ import cookieParser from 'cookie-parser';
 import { securityHeaders } from './middleware/securityHeaders';
 import { trustedProxyIdentity } from './middleware/trustedProxy';
 import { SharedRateLimitStore } from './utils/rate-limit-store';
+import { secretMatches } from './utils/secret-compare';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -368,7 +369,7 @@ app.post('/api/subscriptions/webhook', (req: Request, res: Response) => {
   // If configured, keep this endpoint silent unless the shared secret matches.
   // This prevents Stripe retries from noisy errors while still allowing deploy-time checks.
   if (expected) {
-    if (!provided || provided !== expected) {
+    if (!secretMatches(provided, expected)) {
       return res.status(204).send();
     }
 
@@ -413,7 +414,17 @@ app.use('/uploads', (req, res, next) => {
 
   logger.debug('Static file request', { method: req.method, path: req.path });
   next();
-}, express.static(uploadsPath));
+}, express.static(uploadsPath, {
+  // No dotfiles, no directory listings, and every file served as a file: a
+  // sandboxed document with nothing it may load, never sniffed into a page.
+  dotfiles: 'deny',
+  index: false,
+  setHeaders: (res) => {
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  },
+}));
 
 // ===========================================
 // ROUTES
@@ -492,7 +503,7 @@ app.get('/metrics', async (req: Request, res: Response) => {
       const headerToken = typeof req.headers['x-metrics-token'] === 'string' ? req.headers['x-metrics-token'] : null;
       const provided = bearer || headerToken;
 
-      if (!provided || provided !== metricsToken) {
+      if (!secretMatches(provided, metricsToken)) {
         return res.status(401).json({ success: false, message: 'Unauthorized' });
       }
     }

@@ -12,6 +12,7 @@ import { mlService } from '../services/ml.service';
 // Queue utils are dynamically imported to avoid Redis connection when workers disabled
 // import { getAllQueueStats } from '../utils/queue';
 import { logger } from '../utils/logger';
+import { secretMatchesAny } from '../utils/secret-compare';
 import os from 'os';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -129,9 +130,8 @@ function hasProtectedHealthAccess(req: Request): boolean {
       ? req.headers['x-debug-auth']
       : null;
 
-  return [bearer, headerToken, debugHeader].some(
-    (token) => !!token && configuredTokens.includes(token)
-  );
+  // Compared in constant time: a wrong guess takes as long as a near miss.
+  return [bearer, headerToken, debugHeader].some((token) => secretMatchesAny(token, configuredTokens));
 }
 
 // ===========================================
@@ -200,6 +200,13 @@ router.get('/ready', async (req: Request, res: Response) => {
  * @description Comprehensive health check of all dependencies
  */
 router.get('/detailed', async (req: Request, res: Response) => {
+  // Memory, load, queue depths and which dependency is down describe the
+  // deployment; in production that is for operators, not the internet. The
+  // balancer and the status page use /health and /readyz, which stay open.
+  if (process.env.NODE_ENV === 'production' && !hasProtectedHealthAccess(req)) {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+
   const checks: Record<string, ComponentHealth> = {};
 
   // Database check

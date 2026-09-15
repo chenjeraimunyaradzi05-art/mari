@@ -15,9 +15,16 @@ declare module 'express-serve-static-core' {
  *
  * The ID is also returned in the response headers for client-side correlation.
  */
+// What an upstream id may look like: an opaque token, not a payload. Anything
+// else is replaced rather than echoed into every log line and response.
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+export function acceptableRequestId(incoming: unknown): string | null {
+  return typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming) ? incoming : null;
+}
+
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction) {
-  const incomingId = req.headers['x-request-id'];
-  const requestId = typeof incomingId === 'string' && incomingId ? incomingId : uuidv4();
+  const requestId = acceptableRequestId(req.headers['x-request-id']) ?? uuidv4();
 
   req.requestId = requestId;
   res.setHeader('X-Request-Id', requestId);

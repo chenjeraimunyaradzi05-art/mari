@@ -21,8 +21,10 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   // X-Frame-Options: prevent clickjacking
   res.setHeader('X-Frame-Options', 'DENY');
 
-  // X-XSS-Protection: legacy XSS filter (mostly deprecated, but good for defense-in-depth)
-  res.setHeader('X-XSS-Protection', '1; mode=block');
+  // X-XSS-Protection: the old auditor is gone from every current browser and,
+  // where it survives, its blocking mode has been used to leak page content;
+  // 0 switches it off, which is what OWASP now advises. The CSP is the defence.
+  res.setHeader('X-XSS-Protection', '0');
 
   // Cross-origin isolation posture for modern browsers while preserving auth popups.
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
@@ -76,10 +78,8 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
     (isProduction ? prodCspDirectives : devCspDirectives).join('; ')
   );
 
-  // Expect-CT: Certificate Transparency
-  if (isProduction) {
-    res.setHeader('Expect-CT', 'max-age=86400, enforce');
-  }
+  // Expect-CT is gone: certificate transparency has been mandatory in every
+  // browser since 2018 and the header was retired, so it only added bytes.
 
   next();
 }
