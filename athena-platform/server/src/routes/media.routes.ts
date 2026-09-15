@@ -314,6 +314,7 @@ router.post('/presigned-url', authenticate, uploadLimiter, async (req: AuthReque
 
     // The name is stored as object metadata, which has a size ceiling of its
     // own and no business carrying control characters.
+    // eslint-disable-next-line no-control-regex -- refusing control characters is the point
     if (typeof fileName !== 'string' || typeof contentType !== 'string' || fileName.length > 255 || /[ -]/.test(fileName)) {
       throw new ApiError(400, 'fileName must be a plain name of 255 characters or fewer');
     }

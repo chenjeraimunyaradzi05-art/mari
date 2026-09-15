@@ -108,6 +108,75 @@ those require your explicit action (see "Still requires your action").
    security-maintenance liability.
 5. Add server-side authorization (IDOR/cross-tenant) tests before launch.
 
+## 2026-09-15 — The gaps behind the audit's sixteen findings
+
+Applied after the S1–S16 fixes of 14–15 September, from a second reading of the
+perimeter. Every item has tests; `PROXY_SHARED_SECRET` and `TOTP_ENCRYPTION_KEY`
+are the two new environment variables (both documented in the `.env.example`
+files and `athena-platform/DEPLOY.md`).
+
+- **The API now sees each visitor, not the web host.** Every browser call reaches
+  the API through the Next.js route handlers on Netlify, which fetch from their
+  own addresses, so the API had one shared budget of a hundred requests a quarter
+  hour for the whole site, a login lockout keyed on the proxy, and new-device
+  alerts comparing the proxy's browser. `athena-platform/client/src/app/api/proxy-identity.ts`
+  forwards the visitor's address and user agent with a shared secret;
+  `athena-platform/server/src/middleware/trustedProxy.ts` believes the address only
+  when the secret matches, compared in constant time. **Set `PROXY_SHARED_SECRET`
+  to the same value on both hosts.**
+- **Staff two-factor is enforced at authentication.** Forty-odd routes check the
+  admin role inline rather than through the role middleware, so an admin without
+  a second factor still reached them. `authenticate` in
+  `athena-platform/server/src/middleware/auth.ts` now refuses a staff account
+  without a factor everywhere except the `/api/auth/*` routes that enrol one.
+- **One-time codes are one-time.** An authenticator code was accepted any number
+  of times inside its ninety-second window; the matched step is now claimed
+  (`athena-platform/server/src/utils/totp-replay.ts`) and a repeat is refused.
+- **Authenticator seeds are sealed at rest** with AES-256-GCM
+  (`athena-platform/server/src/utils/secret-box.ts`) under `TOTP_ENCRYPTION_KEY`,
+  falling back to `DV_ENCRYPTION_KEY`; seeds written before sealing are read as
+  they are.
+- **Tokens carry their kind.** Access and refresh tokens are typed and verified
+  against the type, with HS256 pinned, so one cannot stand in for the other.
+- **Login lockout without Redis** counts in the process instead of not at all.
+- **Sessions end everywhere.** Revoking a session, logging out of all devices,
+  changing or resetting a password and being suspended now close that account's
+  live sockets (`athena-platform/server/src/utils/session-events.ts`).
+- **Refresh cookie is `SameSite=Lax`** by default, since the browser only reaches
+  the API through the web app's own route handlers; `COOKIE_SAMESITE=none` remains
+  for a split deployment.
+- **Forgot-password and resend-verification** answer before the mail is sent, so
+  their timing no longer says whether the address has an account.
+- **Rate limits are shared across instances.** The four boot-time limiters count
+  in Redis when it is configured (`athena-platform/server/src/utils/rate-limit-store.ts`),
+  and the upload, AI and search limiters that were defined but never applied now
+  are. Each upload is read with its own kind's ceiling rather than the video
+  ceiling for everything.
+- **Outbound fetches** of member-supplied links (link previews, the video
+  pipeline's source download) go through one guard
+  (`athena-platform/server/src/utils/outbound-url.ts`): public hosts only, every
+  redirect hop checked, credentials refused, and the video source streamed to
+  disk under the 500 MB ceiling with a timeout. Before this the pipeline fetched
+  any URL a reel named, into memory, with no host check.
+- **Served files are sandboxed**: `/uploads` and `/api/media/local` answer with
+  `Content-Security-Policy: sandbox`, `nosniff`, no dotfiles or listings, and
+  private documents as downloads.
+- **Diagnostics for operators only**: `/health/detailed` needs the diagnostics
+  token in production; the metrics, health and legacy-webhook tokens are compared
+  in constant time (`athena-platform/server/src/utils/secret-compare.ts`).
+- **Logs carry no secrets**: passwords, tokens, cookies, authenticator codes and
+  keys are masked by name at any depth (`athena-platform/server/src/utils/logger.ts`).
+- **Errors from the libraries in front of the handlers** (a file over its limit,
+  a body over the JSON limit, malformed JSON, a failed zod parse) answer 413 or
+  400 with a plain sentence rather than a 500 logged as a server failure.
+- Housekeeping with security weight: a caller's `X-Request-Id` is echoed only
+  when it looks like one; the profile update bounds its fields; `Expect-CT` is
+  gone and `X-XSS-Protection` is `0` on both tiers.
+
+Still yours to do: S7 (a development database branch) and S16 (GitHub billing,
+which restores CI and the weekly advisory sweep). DNS rebinding between the
+outbound host check and the fetch remains the residual risk on link fetches.
+
 ## 2026-09-06 — Upload content sniffing (`athena-platform/server`)
 
 - **Uploads must be what they claim.** The media routes checked only the MIME

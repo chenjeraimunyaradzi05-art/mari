@@ -26,12 +26,14 @@ well-known security.txt URL on the deployed site (source file:
 
 ## Key security controls
 
-- JWT authentication with session revocation and refresh-token-reuse detection (athena-platform/server)
-- TOTP-based MFA (athena-platform/server/src/utils/totp.ts)
-- Per-account login lockout and bcrypt cost 12 password hashing
-- Tiered rate limiting (athena-frontend/lib/rate-limit.ts, app-backend express-rate-limit)
-- Stripe/PayPal webhook signature verification
-- Security headers + CSP via netlify.toml, Next middleware, and Express securityHeaders middleware
+- JWT authentication with typed access and refresh tokens, per-request session checks, revocation that also closes live sockets, and refresh-token-reuse detection (athena-platform/server)
+- TOTP-based MFA with replay protection and seeds sealed at rest, required for every staff role before any staff power (athena-platform/server/src/utils/totp.ts, totp-replay.ts, secret-box.ts, middleware/auth.ts)
+- Per-account login lockout (Redis, with an in-process fallback) and bcrypt cost 12 password hashing
+- Rate limiting with counters shared across instances (athena-platform/server/src/utils/rate-limit-store.ts), keyed on the visitor's real address, which the web proxy forwards under a shared secret (middleware/trustedProxy.ts)
+- Outbound fetches of member-supplied links restricted to public hosts, every redirect checked (athena-platform/server/src/utils/outbound-url.ts)
+- Uploads content-sniffed, read under per-kind size ceilings, and served sandboxed
+- Stripe webhook signature verification
+- Nonce-based CSP on the web app (client/src/middleware.ts), security headers on both tiers, secrets masked in logs
 
 ## Operational requirements (production)
 
