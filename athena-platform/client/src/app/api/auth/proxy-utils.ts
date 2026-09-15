@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { proxyIdentityHeaders } from '../proxy-identity';
 
 export function forwardSetCookieHeaders(from: Response, to: NextResponse) {
   const headersWithGetSetCookie = from.headers as Headers & {
@@ -55,7 +56,10 @@ export function buildBackendProxyHeaders(
   request: NextRequest,
   extras: Record<string, string> = {}
 ): HeadersInit {
+  // Who the visitor is goes first: the sign-in lockout, the sign-in alerts
+  // and the per-address limits on these routes all key on it.
   const headers: Record<string, string> = {
+    ...proxyIdentityHeaders(request.headers),
     'Content-Type': 'application/json',
     ...extras,
   };

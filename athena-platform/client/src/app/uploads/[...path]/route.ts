@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { proxyIdentityHeaders } from '../../api/proxy-identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,8 @@ async function proxy(request: NextRequest) {
   const { pathname, search } = new URL(request.url);
   const target = `${BACKEND_URL}${pathname}${search}`;
 
-  const headers: Record<string, string> = {};
+  // The visitor's identity travels with the request (see api/proxy-identity).
+  const headers: Record<string, string> = proxyIdentityHeaders(request.headers);
   // `range` matters for video seeking; the rest let the browser cache and
   // authenticate the same way it would against the backend directly.
   const forward = ['authorization', 'cookie', 'accept', 'range', 'if-none-match', 'if-modified-since'];

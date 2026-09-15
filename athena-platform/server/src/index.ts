@@ -21,6 +21,7 @@ import { prisma, connectWithRetry } from './utils/prisma';
 import { sessionService } from './services/session.service';
 import cookieParser from 'cookie-parser';
 import { securityHeaders } from './middleware/securityHeaders';
+import { trustedProxyIdentity } from './middleware/trustedProxy';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -246,6 +247,10 @@ app.use(cors({
     'X-Metrics-Token',
   ],
 }));
+
+// The visitor's real address, when the web proxy proves it sent the request.
+// Ahead of every limiter, lockout and session record that keys on req.ip.
+app.use(trustedProxyIdentity);
 
 // Cookie parser (for refresh token cookie handling)
 app.use(cookieParser());

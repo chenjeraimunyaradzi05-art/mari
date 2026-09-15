@@ -85,6 +85,7 @@ Never run `db:migrate` or `db:push` against this database; see
 | `DV_ENCRYPTION_KEY` | DV-Safe | 64 hex chars: `openssl rand -hex 32` |
 | `ENABLE_WORKERS` | BullMQ | Set `true` to enable background jobs (needs `REDIS_URL`) |
 | `METRICS_TOKEN` | Prometheus | Protect `/metrics` endpoint |
+| `PROXY_SHARED_SECRET` | Web proxy | 32+ chars, same value on Netlify. The web app's route handlers forward each visitor's address with it, so rate limits, the login lockout and new-device alerts see the visitor, not the proxy |
 
 ### 2.4 Build & Deploy
 
@@ -124,6 +125,7 @@ Set in **Netlify Dashboard, Site Settings, Environment Variables:**
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `https://api.your-domain.com` |
 | `NEXT_PUBLIC_APP_URL` | This site's URL, e.g. `https://athena-empress.netlify.app` |
+| `PROXY_SHARED_SECRET` | Same value as the API's `PROXY_SHARED_SECRET`. The route handlers forward each visitor's address with it; without it the API sees every visitor as this host and rate limits and the login lockout are shared by everyone |
 
 > **Critical:** Without `NEXT_PUBLIC_API_URL` the in-app proxy falls back to
 > `localhost:5000` and every `/api/*` and `/uploads/*` request fails. The

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { backendFailureResponse } from '../proxy-utils';
+import { backendFailureResponse, buildBackendProxyHeaders } from '../proxy-utils';
 import { BACKEND_API_URL as API_URL } from '@/lib/runtime-config';
 
 export const dynamic = 'force-dynamic';
@@ -7,20 +7,17 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-    
+
     if (!authHeader) {
       return NextResponse.json(
         { success: false, message: 'Unauthorized' },
         { status: 401 }
       );
     }
-    
+
     const response = await fetch(`${API_URL}/api/auth/me`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authHeader,
-      },
+      headers: buildBackendProxyHeaders(request),
     });
 
     let data;

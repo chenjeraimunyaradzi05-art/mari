@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { proxyIdentityHeaders } from '../proxy-identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +18,10 @@ async function proxy(request: NextRequest) {
   const { pathname, search } = new URL(request.url);
   const target = `${BACKEND_URL}${pathname}${search}`;
 
-  // Forward essential request headers
-  const headers: Record<string, string> = {};
+  // Forward essential request headers, plus who the visitor is: the API keys
+  // its rate limits, lockouts and new-device alerts on the address and
+  // browser, which would otherwise all be this host's.
+  const headers: Record<string, string> = proxyIdentityHeaders(request.headers);
   const forward = ['authorization', 'content-type', 'cookie', 'accept', 'x-request-id'];
   for (const key of forward) {
     const val = request.headers.get(key);

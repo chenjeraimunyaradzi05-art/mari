@@ -73,6 +73,34 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     validator: (v) => v.startsWith('whsec_'),
     errorMessage: 'STRIPE_WEBHOOK_SECRET must start with whsec_',
   },
+  // The web proxy proves who it is with this; without it every visitor shares
+  // the proxy's address for rate limits, lockouts and new-device alerts.
+  {
+    name: 'PROXY_SHARED_SECRET',
+    required: false,
+    productionOnly: true,
+    validator: (v) => v.trim().length >= 32,
+    errorMessage: 'PROXY_SHARED_SECRET must be at least 32 characters',
+  },
+  // Operator tokens: a short one is guessable, so a short one is reported.
+  {
+    name: 'METRICS_TOKEN',
+    required: false,
+    validator: (v) => v.length >= 16,
+    errorMessage: 'METRICS_TOKEN must be at least 16 characters',
+  },
+  {
+    name: 'DEBUG_SECRET',
+    required: false,
+    validator: (v) => v.length >= 16,
+    errorMessage: 'DEBUG_SECRET must be at least 16 characters',
+  },
+  {
+    name: 'HEALTH_DIAGNOSTICS_TOKEN',
+    required: false,
+    validator: (v) => v.length >= 16,
+    errorMessage: 'HEALTH_DIAGNOSTICS_TOKEN must be at least 16 characters',
+  },
   // Australian integrations (optional; the features say so when unset)
   { name: 'ABR_GUID', required: false },
   { name: 'BASIQ_API_KEY', required: false },
