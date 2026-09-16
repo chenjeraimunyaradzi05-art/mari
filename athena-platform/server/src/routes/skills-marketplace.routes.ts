@@ -419,13 +419,46 @@ router.post(
         throw new ApiError(404, 'Service not found');
       }
 
+      // A rating moves the listing up the marketplace, so it has to come from
+      // someone who actually bought the work. Either a completed hourly
+      // booking or a completed fixed-price order will do; without one this is
+      // refused rather than quietly recorded.
+      const clientId = req.user!.id;
+      const requestedBookingId = typeof req.body.bookingId === 'string' && req.body.bookingId ? req.body.bookingId : null;
+
+      if (requestedBookingId) {
+        const booking = await prisma.serviceBooking.findUnique({ where: { id: requestedBookingId } });
+        if (!booking || booking.serviceId !== id || booking.clientId !== clientId) {
+          throw new ApiError(404, 'No booking of yours matches that id for this service');
+        }
+        if (booking.status !== 'COMPLETED') {
+          throw new ApiError(403, 'You can review a booking once it is complete');
+        }
+      } else {
+        const [completedBooking, completedOrder] = await Promise.all([
+          prisma.serviceBooking.findFirst({ where: { serviceId: id, clientId, status: 'COMPLETED' } }),
+          prisma.serviceOrder.findFirst({ where: { serviceId: id, clientId, status: 'COMPLETED' } }),
+        ]);
+        if (!completedBooking && !completedOrder) {
+          throw new ApiError(403, 'Only a client who has completed a booking or an order with this seller can review it');
+        }
+      }
+
+      // One review per booking; one per service where the work was an order.
+      // The unique index treats a null bookingId as its own slot, so the
+      // existing row is checked for rather than left to a constraint error.
+      const existing = await prisma.serviceReview.findFirst({ where: { serviceId: id, clientId, bookingId: requestedBookingId } });
+      if (existing) {
+        throw new ApiError(409, 'You have already reviewed this');
+      }
+
       const review = await prisma.serviceReview.create({
         data: {
           serviceId: id,
-          clientId: req.user!.id,
+          clientId,
           rating: req.body.rating,
           content: req.body.content,
-          bookingId: req.body.bookingId,
+          bookingId: requestedBookingId,
         },
       });
 

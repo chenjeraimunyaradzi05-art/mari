@@ -530,6 +530,23 @@ export const skillsMarketplaceApi = {
   getServiceReviews: (serviceId: string, params?: { page?: number; limit?: number }) =>
     api.get(`/skills-marketplace/services/${serviceId}/reviews`, { params }),
 
+  // An hour of someone's time, rather than a fixed-price package. The server
+  // prices it at the hourly rate and never below the listing's minimum.
+  bookService: (serviceId: string, data: { scheduledAt: string; durationMinutes: number; clientNotes?: string }) =>
+    api.post(`/skills-marketplace/services/${serviceId}/book`, data),
+
+  // Bookings from whichever side you are on.
+  getMyBookings: (role?: 'client' | 'provider') =>
+    api.get('/skills-marketplace/bookings/me', { params: role ? { role } : undefined }),
+
+  updateBooking: (bookingId: string, status: 'PENDING' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED') =>
+    api.patch(`/skills-marketplace/bookings/${bookingId}`, { status }),
+
+  // A review against a completed booking. The server refuses one from anybody
+  // who has not completed a booking or an order with that seller.
+  reviewService: (serviceId: string, data: { rating: number; content?: string; bookingId?: string }) =>
+    api.post(`/skills-marketplace/services/${serviceId}/reviews`, data),
+
   // Favorite service
   favoriteService: (id: string) => api.post(`/skills-marketplace/services/${id}/favorite`),
 

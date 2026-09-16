@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
-import { OrderModal } from '@/components/skills-marketplace';
+import { BookingModal, OrderModal } from '@/components/skills-marketplace';
 import {
   SkillService,
   categoryLabel,
@@ -57,6 +57,7 @@ export default function ServiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [showOrder, setShowOrder] = useState(false);
+  const [showBooking, setShowBooking] = useState(false);
   const [shareLabel, setShareLabel] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -339,14 +340,26 @@ export default function ServiceDetailPage() {
               </div>
 
               <div className="mt-5 space-y-2">
-                {packages.length > 0 ? (
+                {packages.length > 0 && (
                   <Button className="w-full" onClick={() => setShowOrder(true)}>
                     Choose a package
                   </Button>
-                ) : (
-                  /* Hourly-only services have nothing for the package modal to
-                     sell, so the buyer is sent to the provider to arrange a time
-                     rather than shown an empty picker. */
+                )}
+
+                {/* An hourly rate is bookable directly. This used to push the
+                    buyer into a message because the booking screen did not
+                    exist; the server has taken bookings all along. */}
+                {service.hourlyRate > 0 && service.isAvailable !== false && (
+                  <Button
+                    className="w-full"
+                    variant={packages.length > 0 ? 'outline' : 'default'}
+                    onClick={() => setShowBooking(true)}
+                  >
+                    Book an hour
+                  </Button>
+                )}
+
+                {packages.length === 0 && !(service.hourlyRate > 0) && (
                   <Button
                     className="w-full"
                     onClick={() => router.push(`/dashboard/messages?user=${service.provider?.id ?? ''}`)}
@@ -381,6 +394,19 @@ export default function ServiceDetailPage() {
           </aside>
         </div>
       </div>
+
+      {showBooking && (
+        <BookingModal
+          isOpen={showBooking}
+          onClose={() => setShowBooking(false)}
+          service={service}
+          onBook={async (data) => {
+            await skillsMarketplaceApi.bookService(service.id, data);
+            setShowBooking(false);
+            router.push('/skills-marketplace/bookings');
+          }}
+        />
+      )}
 
       {showOrder && packages.length > 0 && (
         <OrderModal
