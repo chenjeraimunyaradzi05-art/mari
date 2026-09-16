@@ -136,6 +136,7 @@ export default function AppealPage() {
               <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-2">
                 <li>• Your appeal will be reviewed by a different moderator than the one who made the original decision</li>
                 <li>• We aim to complete appeal reviews within 5 business days</li>
+                <li>• You can follow this appeal, and read the decision when it is made, under <Link href="/help/appeals" className="underline">your appeals</Link></li>
                 <li>• Quote your appeal reference if you need to follow up with our Trust &amp; Safety team</li>
                 <li>• If your appeal is successful, your content or account will be restored</li>
               </ul>
@@ -150,11 +151,11 @@ export default function AppealPage() {
                 Back to Home
               </Link>
               <Link
-                href="/help/transparency-report"
+                href="/help/appeals"
                 className="inline-flex items-center justify-center px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
               >
                 <FileText className="w-4 h-4 mr-2" />
-                View Transparency Report
+                Follow this appeal
               </Link>
             </div>
           </div>

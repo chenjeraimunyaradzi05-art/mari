@@ -102,6 +102,7 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { href: '/help/community-guidelines', label: 'Community guidelines' },
       { href: '/help/transparency-report', label: 'Transparency report' },
       { href: '/help/appeal', label: 'Appeal a decision' },
+      { href: '/help/appeals', label: 'Your appeals' },
       { href: '/accessibility', label: 'Accessibility' },
     ],
   },

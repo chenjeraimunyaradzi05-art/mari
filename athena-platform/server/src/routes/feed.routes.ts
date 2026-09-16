@@ -107,6 +107,20 @@ router.get('/onboarding', authenticate, async (req: AuthRequest, res: Response, 
  * @route GET /api/feed/opportunities
  * @desc Get job/gig opportunities feed
  * @access Private
+ *
+ * ## Not personalised, and deliberately not surfaced
+ *
+ * `getRelevantOpportunities` in opportunity-verse.service.ts does not match
+ * anything to anyone: it takes the most recently created active jobs and
+ * courses and stamps every one with a hardcoded `matchScore` of 70 or 60,
+ * under its own comment "Would be calculated by CareerCompass". Putting that
+ * on a screen would tell a member an opportunity is a 70% fit for her when
+ * nothing has looked at her at all.
+ *
+ * Opportunities that are actually scored against a member live at
+ * `/api/ai-algorithms/*`, behind /dashboard/ai/opportunity-radar and
+ * /dashboard/ai/opportunity-scan. Point new work there. Wire this route up
+ * only once the mixer computes a real score.
  */
 router.get('/opportunities', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

@@ -33,6 +33,11 @@ const sections = [
     description: 'Appeal a moderation or account decision.',
   },
   {
+    href: '/help/appeals',
+    title: 'Your appeals',
+    description: 'Where each appeal you have lodged has got to, and why it was decided that way.',
+  },
+  {
     href: '/help/transparency-report',
     title: 'Transparency report',
     description: 'Published reports on moderation and requests.',
