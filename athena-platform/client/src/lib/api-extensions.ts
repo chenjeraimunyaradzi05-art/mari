@@ -390,6 +390,31 @@ export const apprenticeshipApi = {
   // Get recommended apprenticeships
   getRecommended: () => api.get('/apprenticeships/recommended'),
 
+  // The provider's side: her own listings including drafts, creating one,
+  // editing it, publishing it, and who has applied.
+  getMine: () => api.get('/apprenticeships/mine'),
+
+  create: (data: {
+    title: string;
+    description: string;
+    framework: string;
+    level: string;
+    durationMonths: number;
+    positions?: number;
+    city?: string;
+    state?: string;
+    wageMin?: number;
+    wageMax?: number;
+    rtoId?: string;
+    hostEmployerId?: string;
+  }) => api.post('/apprenticeships', data),
+
+  updateListing: (id: string, data: Record<string, unknown>) => api.patch(`/apprenticeships/${id}`, data),
+
+  publish: (id: string) => api.post(`/apprenticeships/${id}/publish`),
+
+  getApplicationsFor: (id: string) => api.get(`/apprenticeships/${id}/applications`),
+
   // Get apprenticeship categories/industries
   getCategories: () => api.get('/apprenticeships/categories'),
 

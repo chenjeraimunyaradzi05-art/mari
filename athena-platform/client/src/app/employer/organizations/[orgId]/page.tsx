@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Building2,
   Briefcase,
+  GraduationCap,
   Users,
   FileText,
   TrendingUp,
@@ -198,6 +199,18 @@ export default function OrganizationDashboardPage() {
             <div className="flex items-center gap-3">
               <FileText className="h-5 w-5 text-green-600" />
               <span className="font-medium text-slate-900 dark:text-white">Applications</span>
+            </div>
+            <ChevronRight className="h-5 w-5 text-slate-400" />
+          </div>
+        </Link>
+        <Link
+          href={`/employer/organizations/${orgId}/apprenticeships`}
+          className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-blue-300 transition-colors"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <GraduationCap className="h-5 w-5 text-rose-600" />
+              <span className="font-medium text-slate-900 dark:text-white">Apprenticeships</span>
             </div>
             <ChevronRight className="h-5 w-5 text-slate-400" />
           </div>

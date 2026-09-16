@@ -57,6 +57,15 @@ async function findApprenticeshipForStaff(apprenticeshipId: string, user: StaffU
   return membership ? apprenticeship : null;
 }
 
+/** Every organization this member is staff of, for scoping their own listings. */
+async function staffOrganizationIds(userId: string): Promise<string[]> {
+  const memberships = await prisma.organizationMember.findMany({
+    where: { userId },
+    select: { organizationId: true },
+  });
+  return memberships.map((m) => m.organizationId);
+}
+
 /**
  * Marks which of these listings the viewer has bookmarked.
  *
@@ -109,8 +118,24 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
 
     const where: any = {};
 
-    if (status) {
+    // Only OPEN listings are public. `status` used to be taken straight from
+    // the query, so anyone could read another provider's drafts with
+    // `?status=DRAFT` — the same thing `findApprenticeshipForStaff` refuses to
+    // confirm on the detail route. A caller asking for anything else is
+    // narrowed to listings their own organizations own; `/mine` is the
+    // intended door for that.
+    if (!status || status === 'OPEN') {
+      where.status = 'OPEN';
+    } else if (req.user?.role === 'ADMIN') {
       where.status = status;
+    } else if (req.user) {
+      const orgIds = await staffOrganizationIds(req.user.id);
+      if (orgIds.length === 0) {
+        where.status = 'OPEN';
+      } else {
+        where.status = status;
+        where.OR = [{ rtoId: { in: orgIds } }, { hostEmployerId: { in: orgIds } }];
+      }
     } else {
       where.status = 'OPEN';
     }
@@ -152,6 +177,41 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         pages: Math.ceil(total / limit),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// A PROVIDER'S OWN APPRENTICESHIPS
+// ===========================================
+// Drafts included, which is the point: a listing created through POST / starts
+// as a draft and there was no route that could find it again. Declared before
+// '/:id' so Express does not hand "mine" to the id route.
+router.get('/mine', authenticate, requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'), async (req: AuthRequest, res, next) => {
+  try {
+    const orgIds = await staffOrganizationIds(req.user!.id);
+
+    if (orgIds.length === 0 && req.user!.role !== 'ADMIN') {
+      return res.json({ success: true, data: [], organizations: [] });
+    }
+
+    const where = req.user!.role === 'ADMIN' && orgIds.length === 0
+      ? {}
+      : { OR: [{ rtoId: { in: orgIds } }, { hostEmployerId: { in: orgIds } }] };
+
+    const items = await prisma.apprenticeship.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: {
+        rto: { select: { id: true, name: true, logo: true } },
+        hostEmployer: { select: { id: true, name: true, logo: true } },
+        _count: { select: { applications: true } },
+      },
+    });
+
+    res.json({ success: true, data: items });
   } catch (error) {
     next(error);
   }
