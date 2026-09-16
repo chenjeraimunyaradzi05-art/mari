@@ -6,6 +6,10 @@ import { useParams } from 'next/navigation';
 import { useFormation, useSubmitFormation, useUpdateFormation } from '@/lib/hooks';
 import { formatRelativeTime } from '@/lib/utils';
 import { FormationDocuments } from '@/components/strategy/FormationDocuments';
+import { RegisterCheck } from '@/components/business/RegisterCheck';
+import { FormationFee } from '@/components/business/FormationFee';
+
+type FormationPayment = { paymentIntentId: string; clientSecret: string | null; amountCents: number; currency: string };
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -19,6 +23,7 @@ export default function FormationDetailPage() {
   const { data: formation, isLoading } = useFormation(id);
   const submitMutation = useSubmitFormation();
   const updateMutation = useUpdateFormation();
+  const [payment, setPayment] = useState<FormationPayment | null>(null);
 
   const initialBusinessName = useMemo(() => {
     return formation?.businessName || formation?.data?.businessName || '';
@@ -271,11 +276,16 @@ export default function FormationDetailPage() {
     });
   };
 
+  // Submitting hands back the payment with the registration. Keeping it is
+  // what lets the fee be authorised straight away rather than leaving the
+  // registration sitting at PAYMENT_PENDING with nothing to click.
   const handleSubmit = async () => {
     if (canEdit) {
       await handleSave();
     }
-    await submitMutation.mutateAsync(id);
+    const response = await submitMutation.mutateAsync(id);
+    const payment = (response as { data?: { payment?: FormationPayment } })?.data?.payment ?? null;
+    if (payment) setPayment(payment);
   };
 
   if (isLoading) {
@@ -496,6 +506,15 @@ export default function FormationDetailPage() {
           </div>
         </div>
       )}
+
+      <FormationFee
+        registrationId={id}
+        status={String(formation.status ?? '')}
+        payment={payment}
+        onPaid={() => setPayment(null)}
+      />
+
+      <RegisterCheck defaultKind={formation.type === 'COMPANY' ? 'acn' : 'name'} defaultValue={formation.businessName ?? ''} />
 
       <FormationDocuments registrationId={id} businessName={formation.businessName} />
 

@@ -221,6 +221,7 @@ export default function AcceleratorPage() {
                     <div className="text-xs text-slate-500">
                       Enrolled {formatDate(enrollment.enrolledAt)} · Status {enrollment.status}
                     </div>
+                    <Link href={`/dashboard/accelerator/${enrollment.id}`} className="mt-1 mr-3 inline-block text-xs font-medium text-primary-600 hover:underline">Week by week</Link>
                     {enrollment.status === 'COMPLETED' && (
                       <Link href={`/certificates/accelerator/${enrollment.id}`} className="mt-1 inline-block text-xs font-medium text-primary-600 hover:underline">Certificate of completion</Link>
                     )}

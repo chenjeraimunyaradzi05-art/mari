@@ -35,6 +35,12 @@ const tiles = [
     highlight: true,
   },
   {
+    title: 'Invoices',
+    description: 'What ATHENA has charged you, each one a tax invoice as a PDF.',
+    href: '/dashboard/finance/invoices',
+    icon: Receipt,
+  },
+  {
     title: 'Savings Goals',
     description: 'Emergency funds, home deposits, and goal tracking.',
     href: '/dashboard/finance/savings',

@@ -16,6 +16,22 @@ export function downloadText(filename: string, text: string, type = 'text/plain;
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * The same, for bytes the server produced: a PDF invoice, an export. The blob
+ * arrives from the API and is handed to the reader without being parsed here.
+ */
+export function downloadBlob(filename: string, blob: Blob): void {
+  if (typeof window === 'undefined') return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Native share where the browser has it, the clipboard where it does not. */
 export async function shareOrCopy(data: { title: string; text?: string; url: string }): Promise<'shared' | 'copied' | 'failed'> {
   try {

@@ -589,6 +589,27 @@ export const formationApi = {
   update: (id: string, data: Record<string, unknown>) => api.patch(`/formation/${id}`, data),
 
   submit: (id: string) => api.post(`/formation/${id}/submit`),
+
+  // The registers. An ABN or ACN is checked for its checksum here and, when
+  // ABR_GUID is configured, looked up against the Australian Business
+  // Register; otherwise the checksum result comes back with a link to search
+  // by hand.
+  lookupAbn: (abn: string) => api.get(`/formation/lookup/abn/${encodeURIComponent(abn)}`),
+  lookupAcn: (acn: string) => api.get(`/formation/lookup/acn/${encodeURIComponent(acn)}`),
+  lookupName: (q: string) => api.get('/formation/lookup/name', { params: { q } }),
+
+  // The fee. Submitting returns the payment with the registration; these two
+  // are for an applicant who left checkout and came back.
+  paymentIntent: (id: string) => api.post(`/formation/${id}/payment-intent`),
+  confirmPayment: (id: string, paymentIntentId: string) =>
+    api.post(`/formation/${id}/confirm-payment`, { paymentIntentId }),
+};
+
+// Tax invoices the platform has issued to this member.
+export const invoiceApi = {
+  list: () => api.get('/invoices'),
+  get: (invoiceId: string) => api.get(`/invoices/${invoiceId}`),
+  pdf: (invoiceId: string) => api.get(`/invoices/${invoiceId}/pdf`, { responseType: 'blob' }),
 };
 
 // ============================================
@@ -980,6 +1001,17 @@ export const businessApi = {
   enrollInAccelerator: (id: string) => api.post(`/business/accelerators/${id}/enroll`),
 
   getMyAcceleratorEnrollments: () => api.get('/business/accelerators/my/enrollments'),
+
+  // A cohort week by week: what has been marked done, what is next, and the
+  // fee while it is unpaid (progress cannot be recorded until it is).
+  getEnrollmentProgress: (enrollmentId: string) =>
+    api.get(`/business/accelerators/enrollments/${enrollmentId}/progress`),
+
+  markCohortWeek: (enrollmentId: string, data: { weekNumber: number; note?: string; deliverableUrl?: string }) =>
+    api.post(`/business/accelerators/enrollments/${enrollmentId}/progress`, data),
+
+  payForEnrollment: (enrollmentId: string) =>
+    api.post(`/business/accelerators/enrollments/${enrollmentId}/payment`),
 
   // Grants
   getGrants: (params?: { providerType?: string; industry?: string; region?: string; active?: boolean }) =>

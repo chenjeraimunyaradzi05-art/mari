@@ -1,7 +1,25 @@
 /**
  * Mentor Scheduling Routes
  * Calendar integration, booking, availability management
- * 
+ *
+ * ## Superseded: mentor booking lives at /api/mentors/*
+ *
+ * These eleven routes are a second, older booking engine. The one the product
+ * actually uses is in `mentor.routes.ts`: `POST /api/mentors/:id/book`,
+ * `GET /api/mentors/sessions`, `PATCH /api/mentors/sessions/:id/status`,
+ * `PATCH /api/mentors/sessions/:id` and `POST /api/mentors/sessions/:id/
+ * payment-intent`, which the web app calls through `mentorApi` and which
+ * carries the Stripe hold that pays the mentor. Both write the same
+ * `MentorSession` rows.
+ *
+ * Nothing calls the routes below, and `check-api-contract --unreachable`
+ * reports them for that reason. They are left mounted because the service
+ * behind them has timezone and slot-generation code the `/api/mentors` path
+ * does not have yet, and that is worth keeping until it is either merged in
+ * or deliberately dropped. What matters is: do not build a second booking
+ * screen against these. Add to `/api/mentors/*`, or move the slot logic
+ * there first.
+ *
  * Works with the simplified mentor-scheduling.service.ts
  * Service functions:
  * - getMentorAvailability(mentorProfileId)

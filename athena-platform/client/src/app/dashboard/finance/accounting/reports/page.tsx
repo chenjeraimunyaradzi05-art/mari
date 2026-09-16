@@ -19,6 +19,8 @@ type Row = { accountId: string; code: string | null; name: string; type: string;
 type ProfitAndLoss = { period: { from: string | null; to: string | null }; revenue: Row[]; expenses: Row[]; totalRevenue: number; totalExpenses: number; netProfit: number };
 type BalanceSheet = { asOf: string | null; assets: Row[]; liabilities: Row[]; equity: Row[]; retainedEarnings: number; totalAssets: number; totalLiabilities: number; totalEquity: number; difference: number };
 
+type TrialRow = { accountId: string; code: string | null; name: string; type: string; debit: number; credit: number };
+
 const aud = (n: number) => new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 
 // The Australian financial year runs 1 July to 30 June.
@@ -36,7 +38,7 @@ export default function AccountingReportsPage() {
   const [from, setFrom] = useState(fy.from);
   const [to, setTo] = useState(fy.to);
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
-  const [tab, setTab] = useState<'pnl' | 'balance'>('pnl');
+  const [tab, setTab] = useState<'pnl' | 'balance' | 'trial'>('pnl');
 
   const pnl = useQuery({
     queryKey: ['accounting-pnl', organizationId, from, to],
@@ -50,6 +52,30 @@ export default function AccountingReportsPage() {
     select: (r) => r.data?.data as BalanceSheet,
     enabled: tab === 'balance' && Boolean(asOf),
   });
+  // Every account with its debit and credit totals: the report an accountant
+  // asks for first, because it is where an unbalanced entry shows up.
+  const trial = useQuery({
+    queryKey: ['accounting-trial', organizationId],
+    queryFn: () => api.get('/accounting/reports/trial-balance', { params: { organizationId } }),
+    select: (r) => (r.data?.data ?? []) as TrialRow[],
+    enabled: tab === 'trial',
+  });
+
+  const trialTotals = (trial.data ?? []).reduce(
+    (acc, row) => ({ debit: acc.debit + (row.debit ?? 0), credit: acc.credit + (row.credit ?? 0) }),
+    { debit: 0, credit: 0 }
+  );
+
+  const exportTrial = () => {
+    if (!trial.data?.length) return;
+    const lines = [
+      csvRow(['Trial balance', new Date().toISOString().slice(0, 10)]),
+      csvRow(['Account', 'Type', 'Debit', 'Credit']),
+      ...trial.data.map((r) => csvRow([`${r.code ? `${r.code} ` : ''}${r.name}`, r.type, r.debit ?? 0, r.credit ?? 0])),
+      csvRow(['Total', '', trialTotals.debit, trialTotals.credit]),
+    ];
+    downloadText(`trial-balance-${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'), 'text/csv;charset=utf-8');
+  };
 
   const exportPnl = () => {
     if (!pnl.data) return;
@@ -119,7 +145,8 @@ export default function AccountingReportsPage() {
           [
             ['pnl', 'Profit and loss'],
             ['balance', 'Balance sheet'],
-          ] as Array<['pnl' | 'balance', string]>
+            ['trial', 'Trial balance'],
+          ] as Array<['pnl' | 'balance' | 'trial', string]>
         ).map(([v, l]) => (
           <button key={v} type="button" role="tab" aria-selected={tab === v} onClick={() => setTab(v)} className={cn('rounded-md px-3 py-1.5 text-sm font-medium', tab === v ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>
             {l}
@@ -127,7 +154,55 @@ export default function AccountingReportsPage() {
         ))}
       </div>
 
-      {tab === 'pnl' ? (
+      {tab === 'trial' ? (
+        <section className="card">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-slate-900 dark:text-white">Trial balance</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Every account, all posted entries. The two columns must agree.</p>
+            </div>
+            <button type="button" onClick={exportTrial} disabled={!trial.data?.length} className="btn-outline px-3 py-1.5 text-sm disabled:opacity-50">Export CSV</button>
+          </div>
+          {trial.isLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
+          ) : trial.isError ? (
+            <p className="py-6 text-center text-sm text-slate-500">Could not load the report. You may not have access to these books.</p>
+          ) : (trial.data?.length ?? 0) === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-500">Nothing has been posted to the ledger yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
+                    <th className="py-2">Account</th>
+                    <th className="py-2 text-right">Debit</th>
+                    <th className="py-2 text-right">Credit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trial.data!.map((row) => (
+                    <tr key={row.accountId} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+                      <td className="py-1.5 text-slate-700 dark:text-slate-300">{row.code ? `${row.code} ` : ''}{row.name} <span className="text-xs text-slate-400">{row.type.toLowerCase()}</span></td>
+                      <td className="py-1.5 text-right tabular-nums text-slate-900 dark:text-white">{row.debit ? aud(row.debit) : ''}</td>
+                      <td className="py-1.5 text-right tabular-nums text-slate-900 dark:text-white">{row.credit ? aud(row.credit) : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-300 font-semibold dark:border-slate-600">
+                    <td className="py-2 text-slate-900 dark:text-white">Total</td>
+                    <td className="py-2 text-right tabular-nums text-slate-900 dark:text-white">{aud(trialTotals.debit)}</td>
+                    <td className="py-2 text-right tabular-nums text-slate-900 dark:text-white">{aud(trialTotals.credit)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              <p className={cn('mt-3 text-xs', Math.abs(trialTotals.debit - trialTotals.credit) < 0.005 ? 'text-slate-500' : 'text-red-600')}>
+                {Math.abs(trialTotals.debit - trialTotals.credit) < 0.005 ? 'Debits equal credits.' : `Out by ${aud(Math.abs(trialTotals.debit - trialTotals.credit))}: an entry was posted unbalanced.`}
+              </p>
+            </div>
+          )}
+        </section>
+      ) : tab === 'pnl' ? (
         <section className="card">
           <div className="mb-4 flex flex-wrap items-end gap-3">
             <label className="text-sm text-slate-600 dark:text-slate-300">
