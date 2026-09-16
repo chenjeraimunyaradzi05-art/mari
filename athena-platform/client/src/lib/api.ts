@@ -1507,6 +1507,11 @@ export const creatorApi = {
 
   getBalance: () => api.get('/creator/balance'),
 
+  // Buying gift points: the server makes the Stripe intent carrying the points
+  // in its metadata, and credits them once when the payment is confirmed.
+  purchaseGiftBalance: (amount: number) => api.post('/creator/balance/purchase', { amount }),
+  confirmGiftPurchase: (paymentIntentId: string) => api.post('/creator/balance/purchase/confirm', { paymentIntentId }),
+
   getEarnings: (params?: { period?: string }) => api.get('/creator/earnings', { params }),
 
   getPayouts: () => api.get('/creator/payouts'),

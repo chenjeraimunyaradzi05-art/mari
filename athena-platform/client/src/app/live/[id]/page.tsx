@@ -9,6 +9,7 @@ import { livestreamApi, type LiveChatMessage, type LiveStream } from '@/lib/api-
 import { useAuthStore } from '@/lib/store';
 import { useSocket } from '@/lib/hooks/use-socket';
 import { LivePlayer } from '@/components/live/LivePlayer';
+import { TopUpModal } from '@/components/creator/TopUpModal';
 import { Avatar } from '@/components/ui/avatar';
 import { renderSocialText } from '@/lib/social-text';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,7 @@ export default function LiveWatchPage() {
   const [gifts, setGifts] = useState<GiftOption[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
   const [showGifts, setShowGifts] = useState(false);
+  const [showTopUp, setShowTopUp] = useState(false);
   const [gifting, setGifting] = useState<string | null>(null);
   const [leaderboard, setLeaderboard] = useState<Array<{ rank: number; user: { id: string; displayName: string | null }; points: number }>>([]);
   const [ending, setEnding] = useState(false);
@@ -394,8 +396,22 @@ export default function LiveWatchPage() {
             <div className="border-t border-slate-200 px-4 py-3 dark:border-slate-800">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span>Send a gift</span>
-                <span>{balance ?? 0} pts available</span>
+                <span className="flex items-center gap-2">
+                  {balance ?? 0} pts available
+                  <button
+                    type="button"
+                    onClick={() => setShowTopUp(true)}
+                    className="font-medium text-rose-600 hover:underline dark:text-rose-400"
+                  >
+                    Top up
+                  </button>
+                </span>
               </div>
+              {(balance ?? 0) < Math.min(...gifts.map((g) => g.value)) && (
+                <p className="mt-2 text-xs text-slate-500">
+                  You need points before you can send a gift.
+                </p>
+              )}
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {gifts.map((gift) => (
                   <button
@@ -449,6 +465,14 @@ export default function LiveWatchPage() {
           </div>
         </div>
       </div>
+
+      {showTopUp && (
+        <TopUpModal
+          isOpen={showTopUp}
+          onClose={() => setShowTopUp(false)}
+          onTopped={(points) => setBalance((current) => (current ?? 0) + points)}
+        />
+      )}
     </div>
   );
 }

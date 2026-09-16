@@ -325,6 +325,9 @@ export async function purchaseGiftBalance(userId: string, amount: number) {
   });
 
   return {
+    // The id travels with the secret so the browser can confirm the purchase
+    // without picking the id back out of the secret string.
+    paymentIntentId: paymentIntent.id,
     clientSecret: paymentIntent.client_secret,
     amount,
     giftPoints,
