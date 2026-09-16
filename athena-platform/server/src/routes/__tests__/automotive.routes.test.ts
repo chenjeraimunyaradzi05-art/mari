@@ -245,8 +245,17 @@ describe('The automotive routes', () => {
     const page = await request(app).get('/api/automotive/mechanics/jos-garage').expect(200);
     expect(page.body.data.nextAvailable.length).toBeGreaterThan(0);
     expect(page.body.data.prices.find((p: any) => p.kind === 'brakes').own).toBe(false);
-    const day = page.body.data.nextAvailable[0].day;
-    const slots = await request(app).get(`/api/automotive/mechanics/m1/slots?day=${day}&service=logbook`).expect(200);
+    // The page's "next available" is counted in the workshop's default
+    // 60-minute slots; a logbook service takes 120 and needs two hours'
+    // notice, so early on a weekday afternoon the first offered day has no
+    // logbook slot left. Take the first offered day that has one, as a
+    // member would.
+    let slots: request.Response | null = null;
+    for (const offered of page.body.data.nextAvailable as Array<{ day: string }>) {
+      const candidate = await request(app).get(`/api/automotive/mechanics/m1/slots?day=${offered.day}&service=logbook`).expect(200);
+      if (candidate.body.data.slots.length > 0) { slots = candidate; break; }
+    }
+    if (!slots) throw new Error('No offered day had a logbook slot');
     expect(slots.body.data.minutes).toBe(120);
     const car = await request(app).post('/api/automotive/garage').set(as('member')).send({ make: 'Kia', model: 'Sportage', year: 2019, odometerKm: 90000 }).expect(201);
     await request(app).post('/api/automotive/mechanics/m1/bookings').set(as('member')).send({ kind: 'logbook', scheduledAt: new Date('2020-01-01T00:00:00Z').toISOString(), vehicleId: car.body.data.id }).expect(400);
