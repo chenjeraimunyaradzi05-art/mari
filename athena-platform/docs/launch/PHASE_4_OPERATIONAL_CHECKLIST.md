@@ -141,7 +141,7 @@
 ### Components Created
 | Component | File | Purpose |
 |-----------|------|---------|
-| GranularCookieBanner | `client/src/components/privacy/GranularCookieBanner.tsx` | GDPR-compliant cookie consent |
+| CookieConsentBanner | `client/src/components/CookieConsentBanner.tsx` | Cookie consent, with per-category choices |
 
 ### Database Models Added (in schema.prisma)
 - `ConsentRecord` - Timestamped consent ledger

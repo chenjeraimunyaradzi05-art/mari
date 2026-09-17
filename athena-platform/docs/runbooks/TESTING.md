@@ -19,7 +19,6 @@ NODE_ENV=test npm test
 |------|-------|
 | `src/__tests__/auth.happy.test.ts` | Auth happy paths (register, login, refresh, logout) |
 | `src/__tests__/register_debug.test.ts` | Registration edge cases |
-| `src/__tests__/validation.test.ts` | Input validation (express-validator rules) |
 
 ### Common test failures
 

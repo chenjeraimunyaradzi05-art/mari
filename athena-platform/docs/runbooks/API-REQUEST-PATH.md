@@ -47,7 +47,7 @@ Next's App Router matches the most specific route, and a route handler that does
 not export a verb answers **405** for it. It does not fall through to
 `[...path]`.
 
-That produced this bug: `app/api/channels/[id]/route.ts` exported `GET` only, so
+That produced this bug: the channels proxy that used to sit under the App Router exported `GET` only, so
 `PATCH /api/channels/:id` and `DELETE /api/channels/:id` returned 405 in
 production and never reached the backend — while working perfectly in local dev,
 where the middleware bypassed the handler entirely. The same applied to

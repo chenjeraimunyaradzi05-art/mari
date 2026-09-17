@@ -36,7 +36,7 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 - [x] Exports user data in JSON format
 - [x] Includes: profile, posts, applications, messages, activity logs
 - [x] Response time: within 30 days (automated: instant)
-- **Evidence:** [user.routes.ts - exportUserData](../server/src/routes/user.routes.ts)
+- **Evidence:** [user.routes.ts - exportUserData](../../server/src/routes/user.routes.ts)
 
 ### ✅ Right to Rectification (Article 16)
 - [x] Profile editing available via `/dashboard/settings/profile`
@@ -48,7 +48,7 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 - [x] Cascading soft-delete implemented
 - [x] 30-day grace period before permanent deletion
 - [x] Retained data: anonymized for legitimate interests (fraud prevention)
-- **Evidence:** [user.routes.ts - deleteAccount](../server/src/routes/user.routes.ts)
+- **Evidence:** [user.routes.ts - deleteAccount](../../server/src/routes/user.routes.ts)
 
 ### ✅ Right to Data Portability (Article 20)
 - [x] Export format: JSON (machine-readable)
@@ -154,7 +154,7 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 ## 7. Breach Response
 
 ### ✅ Incident Response Plan
-- [x] Documented procedure in `docs/runbooks/security-incident.md`
+- [x] Documented procedure in `docs/security/incident-response.md`
 - [x] 72-hour notification timeline to authorities
 - [x] User notification process
 - [x] Incident logging and tracking
@@ -188,12 +188,12 @@ This document serves as the legal review checklist for ATHENA's GDPR/Privacy com
 ## 10. Audit Trail
 
 ### Evidence Files
-1. [Privacy Center UI](../client/src/app/privacy-center/page.tsx)
-2. [Cookie Consent Banner](../client/src/components/CookieConsentBanner.tsx)
-3. [GDPR Context Provider](../client/src/lib/contexts/GDPRContext.tsx)
-4. [User Data Export Route](../server/src/routes/user.routes.ts)
-5. [Data Retention Policy](../docs/legal/data-retention-policy.md)
-6. [Privacy Policy](../docs/legal/privacy-policy.md)
+1. [Privacy Center UI](../../client/src/app/privacy-center/page.tsx)
+2. [Cookie Consent Banner](../../client/src/components/CookieConsentBanner.tsx)
+3. [GDPR Context Provider](../../client/src/lib/contexts/GDPRContext.tsx)
+4. [User Data Export Route](../../server/src/routes/user.routes.ts)
+5. [Data Retention Policy](../../../docs/security/retention-and-deletion.md)
+6. [Privacy Policy draft](../legal/PRIVACY_POLICY_DRAFT.md)
 
 ---
 

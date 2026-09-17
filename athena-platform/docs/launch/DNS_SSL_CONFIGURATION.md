@@ -10,7 +10,7 @@
 > - **Frontend:** `https://athena-empress.netlify.app` (Netlify, auto-SSL)
 > - **API:** the API host's public URL (managed hosts issue the certificate); database on Neon
 >
-> For the current setup, see [DEPLOY.md](../../../DEPLOY.md) and [NETLIFY_SETUP.md](../../../NETLIFY_SETUP.md).
+> For the current setup, see [DEPLOY.md](../../DEPLOY.md) and [NETLIFY_SETUP.md](../../../NETLIFY_SETUP.md).
 
 ## Overview
 

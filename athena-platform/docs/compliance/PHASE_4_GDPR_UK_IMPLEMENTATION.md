@@ -218,8 +218,7 @@ model UserSafetySettings {
 - `client/src/app/help/community-guidelines/page.tsx`
 - `client/src/app/help/appeal/page.tsx`
 - `client/src/app/help/safety-center/page.tsx`
-- `client/src/components/gdpr/CookieConsentBanner.tsx`
-- `client/src/components/gdpr/index.ts`
+- `client/src/components/CookieConsentBanner.tsx`
 - `server/src/middleware/gdpr.middleware.ts`
 - `server/src/services/content-report.service.ts`
 
