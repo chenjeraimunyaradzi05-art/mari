@@ -5,6 +5,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { createAcceleratorEnrollmentPayment } from '../services/payments-orchestration.service';
 
 const router = Router();
@@ -416,6 +417,7 @@ async function matchScoreForApplication(
 router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { status, upcoming } = req.query;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = {};
     if (status) {
@@ -425,15 +427,20 @@ router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFu
       where.startDate = { gte: new Date() };
     }
 
-    const cohorts = await prisma.acceleratorCohort.findMany({
-      where,
-      orderBy: { startDate: 'asc' },
-      include: {
-        _count: {
-          select: { enrollments: true, sessions: true },
+    const [cohorts, total] = await Promise.all([
+      prisma.acceleratorCohort.findMany({
+        where,
+        orderBy: { startDate: 'asc' },
+        include: {
+          _count: {
+            select: { enrollments: true, sessions: true },
+          },
         },
-      },
-    });
+        skip,
+        take: limit,
+      }),
+      prisma.acceleratorCohort.count({ where }),
+    ]);
 
     res.json({
       success: true,
@@ -443,6 +450,7 @@ router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFu
         sessionCount: c._count.sessions,
         spotsRemaining: c.maxParticipants - c._count.enrollments,
       })),
+      pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -556,24 +564,31 @@ router.get(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
+      const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
-      const enrollments = await prisma.acceleratorEnrollment.findMany({
-        where: { userId },
-        include: {
-          cohort: {
-            include: {
-              sessions: {
-                orderBy: { weekNumber: 'asc' },
+      const [enrollments, total] = await Promise.all([
+        prisma.acceleratorEnrollment.findMany({
+          where: { userId },
+          include: {
+            cohort: {
+              include: {
+                sessions: {
+                  orderBy: { weekNumber: 'asc' },
+                },
               },
             },
           },
-        },
-        orderBy: { enrolledAt: 'desc' },
-      });
+          orderBy: { enrolledAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        prisma.acceleratorEnrollment.count({ where: { userId } }),
+      ]);
 
       res.json({
         success: true,
         data: enrollments,
+        pagination: buildPaginationMeta(total, page, limit),
       });
     } catch (error) {
       next(error);
@@ -792,6 +807,7 @@ router.post(
 router.get('/grants', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { providerType, industry, region, active } = req.query;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = {};
     if (providerType) {
@@ -807,17 +823,23 @@ router.get('/grants', async (req: AuthRequest, res: Response, next: NextFunction
       where.isActive = true;
     }
 
-    const grants = await prisma.grant.findMany({
-      where,
-      orderBy: [
-        { deadline: 'asc' },
-        { createdAt: 'desc' },
-      ],
-    });
+    const [grants, total] = await Promise.all([
+      prisma.grant.findMany({
+        where,
+        orderBy: [
+          { deadline: 'asc' },
+          { createdAt: 'desc' },
+        ],
+        skip,
+        take: limit,
+      }),
+      prisma.grant.count({ where }),
+    ]);
 
     res.json({
       success: true,
       data: grants,
+      pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -919,18 +941,25 @@ router.get(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
+      const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
-      const applications = await prisma.grantApplication.findMany({
-        where: { userId },
-        include: {
-          grant: true,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const [applications, total] = await Promise.all([
+        prisma.grantApplication.findMany({
+          where: { userId },
+          include: {
+            grant: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        prisma.grantApplication.count({ where: { userId } }),
+      ]);
 
       res.json({
         success: true,
         data: applications,
+        pagination: buildPaginationMeta(total, page, limit),
       });
     } catch (error) {
       next(error);
@@ -1016,6 +1045,7 @@ router.patch(
 router.get('/investors', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { type, industry, stage, region, minCheck, maxCheck } = req.query;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = { isActive: true };
     if (type) {
@@ -1031,14 +1061,20 @@ router.get('/investors', async (req: AuthRequest, res: Response, next: NextFunct
       where.regions = { has: region as string };
     }
 
-    const investors = await prisma.investor.findMany({
-      where,
-      orderBy: { name: 'asc' },
-    });
+    const [investors, total] = await Promise.all([
+      prisma.investor.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.investor.count({ where }),
+    ]);
 
     res.json({
       success: true,
       data: investors,
+      pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -1133,18 +1169,25 @@ router.get(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
+      const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
-      const introductions = await prisma.investorIntroduction.findMany({
-        where: { userId },
-        include: {
-          investor: true,
-        },
-        orderBy: { requestedAt: 'desc' },
-      });
+      const [introductions, total] = await Promise.all([
+        prisma.investorIntroduction.findMany({
+          where: { userId },
+          include: {
+            investor: true,
+          },
+          orderBy: { requestedAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        prisma.investorIntroduction.count({ where: { userId } }),
+      ]);
 
       res.json({
         success: true,
         data: introductions,
+        pagination: buildPaginationMeta(total, page, limit),
       });
     } catch (error) {
       next(error);
@@ -1160,6 +1203,7 @@ router.get(
 router.get('/vendors', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { category, partner, verified, minRating } = req.query;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = {};
     if (category) {
@@ -1175,17 +1219,23 @@ router.get('/vendors', async (req: AuthRequest, res: Response, next: NextFunctio
       where.avgRating = { gte: parseFloat(minRating as string) };
     }
 
-    const vendors = await prisma.vendor.findMany({
-      where,
-      orderBy: [
-        { isPartner: 'desc' },
-        { avgRating: 'desc' },
-      ],
-    });
+    const [vendors, total] = await Promise.all([
+      prisma.vendor.findMany({
+        where,
+        orderBy: [
+          { isPartner: 'desc' },
+          { avgRating: 'desc' },
+        ],
+        skip,
+        take: limit,
+      }),
+      prisma.vendor.count({ where }),
+    ]);
 
     res.json({
       success: true,
       data: vendors,
+      pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -1469,6 +1519,7 @@ router.post(
 router.get('/rfps', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { category, status } = req.query;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = {};
     if (category) {
@@ -1480,18 +1531,23 @@ router.get('/rfps', async (req: AuthRequest, res: Response, next: NextFunction) 
       where.status = 'OPEN';
     }
 
-    const rfps = await prisma.rfp.findMany({
-      where,
-      include: {
-        user: {
-          select: { id: true, firstName: true, lastName: true, avatar: true },
+    const [rfps, total] = await Promise.all([
+      prisma.rfp.findMany({
+        where,
+        include: {
+          user: {
+            select: { id: true, firstName: true, lastName: true, avatar: true },
+          },
+          _count: {
+            select: { responses: true },
+          },
         },
-        _count: {
-          select: { responses: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.rfp.count({ where }),
+    ]);
 
     res.json({
       success: true,
@@ -1499,6 +1555,7 @@ router.get('/rfps', async (req: AuthRequest, res: Response, next: NextFunction) 
         ...r,
         responseCount: r._count.responses,
       })),
+      pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
     next(error);

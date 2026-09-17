@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 
 const router = Router();
 
@@ -241,6 +242,7 @@ router.patch(
 router.get('/insurance', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { type } = req.query;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = {
       isActive: true,
@@ -248,14 +250,20 @@ router.get('/insurance', async (req: AuthRequest, res: Response, next: NextFunct
 
     if (type) where.type = type;
 
-    const products = await prisma.insuranceProduct.findMany({
-      where,
-      orderBy: { premiumMonthly: 'asc' },
-    });
+    const [products, total] = await Promise.all([
+      prisma.insuranceProduct.findMany({
+        where,
+        orderBy: { premiumMonthly: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.insuranceProduct.count({ where }),
+    ]);
 
     res.json({
       success: true,
       data: products,
+      pagination: buildPaginationMeta(total, page, limit),
     });
   } catch (error) {
     next(error);
@@ -351,18 +359,25 @@ router.get(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
+      const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
-      const applications = await prisma.insuranceApplication.findMany({
-        where: { userId },
-        include: {
-          product: true,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const [applications, total] = await Promise.all([
+        prisma.insuranceApplication.findMany({
+          where: { userId },
+          include: {
+            product: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        prisma.insuranceApplication.count({ where: { userId } }),
+      ]);
 
       res.json({
         success: true,
         data: applications,
+        pagination: buildPaginationMeta(total, page, limit),
       });
     } catch (error) {
       next(error);

@@ -59,6 +59,7 @@ import { launchChecklist, pickVendors, type Structure } from '../services/strate
 import { buildDeckOutline } from '../services/strategy/deck-outline.service';
 import { buildEarningsStatement } from '../services/strategy/earnings-statement.service';
 import { listTransactions } from '../services/open-banking.service';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -266,10 +267,14 @@ router.get('/business/grant-matches', authenticate, async (req: AuthRequest, res
       stage: z.string().max(60).optional(), industry: z.string().max(60).optional(), state: z.string().max(10).optional(), amountNeeded: optMoney,
       womenLed: optBool, indigenous: optBool, regional: optBool, includeClosed: optBool,
     }), req.query);
-    const grants = await prisma.grant.findMany({ where: { isActive: true } });
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+    // The score is worked out here rather than in the query, so the field she
+    // is ranked against is capped at the most recently maintained listings and
+    // the page is cut from the ranking instead of from the table.
+    const grants = await prisma.grant.findMany({ where: { isActive: true }, orderBy: { updatedAt: 'desc' }, take: 200 });
     const ranked = rankGrants(grants, { ...q, womenLed: q.womenLed ?? true });
     const open = q.includeClosed ? ranked : ranked.filter((g) => !g.match.gaps.includes('Applications have closed'));
-    ok(res, { profile: q, matches: open });
+    ok(res, { profile: q, matches: open.slice(skip, skip + limit), pagination: buildPaginationMeta(open.length, page, limit) });
   } catch (error) {
     next(error);
   }
@@ -493,9 +498,12 @@ router.post('/housing/investment-property', async (req: AuthRequest, res: Respon
 router.get('/business/investor-matches', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const q = parse(z.object({ stage: z.string().max(60).optional(), industry: z.string().max(60).optional(), state: z.string().max(10).optional(), raiseAmount: optMoney, investorTypes: z.string().max(200).optional() }), req.query);
-    const investors = await prisma.investor.findMany({ where: { isActive: true } });
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+    // Ranked in memory like the grants, so the field is capped with the
+    // verified names first and the page taken off the ranking.
+    const investors = await prisma.investor.findMany({ where: { isActive: true }, orderBy: [{ isVerified: 'desc' }, { updatedAt: 'desc' }], take: 200 });
     const ranked = rankInvestors(investors, { ...q, investorTypes: q.investorTypes ? q.investorTypes.split(',').map((s) => s.trim()).filter(Boolean) : undefined });
-    ok(res, { profile: q, matches: ranked });
+    ok(res, { profile: q, matches: ranked.slice(skip, skip + limit), pagination: buildPaginationMeta(ranked.length, page, limit) });
   } catch (error) {
     next(error);
   }

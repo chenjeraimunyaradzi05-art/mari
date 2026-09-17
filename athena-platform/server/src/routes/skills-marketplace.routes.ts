@@ -9,14 +9,13 @@ import {
   createEscrowPayment,
   getEscrowClientSecret,
 } from '../services/stripe-connect.service';
+import { parsePagination } from '../utils/pagination';
 
 const router = Router();
 
-function parseLimit(value: unknown, fallback = 20, max = 50): number {
-  const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
-  if (Number.isNaN(parsed) || parsed <= 0) return fallback;
-  return Math.min(parsed, max);
-}
+// The browse routes keep the tighter ceiling they have always had; a member
+// reading her own orders, bookings or briefs gets the platform-wide one.
+const BROWSE_PAGE_MAX = 50;
 
 /**
  * Marks which of these services the viewer has saved.
@@ -44,8 +43,7 @@ async function withFavoriteState<T extends { id: string }>(items: T[], userId?: 
 // ===========================================
 router.get('/services', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
-    const limit = parseLimit(req.query.limit, 20, 50);
-    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string }, BROWSE_PAGE_MAX);
     const search = typeof req.query.search === 'string' ? req.query.search : undefined;
     const category = typeof req.query.category === 'string' ? req.query.category : undefined;
     const minRate = typeof req.query.minRate === 'string' ? parseInt(req.query.minRate, 10) : undefined;
@@ -71,7 +69,7 @@ router.get('/services', optionalAuth, async (req: AuthRequest, res, next) => {
       prisma.skillService.findMany({
         where,
         orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
-        skip: (page - 1) * limit,
+        skip,
         take: limit,
         include: {
           provider: { select: { id: true, displayName: true, avatar: true, headline: true } },
@@ -174,11 +172,15 @@ router.get('/categories', optionalAuth, async (_req: AuthRequest, res, next) => 
 // Above '/services/:id', or "me" is read as a service id.
 router.get('/services/me', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const { limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+
     // The provider sees their paused and archived listings too, not just the
     // ACTIVE ones the public list route returns.
     const services = await prisma.skillService.findMany({
       where: { providerId: req.user!.id },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         _count: { select: { orders: true, bookings: true, reviews: true, favorites: true } },
       },
@@ -200,7 +202,9 @@ router.get('/services/:id', optionalAuth, async (req: AuthRequest, res, next) =>
       where: { id },
       include: {
         provider: { select: { id: true, displayName: true, avatar: true, headline: true } },
-        reviews: { orderBy: { createdAt: 'desc' } },
+        // The listing shows the latest few underneath the description; the
+        // whole history is read a page at a time from /services/:id/reviews.
+        reviews: { orderBy: { createdAt: 'desc' }, take: 20 },
       },
     });
 
@@ -326,6 +330,7 @@ router.post(
 router.get('/bookings/me', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const role = typeof req.query.role === 'string' ? req.query.role : 'all';
+    const { limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const where: any = {};
     if (role === 'client') {
@@ -342,6 +347,8 @@ router.get('/bookings/me', authenticate, async (req: AuthRequest, res, next) => 
     const bookings = await prisma.serviceBooking.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         service: { include: { provider: { select: { id: true, displayName: true, avatar: true } } } },
       },
@@ -489,8 +496,7 @@ router.post(
 router.get('/services/:id/reviews', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const limit = parseLimit(req.query.limit, 20, 50);
-    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string }, BROWSE_PAGE_MAX);
 
     const service = await prisma.skillService.findUnique({
       where: { id },
@@ -505,7 +511,7 @@ router.get('/services/:id/reviews', optionalAuth, async (req: AuthRequest, res, 
       prisma.serviceReview.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
+        skip,
         take: limit,
         include: { client: { select: { id: true, displayName: true, avatar: true } } },
       }),
@@ -618,9 +624,13 @@ router.get('/sellers/:userId', optionalAuth, async (req: AuthRequest, res, next)
 // ===========================================
 router.get('/favorites', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const { limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+
     const favorites = await prisma.serviceFavorite.findMany({
       where: { userId: req.user!.id },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         service: {
           include: {
@@ -786,10 +796,13 @@ router.post(
 router.get('/orders/me', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const orders = await prisma.serviceOrder.findMany({
       where: { clientId: req.user!.id, ...(status ? { status: status as never } : {}) },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         service: {
           include: {
@@ -813,6 +826,7 @@ router.get('/orders/me', authenticate, async (req: AuthRequest, res, next) => {
 router.get('/orders/received', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
     const orders = await prisma.serviceOrder.findMany({
       where: {
@@ -820,6 +834,8 @@ router.get('/orders/received', authenticate, async (req: AuthRequest, res, next)
         ...(status ? { status: status as never } : {}),
       },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         service: { select: { id: true, title: true, category: true } },
         client: { select: { id: true, displayName: true, avatar: true } },
@@ -1228,8 +1244,7 @@ router.post(
 // this is the sellers' view; buyers use /requests/me.
 router.get('/requests', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const limit = parseLimit(req.query.limit, 20, 50);
-    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string }, BROWSE_PAGE_MAX);
     const category = typeof req.query.category === 'string' ? req.query.category : undefined;
 
     const where: Record<string, unknown> = {
@@ -1242,7 +1257,7 @@ router.get('/requests', authenticate, async (req: AuthRequest, res, next) => {
       prisma.serviceRequest.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
+        skip,
         take: limit,
         include: {
           client: { select: { id: true, displayName: true, avatar: true } },
@@ -1274,9 +1289,13 @@ router.get('/requests', authenticate, async (req: AuthRequest, res, next) => {
 // Above '/requests/:id'.
 router.get('/requests/me', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    const { limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
+
     const requests = await prisma.serviceRequest.findMany({
       where: { clientId: req.user!.id },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: { _count: { select: { proposals: true } } },
     });
 
