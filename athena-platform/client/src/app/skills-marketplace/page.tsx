@@ -185,11 +185,19 @@ export default function SkillsMarketplacePage() {
         primaryAction={{ label: 'Browse services', href: '#all-services' }}
         secondaryAction={{ label: 'Offer your own', href: '/dashboard/creator' }}
       />
-      <div className="mt-3 text-sm">
-        <Link href="/skills-marketplace/orders" className="font-medium text-primary-600 hover:underline">
-          Your orders
-        </Link>
-        <span className="text-slate-400"> · what you have bought and what you are delivering</span>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <span>
+          <Link href="/skills-marketplace/orders" className="font-medium text-primary-600 hover:underline">
+            Your orders
+          </Link>
+          <span className="text-slate-400"> · fixed-price work you have bought or are delivering</span>
+        </span>
+        <span>
+          <Link href="/skills-marketplace/bookings" className="font-medium text-primary-600 hover:underline">
+            Your bookings
+          </Link>
+          <span className="text-slate-400"> · time booked by the hour</span>
+        </span>
       </div>
 
       {/* Popular Categories */}
