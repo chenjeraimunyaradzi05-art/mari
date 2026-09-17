@@ -390,9 +390,19 @@
            shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-16px_rgba(244,63,94,0.25)];
   }
 
-  /* Every interactive element gets a visible keyboard state. */
+  /* Every interactive element gets a visible keyboard state.
+   *
+   * Deliberately without outline-none. Tailwind's outline-none is a
+   * transparent outline rather than no outline, so it hides the rose outline
+   * set below, and the ring that was meant to replace it does not always
+   * render: an element whose box-shadow is set by another utility keeps that
+   * one, and the ring is silently lost. That left keyboard users with no
+   * indicator at all on some controls and a ring on others.
+   *
+   * Leaving the outline in place makes the outline the guarantee and the ring
+   * an enhancement on top of it, so the worst case is still visible. */
   .focusable {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400
+    @apply focus-visible:ring-2 focus-visible:ring-rose-400
            focus-visible:ring-offset-2 focus-visible:ring-offset-white
            dark:focus-visible:ring-offset-slate-950;
   }
