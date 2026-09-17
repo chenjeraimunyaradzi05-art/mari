@@ -202,6 +202,26 @@ router.get('/breaches/deadlines', ...adminOnly, async (_req: AuthRequest, res: R
 });
 
 /**
+ * GET /admin/breaches/ndb-assessments-due
+ * Suspected eligible breaches whose thirty-day assessment window is closing
+ *
+ * Declared above `/breaches/:id`, which would otherwise match this path and
+ * look for a breach called "ndb-assessments-due".
+ */
+router.get('/breaches/ndb-assessments-due', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const withinDays = Number(req.query.withinDays);
+    res.json({
+      breaches: await breachNotificationService.getNdbAssessmentsDue(
+        Number.isFinite(withinDays) && withinDays > 0 ? withinDays : 7
+      ),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /admin/breaches
  * Breach register for the audit dashboard
  */
@@ -295,6 +315,57 @@ router.patch('/breaches/:id', ...adminOnly, async (req: AuthRequest, res: Respon
     });
 
     res.json(withDeadline(updated));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/breaches/:id/ndb-assessment
+ * Start the Australian thirty-day assessment window on a suspected eligible breach
+ */
+router.post('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const breach = await prisma.dataBreach.findUnique({ where: { id: req.params.id } });
+    if (!breach) {
+      throw new ApiError(404, 'Breach not found');
+    }
+
+    // The clock runs from awareness, which is usually when the breach was
+    // detected rather than when someone got around to opening this screen.
+    res.json(await breachNotificationService.beginNdbAssessment(req.params.id, breach.detectedAt));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/breaches/:id/ndb-assessment
+ * Record the outcome: whether serious harm is likely, and whether it was averted
+ */
+router.patch('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { seriousHarmLikely, remediedBeforeHarm, reasoning } = req.body ?? {};
+
+    if (typeof seriousHarmLikely !== 'boolean') {
+      throw new ApiError(400, 'seriousHarmLikely must be true or false');
+    }
+    if (typeof reasoning !== 'string' || !reasoning.trim()) {
+      throw new ApiError(400, 'reasoning is required, so the assessment can be justified later');
+    }
+
+    const breach = await prisma.dataBreach.findUnique({ where: { id: req.params.id } });
+    if (!breach) {
+      throw new ApiError(404, 'Breach not found');
+    }
+
+    res.json(
+      await breachNotificationService.completeNdbAssessment(req.params.id, {
+        seriousHarmLikely,
+        remediedBeforeHarm: remediedBeforeHarm === true,
+        reasoning: reasoning.trim(),
+      })
+    );
   } catch (error) {
     next(error);
   }

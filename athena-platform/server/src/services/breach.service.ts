@@ -1,7 +1,19 @@
 /**
  * Breach Notification Service
- * Handles data breach detection, assessment, and 72-hour notification workflow
- * Phase 4: UK/EU Market Launch - GDPR Article 33/34 Compliance
+ *
+ * Two regimes, because ATHENA is an Australian company that also holds data on
+ * UK and EU members, and they do not agree on anything that matters here.
+ *
+ * GDPR Articles 33 and 34: notify the supervisory authority within 72 hours of
+ * becoming aware, unless the breach is unlikely to result in a risk.
+ *
+ * Australia's Notifiable Data Breaches scheme: a suspicion of an eligible data
+ * breach starts a 30-day window to complete a reasonable assessment. The
+ * threshold is that serious harm is likely, and remedial action that prevents
+ * that harm removes the obligation to notify at all. The regulator is the OAIC.
+ *
+ * The 72-hour clock does not apply to the Australian path and must not be used
+ * for it; the NDB helpers below are separate for that reason.
  */
 
 import { BreachSeverity, BreachStatus, DataCategory } from '@prisma/client';
@@ -26,9 +38,19 @@ interface RegulatoryNotification {
   notificationContent: string;
 }
 
+/** Which regime a breach is handled under. A breach can touch more than one. */
+export type BreachJurisdiction = 'AU' | 'UK' | 'EU';
+
 export class BreachNotificationService {
   // 72-hour deadline in milliseconds
   private readonly NOTIFICATION_DEADLINE_MS = 72 * 60 * 60 * 1000;
+
+  /**
+   * The NDB scheme allows 30 days to complete a reasonable assessment of a
+   * suspected eligible data breach. It is an outer limit, not a target: the
+   * scheme says an assessment must be reasonable and expeditious.
+   */
+  private readonly NDB_ASSESSMENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
   /**
    * Report a new data breach
@@ -69,6 +91,94 @@ export class BreachNotificationService {
     });
 
     return breach;
+  }
+
+  /**
+   * Start the Australian assessment clock on a breach.
+   *
+   * Under the NDB scheme the duty is triggered by suspecting an eligible data
+   * breach, not by confirming one, so this is called as soon as there is a
+   * suspicion rather than after the investigation.
+   */
+  async beginNdbAssessment(breachId: string, awareOf = new Date()): Promise<any> {
+    const breach = await prisma.dataBreach.update({
+      where: { id: breachId },
+      data: {
+        jurisdiction: 'AU',
+        assessmentDueAt: new Date(awareOf.getTime() + this.NDB_ASSESSMENT_WINDOW_MS),
+        assessmentComplete: false,
+      },
+    });
+
+    await prisma.privacyAuditLog.create({
+      data: {
+        action: 'NDB_ASSESSMENT_STARTED',
+        resourceType: 'DataBreach',
+        resourceId: breachId,
+        details: { assessmentDueAt: breach.assessmentDueAt },
+      },
+    });
+
+    return breach;
+  }
+
+  /**
+   * Record the outcome of an NDB assessment.
+   *
+   * Two things decide whether anyone has to be told: whether serious harm is
+   * likely, and whether remedial action prevented it. Remedial action that
+   * works removes the obligation entirely, which is why it is recorded
+   * separately rather than folded into the harm judgement.
+   */
+  async completeNdbAssessment(
+    breachId: string,
+    outcome: { seriousHarmLikely: boolean; remediedBeforeHarm?: boolean; reasoning: string }
+  ): Promise<any> {
+    const notifiable = outcome.seriousHarmLikely && !outcome.remediedBeforeHarm;
+
+    const breach = await prisma.dataBreach.update({
+      where: { id: breachId },
+      data: {
+        jurisdiction: 'AU',
+        assessmentComplete: true,
+        seriousHarmLikely: outcome.seriousHarmLikely,
+        remediedBeforeHarm: outcome.remediedBeforeHarm ?? false,
+        notificationRequired: notifiable,
+        likelyConsequences: outcome.reasoning,
+      },
+    });
+
+    await prisma.privacyAuditLog.create({
+      data: {
+        action: 'NDB_ASSESSMENT_COMPLETED',
+        resourceType: 'DataBreach',
+        resourceId: breachId,
+        details: {
+          seriousHarmLikely: outcome.seriousHarmLikely,
+          remediedBeforeHarm: outcome.remediedBeforeHarm ?? false,
+          notificationRequired: notifiable,
+        },
+      },
+    });
+
+    return breach;
+  }
+
+  /**
+   * Suspected eligible breaches whose 30-day assessment window is running out.
+   *
+   * Overdue is reported rather than hidden: the scheme expects the assessment
+   * to be finished, and an unfinished one is the thing somebody has to act on.
+   */
+  async getNdbAssessmentsDue(withinDays = 7, now = new Date()): Promise<any[]> {
+    return prisma.dataBreach.findMany({
+      where: {
+        jurisdiction: 'AU',
+        assessmentComplete: false,
+        assessmentDueAt: { lte: new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000) },
+      },
+      orderBy: { assessmentDueAt: 'asc' },
+    });
   }
 
   /**

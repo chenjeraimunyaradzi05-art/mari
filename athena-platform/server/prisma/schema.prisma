@@ -3758,9 +3758,20 @@ model DataBreach {
   // Notification (72-hour requirement)
   notificationRequired Boolean   @default(false)
   regulatorNotifiedAt  DateTime?
-  regulatorReference   String? // ICO/DPA reference number
+  regulatorReference   String? // ICO/DPA/OAIC reference number
   usersNotifiedAt      DateTime?
   notificationMethod   String? // Email, letter, etc.
+
+  // Australia: the Notifiable Data Breaches scheme, which is not the 72-hour
+  // GDPR clock. An entity that suspects an eligible data breach has 30 days to
+  // complete a reasonable assessment, the threshold is that serious harm is
+  // likely, and remedial action taken before that harm eventuates removes the
+  // obligation to notify at all.
+  jurisdiction       String? // AU, UK, EU
+  assessmentDueAt    DateTime? // 30 days from awareness, NDB scheme
+  assessmentComplete Boolean   @default(false)
+  seriousHarmLikely  Boolean? // null until the assessment reaches a view
+  remediedBeforeHarm Boolean   @default(false)
 
   // Response actions
   containmentActions String[]

@@ -41,6 +41,10 @@ type Breach = {
   remediationActions: string[];
   rootCause: string | null;
   notificationDeadline: Deadline;
+  assessmentDueAt: string | null;
+  assessmentComplete: boolean;
+  seriousHarmLikely: boolean | null;
+  remediedBeforeHarm: boolean;
 };
 
 const DATA_CATEGORIES = ['PII', 'SENSITIVE', 'FINANCIAL', 'UGC', 'BIOMETRIC', 'BEHAVIORAL', 'TECHNICAL'] as const;
@@ -59,6 +63,7 @@ export default function BreachRegisterPage() {
   const [form, setForm] = useState({ title: '', description: '', severity: 'MEDIUM' as Severity, dataCategories: [] as string[], affectedRecords: '', affectedUsers: '', occurredAt: '' });
   const [update, setUpdate] = useState({ status: '' as '' | Status, containmentActions: '', remediationActions: '', rootCause: '' });
   const [regulator, setRegulator] = useState({ regulatorName: 'Office of the Australian Information Commissioner', regulatorEmail: 'enquiries@oaic.gov.au', notificationContent: '' });
+  const [assessment, setAssessment] = useState({ remediedBeforeHarm: false, reasoning: '' });
 
   const register = useQuery({
     queryKey: ['admin-breaches'],
@@ -111,6 +116,30 @@ export default function BreachRegisterPage() {
     onSuccess: () => {
       refresh();
       toast.success('Regulator notification recorded and sent.');
+    },
+    onError,
+  });
+
+  const startAssessment = useMutation({
+    mutationFn: (id: string) => api.post(`/admin/breaches/${id}/ndb-assessment`),
+    onSuccess: () => {
+      refresh();
+      toast.success('Assessment window recorded.');
+    },
+    onError,
+  });
+
+  const recordAssessment = useMutation({
+    mutationFn: ({ id, seriousHarmLikely }: { id: string; seriousHarmLikely: boolean }) =>
+      api.patch(`/admin/breaches/${id}/ndb-assessment`, {
+        seriousHarmLikely,
+        remediedBeforeHarm: assessment.remediedBeforeHarm,
+        reasoning: assessment.reasoning,
+      }),
+    onSuccess: () => {
+      refresh();
+      setAssessment({ remediedBeforeHarm: false, reasoning: '' });
+      toast.success('Assessment recorded.');
     },
     onError,
   });
@@ -248,8 +277,75 @@ export default function BreachRegisterPage() {
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-500">NDB assessment (30 days, Australia)</dt>
-                <dd className="text-slate-700 dark:text-slate-300">
-                  Decide by {ndbAssessmentDue(current.detectedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })} whether serious harm is likely; if so, notify the OAIC and the people affected as soon as practicable.
+                <dd className="space-y-3 text-slate-700 dark:text-slate-300">
+                  {current.assessmentComplete ? (
+                    <p>
+                      {current.seriousHarmLikely
+                        ? current.remediedBeforeHarm
+                          ? 'Serious harm was likely, but remedial action prevented it. No notification is required under the scheme.'
+                          : 'Serious harm is likely. Notify the OAIC and the people affected as soon as practicable.'
+                        : 'Serious harm is not likely. No notification is required.'}
+                    </p>
+                  ) : (
+                    <>
+                      <p>
+                        Decide by{' '}
+                        {(current.assessmentDueAt
+                          ? new Date(current.assessmentDueAt)
+                          : ndbAssessmentDue(current.detectedAt)
+                        ).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}{' '}
+                        whether serious harm is likely.
+                        {!current.assessmentDueAt && ' The window has not been recorded yet.'}
+                      </p>
+
+                      {!current.assessmentDueAt ? (
+                        <button
+                          type="button"
+                          onClick={() => startAssessment.mutate(current.id)}
+                          disabled={startAssessment.isPending}
+                          className="btn-outline px-3 py-1.5 text-sm"
+                        >
+                          {startAssessment.isPending ? 'Recording…' : 'Start the assessment window'}
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <textarea
+                            value={assessment.reasoning}
+                            onChange={(e) => setAssessment((a) => ({ ...a, reasoning: e.target.value }))}
+                            rows={2}
+                            placeholder="What was considered, and why. This is the record if the assessment is ever questioned."
+                            className="input w-full text-sm"
+                          />
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={assessment.remediedBeforeHarm}
+                              onChange={(e) => setAssessment((a) => ({ ...a, remediedBeforeHarm: e.target.checked }))}
+                            />
+                            Remedial action prevented the harm
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => recordAssessment.mutate({ id: current.id, seriousHarmLikely: true })}
+                              disabled={recordAssessment.isPending || !assessment.reasoning.trim()}
+                              className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 disabled:opacity-50 dark:border-red-800 dark:text-red-300"
+                            >
+                              Serious harm is likely
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => recordAssessment.mutate({ id: current.id, seriousHarmLikely: false })}
+                              disabled={recordAssessment.isPending || !assessment.reasoning.trim()}
+                              className="btn-outline px-3 py-1.5 text-sm disabled:opacity-50"
+                            >
+                              Not likely
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </dd>
               </div>
               <div>
