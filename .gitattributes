@@ -1,0 +1,38 @@
+# Store text with LF in the repository, whatever the working tree uses.
+#
+# Deliberately without `eol=lf`: the checkout stays under core.autocrlf, so a
+# Windows working tree keeps CRLF and nobody's editor sees every file change at
+# once. This only fixes what gets committed, which is where mixed endings turn a
+# one-line edit into a whole-file diff.
+* text=auto
+
+# Windows-only scripts have to keep CRLF to run.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary, so git never tries to translate anything inside them.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.avif binary
+*.svg  text
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.eot  binary
+*.mp4  binary
+*.webm binary
+*.mp3  binary
+*.wav  binary
+
+# Generated, and noisy in review.
+package-lock.json linguist-generated=true
+*.tsbuildinfo     linguist-generated=true

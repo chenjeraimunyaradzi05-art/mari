@@ -1102,14 +1102,29 @@ router.get('/mechanics', optionalAuth, async (req: AuthRequest, res: Response, n
       [rows, total] = await Promise.all([prisma.mechanic.findMany({ where, orderBy, skip: (p - 1) * 20, take: 20 }), prisma.mechanic.count({ where })]);
     }
     const today = localParts(new Date(), 'Australia/Brisbane').day;
-    const cards = await Promise.all(rows.map(async (m) => {
+    // One booking query for the whole page rather than one per workshop, which
+    // put twenty round trips behind every load of the directory.
+    const bookable = rows.filter((m) => m.acceptsBookings && m.ownerUserId);
+    const bookings = bookable.length
+      ? await prisma.mechanicBooking.findMany({
+          where: { mechanicId: { in: bookable.map((m) => m.id) }, status: { in: ['REQUESTED', 'QUOTED', 'CONFIRMED', 'IN_PROGRESS'] }, scheduledAt: { gte: dayDate(today) } },
+          select: { mechanicId: true, scheduledAt: true, durationMinutes: true },
+        })
+      : [];
+    const bookedByMechanic = new Map<string, typeof bookings>();
+    for (const b of bookings) {
+      const list = bookedByMechanic.get(b.mechanicId) ?? [];
+      list.push(b);
+      bookedByMechanic.set(b.mechanicId, list);
+    }
+    const cards = rows.map((m) => {
       let nextFree: string | null = null;
       if (m.acceptsBookings && m.ownerUserId) {
-        const booked = await prisma.mechanicBooking.findMany({ where: { mechanicId: m.id, status: { in: ['REQUESTED', 'QUOTED', 'CONFIRMED', 'IN_PROGRESS'] }, scheduledAt: { gte: dayDate(today) } }, select: { scheduledAt: true, durationMinutes: true } });
+        const booked = bookedByMechanic.get(m.id) ?? [];
         nextFree = nextAvailableDays({ availability: m.availability as Availability | null, slotMinutes: m.slotMinutes, from: today, booked, days: 14 })[0]?.day ?? null;
       }
       return { ...mechanicCard(m), nextFree, price: service ? priceFor(m.priceList, service) : null };
-    }));
+    });
     ok(res, { mechanics: cards, total, page: p, serviceKinds: SERVICE_KINDS, makes: MAKES });
   } catch (error) { next(error); }
 });

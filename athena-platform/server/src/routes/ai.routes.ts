@@ -135,21 +135,20 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
       take: 20,
     });
 
-    // Calculate match scores using AI
-    const jobsWithScores = await Promise.all(
-      matchingJobs.map(async (job) => {
-        const jobSkillNames = job.skills.map(js => js.skill.name);
-        const matchedSkills = jobSkillNames.filter(s => skills.includes(s));
-        const matchScore = Math.min(100, (matchedSkills.length / Math.max(jobSkillNames.length, 1)) * 100);
+    // Overlap scoring only, so nothing here awaits. The AI pass happens below,
+    // against the top few once they are ranked.
+    const jobsWithScores = matchingJobs.map((job) => {
+      const jobSkillNames = job.skills.map(js => js.skill.name);
+      const matchedSkills = jobSkillNames.filter(s => skills.includes(s));
+      const matchScore = Math.min(100, (matchedSkills.length / Math.max(jobSkillNames.length, 1)) * 100);
 
-        return {
-          ...job,
-          matchScore: Math.round(matchScore),
-          matchedSkills,
-          aiInsight: null, // Will be populated by AI in premium tier
-        };
-      })
-    );
+      return {
+        ...job,
+        matchScore: Math.round(matchScore),
+        matchedSkills,
+        aiInsight: null as string | null,
+      };
+    });
 
     // Sort by match score
     jobsWithScores.sort((a, b) => b.matchScore - a.matchScore);
