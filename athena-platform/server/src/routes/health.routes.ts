@@ -362,6 +362,20 @@ async function checkDatabase(): Promise<ComponentHealth> {
 
 async function checkRedis(): Promise<ComponentHealth> {
   const start = Date.now();
+
+  // Not configured is not the same as broken. getRedisClient falls back to
+  // localhost and connects lazily, so it hands back a client that has never
+  // reached anything; letting that reach ping() reports a deployment which
+  // deliberately runs without Redis as hard down, and a load balancer reading
+  // /health/detailed would take the instance out of rotation for it.
+  if (!process.env.REDIS_URL) {
+    return {
+      status: 'degraded',
+      message:
+        'REDIS_URL is not set: caching, rate limits and scheduled-sweep locks are per instance',
+    };
+  }
+
   try {
     const redis = getRedisClient();
     if (!redis) {
