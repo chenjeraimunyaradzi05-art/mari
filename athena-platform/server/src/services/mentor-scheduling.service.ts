@@ -53,13 +53,99 @@ export interface MentorAvailability {
   sessionCount: number;
 }
 
-// Timezone utilities
+// Timezone utilities.
+//
+// Australia is listed first and in full because it is the home market and
+// `User.timezone` defaults to Australia/Sydney. The distinction between the
+// eastern zones matters for booking: Brisbane does not observe daylight saving,
+// so for half the year it is an hour behind Sydney and Melbourne despite
+// sharing their standard offset, and a mentor in Perth is two to three hours
+// behind depending on the season.
 const SUPPORTED_TIMEZONES = [
+  'Australia/Brisbane', 'Australia/Sydney', 'Australia/Melbourne',
+  'Australia/Adelaide', 'Australia/Perth', 'Australia/Darwin', 'Australia/Hobart',
+  'Pacific/Auckland',
+  'Asia/Singapore', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Mumbai', 'Asia/Dubai',
+  'Europe/London', 'Europe/Paris', 'Europe/Berlin',
   'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-  'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
-  'Asia/Dubai', 'Asia/Mumbai', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Seoul',
-  'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
+  'America/Sao_Paulo',
 ];
+
+/** The working day a mentor is offered to bookers, in the mentor's own timezone. */
+const DAY_STARTS_AT_HOUR = 9;
+const DAY_ENDS_AT_HOUR = 17;
+
+/** Matches the default on MentorSession.durationMinutes. */
+const DEFAULT_SESSION_MINUTES = 60;
+
+/** Matches the default on User.timezone. */
+const DEFAULT_TIMEZONE = 'Australia/Sydney';
+
+/**
+ * How far `timeZone` sits from UTC at a given instant, in milliseconds.
+ *
+ * There is no way to ask JavaScript this directly, so we format the instant in
+ * the target zone, read that wall-clock time back as if it were UTC, and take
+ * the difference.
+ */
+function offsetAtInstant(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(instant);
+
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
+
+  // Intl emits hour 24 for midnight when hour12 is false.
+  const hour = get('hour') === 24 ? 0 : get('hour');
+
+  const asIfUtc = Date.UTC(get('year'), get('month') - 1, get('day'), hour, get('minute'), get('second'));
+
+  return asIfUtc - instant.getTime();
+}
+
+/**
+ * The instant at which a given wall-clock time occurs in `timeZone`.
+ *
+ * The offset has to be looked up twice: the first guess is taken at the wrong
+ * instant, which lands on the wrong side of a daylight-saving change for the
+ * hours either side of it.
+ */
+function instantForLocalTime(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const naive = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+
+  const firstGuess = naive - offsetAtInstant(new Date(naive), timeZone);
+  const settled = naive - offsetAtInstant(new Date(firstGuess), timeZone);
+
+  return new Date(settled);
+}
+
+/** The calendar date in `timeZone` at a given instant, as its year, month and day. */
+function calendarDateIn(instant: Date, timeZone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(instant);
+
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
+
+  return { year: get('year'), month: get('month'), day: get('day') };
+}
 
 /**
  * Convert a date to a specific timezone
@@ -137,49 +223,91 @@ export async function getAvailableSlots(
   
   const mentorTimezone = mentor.user?.timezone || 'UTC';
   const slots: { start: Date; end: Date; displayTime: string }[] = [];
-  
-  // Get existing bookings for the day
-  const dayStart = new Date(date);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(date);
-  dayEnd.setHours(23, 59, 59, 999);
-  
+
+  // The requested day is the mentee's day, so it is resolved in the mentee's
+  // timezone. Reading it in the server's zone instead would offer a mentee in
+  // Perth the wrong date whenever the server is not sitting beside her.
+  const requestedDay = calendarDateIn(date, menteeTimezone);
+
+  // MentorProfile carries no per-mentor session length, so slots are offered at
+  // the same default a session is created with.
+  const durationMinutes = DEFAULT_SESSION_MINUTES;
+  const durationMs = durationMinutes * 60 * 1000;
+
+  // Slots are generated across the mentor's working day, so the window has to
+  // be wide enough to cover it wherever the mentee is: the same calendar day in
+  // Brisbane and in London barely overlap.
+  const windowStart = instantForLocalTime(requestedDay.year, requestedDay.month, requestedDay.day, 0, 0, menteeTimezone);
+  const windowEnd = new Date(windowStart.getTime() + 24 * 60 * 60 * 1000);
+
   const existingBookings = await prisma.mentorSession.findMany({
     where: {
       mentorProfileId,
       status: { in: ['REQUESTED', 'CONFIRMED'] },
-      scheduledAt: { gte: dayStart, lte: dayEnd },
+      scheduledAt: {
+        gte: new Date(windowStart.getTime() - durationMs),
+        lte: windowEnd,
+      },
     },
+    select: { scheduledAt: true, durationMinutes: true },
   });
-  
-  const bookedTimes = new Set(
-    existingBookings.map(b => b.scheduledAt?.toISOString())
-  );
-  
-  // Generate hourly slots from 9 AM to 5 PM in mentor's timezone
-  for (let hour = 9; hour < 17; hour++) {
-    const slotStart = new Date(date);
-    slotStart.setHours(hour, 0, 0, 0);
-    
-    // Skip if already booked
-    if (bookedTimes.has(slotStart.toISOString())) {
-      continue;
-    }
-    
-    // Skip if in the past
-    if (slotStart < new Date()) {
-      continue;
-    }
-    
-    const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
-    
-    slots.push({
-      start: slotStart,
-      end: slotEnd,
-      displayTime: formatInTimezone(slotStart, menteeTimezone, 'time'),
+
+  const booked = existingBookings
+    .filter(b => b.scheduledAt)
+    .map(b => {
+      const start = b.scheduledAt!.getTime();
+      return { start, end: start + (b.durationMinutes ?? durationMinutes) * 60 * 1000 };
     });
+
+  const now = Date.now();
+
+  // The mentor's working day may begin on either the previous or the next
+  // calendar date in her own zone, so both are generated and filtered back down
+  // to the window the mentee asked for.
+  for (const dayOffset of [-1, 0, 1]) {
+    const anchor = new Date(windowStart.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+    const mentorDay = calendarDateIn(anchor, mentorTimezone);
+
+    for (let hour = DAY_STARTS_AT_HOUR; hour < DAY_ENDS_AT_HOUR; hour++) {
+      const slotStart = instantForLocalTime(
+        mentorDay.year,
+        mentorDay.month,
+        mentorDay.day,
+        hour,
+        0,
+        mentorTimezone
+      );
+      const startedAt = slotStart.getTime();
+      const endsAt = startedAt + durationMs;
+
+      if (startedAt < windowStart.getTime() || startedAt >= windowEnd.getTime()) {
+        continue;
+      }
+
+      if (startedAt < now) {
+        continue;
+      }
+
+      // A slot is gone if any existing booking overlaps it, not only if one
+      // starts at the same minute: a 90-minute session blocks the hour after it.
+      if (booked.some(b => b.start < endsAt && startedAt < b.end)) {
+        continue;
+      }
+
+      if (slots.some(s => s.start.getTime() === startedAt)) {
+        continue;
+      }
+
+      slots.push({
+        start: slotStart,
+        end: new Date(endsAt),
+        displayTime: formatInTimezone(slotStart, menteeTimezone, 'time'),
+      });
+    }
   }
-  
+
+  slots.sort((a, b) => a.start.getTime() - b.start.getTime());
+
   return slots;
 }
 
@@ -188,6 +316,25 @@ export async function getAvailableSlots(
  */
 export function isValidTimezone(timezone: string): boolean {
   return SUPPORTED_TIMEZONES.includes(timezone);
+}
+
+/**
+ * The timezone to show a member times in.
+ *
+ * Falls back to the platform default rather than UTC, because showing an
+ * Australian member a UTC time is a wrong answer rather than a neutral one.
+ */
+export async function getUserTimezone(userId?: string): Promise<string> {
+  if (!userId) return DEFAULT_TIMEZONE;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { timezone: true },
+  });
+
+  const saved = user?.timezone;
+
+  return saved && isValidTimezone(saved) ? saved : DEFAULT_TIMEZONE;
 }
 
 /**

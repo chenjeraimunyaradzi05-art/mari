@@ -13,12 +13,12 @@
  * `MentorSession` rows.
  *
  * Nothing calls the routes below, and `check-api-contract --unreachable`
- * reports them for that reason. They are left mounted because the service
- * behind them has timezone and slot-generation code the `/api/mentors` path
- * does not have yet, and that is worth keeping until it is either merged in
- * or deliberately dropped. What matters is: do not build a second booking
- * screen against these. Add to `/api/mentors/*`, or move the slot logic
- * there first.
+ * reports them for that reason. The slot generation and timezone handling that
+ * were the reason to keep them have since moved onto the live path, as
+ * `GET /api/mentors/:mentorId/slots` and `GET /api/mentors/timezones`, both
+ * served by the same service. What is left here is duplicate lifecycle
+ * handling, so: do not build a booking screen against these. Add to
+ * `/api/mentors/*`.
  *
  * Works with the simplified mentor-scheduling.service.ts
  * Service functions:

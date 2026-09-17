@@ -458,6 +458,12 @@ export const mentorApi = {
     api.patch(`/mentors/sessions/${sessionId}`, { scheduledAt, ...(durationMinutes ? { durationMinutes } : {}) }),
   // The client secret to authorise a pending session payment, for the mentee.
   paymentIntent: (sessionId: string) => api.post(`/mentors/sessions/${sessionId}/payment-intent`),
+
+  // The times this mentor is actually free on a day, already converted into the
+  // viewer's timezone. `date` is `YYYY-MM-DD`.
+  slots: (mentorId: string, date: string, timezone?: string) =>
+    api.get(`/mentors/${mentorId}/slots`, { params: { date, ...(timezone ? { timezone } : {}) } }),
+  timezones: () => api.get('/mentors/timezones'),
 };
 
 // ============================================
@@ -935,6 +941,21 @@ export const engagementApi = {
   leaderboard: (params?: { type?: 'xp' | 'followers' | 'posts' | 'streak'; period?: 'daily' | 'weekly' | 'monthly' | 'alltime'; limit?: number }) =>
     api.get('/engagement/leaderboard', { params }),
   xpHistory: (limit = 20) => api.get('/engagement/xp/history', { params: { limit } }),
+
+  // Her level and how far into it she is.
+  xp: () => api.get('/engagement/xp'),
+  // Every streak she keeps, keyed by activity.
+  streaks: () => api.get('/engagement/streaks'),
+  // Her achievements, each marked earned or still to come.
+  achievements: () => api.get('/engagement/achievements'),
+  // The whole catalogue, including ones nobody has earned. Public.
+  achievementCatalogue: () => api.get('/engagement/achievements/list'),
+
+  // The two leaderboards that have their own handler rather than the generic one.
+  xpLeaderboard: (period: 'daily' | 'weekly' | 'monthly' | 'alltime' = 'alltime', limit = 10) =>
+    api.get('/engagement/leaderboard/xp', { params: { period, limit } }),
+  creatorLeaderboard: (period: 'daily' | 'weekly' | 'monthly' | 'alltime' = 'weekly', limit = 10) =>
+    api.get('/engagement/leaderboard/creators', { params: { period, limit } }),
 };
 
 // ============================================

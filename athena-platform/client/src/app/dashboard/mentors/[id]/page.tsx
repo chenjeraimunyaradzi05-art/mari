@@ -5,37 +5,45 @@
  * Profile" and "Book Session" here since it was built; the page did not
  * exist, so both buttons ended on a 404.
  *
- * Booking asks for a time, a length and a note, and requests the session.
- * The mentor confirms or declines from their sessions page. A mentor who has
- * not set a rate or enabled payments cannot be booked yet, and the page says
- * so instead of failing on submit.
+ * Booking offers the hours the mentor is genuinely free on the chosen day,
+ * converted into the viewer's own timezone, rather than a fixed list of times
+ * she may never have offered. A length and a note go with it, and the mentor
+ * confirms or declines from their sessions page. A mentor who has not set a
+ * rate or enabled payments cannot be booked yet, and the page says so instead
+ * of failing on submit.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Award, CalendarDays, Clock, Loader2, Star, Users } from 'lucide-react';
 import { useAuthStore, useBookMentor, useMentor } from '@/lib/hooks';
+import { mentorApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Avatar } from '@/components/ui/avatar';
 import { PaymentIntentForm } from '@/components/payments/PaymentIntentForm';
 
 const DURATIONS = [30, 60, 90] as const;
 
+type Slot = { start: string; end: string; displayTime: string };
+
 function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-/** Half-hour slots from 07:00 to 20:30, the hours a session is realistically held. */
-const TIME_SLOTS = Array.from({ length: 28 }, (_, i) => {
-  const hour = 7 + Math.floor(i / 2);
-  const minute = i % 2 === 0 ? '00' : '30';
-  return `${String(hour).padStart(2, '0')}:${minute}`;
-});
-
 function todayIso(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/** The viewer's own timezone, so the offered times are the times she keeps. */
+function browserTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export default function MentorProfilePage() {
@@ -47,7 +55,7 @@ export default function MentorProfilePage() {
   const book = useBookMentor();
 
   const [date, setDate] = useState(todayIso());
-  const [time, setTime] = useState('10:00');
+  const [selectedStart, setSelectedStart] = useState<string | null>(null);
   const [duration, setDuration] = useState<(typeof DURATIONS)[number]>(60);
   const [note, setNote] = useState('');
   // After booking: the payment to authorise, held until the session completes.
@@ -61,11 +69,32 @@ export default function MentorProfilePage() {
   const acceptsBookings = Boolean(mentor?.isAvailable && hourlyRate && hourlyRate > 0 && mentor?.stripeAccountId);
   const estimate = hourlyRate ? (hourlyRate * duration) / 60 : null;
 
+  // Which hours this mentor is actually free, rather than a fixed list of times
+  // she may never have offered.
+  const {
+    data: availability,
+    isLoading: slotsLoading,
+    isError: slotsError,
+  } = useQuery({
+    queryKey: ['mentor-slots', mentorId, date],
+    queryFn: () => mentorApi.slots(mentorId, date, browserTimezone()),
+    enabled: Boolean(mentorId) && acceptsBookings,
+  });
+
+  const slots: Slot[] = useMemo(() => availability?.data?.slots ?? [], [availability]);
+  const slotTimezone: string | undefined = availability?.data?.timezone;
+
+  // A day change invalidates whatever was picked on the previous one.
+  useEffect(() => {
+    setSelectedStart(null);
+  }, [date]);
+
   const scheduledAt = useMemo(() => {
-    const value = new Date(`${date}T${time}:00`);
+    if (!selectedStart) return null;
+    const value = new Date(selectedStart);
     return Number.isNaN(value.getTime()) ? null : value;
-  }, [date, time]);
-  const inPast = scheduledAt ? scheduledAt.getTime() < Date.now() : true;
+  }, [selectedStart]);
+  const inPast = scheduledAt ? scheduledAt.getTime() < Date.now() : false;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -206,18 +235,51 @@ export default function MentorProfilePage() {
                 </span>
                 <input type="date" value={date} min={todayIso()} onChange={(e) => setDate(e.target.value)} required className="input w-full" />
               </label>
-              <label className="block text-sm">
-                <span className="mb-1 flex items-center gap-1 font-medium text-slate-700 dark:text-slate-200">
-                  <Clock className="h-4 w-4" /> Time
-                </span>
-                <select value={time} onChange={(e) => setTime(e.target.value)} className="input w-full">
-                  {TIME_SLOTS.map((slot) => (
-                    <option key={slot} value={slot}>
-                      {slot}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <fieldset className="text-sm">
+                <legend className="mb-1 flex items-center gap-1 font-medium text-slate-700 dark:text-slate-200">
+                  <Clock className="h-4 w-4" /> When suits you?
+                </legend>
+
+                {slotsLoading ? (
+                  <div className="flex items-center gap-2 py-3 text-slate-500 dark:text-slate-400">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Finding her free hours…
+                  </div>
+                ) : slotsError ? (
+                  <p className="py-3 text-slate-500 dark:text-slate-400">
+                    We could not load her availability just now. Try another day, or refresh.
+                  </p>
+                ) : slots.length === 0 ? (
+                  <p className="py-3 text-slate-500 dark:text-slate-400">
+                    Nothing free on this day. Try another date, or message her from her profile to ask for a
+                    time that works.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      {slots.map((slot) => (
+                        <button
+                          key={slot.start}
+                          type="button"
+                          onClick={() => setSelectedStart(slot.start)}
+                          aria-pressed={selectedStart === slot.start}
+                          className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                            selectedStart === slot.start
+                              ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {slot.displayTime}
+                        </button>
+                      ))}
+                    </div>
+                    {slotTimezone && (
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        Times shown in {slotTimezone.replace(/_/g, ' ')}.
+                      </p>
+                    )}
+                  </>
+                )}
+              </fieldset>
               <fieldset className="text-sm">
                 <legend className="mb-1 font-medium text-slate-700 dark:text-slate-200">Length</legend>
                 <div className="grid grid-cols-3 gap-2">
@@ -256,10 +318,14 @@ export default function MentorProfilePage() {
                   are charged only after the session is completed.
                 </p>
               )}
-              {inPast && <p className="text-xs text-red-600">Choose a time in the future.</p>}
+              {inPast && <p className="text-xs text-red-600">That time has just passed. Pick another.</p>}
 
-              <button type="submit" disabled={book.isPending || inPast} className="btn-primary w-full py-2.5">
-                {book.isPending ? 'Requesting…' : 'Request session'}
+              <button
+                type="submit"
+                disabled={book.isPending || inPast || !selectedStart}
+                className="btn-primary w-full py-2.5"
+              >
+                {book.isPending ? 'Requesting…' : selectedStart ? 'Request session' : 'Pick a time'}
               </button>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 The mentor confirms or declines. You can follow it on{' '}

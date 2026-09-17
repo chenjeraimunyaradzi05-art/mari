@@ -5,9 +5,10 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, query, validationResult } from 'express-validator';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import * as mentorService from '../services/mentor.service';
+import * as mentorScheduling from '../services/mentor-scheduling.service';
 
 const router = Router();
 
@@ -63,6 +64,60 @@ router.get('/profile/:userId', async (req: Request, res: Response, next: NextFun
     next(error);
   }
 });
+
+/**
+ * GET /api/mentors/timezones
+ * The timezones a session can be booked in.
+ *
+ * Declared before `/:mentorId` so it is not read as a profile id.
+ */
+router.get('/timezones', (_req: Request, res: Response) => {
+  res.json({ timezones: mentorScheduling.getSupportedTimezones() });
+});
+
+/**
+ * GET /api/mentors/:mentorId/slots
+ * The times this mentor is actually free on a given day.
+ *
+ * Without this a booker picks a time blind and finds out it does not suit only
+ * when the mentor declines. `date` is a calendar day read in `timezone`, which
+ * defaults to the caller's saved timezone and then to the platform default.
+ */
+router.get(
+  '/:mentorId/slots',
+  optionalAuth,
+  [query('date').optional().isISO8601(), query('timezone').optional().isString()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'Validation failed: ' + errors.array().map(e => e.msg).join(', '));
+      }
+
+      const requested = req.query.timezone as string | undefined;
+      const timezone =
+        requested && mentorScheduling.isValidTimezone(requested)
+          ? requested
+          : await mentorScheduling.getUserTimezone(req.user?.id);
+
+      const date = req.query.date ? new Date(req.query.date as string) : new Date();
+
+      const slots = await mentorScheduling.getAvailableSlots(req.params.mentorId, date, timezone);
+
+      res.json({
+        timezone,
+        date: date.toISOString(),
+        slots: slots.map(slot => ({
+          start: slot.start.toISOString(),
+          end: slot.end.toISOString(),
+          displayTime: slot.displayTime,
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // ==========================================
 // PROTECTED ENDPOINTS
