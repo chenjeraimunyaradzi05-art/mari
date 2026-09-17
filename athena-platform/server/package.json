@@ -28,7 +28,8 @@
     "db:guard": "node scripts/guard-destructive-migration.js",
     "check:api-contract": "node scripts/check-api-contract.js",
     "check:env": "node scripts/check-env.js",
-    "db:seed:apprenticeships": "ts-node src/services/seed/apprenticeships.seed.ts"
+    "db:seed:apprenticeships": "ts-node src/services/seed/apprenticeships.seed.ts",
+    "db:seed:super": "ts-node src/services/seed/super.seed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.971.0",
