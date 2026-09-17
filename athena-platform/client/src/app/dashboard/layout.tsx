@@ -19,6 +19,7 @@ import {
   X,
   Search,
   Sparkles,
+  Trophy,
   Building2,
   GraduationCap,
   PenSquare,
@@ -74,6 +75,7 @@ const modeNavigation: Record<AppMode, NavigationItem[]> = {
 const secondaryNav = [
   { name: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   { name: 'Notifications', href: '/dashboard/notifications', icon: Bell },
+  { name: 'Rewards', href: '/dashboard/rewards', icon: Trophy },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ] satisfies NavigationItem[];
 
