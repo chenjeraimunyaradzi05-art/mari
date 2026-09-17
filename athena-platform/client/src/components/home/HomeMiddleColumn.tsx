@@ -8,12 +8,8 @@ import { HomeHero } from './HomeHero';
 import { Reveal } from './Reveal';
 import { HomeReelsRail } from './HomeReelsRail';
 import { ReelTopicCircles } from './ReelTopicCircles';
-import { JobSpotlight } from './JobSpotlight';
 import { WinsRail } from './WinsRail';
 import { MentorsRail } from './MentorsRail';
-import { EventsRail } from './EventsRail';
-import { LearningRail, CommunityRail } from './HomeContentRails';
-import { PlatformDirectory } from './PlatformDirectory';
 import { SuggestedPeople } from '@/components/community/SuggestedPeople';
 
 /**
@@ -179,29 +175,11 @@ export function HomeMiddleColumn() {
         <WinsRail />
       </Reveal>
 
-      {/* Real open roles and apprenticeships rather than more marketing copy. */}
-      <Reveal>
-        <JobSpotlight />
-      </Reveal>
-
       <Reveal>
         <MentorsRail />
       </Reveal>
 
       <SponsoredSlot placement="home-middle-top" />
-
-      {/* Real courses and real communities, in place of tiles of marketing copy. */}
-      <Reveal>
-        <LearningRail />
-      </Reveal>
-
-      <Reveal>
-        <EventsRail />
-      </Reveal>
-
-      <Reveal>
-        <CommunityRail />
-      </Reveal>
 
       {/* Members worth following, with the reason each is here. Renders
           nothing for a visitor. */}
@@ -211,12 +189,6 @@ export function HomeMiddleColumn() {
 
       <Reveal>
         <HomeReelsRail compact />
-      </Reveal>
-
-      {/* The rest of the product, named in full: a member cannot use what she
-          cannot find. */}
-      <Reveal>
-        <PlatformDirectory />
       </Reveal>
 
       <Reveal>
