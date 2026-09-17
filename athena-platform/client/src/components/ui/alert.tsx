@@ -18,8 +18,16 @@ const toneStyles = {
 };
 
 export function InlineAlert({ tone = 'info', children, onDismiss, className }: InlineAlertProps) {
+  // These appear after the page has settled, so without a live region a screen
+  // reader never hears them: the failure is silent for the person least able to
+  // notice it visually. Errors interrupt, because something they did has not
+  // worked; success and information wait for a pause.
+  const isError = tone === 'error';
+
   return (
     <div
+      role={isError ? 'alert' : 'status'}
+      aria-live={isError ? 'assertive' : 'polite'}
       className={cn(
         'flex items-center justify-between rounded-xl border px-4 py-3 text-sm',
         toneStyles[tone],
@@ -28,8 +36,8 @@ export function InlineAlert({ tone = 'info', children, onDismiss, className }: I
     >
       <span>{children}</span>
       {onDismiss && (
-        <button type="button" onClick={onDismiss} className="ml-3">
-          <X className="h-4 w-4" />
+        <button type="button" onClick={onDismiss} aria-label="Dismiss this message" className="ml-3">
+          <X aria-hidden="true" className="h-4 w-4" />
         </button>
       )}
     </div>

@@ -248,10 +248,11 @@ function ReportContent() {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Content Type */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+            <label htmlFor="report-content-type" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               What type of content are you reporting?
             </label>
             <select
+              id="report-content-type"
               value={formData.contentType}
               onChange={(e) => setFormData(prev => ({ ...prev, contentType: e.target.value as ReportFormData['contentType'] }))}
               className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
@@ -264,10 +265,11 @@ function ReportContent() {
 
           {/* Content ID */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+            <label htmlFor="report-content-id" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Content ID or URL
             </label>
             <input
+              id="report-content-id"
               type="text"
               value={formData.contentId}
               onChange={(e) => setFormData(prev => ({ ...prev, contentId: e.target.value }))}
@@ -321,10 +323,11 @@ function ReportContent() {
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+            <label htmlFor="report-description" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Please describe the issue
             </label>
             <textarea
+              id="report-description"
               value={formData.description}
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
               rows={4}
@@ -336,11 +339,12 @@ function ReportContent() {
 
           {/* Evidence URLs */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+            <label htmlFor="report-evidence" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Additional evidence (optional)
             </label>
             <div className="flex gap-2 mb-2">
               <input
+                id="report-evidence"
                 type="url"
                 value={newEvidenceUrl}
                 onChange={(e) => setNewEvidenceUrl(e.target.value)}
@@ -375,10 +379,11 @@ function ReportContent() {
 
           {/* Contact Email */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+            <label htmlFor="report-contact-email" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Your email (for updates)
             </label>
             <input
+              id="report-contact-email"
               type="email"
               value={formData.contactEmail}
               onChange={(e) => setFormData(prev => ({ ...prev, contactEmail: e.target.value }))}

@@ -164,12 +164,17 @@ function LoginContent() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  // Icon-only, so the name and the state have to be spoken.
+                  // Without these a screen reader announces only "button".
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  aria-controls="password"
                   className="absolute inset-y-0 right-0 flex items-center pr-3"
                 >
                   {showPassword ? (
-                    <EyeOff className="w-5 h-5 text-slate-400" />
+                    <EyeOff aria-hidden="true" className="w-5 h-5 text-slate-400" />
                   ) : (
-                    <Eye className="w-5 h-5 text-slate-400" />
+                    <Eye aria-hidden="true" className="w-5 h-5 text-slate-400" />
                   )}
                 </button>
               </div>

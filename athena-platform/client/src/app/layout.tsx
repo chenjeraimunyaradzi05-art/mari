@@ -17,6 +17,7 @@ const fraunces = Fraunces({
 import { Providers } from './providers';
 import { Toaster } from 'react-hot-toast';
 import { SiteFooter } from '@/components/layout/SiteFooter';
+import { ToastAnnouncer } from '@/components/ui/ToastAnnouncer';
 
 const siteUrl =
   process.env.NEXT_PUBLIC_APP_URL ||
@@ -81,6 +82,7 @@ export default async function RootLayout({
         <Providers>
           {children}
           <SiteFooter />
+          <ToastAnnouncer />
           <Toaster
             position="top-right"
             toastOptions={{
@@ -102,6 +104,8 @@ export default async function RootLayout({
                   primary: '#ef4444',
                   secondary: '#fff',
                 },
+                // Long enough to be read aloud before it goes.
+                duration: 6000,
               },
             }}
           />
