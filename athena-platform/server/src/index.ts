@@ -110,6 +110,7 @@ import strategyRoutes from './routes/strategy.routes';
 import wellnessRoutes from './routes/wellness.routes';
 import automotiveRoutes from './routes/automotive.routes';
 import { startAutomotiveSweeper } from './services/automotive/automotive-reminders.service';
+import { startEscrowExpirySweeper } from './services/escrow-expiry.service';
 import { startCarCatalogue } from './services/automotive/automotive-catalogue';
 import { startWellnessSweeper } from './services/wellness/wellness-reminders.service';
 import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
@@ -782,6 +783,9 @@ export async function startServer() {
     startWellnessSweeper();
     startWellnessCatalogue();
     startAutomotiveSweeper();
+    // Escrow holds outliving the card authorisation behind them: warn while
+    // there is still time to act.
+    startEscrowExpirySweeper();
     startCarCatalogue();
     // Scheduled posts: publish what has come due, once a minute.
     startScheduledPostPublisher();
