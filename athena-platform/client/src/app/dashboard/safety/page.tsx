@@ -25,17 +25,24 @@ import {
   Loader2,
   Lock,
   Phone,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Trash2,
   UserPlus,
 } from 'lucide-react';
-import { dvSafeApi } from '@/lib/api';
+import { dvSafeApi, searchApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
 
 type Contact = { id: string; name: string; phone: string; email?: string; relationship: string; notifyOnPanic: boolean };
+/** A search hit, narrowed to what this page needs. Search returns a name as `title`. */
+type Person = { id: string; title?: string | null };
+
+function personName(person: Person): string {
+  return person.title?.trim() || 'This person';
+}
 type Settings = {
   isSafeMode: boolean;
   hideFromSearch: boolean;
@@ -263,6 +270,45 @@ export default function SafetyPage() {
     onError: (error) => toast.error(errorMessage(error) || 'Could not clear traces'),
   });
 
+  // ---- checking one particular person
+  const [personQuery, setPersonQuery] = useState('');
+  const [people, setPeople] = useState<Person[]>([]);
+  const [checked, setChecked] = useState<{ person: Person; canSee: boolean } | null>(null);
+
+  const findPeople = useMutation({
+    mutationFn: (q: string) => searchApi.unified({ q, type: 'users', limit: 5 }),
+    onSuccess: (response) => {
+      const results = response.data?.results;
+      setPeople(
+        Array.isArray(results)
+          ? results.filter((r: { type?: string }) => r.type === 'user' || r.type === 'mentor')
+          : []
+      );
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not search just now'),
+  });
+
+  const checkVisibility = useMutation({
+    mutationFn: (person: Person) =>
+      dvSafeApi.canBeSeenBy(person.id).then((response) => ({ person, canSee: Boolean(response.data?.isVisible) })),
+    onSuccess: setChecked,
+    onError: (error) => toast.error(errorMessage(error) || 'Could not check that just now'),
+  });
+
+  const blockPerson = useMutation({
+    mutationFn: (person: Person) => dvSafeApi.block(person.id),
+    onSuccess: (_result, person) => {
+      setChecked({ person, canSee: false });
+      toast.success(`${personName(person)} can no longer find you`);
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not block them just now'),
+  });
+
+  // ---- what the lock screen shows
+  const previewNotification = useMutation({
+    mutationFn: () => dvSafeApi.notificationPreview('Message from Priya', 'Are you safe? Call me when you can.'),
+  });
+
   const s = settings.data;
   const contacts = s?.emergencyContacts ?? [];
   const canAlert = Boolean(s?.panicButtonEnabled) && contacts.some((c) => c.notifyOnPanic);
@@ -345,6 +391,126 @@ export default function SafetyPage() {
                 Save
               </button>
             </form>
+          </section>
+
+          {/* One particular person, which is the question that actually gets asked */}
+          <section className="card space-y-4">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
+                <Search className="h-5 w-5" /> Check one person
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Settings tell you what everyone can see. This tells you about someone in particular.
+              </p>
+            </div>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const q = personQuery.trim();
+                if (q) findPeople.mutate(q);
+              }}
+              className="flex flex-wrap items-end gap-2"
+            >
+              <label className="flex-1 text-sm">
+                <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Their name</span>
+                <input
+                  type="text"
+                  value={personQuery}
+                  onChange={(event) => setPersonQuery(event.target.value)}
+                  placeholder="Search by name"
+                  className="input w-full"
+                />
+              </label>
+              <button type="submit" disabled={!personQuery.trim() || findPeople.isPending} className="btn-outline px-4 py-2 text-sm">
+                {findPeople.isPending ? 'Looking…' : 'Look them up'}
+              </button>
+            </form>
+
+            {findPeople.isSuccess && people.length === 0 && (
+              <p className="text-sm text-slate-500 dark:text-slate-400">Nobody by that name.</p>
+            )}
+
+            {people.length > 0 && (
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {people.map((person) => (
+                  <li key={person.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{personName(person)}</span>
+                    <span className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => checkVisibility.mutate(person)}
+                        disabled={checkVisibility.isPending}
+                        className="btn-outline px-3 py-1.5 text-sm"
+                      >
+                        Can they see me?
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => blockPerson.mutate(person)}
+                        disabled={blockPerson.isPending}
+                        className="rounded-lg border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                      >
+                        Block
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {checked && (
+              <p
+                className={cn(
+                  'rounded-lg border px-3 py-2 text-sm',
+                  checked.canSee
+                    ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200'
+                    : 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200'
+                )}
+              >
+                {checked.canSee
+                  ? `${personName(checked.person)} can find your profile. Blocking them stops that.`
+                  : `${personName(checked.person)} cannot find your profile.`}
+              </p>
+            )}
+          </section>
+
+          {/* What the lock screen gives away */}
+          <section className="card space-y-3">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
+                <Lock className="h-5 w-5" /> What your phone shows
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                A notification can appear on a locked screen, where someone else may read it. This is exactly what
+                yours would say right now.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => previewNotification.mutate()}
+              disabled={previewNotification.isPending}
+              className="btn-outline px-4 py-2 text-sm"
+            >
+              {previewNotification.isPending ? 'Checking…' : 'Show me'}
+            </button>
+
+            {previewNotification.data && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {previewNotification.data.data?.title}
+                </p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  {previewNotification.data.data?.message}
+                </p>
+                {!s.notificationsSafe && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                    This is the real message. Turn on &ldquo;Keep notifications vague&rdquo; above to hide it.
+                  </p>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Emergency contacts and alert */}

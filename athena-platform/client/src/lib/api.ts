@@ -537,6 +537,16 @@ export const dvSafeApi = {
   deleteChat: (chatId: string, pin?: string) => api.delete(`/safety/dv/chats/${chatId}`, { data: pin ? { pin } : {} }),
   clearTraces: () => api.post('/safety/dv/clear-traces'),
   resources: (region?: string) => api.get('/safety/dv/resources', { params: region ? { region } : {} }),
+
+  // Whether one specific person can see her, which is the question someone in
+  // safe mode actually asks, rather than what her settings say in general.
+  canBeSeenBy: (viewerId: string) => api.get(`/safety/dv/visibility/${viewerId}`),
+  // Blocking from inside safe mode, kept separate from the ordinary block so it
+  // applies to the safety profile the visibility check reads.
+  block: (userId: string) => api.post(`/safety/dv/block/${userId}`),
+  // What her phone would actually show on the lock screen for a given message.
+  notificationPreview: (title: string, message: string) =>
+    api.post('/safety/dv/safe-notification', { title, message }),
 };
 
 // ============================================
