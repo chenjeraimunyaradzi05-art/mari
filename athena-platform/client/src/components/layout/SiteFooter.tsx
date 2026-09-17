@@ -108,6 +108,21 @@ const LEGAL: FooterLink[] = [
 
 const linkClass = 'focusable rounded-sm text-[13px] leading-5 text-slate-600 transition hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-300';
 
+/**
+ * The closing row is three lists joined together, and they can name the same
+ * destination twice: with no support mailbox configured, "Talk to us" falls back
+ * to /help, which the utility list already links. Keeping the first occurrence
+ * leaves one link per destination, and stops React seeing a repeated key.
+ */
+function dedupeByHref(links: FooterLink[]): FooterLink[] {
+  const seen = new Set<string>();
+  return links.filter((link) => {
+    if (seen.has(link.href)) return false;
+    seen.add(link.href);
+    return true;
+  });
+}
+
 export function SiteFooter() {
   const year = new Date().getFullYear();
   const support = contactLink('support');
@@ -167,7 +182,7 @@ export function SiteFooter() {
         {/* The closing rows: what you need when something is wrong, then the credit and the legal line. */}
         <div className="mt-5 border-t border-rose-100/70 pt-4 text-xs text-slate-500 dark:border-white/10 dark:text-slate-400">
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            {[...UTILITY, ...touch, ...LEGAL].map((link) => (
+            {dedupeByHref([...UTILITY, ...touch, ...LEGAL]).map((link) => (
               <li key={link.href}>
                 <Link href={link.href} className="focusable rounded-sm transition hover:text-rose-600 dark:hover:text-rose-300">
                   {link.label}
