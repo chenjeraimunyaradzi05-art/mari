@@ -34,9 +34,16 @@ export interface SalaryBenchmark {
 export interface PayGapAnalysis {
   role: string;
   location: string;
-  genderGap: number;  // Percentage difference (positive = women paid less)
-  industryGap: number;
-  experienceAdjustedGap: number;
+  /**
+   * Percentage difference, positive when women are paid less. Null when too few
+   * members of either gender have reported for the comparison to mean anything:
+   * a gap computed from one woman and one man is a rumour, not a finding, and
+   * this one is quoted back to employers in negotiations.
+   */
+  genderGap: number | null;
+  sampleSize: number;
+  womenReporting: number;
+  menReporting: number;
   recommendations: string[];
   potentialIncrease: number;
 }
@@ -50,27 +57,45 @@ export interface NegotiationScript {
   tips: string[];
 }
 
-// Simulated salary database (would be real data in production)
-const SALARY_DATABASE: SalaryData[] = [
-  { role: 'Software Engineer', level: 'Junior', industry: 'Technology', location: 'Sydney', yearsExperience: 1, education: 'Bachelor', baseSalary: 75000, totalCompensation: 80000, gender: 'female', isVerified: true },
-  { role: 'Software Engineer', level: 'Junior', industry: 'Technology', location: 'Sydney', yearsExperience: 1, education: 'Bachelor', baseSalary: 82000, totalCompensation: 88000, gender: 'male', isVerified: true },
-  { role: 'Software Engineer', level: 'Mid', industry: 'Technology', location: 'Sydney', yearsExperience: 3, education: 'Bachelor', baseSalary: 110000, totalCompensation: 125000, gender: 'female', isVerified: true },
-  { role: 'Software Engineer', level: 'Mid', industry: 'Technology', location: 'Sydney', yearsExperience: 3, education: 'Bachelor', baseSalary: 120000, totalCompensation: 138000, gender: 'male', isVerified: true },
-  { role: 'Software Engineer', level: 'Senior', industry: 'Technology', location: 'Sydney', yearsExperience: 5, education: 'Bachelor', baseSalary: 150000, totalCompensation: 180000, gender: 'female', isVerified: true },
-  { role: 'Software Engineer', level: 'Senior', industry: 'Technology', location: 'Sydney', yearsExperience: 5, education: 'Bachelor', baseSalary: 165000, totalCompensation: 200000, gender: 'male', isVerified: true },
-  { role: 'Product Manager', level: 'Junior', industry: 'Technology', location: 'Sydney', yearsExperience: 2, education: 'Bachelor', baseSalary: 95000, totalCompensation: 105000, gender: 'female', isVerified: true },
-  { role: 'Product Manager', level: 'Mid', industry: 'Technology', location: 'Sydney', yearsExperience: 4, education: 'Master', baseSalary: 140000, totalCompensation: 160000, gender: 'female', isVerified: true },
-  { role: 'Product Manager', level: 'Senior', industry: 'Technology', location: 'Sydney', yearsExperience: 7, education: 'Master', baseSalary: 180000, totalCompensation: 220000, gender: 'male', isVerified: true },
-  { role: 'Data Scientist', level: 'Mid', industry: 'Technology', location: 'Sydney', yearsExperience: 3, education: 'Master', baseSalary: 130000, totalCompensation: 150000, gender: 'female', isVerified: true },
-  { role: 'Data Scientist', level: 'Senior', industry: 'Technology', location: 'Sydney', yearsExperience: 6, education: 'PhD', baseSalary: 175000, totalCompensation: 210000, gender: 'male', isVerified: true },
-  { role: 'Marketing Manager', level: 'Mid', industry: 'Marketing', location: 'Melbourne', yearsExperience: 4, education: 'Bachelor', baseSalary: 95000, totalCompensation: 105000, gender: 'female', isVerified: true },
-  { role: 'Marketing Manager', level: 'Senior', industry: 'Marketing', location: 'Melbourne', yearsExperience: 7, education: 'Master', baseSalary: 130000, totalCompensation: 150000, gender: 'male', isVerified: true },
-  { role: 'Financial Analyst', level: 'Junior', industry: 'Finance', location: 'Sydney', yearsExperience: 1, education: 'Bachelor', baseSalary: 70000, totalCompensation: 75000, gender: 'female', isVerified: true },
-  { role: 'Financial Analyst', level: 'Senior', industry: 'Finance', location: 'Sydney', yearsExperience: 5, education: 'Master', baseSalary: 140000, totalCompensation: 180000, gender: 'male', isVerified: true },
-];
+/**
+ * Benchmarks are read from the SalaryDataPoint table members contribute to.
+ *
+ * Below these counts nothing is reported at all. A woman takes these figures
+ * into a salary negotiation, so a number derived from a handful of rows is
+ * worse than no number: it is confidently wrong in a conversation she cannot
+ * easily reopen. The gender thresholds are per gender, not combined.
+ */
+const MIN_SAMPLE_FOR_BENCHMARK = 5;
+const MIN_PER_GENDER_FOR_GAP = 3;
 
-// Benchmark cache
-const benchmarkCache = new Map<string, SalaryBenchmark>();
+
+/** The reported figures for a role, optionally narrowed to a city and industry. */
+async function findReportedSalaries(
+  role: string,
+  location?: string,
+  filters?: { industry?: string; yearsExperience?: number }
+) {
+  return prisma.salaryDataPoint.findMany({
+    where: {
+      normalizedTitle: { contains: role.toLowerCase().trim() },
+      ...(location ? { city: { contains: location, mode: 'insensitive' as const } } : {}),
+      ...(filters?.industry ? { industry: { contains: filters.industry, mode: 'insensitive' as const } } : {}),
+    },
+    select: {
+      baseSalary: true,
+      totalComp: true,
+      gender: true,
+      yearsExperience: true,
+      submittedAt: true,
+    },
+    orderBy: { submittedAt: 'desc' },
+  });
+}
+
+/** Total compensation where it was given, otherwise base. */
+function compensationOf(row: { baseSalary: unknown; totalComp: unknown }): number {
+  return Number(row.totalComp ?? row.baseSalary);
+}
 
 /**
  * Get salary benchmark for a role and location
@@ -84,32 +109,15 @@ export async function getSalaryBenchmark(
     yearsExperience?: number;
   }
 ): Promise<SalaryBenchmark | null> {
-  const cacheKey = `${role}-${location}-${JSON.stringify(filters || {})}`;
-  
-  if (benchmarkCache.has(cacheKey)) {
-    return benchmarkCache.get(cacheKey)!;
+  const data = await findReportedSalaries(role, location, filters);
+
+  if (data.length < MIN_SAMPLE_FOR_BENCHMARK) {
+    return null;
   }
 
-  // Filter salary data
-  let data = SALARY_DATABASE.filter(
-    s => s.role.toLowerCase().includes(role.toLowerCase()) &&
-         s.location.toLowerCase().includes(location.toLowerCase())
-  );
+  const salaries = data.map(compensationOf).sort((a, b) => a - b);
 
-  if (filters?.industry) {
-    data = data.filter(s => s.industry.toLowerCase() === filters.industry!.toLowerCase());
-  }
-  if (filters?.level) {
-    data = data.filter(s => s.level.toLowerCase() === filters.level!.toLowerCase());
-  }
-
-  if (data.length < 3) {
-    return null; // Not enough data for reliable benchmark
-  }
-
-  const salaries = data.map(s => s.totalCompensation).sort((a, b) => a - b);
-  
-  const benchmark: SalaryBenchmark = {
+  return {
     role,
     location,
     percentile10: getPercentile(salaries, 10),
@@ -118,11 +126,10 @@ export async function getSalaryBenchmark(
     percentile75: getPercentile(salaries, 75),
     percentile90: getPercentile(salaries, 90),
     sampleSize: data.length,
-    lastUpdated: new Date(),
+    // The freshest contribution, so a stale benchmark is visibly stale rather
+    // than looking as though it were compiled today.
+    lastUpdated: data[0]?.submittedAt ?? new Date(),
   };
-
-  benchmarkCache.set(cacheKey, benchmark);
-  return benchmark;
 }
 
 /**
@@ -133,57 +140,68 @@ export async function analyzePayGap(
   location: string,
   currentSalary?: number
 ): Promise<PayGapAnalysis> {
-  // Get salary data by gender
-  const roleData = SALARY_DATABASE.filter(
-    s => s.role.toLowerCase().includes(role.toLowerCase()) &&
-         s.location.toLowerCase().includes(location.toLowerCase())
-  );
+  const roleData = await findReportedSalaries(role, location);
 
-  const femaleSalaries = roleData
-    .filter(s => s.gender === 'female')
-    .map(s => s.totalCompensation);
-  
-  const maleSalaries = roleData
-    .filter(s => s.gender === 'male')
-    .map(s => s.totalCompensation);
+  // The table stores the values the submission form collects, which are
+  // upper-case and include PREFER_NOT and NON_BINARY. Only the two that can be
+  // compared are counted here; the rest still count toward the sample.
+  const womenSalaries = roleData.filter(s => s.gender === 'WOMAN').map(compensationOf);
+  const menSalaries = roleData.filter(s => s.gender === 'MAN').map(compensationOf);
 
-  const femaleAvg = femaleSalaries.length > 0 
-    ? femaleSalaries.reduce((a, b) => a + b, 0) / femaleSalaries.length 
-    : 0;
-  const maleAvg = maleSalaries.length > 0 
-    ? maleSalaries.reduce((a, b) => a + b, 0) / maleSalaries.length 
-    : 0;
+  const median = (values: number[]): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return getPercentile(sorted, 50);
+  };
 
-  const genderGap = maleAvg > 0 ? ((maleAvg - femaleAvg) / maleAvg) * 100 : 0;
+  const comparable =
+    womenSalaries.length >= MIN_PER_GENDER_FOR_GAP && menSalaries.length >= MIN_PER_GENDER_FOR_GAP;
 
-  // Calculate potential increase
+  const womenMedian = womenSalaries.length ? median(womenSalaries) : 0;
+  const menMedian = menSalaries.length ? median(menSalaries) : 0;
+
+  // Medians rather than means: one very senior outlier should not move the
+  // number a member is about to quote in a negotiation.
+  const genderGap = comparable && menMedian > 0 ? ((menMedian - womenMedian) / menMedian) * 100 : null;
+
   let potentialIncrease = 0;
-  if (currentSalary && currentSalary < femaleAvg) {
-    potentialIncrease = femaleAvg - currentSalary;
-  } else if (currentSalary && genderGap > 0) {
+  if (currentSalary && womenMedian > 0 && currentSalary < womenMedian) {
+    potentialIncrease = womenMedian - currentSalary;
+  } else if (currentSalary && genderGap !== null && genderGap > 0) {
     potentialIncrease = currentSalary * (genderGap / 100);
   }
 
   const recommendations: string[] = [];
-  
-  if (genderGap > 15) {
-    recommendations.push(`The gender pay gap for ${role} in ${location} is significant at ${genderGap.toFixed(1)}%. You should negotiate for pay equity.`);
+
+  if (roleData.length < MIN_SAMPLE_FOR_BENCHMARK) {
+    recommendations.push(
+      `Only ${roleData.length} ${roleData.length === 1 ? 'person has' : 'people have'} reported pay for ${role} in ${location}, which is too few to draw a conclusion from. Adding yours helps the next woman who looks.`
+    );
+  } else if (genderGap === null) {
+    recommendations.push(
+      'There are not yet enough reports from both women and men in this role to compare them fairly, so no gap is shown.'
+    );
+  } else if (genderGap > 15) {
+    recommendations.push(
+      `Women reporting this role in ${location} are paid ${genderGap.toFixed(1)}% less at the median. That is worth raising directly in your next pay conversation.`
+    );
   }
-  
-  if (currentSalary && currentSalary < femaleAvg) {
-    recommendations.push(`Your salary is below the average for women in this role. Consider requesting a raise of $${potentialIncrease.toLocaleString()}.`);
+
+  if (currentSalary && womenMedian > 0 && currentSalary < womenMedian) {
+    recommendations.push(
+      `You are below the median for women reporting this role. The difference is about $${Math.round(potentialIncrease).toLocaleString()}.`
+    );
   }
 
   recommendations.push('Document your achievements and impact with specific metrics.');
-  recommendations.push('Research competitor salaries and industry benchmarks.');
-  recommendations.push('Practice negotiation with our AI Interview Coach.');
+  recommendations.push('Practice the conversation with our AI Interview Coach.');
 
   return {
     role,
     location,
-    genderGap: Math.round(genderGap * 10) / 10,
-    industryGap: Math.round(genderGap * 0.8 * 10) / 10, // Simplified calculation
-    experienceAdjustedGap: Math.round(genderGap * 0.7 * 10) / 10,
+    genderGap: genderGap === null ? null : Math.round(genderGap * 10) / 10,
+    sampleSize: roleData.length,
+    womenReporting: womenSalaries.length,
+    menReporting: menSalaries.length,
     recommendations,
     potentialIncrease: Math.round(potentialIncrease),
   };
@@ -192,27 +210,43 @@ export async function analyzePayGap(
 /**
  * Get salary range for job posting transparency
  */
-export function getSalaryRange(
+export async function getSalaryRange(
   role: string,
   location: string,
   level: string
-): { min: number; max: number; median: number } | null {
-  const data = SALARY_DATABASE.filter(
-    s => s.role.toLowerCase().includes(role.toLowerCase()) &&
-         s.location.toLowerCase().includes(location.toLowerCase()) &&
-         s.level.toLowerCase() === level.toLowerCase()
-  );
+): Promise<{ min: number; max: number; median: number; sampleSize: number } | null> {
+  // `level` narrows by years of experience rather than a stored level, because
+  // the table records experience and not a seniority label.
+  const bands: Record<string, { gte?: number; lt?: number }> = {
+    junior: { lt: 3 },
+    mid: { gte: 3, lt: 6 },
+    senior: { gte: 6 },
+  };
+  const band = bands[level.toLowerCase()];
 
-  if (data.length === 0) {
+  const data = await findReportedSalaries(role, location);
+
+  const inBand = band
+    ? data.filter(s => {
+        const years = s.yearsExperience;
+        if (years === null || years === undefined) return false;
+        if (band.gte !== undefined && years < band.gte) return false;
+        if (band.lt !== undefined && years >= band.lt) return false;
+        return true;
+      })
+    : data;
+
+  if (inBand.length < MIN_SAMPLE_FOR_BENCHMARK) {
     return null;
   }
 
-  const salaries = data.map(s => s.baseSalary).sort((a, b) => a - b);
-  
+  const salaries = inBand.map(s => Number(s.baseSalary)).sort((a, b) => a - b);
+
   return {
     min: salaries[0],
     max: salaries[salaries.length - 1],
     median: getPercentile(salaries, 50),
+    sampleSize: inBand.length,
   };
 }
 
@@ -325,17 +359,32 @@ export async function submitSalaryData(
   userId: string,
   data: Omit<SalaryData, 'isVerified'>
 ): Promise<boolean> {
-  try {
-    // In production, store in database with encryption for sensitive fields
-    const salaryEntry = {
-      ...data,
-      isVerified: false,
-      submittedAt: new Date(),
-      submittedBy: userId, // Anonymized in reporting
-    };
+  // The gender values this service speaks are lower case; the table stores the
+  // same set the submission form uses.
+  const genderColumn: Record<string, string> = {
+    female: 'WOMAN',
+    male: 'MAN',
+    other: 'NON_BINARY',
+  };
 
-    // Add to in-memory database for now
-    SALARY_DATABASE.push({ ...salaryEntry, isVerified: false });
+  try {
+    await prisma.salaryDataPoint.create({
+      data: {
+        userId,
+        jobTitle: data.role,
+        normalizedTitle: data.role.toLowerCase().trim(),
+        industry: data.industry,
+        city: data.location,
+        baseSalary: data.baseSalary,
+        totalComp: data.totalCompensation,
+        yearsExperience: data.yearsExperience,
+        educationLevel: data.education,
+        ...(data.gender ? { gender: genderColumn[data.gender] } : {}),
+        // Self-reported until someone produces a payslip, which is what
+        // verificationMethod is for.
+        isVerified: false,
+      },
+    });
 
     logger.info('Salary data submitted', { role: data.role, location: data.location });
     return true;
@@ -346,33 +395,68 @@ export async function submitSalaryData(
 }
 
 /**
- * Get salary transparency score for a company
+ * How openly a company posts pay, measured only from what ATHENA can observe.
+ *
+ * This is deliberately narrow. The previous version returned the same four
+ * invented scores for every employer, including things nobody here can see such
+ * as "equal pay certification", which meant naming a real company alongside a
+ * number nobody had measured. What is actually knowable is what share of that
+ * employer's roles on ATHENA publish a salary range, and how many of its
+ * employees have reported pay. Where there is nothing to measure, this returns
+ * null rather than a score.
  */
-export function getCompanyTransparencyScore(companyName: string): {
+export async function getCompanyTransparencyScore(companyName: string): Promise<{
+  companyName: string;
   score: number;
+  rolesPosted: number;
+  rolesWithPayPublished: number;
+  employeesReporting: number;
   factors: { name: string; score: number; weight: number }[];
   recommendations: string[];
-} {
-  // Simulated scoring (would use real data in production)
+} | null> {
+  const name = companyName.trim();
+  if (!name) return null;
+
+  const [jobs, employeesReporting] = await Promise.all([
+    prisma.job.findMany({
+      where: { organization: { name: { contains: name, mode: 'insensitive' } } },
+      select: { salaryMin: true, salaryMax: true },
+    }),
+    prisma.salaryDataPoint.count({
+      where: { company: { contains: name, mode: 'insensitive' } },
+    }),
+  ]);
+
+  if (jobs.length === 0) {
+    return null;
+  }
+
+  const rolesWithPayPublished = jobs.filter(j => j.salaryMin !== null || j.salaryMax !== null).length;
+  const publishedShare = (rolesWithPayPublished / jobs.length) * 100;
+
+  // One factor, because one factor is all that is observable. The weight stays
+  // in the shape so a second measurable factor can join it later.
   const factors = [
-    { name: 'Salary ranges in job postings', score: 80, weight: 0.3 },
-    { name: 'Equal pay certification', score: 60, weight: 0.25 },
-    { name: 'Gender pay gap reporting', score: 70, weight: 0.25 },
-    { name: 'Employee salary satisfaction', score: 75, weight: 0.2 },
+    { name: 'Roles on ATHENA that publish a salary range', score: Math.round(publishedShare), weight: 1 },
   ];
 
-  const score = factors.reduce((acc, f) => acc + f.score * f.weight, 0);
+  const recommendations: string[] = [];
 
-  const recommendations = [];
-  if (factors[0].score < 70) {
-    recommendations.push('Ask about salary range before applying.');
+  if (publishedShare < 70) {
+    recommendations.push(
+      `${Math.round(publishedShare)}% of this employer's roles here name the pay. Ask for the range before your first interview.`
+    );
   }
-  if (factors[1].score < 70) {
-    recommendations.push('Research industry salary benchmarks.');
+  if (employeesReporting === 0) {
+    recommendations.push('Nobody has reported pay for this employer yet. Yours would be the first.');
   }
 
   return {
-    score: Math.round(score),
+    companyName: name,
+    score: Math.round(publishedShare),
+    rolesPosted: jobs.length,
+    rolesWithPayPublished,
+    employeesReporting,
     factors,
     recommendations,
   };

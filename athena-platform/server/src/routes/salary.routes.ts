@@ -2,52 +2,35 @@
  * Salary Equity Routes
  * Pay gap detection, salary benchmarking, negotiation coaching
  *
- * Matches the existing salary-equity.service.ts function signatures
+ * ## The simulated dataset behind these routes is gone
  *
- * ## These routes serve SIMULATED data and are blocked outside development
+ * This module used to be backed by fifteen invented rows carrying invented
+ * salaries and invented genders, all flagged verified, and a company
+ * transparency score that returned the same four numbers for every employer.
+ * It was blocked behind SALARY_SIMULATED_API for that reason.
  *
- * `salary-equity.service.ts` is backed by a hardcoded array its own comment
- * labels "Simulated salary database (would be real data in production)" — 15
- * invented rows carrying invented salaries and invented genders, every one
- * flagged `isVerified: true`. `getCompanyTransparencyScore` likewise returns
- * hardcoded "Simulated scoring".
+ * `salary-equity.service.ts` now reads the `SalaryDataPoint` table members
+ * contribute to, reports nothing below five contributors, and refuses to state
+ * a gender gap without at least three reports from each of women and men.
+ * `getCompanyTransparencyScore` measures only what ATHENA can observe, which is
+ * the share of that employer's roles here that publish a range, and returns
+ * null where there is nothing to measure. The invented rows were deleted rather
+ * than kept behind the flag, so there is no dataset left to leak.
  *
- * Serving that to a member would publish an invented gender pay gap on the one
- * subject where being wrong does real damage: someone could walk into a pay
- * negotiation quoting a number nobody ever earned. The routes stay mounted so
- * the work is not lost and the shapes stay addressable, but they refuse to
- * answer unless SALARY_SIMULATED_API=true is set, which no deployment sets.
+ * Being wrong here does real damage: a member can walk into a pay negotiation
+ * quoting whatever this returns. Every number it serves must come from the
+ * table, and an empty answer is always better than a confident invented one.
  *
- * The real, database-backed pay endpoints live at
- * `/api/ai-algorithms/salary-equity/*`, which read the `SalaryDataPoint` table
- * and enforce a minimum-contributors threshold before reporting anything.
- * `/salary-insights` uses those. Point new work there, not here.
+ * `/api/ai-algorithms/salary-equity/*` reads the same table and is what
+ * `/salary-insights` currently calls. The two overlap and should be merged.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
 import salaryEquityService from '../services/salary-equity.service';
-import { logger } from '../utils/logger';
 
 const router = Router();
 
-const SIMULATED_API_ENABLED = process.env.SALARY_SIMULATED_API === 'true';
-
-// Applied to every route below, so a new handler added later cannot leak the
-// simulated dataset by forgetting the guard.
-router.use((_req: Request, res: Response, next: NextFunction) => {
-  if (SIMULATED_API_ENABLED) return next();
-
-  logger.warn('Blocked a request to the simulated salary API', {
-    hint: 'Use /api/ai-algorithms/salary-equity/* for real, database-backed pay data',
-  });
-
-  return res.status(501).json({
-    success: false,
-    message:
-      'This endpoint is backed by a simulated dataset and is disabled. Use /api/ai-algorithms/salary-equity/* for real pay data.',
-  });
-});
 
 /**
  * @route GET /api/salary/benchmark
@@ -93,8 +76,7 @@ router.get('/range', authenticate, async (req: Request, res: Response, next: Nex
       return res.status(400).json({ error: 'Role, location, and level are required' });
     }
 
-    // Call with correct signature: getSalaryRange(role, location, level)
-    const range = salaryEquityService.getSalaryRange(
+    const range = await salaryEquityService.getSalaryRange(
       role as string,
       location as string,
       level as string
@@ -254,8 +236,15 @@ router.get('/company/:companyName/transparency', authenticate, async (req: Reque
   try {
     const { companyName } = req.params;
 
-    // Call with correct signature: getCompanyTransparencyScore(companyName)
-    const score = salaryEquityService.getCompanyTransparencyScore(decodeURIComponent(companyName));
+    const score = await salaryEquityService.getCompanyTransparencyScore(
+      decodeURIComponent(companyName)
+    );
+
+    if (!score) {
+      return res.status(404).json({
+        error: 'This employer has no roles on ATHENA yet, so there is nothing to measure.',
+      });
+    }
 
     res.json(score);
   } catch (error) {
