@@ -6,13 +6,23 @@ import { FooterColumn } from './FooterColumn';
 
 /**
  * The site footer, mounted once in the root layout so every page carries the
- * way out to everything else. One glass panel, compact: the brand and the
- * safety line across the top, six tight columns of links, and one closing
- * row with the credit, the ways to get in touch and the legal links.
+ * way out to everything else. One glass panel: the brand and the safety line
+ * across the top, six columns of links on a single row, and one closing row
+ * with the credit, the utility links and the legal ones.
  *
- * Every href here resolves: each was requested against a running server, and
- * the auth-gated ones redirect to /login carrying a `redirect` param so the
- * reader lands where they meant to after signing in.
+ * It is kept to six columns of five because it had grown to eight columns of
+ * up to nine, which wrapped to a second row and made the footer taller than
+ * the viewport. Two rules keep it that way:
+ *
+ *   - One line per destination, not per page. A section's own hub page is
+ *     where its inner pages are listed; the footer points at the hub.
+ *   - Nothing under /dashboard. Those need a session, so a signed-out reader
+ *     clicking one only gets a login screen. They belong in the dashboard's
+ *     own navigation.
+ *
+ * Everything dropped from here is still in sitemap.ts and in search. Every
+ * href resolves; the auth-gated ones redirect to /login carrying a `redirect`
+ * param so the reader lands where they meant to after signing in.
  */
 
 type FooterLink = { href: string; label: string };
@@ -24,7 +34,6 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { href: '/jobs', label: 'Jobs' },
       { href: '/apprenticeships', label: 'Apprenticeships' },
       { href: '/skills-marketplace', label: 'Skills marketplace' },
-      { href: '/rfps', label: 'Contracts and tenders' },
       { href: '/salary-insights', label: 'Salary insights' },
       { href: '/employer', label: 'For employers' },
     ],
@@ -37,7 +46,6 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { href: '/certifications', label: 'Certificates' },
       { href: '/skills', label: 'Skills' },
       { href: '/mentors', label: 'Mentors' },
-      { href: '/mentorship', label: 'How mentoring works' },
     ],
   },
   {
@@ -46,10 +54,8 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { href: '/communities', label: 'Communities' },
       { href: '/groups', label: 'Groups' },
       { href: '/events', label: 'Events' },
-      { href: '/network', label: 'Network' },
       { href: '/feed', label: 'Feed' },
       { href: '/explore', label: 'Reels' },
-      { href: '/stories', label: 'Member stories' },
     ],
   },
   {
@@ -58,52 +64,18 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { href: '/finances', label: 'Finances' },
       { href: '/housing', label: 'Housing' },
       { href: '/business', label: 'Business' },
-      { href: '/formation', label: 'Company formation' },
       { href: '/grants', label: 'Grants' },
-      { href: '/capital', label: 'Capital' },
-      { href: '/accelerator', label: 'Accelerator' },
-      { href: '/vendors', label: 'Vendors' },
       { href: '/pricing', label: 'Plans and pricing' },
     ],
   },
   {
-    title: 'Wellbeing',
+    title: 'Wellbeing and cars',
     links: [
       { href: '/wellness', label: 'Wellness' },
-      { href: '/dashboard/wellness/track', label: 'Health dashboard' },
-      { href: '/dashboard/wellness/forums', label: 'Forums' },
-      { href: '/dashboard/wellness/circles', label: 'Support circles' },
-      { href: '/dashboard/wellness/practitioners', label: 'Find care' },
-      { href: '/dashboard/wellness/mental-load', label: 'The mental load' },
-      { href: '/dashboard/wellness/habits', label: 'Habits and goals' },
-      { href: '/dashboard/wellness/library', label: 'The library' },
-    ],
-  },
-  {
-    title: 'Cars',
-    links: [
       { href: '/cars', label: 'Cars' },
-      { href: '/cars/new', label: 'New cars' },
-      { href: '/cars/preloved', label: 'Pre-loved' },
+      { href: '/cars/preloved', label: 'Pre-loved cars' },
       { href: '/cars/mechanics', label: 'Find a mechanic' },
       { href: '/cars/finance', label: 'Car finance' },
-      { href: '/cars/insurance', label: 'Car insurance' },
-      { href: '/cars/value', label: 'What is it worth' },
-      { href: '/cars/safety', label: 'Safety, explained' },
-    ],
-  },
-  {
-    title: 'Safety and privacy',
-    links: [
-      { href: '/safety-center', label: 'Safety centre' },
-      { href: '/report', label: 'Report something' },
-      { href: '/trust', label: 'Trust centre' },
-      { href: '/privacy-center', label: 'Privacy centre' },
-      { href: '/help/community-guidelines', label: 'Community guidelines' },
-      { href: '/help/transparency-report', label: 'Transparency report' },
-      { href: '/help/appeal', label: 'Appeal a decision' },
-      { href: '/help/appeals', label: 'Your appeals' },
-      { href: '/accessibility', label: 'Accessibility' },
     ],
   },
   {
@@ -111,22 +83,27 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     links: [
       { href: '/about', label: 'About' },
       { href: '/impact', label: 'Impact' },
-      { href: '/team', label: 'Team' },
       { href: '/careers', label: 'Careers' },
-      { href: '/press', label: 'Press' },
       { href: '/blog', label: 'Blog' },
-      { href: '/developers', label: 'Developers' },
-      { href: '/changelog', label: 'Changelog' },
-      { href: '/status', label: 'Status' },
+      { href: '/press', label: 'Press' },
     ],
   },
+];
+
+/** The closing row: what someone needs when something has gone wrong, then the legal line. */
+const UTILITY: FooterLink[] = [
+  { href: '/safety-center', label: 'Safety centre' },
+  { href: '/report', label: 'Report something' },
+  { href: '/trust', label: 'Trust centre' },
+  { href: '/privacy-center', label: 'Privacy centre' },
+  { href: '/help', label: 'Help' },
+  { href: '/accessibility', label: 'Accessibility' },
 ];
 
 const LEGAL: FooterLink[] = [
   { href: '/terms', label: 'Terms' },
   { href: '/privacy', label: 'Privacy' },
   { href: '/cookies', label: 'Cookies' },
-  { href: '/mentor-agreement', label: 'Mentor agreement' },
 ];
 
 const linkClass = 'focusable rounded-sm text-[13px] leading-5 text-slate-600 transition hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-300';
@@ -142,8 +119,8 @@ export function SiteFooter() {
   ];
 
   return (
-    <footer className="mt-14 px-3 pb-8 text-slate-950 xl:px-5 dark:text-white" aria-labelledby="site-footer-heading">
-      <div className="rail-panel glow-card mx-auto w-full max-w-7xl p-5 sm:p-7">
+    <footer className="mt-10 px-3 pb-6 text-slate-950 xl:px-5 dark:text-white" aria-labelledby="site-footer-heading">
+      <div className="rail-panel glow-card mx-auto w-full max-w-7xl p-5 sm:p-6">
         <h2 id="site-footer-heading" className="sr-only">
           Site links
         </h2>
@@ -170,8 +147,8 @@ export function SiteFooter() {
           </div>
         </div>
 
-        {/* Six tight columns on a wide screen; on a phone each folds to its heading. */}
-        <div className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 border-t border-rose-100/70 pt-5 sm:grid-cols-2 sm:gap-y-3 lg:grid-cols-6 lg:gap-y-5 lg:pt-6 dark:border-white/10">
+        {/* Six columns, one row. On a phone each folds to its heading. */}
+        <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-1 border-t border-rose-100/70 pt-4 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-3 lg:grid-cols-6 lg:pt-5 dark:border-white/10">
           {COLUMNS.map((column) => (
             <FooterColumn key={column.title} title={column.title}>
               <ul className="space-y-1">
@@ -187,9 +164,19 @@ export function SiteFooter() {
           ))}
         </div>
 
-        {/* One closing row: credit, ways in, the legal line. */}
-        <div className="mt-6 flex flex-col gap-3 border-t border-rose-100/70 pt-5 text-xs text-slate-500 lg:flex-row lg:items-center lg:justify-between dark:border-white/10 dark:text-slate-400">
-          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        {/* The closing rows: what you need when something is wrong, then the credit and the legal line. */}
+        <div className="mt-5 border-t border-rose-100/70 pt-4 text-xs text-slate-500 dark:border-white/10 dark:text-slate-400">
+          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {[...UTILITY, ...touch, ...LEGAL].map((link) => (
+              <li key={link.href}>
+                <Link href={link.href} className="focusable rounded-sm transition hover:text-rose-600 dark:hover:text-rose-300">
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1">
             <span>
               &copy; {year} {ORGANISATION.legalName}
               {/* The ABN is published only once it is real; see lib/contact.ts. */}
@@ -201,15 +188,6 @@ export function SiteFooter() {
             </span>
             <Heart className="h-3 w-3 text-rose-500" aria-hidden="true" />
           </p>
-          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            {[...touch, ...LEGAL].map((link) => (
-              <li key={link.href}>
-                <Link href={link.href} className="focusable rounded-sm transition hover:text-rose-600 dark:hover:text-rose-300">
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
         </div>
       </div>
     </footer>
