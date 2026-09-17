@@ -11,4 +11,9 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   clearMocks: true,
+  // Jest's 5 second default is not enough for these suites on a loaded machine:
+  // ts-jest compiles as it goes, and a run that is sharing the machine reports
+  // timeouts in suites that pass on their own. That produces failures which look
+  // real, are not reproducible, and cost more to chase than the wait costs.
+  testTimeout: 30_000,
 };
