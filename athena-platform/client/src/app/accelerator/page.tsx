@@ -73,7 +73,10 @@ export default function AcceleratorPage() {
       setError(null);
 
       try {
-        const response = await businessApi.getAccelerators({ upcoming: true });
+        // The page totals capacity and sessions across every upcoming cohort
+        // and picks the soonest start, so it needs the whole set rather than
+        // the first page of it.
+        const response = await businessApi.getAccelerators({ upcoming: true, limit: 100 });
 
         if (!cancelled) {
           setCohorts(response.data?.data || []);

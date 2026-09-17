@@ -66,6 +66,9 @@ export default function GrantsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProviderType, setSelectedProviderType] = useState('');
   const [grants, setGrants] = useState<Grant[]>([]);
+  // How many the catalogue holds, which is not the same as how many were
+  // fetched now that the endpoint is paged.
+  const [totalGrants, setTotalGrants] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,14 +83,21 @@ export default function GrantsPage() {
         const response = await businessApi.getGrants({
           providerType: selectedProviderType || undefined,
           active: true,
+          // The page filters and counts across what it holds, so it asks for
+          // as much as the endpoint will give in one go.
+          limit: 100,
         });
 
         if (!cancelled) {
           setGrants(response.data?.data || []);
+          setTotalGrants(
+            typeof response.data?.pagination?.total === 'number' ? response.data.pagination.total : null
+          );
         }
       } catch (err: any) {
         if (!cancelled) {
           setGrants([]);
+          setTotalGrants(null);
           setError(err?.response?.data?.error || 'Unable to load grants right now.');
         }
       } finally {
@@ -130,14 +140,17 @@ export default function GrantsPage() {
     const regionCount = new Set(grants.flatMap((grant) => grant.regions || [])).size;
     const totalMaxFunding = grants.reduce((total, grant) => total + toNumber(grant.maxFunding), 0);
 
+    // The headline comes from the server's count of the whole catalogue. The
+    // rest are worked out from the grants actually loaded, so they describe
+    // what is listed below rather than everything that exists.
     return [
-      { value: grants.length.toString(), label: 'Active Grants', icon: Gift },
-      { value: providerCount.toString(), label: 'Providers', icon: Users },
+      { value: (totalGrants ?? grants.length).toString(), label: 'Active Grants', icon: Gift },
+      { value: providerCount.toString(), label: 'Providers listed', icon: Users },
       { value: rollingCount.toString(), label: 'Rolling Programs', icon: Clock },
-      { value: totalMaxFunding ? formatCurrency(totalMaxFunding) : 'Varies', label: 'Listed Funding', icon: DollarSign },
-      { value: regionCount.toString(), label: 'Regions', icon: Award },
+      { value: totalMaxFunding ? formatCurrency(totalMaxFunding) : 'Varies', label: 'Funding listed', icon: DollarSign },
+      { value: regionCount.toString(), label: 'Regions listed', icon: Award },
     ];
-  }, [grants]);
+  }, [grants, totalGrants]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">

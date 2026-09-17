@@ -1024,7 +1024,7 @@ export const employerApi = {
 // ============================================
 export const businessApi = {
   // Accelerators
-  getAccelerators: (params?: { status?: string; upcoming?: boolean }) =>
+  getAccelerators: (params?: { status?: string; upcoming?: boolean; page?: number; limit?: number }) =>
     api.get('/business/accelerators', { params }),
 
   getAccelerator: (id: string) => api.get(`/business/accelerators/${id}`),
@@ -1045,7 +1045,10 @@ export const businessApi = {
     api.post(`/business/accelerators/enrollments/${enrollmentId}/payment`),
 
   // Grants
-  getGrants: (params?: { providerType?: string; industry?: string; region?: string; active?: boolean }) =>
+  // These catalogues are paged server-side. A caller that counts or filters
+  // across what it holds should ask for a page big enough to mean something,
+  // and read the real total from `pagination.total`.
+  getGrants: (params?: { providerType?: string; industry?: string; region?: string; active?: boolean; page?: number; limit?: number }) =>
     api.get('/business/grants', { params }),
 
   getGrant: (id: string) => api.get(`/business/grants/${id}`),
@@ -1059,7 +1062,7 @@ export const businessApi = {
     api.patch(`/business/grants/applications/${id}`, data),
 
   // Investors
-  getInvestors: (params?: { type?: string; industry?: string; stage?: string; region?: string }) =>
+  getInvestors: (params?: { type?: string; industry?: string; stage?: string; region?: string; page?: number; limit?: number }) =>
     api.get('/business/investors', { params }),
 
   getInvestor: (id: string) => api.get(`/business/investors/${id}`),
@@ -1070,7 +1073,7 @@ export const businessApi = {
   getMyInvestorIntroductions: () => api.get('/business/investors/my/introductions'),
 
   // Vendors
-  getVendors: (params?: { category?: string; partner?: boolean; verified?: boolean; minRating?: number }) =>
+  getVendors: (params?: { category?: string; partner?: boolean; verified?: boolean; minRating?: number; page?: number; limit?: number }) =>
     api.get('/business/vendors', { params }),
 
   getVendor: (id: string) => api.get(`/business/vendors/${id}`),
@@ -1079,7 +1082,7 @@ export const businessApi = {
     api.post(`/business/vendors/${id}/reviews`, data),
 
   // RFPs
-  getRfps: (params?: { category?: string; status?: string }) =>
+  getRfps: (params?: { category?: string; status?: string; page?: number; limit?: number }) =>
     api.get('/business/rfps', { params }),
 
   createRfp: (data: {
@@ -1213,7 +1216,7 @@ export const financeApi = {
   }) => api.patch(`/finance/savings-goals/${id}`, data),
 
   // Insurance
-  getInsuranceProducts: (params?: { type?: string }) =>
+  getInsuranceProducts: (params?: { type?: string; page?: number; limit?: number }) =>
     api.get('/finance/insurance', { params }),
 
   getInsuranceProduct: (id: string) => api.get(`/finance/insurance/${id}`),
@@ -1221,7 +1224,8 @@ export const financeApi = {
   applyForInsurance: (productId: string, data?: { applicationData?: any }) =>
     api.post(`/finance/insurance/${productId}/apply`, data),
 
-  getMyInsuranceApplications: () => api.get('/finance/insurance/my/applications'),
+  getMyInsuranceApplications: (params?: { page?: number; limit?: number }) =>
+    api.get('/finance/insurance/my/applications', { params }),
 
   // Superannuation
   getSuperAccounts: () => api.get('/finance/super'),

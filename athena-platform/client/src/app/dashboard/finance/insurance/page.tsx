@@ -58,9 +58,16 @@ export default function InsurancePage() {
     setLoading(true);
     setError(null);
     try {
+      // Both lists are paged server-side, and this page reads across the whole
+      // of each: the product grid decides Apply against every application the
+      // member holds, so a truncated list would offer Apply on cover she
+      // already has and the server would refuse it with a conflict.
       const [productsRes, appsRes] = await Promise.all([
-        financeApi.getInsuranceProducts(filterType === 'ALL' ? undefined : { type: filterType }),
-        financeApi.getMyInsuranceApplications(),
+        financeApi.getInsuranceProducts({
+          ...(filterType === 'ALL' ? {} : { type: filterType }),
+          limit: 100,
+        }),
+        financeApi.getMyInsuranceApplications({ limit: 100 }),
       ]);
       setProducts(productsRes.data?.data || []);
       setApplications(appsRes.data?.data || []);
