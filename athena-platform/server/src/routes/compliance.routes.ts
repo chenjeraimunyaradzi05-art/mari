@@ -610,7 +610,8 @@ router.get('/status', async (req: AuthRequest, res: Response, next: NextFunction
  */
 router.get('/my-region', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const user = req.user!;
+    // No authenticate on this route, deliberately: region detection works for
+    // a visitor too, and nothing here reads the account anyway.
     const countryCode = req.headers['cf-ipcountry'] as string || 'AU';
     const region = getRegionFromCountry(countryCode);
     const config = REGION_CONFIGS[region] || REGION_CONFIGS.ANZ;
