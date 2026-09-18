@@ -411,20 +411,26 @@ Skills: ${user.skills.map((s) => `${s.skill.name} (${s.level})`).join(', ') || '
 // ===========================================
 router.post('/content-generator', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
-    const { contentType, topic, tone, platform, wordCount } = req.body;
+    // The generator screen has always sent `type`, `tone` and `context`; this
+    // handler read `contentType` and passed only the topic on, so every choice
+    // on that screen except the topic was quietly discarded. Both spellings
+    // are accepted so no caller breaks.
+    const { contentType, type, topic, tone, platform, context } = req.body;
+    const kind = contentType || type;
 
     if (!topic) {
       throw new ApiError(400, 'Topic is required');
     }
 
-    const content = await aiService.generateContent(topic, contentType, platform);
+    const content = await aiService.generateContent(topic, kind, platform, tone, context);
 
     res.json({
       success: true,
       data: {
-        contentType: contentType || 'post',
+        contentType: kind || 'post',
         topic,
         platform: platform || 'LinkedIn',
+        tone: tone || null,
         content,
         generatedAt: new Date(),
       },

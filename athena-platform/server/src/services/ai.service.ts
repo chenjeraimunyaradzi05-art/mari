@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger';
-import { sanitizeChatHistory, truncate, DEFAULT_MAX_TOKENS } from '../utils/llm';
+import { sanitizeChatHistory, truncate, asUntrustedBlock, DEFAULT_MAX_TOKENS } from '../utils/llm';
 
 class AiService {
   private openai: OpenAI | null = null;
@@ -311,19 +311,44 @@ Candidate answer: ${params.answer}`;
     }
   }
 
-  async generateContent(topic: string, contentType: string = 'post', platform: string = 'LinkedIn'): Promise<string> {
+  /**
+   * The tones the generator screen offers. An allowlist rather than free text,
+   * because the tone is spoken to the model as an instruction: raw caller text
+   * in that position would be an injection point dressed as a style picker.
+   */
+  static readonly CONTENT_TONES = new Set([
+    'professional', 'friendly', 'confident', 'inspiring', 'casual', 'formal',
+  ]);
+
+  async generateContent(
+    topic: string,
+    contentType: string = 'post',
+    platform: string = 'LinkedIn',
+    tone?: string,
+    context?: string
+  ): Promise<string> {
      if (!this.openai) {
        this.ensureOpenAI('content generation');
        return "Simulated content generation response.";
      }
 
+     const spokenTone =
+       tone && AiService.CONTENT_TONES.has(tone.toLowerCase()) ? tone.toLowerCase() : null;
+
      try {
        const systemPrompt = `You are a professional content creator specializing in empowering women in their careers and brief businesses. Create engaging, authentic content.`;
-       const userPrompt = `Create ${contentType} content about: ${topic} for ${platform}. Include hook, body, CTA, and hashtags.`;
-       
+       const parts = [
+         `Create ${contentType} content about: ${truncate(topic, 2000)} for ${platform}.`,
+         spokenTone ? `Write it in a ${spokenTone} tone.` : '',
+         'Include hook, body, CTA, and hashtags.',
+         context?.trim() ? asUntrustedBlock('background', context, 4000) : '',
+       ];
+       const userPrompt = parts.filter(Boolean).join('\n');
+
        const completion = await this.openai.chat.completions.create({
          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
          model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+         max_tokens: DEFAULT_MAX_TOKENS,
        });
        return completion.choices[0]?.message?.content || '';
      } catch (e) {
