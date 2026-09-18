@@ -131,7 +131,7 @@ export default function CookieConsentBanner() {
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 p-4 sm:bottom-4 sm:left-4 sm:right-auto sm:max-w-lg">
+    <div role="region" aria-label="Cookie preferences" className="fixed inset-x-0 bottom-0 z-50 p-4 sm:bottom-4 sm:left-4 sm:right-auto sm:max-w-lg">
       <div className="rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3 flex items-center justify-between">
@@ -210,6 +210,7 @@ export default function CookieConsentBanner() {
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
+                      aria-label="Allow analytics cookies"
                       checked={preferences.analytics}
                       onChange={(e) => setPreferences(p => ({ ...p, analytics: e.target.checked }))}
                       className="sr-only peer"
@@ -227,6 +228,7 @@ export default function CookieConsentBanner() {
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
+                      aria-label="Allow functional cookies"
                       checked={preferences.functional}
                       onChange={(e) => setPreferences(p => ({ ...p, functional: e.target.checked }))}
                       className="sr-only peer"
@@ -244,6 +246,7 @@ export default function CookieConsentBanner() {
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
+                      aria-label="Allow marketing cookies"
                       checked={preferences.marketing}
                       onChange={(e) => setPreferences(p => ({ ...p, marketing: e.target.checked }))}
                       className="sr-only peer"
