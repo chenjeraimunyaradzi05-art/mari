@@ -196,16 +196,22 @@ router.post('/opportunity-radar', authenticate, requirePremium, aiLimiter, oppor
 // ===========================================
 router.post('/resume-optimizer', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
   try {
-    const { resumeText, targetJobId } = req.body;
+    // Both resume screens have always posted `resume` and a pasted
+    // `jobDescription`; this handler read `resumeText` and `targetJobId`, so
+    // every submission failed validation and the feature never ran end to end.
+    // Both spellings are accepted, and a pasted description is used directly.
+    const { resumeText, resume, targetJobId, jobDescription: pastedDescription } = req.body;
+    const resumeBody = resumeText || resume;
 
-    if (!resumeText) {
+    if (!resumeBody || typeof resumeBody !== 'string') {
       throw new ApiError(400, 'Resume text is required');
     }
 
     let targetJobTitle = null;
-    let jobDescription = undefined;
+    let jobDescription: string | undefined =
+      typeof pastedDescription === 'string' && pastedDescription.trim() ? pastedDescription : undefined;
 
-    if (targetJobId) {
+    if (!jobDescription && targetJobId) {
       const targetJob = await prisma.job.findUnique({
         where: { id: targetJobId },
         select: { title: true, description: true }
@@ -216,7 +222,7 @@ router.post('/resume-optimizer', authenticate, requirePremium, aiLimiter, async 
       }
     }
 
-    const data = await aiService.optimizeResume(resumeText, jobDescription);
+    const data = await aiService.optimizeResume(resumeBody, jobDescription);
 
     // Log AI usage
     /*

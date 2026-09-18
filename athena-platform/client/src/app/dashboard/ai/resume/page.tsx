@@ -21,10 +21,22 @@ import { useResumeOptimizer } from '@/lib/hooks';
 import PaywallGate from '@/components/subscription/PaywallGate';
 import { downloadText } from '@/lib/download';
 
+/** The one shape the analysis arrives in; `score` null means none was made. */
+type ResumeAnalysis = {
+  score: number | null;
+  strengths: string | null;
+  weaknesses: string | null;
+  improvements: Array<{ section: string | null; suggestion: string }>;
+  keywordsMatched: string[];
+  keywordsMissing: string[];
+  simulated: boolean;
+  targetJob?: string | null;
+};
+
 export default function ResumePage() {
   const [resume, setResume] = useState('');
   const [jobDescription, setJobDescription] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ResumeAnalysis | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>(['summary', 'keywords', 'improvements']);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -45,7 +57,7 @@ export default function ResumePage() {
     if (!resume || !jobDescription) return;
     
     optimize(
-      { resume, jobDescription },
+      { resumeText: resume, jobDescription },
       {
         onSuccess: (data) => {
           setResult(data);
@@ -191,54 +203,72 @@ export default function ResumePage() {
               </div>
             ) : (
               <>
-                {/* Match Score */}
-                <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                      Match Score
-                    </h3>
-                    <div className={`text-3xl font-bold ${
-                      (result.matchScore || 75) >= 80 ? 'text-green-600' :
-                      (result.matchScore || 75) >= 60 ? 'text-yellow-600' : 'text-red-600'
-                    }`}>
-                      {result.matchScore || 75}%
-                    </div>
+                {result.simulated && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                    Your resume was not analysed: the AI service is not available right now. What follows
+                    is general resume guidance, not a reading of your document.
                   </div>
-                  <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
-                    <div
-                      className={`h-3 rounded-full transition-all duration-500 ${
-                        (result.matchScore || 75) >= 80 ? 'bg-green-600' :
-                        (result.matchScore || 75) >= 60 ? 'bg-yellow-600' : 'bg-red-600'
-                      }`}
-                      style={{ width: `${result.matchScore || 75}%` }}
-                    />
-                  </div>
-                </div>
+                )}
 
-                {/* Summary */}
-                <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                  <button
-                    onClick={() => toggleSection('summary')}
-                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
-                  >
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center space-x-2">
-                      <Zap className="w-5 h-5 text-yellow-600" />
-                      <span>Summary</span>
-                    </h3>
-                    {expandedSections.includes('summary') ? (
-                      <ChevronUp className="w-5 h-5 text-slate-500" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5 text-slate-500" />
-                    )}
-                  </button>
-                  {expandedSections.includes('summary') && (
-                    <div className="px-6 pb-4">
-                      <p className="text-slate-700 dark:text-slate-300">
-                        {result.summary || 'Your resume shows strong alignment with the job requirements. Focus on highlighting your technical skills and quantifying your achievements for better impact.'}
-                      </p>
+                {/* Match score, only when one was actually made. */}
+                {result.score !== null ? (
+                  <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                        Match Score
+                      </h3>
+                      <div className={`text-3xl font-bold ${
+                        result.score >= 80 ? 'text-green-600' :
+                        result.score >= 60 ? 'text-yellow-600' : 'text-red-600'
+                      }`}>
+                        {result.score}%
+                      </div>
                     </div>
-                  )}
-                </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
+                      <div
+                        className={`h-3 rounded-full transition-all duration-500 ${
+                          result.score >= 80 ? 'bg-green-600' :
+                          result.score >= 60 ? 'bg-yellow-600' : 'bg-red-600'
+                        }`}
+                        style={{ width: `${result.score}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : !result.simulated ? (
+                  <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400">
+                    No match score came back for this analysis.
+                  </div>
+                ) : null}
+
+                {/* What reads well, and what does not. */}
+                {(result.strengths || result.weaknesses) && (
+                  <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <button
+                      onClick={() => toggleSection('summary')}
+                      className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
+                    >
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center space-x-2">
+                        <Zap className="w-5 h-5 text-yellow-600" />
+                        <span>Summary</span>
+                      </h3>
+                      {expandedSections.includes('summary') ? (
+                        <ChevronUp className="w-5 h-5 text-slate-500" />
+                      ) : (
+                        <ChevronDown className="w-5 h-5 text-slate-500" />
+                      )}
+                    </button>
+                    {expandedSections.includes('summary') && (
+                      <div className="px-6 pb-4 space-y-3 text-slate-700 dark:text-slate-300">
+                        {result.strengths && (
+                          <p><span className="font-medium text-green-700 dark:text-green-400">Reads well:</span> {result.strengths}</p>
+                        )}
+                        {result.weaknesses && (
+                          <p><span className="font-medium text-amber-700 dark:text-amber-400">Could be stronger:</span> {result.weaknesses}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Keywords */}
                 <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -257,17 +287,42 @@ export default function ResumePage() {
                     )}
                   </button>
                   {expandedSections.includes('keywords') && (
-                    <div className="px-6 pb-4">
-                      <div className="flex flex-wrap gap-2">
-                        {(result.missingKeywords || ['Leadership', 'Agile', 'Cross-functional', 'Data-driven']).map((keyword: string, index: number) => (
-                          <span
-                            key={index}
-                            className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-sm"
-                          >
-                            {keyword}
-                          </span>
-                        ))}
-                      </div>
+                    <div className="px-6 pb-4 space-y-3">
+                      {result.keywordsMissing.length === 0 && result.keywordsMatched.length === 0 ? (
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                          No keyword comparison came back for this analysis.
+                        </p>
+                      ) : (
+                        <>
+                          {result.keywordsMissing.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {result.keywordsMissing.map((keyword, index) => (
+                                <span
+                                  key={index}
+                                  className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-sm"
+                                >
+                                  {keyword}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {result.keywordsMatched.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-xs uppercase tracking-wide text-slate-400">Already covered</p>
+                              <div className="flex flex-wrap gap-2">
+                                {result.keywordsMatched.map((keyword, index) => (
+                                  <span
+                                    key={index}
+                                    className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm"
+                                  >
+                                    {keyword}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -290,17 +345,25 @@ export default function ResumePage() {
                   </button>
                   {expandedSections.includes('improvements') && (
                     <div className="px-6 pb-4 space-y-3">
-                      {(result.improvements || [
-                        'Add quantifiable metrics to your achievements (e.g., "increased sales by 25%")',
-                        'Include relevant certifications mentioned in the job description',
-                        'Reorder experience section to highlight most relevant roles first',
-                        'Add a professional summary tailored to this specific role'
-                      ]).map((improvement: string, index: number) => (
-                        <div key={index} className="flex items-start space-x-3">
-                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                          <span className="text-slate-700 dark:text-slate-300">{improvement}</span>
-                        </div>
-                      ))}
+                      {result.improvements.length === 0 ? (
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                          No specific improvements came back for this analysis.
+                        </p>
+                      ) : (
+                        result.improvements.map((improvement, index) => (
+                          <div key={index} className="flex items-start space-x-3">
+                            <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                            <span className="text-slate-700 dark:text-slate-300">
+                              {improvement.section && (
+                                <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                  {improvement.section}
+                                </span>
+                              )}
+                              {improvement.suggestion}
+                            </span>
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>

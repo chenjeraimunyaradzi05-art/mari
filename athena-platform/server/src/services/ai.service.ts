@@ -2,6 +2,54 @@ import OpenAI from 'openai';
 import { logger } from '../utils/logger';
 import { sanitizeChatHistory, truncate, asUntrustedBlock, DEFAULT_MAX_TOKENS } from '../utils/llm';
 
+/**
+ * The one shape a resume analysis leaves this service in, whether the model
+ * ran or not. Before this the real path and the simulated path returned two
+ * unrelated shapes, the client read fields from a third, and the visible
+ * result was a hardcoded 75% for everyone. `score` is null whenever there is
+ * no analysed number to show; nothing downstream may invent one.
+ */
+export interface ResumeAnalysis {
+  score: number | null;
+  strengths: string | null;
+  weaknesses: string | null;
+  improvements: Array<{ section: string | null; suggestion: string }>;
+  keywordsMatched: string[];
+  keywordsMissing: string[];
+  simulated: boolean;
+}
+
+const stringOrNull = (v: unknown): string | null =>
+  typeof v === 'string' && v.trim() ? v.trim() : null;
+
+const stringList = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
+
+/** Model JSON arrives on a promise, not a schema; clamp it to the contract. */
+export function normaliseResumeAnalysis(raw: any): ResumeAnalysis {
+  const score = Number(raw?.score);
+
+  const improvements: ResumeAnalysis['improvements'] = Array.isArray(raw?.improvements)
+    ? raw.improvements
+        .map((item: unknown) => {
+          if (typeof item === 'string') return { section: null, suggestion: item.trim() };
+          const suggestion = stringOrNull((item as any)?.suggestion);
+          return suggestion ? { section: stringOrNull((item as any)?.section), suggestion } : null;
+        })
+        .filter((x: unknown): x is { section: string | null; suggestion: string } => !!x)
+    : [];
+
+  return {
+    score: Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null,
+    strengths: stringOrNull(raw?.strengthAnalysis ?? raw?.strengths),
+    weaknesses: stringOrNull(raw?.weaknessAnalysis ?? raw?.weaknesses),
+    improvements,
+    keywordsMatched: stringList(raw?.keywordsMatches ?? raw?.keywordsMatched),
+    keywordsMissing: stringList(raw?.keywordsMissing),
+    simulated: false,
+  };
+}
+
 class AiService {
   private openai: OpenAI | null = null;
   private isProduction: boolean;
@@ -39,14 +87,14 @@ class AiService {
     throw new Error(`AI service not configured for ${feature}. Configure AI_OPENAI_API_KEY or OPENAI_API_KEY.`);
   }
 
-  async optimizeResume(resumeText: string, jobDescription?: string): Promise<any> {
+  async optimizeResume(resumeText: string, jobDescription?: string): Promise<ResumeAnalysis> {
     if (!this.openai) {
       this.ensureOpenAI('resume optimization');
       return this.getSimulatedResumeResponse();
     }
 
     try {
-      const systemPrompt = `You are an expert ATS (Applicant Tracking System) optimizer and resume coach. 
+      const systemPrompt = `You are an expert ATS (Applicant Tracking System) optimizer and resume coach.
       Analyze the provided resume against best practices and the target job description (if provided).
       Return a JSON object with:
       {
@@ -60,8 +108,12 @@ class AiService {
         "keywordsMissing": ["keyword3", "keyword4"]
       }`;
 
-      const userPrompt = `RESUME:\n${resumeText}\n\n${jobDescription ? `TARGET JOB DESCRIPTION:\n${jobDescription}` : ''}`;
-      
+      const parts = [
+        asUntrustedBlock('resume', resumeText, 20000),
+        jobDescription ? asUntrustedBlock('target job description', jobDescription, 8000) : '',
+      ];
+      const userPrompt = parts.filter(Boolean).join('\n\n');
+
       const model = process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106';
 
       const completion = await this.openai.chat.completions.create({
@@ -72,12 +124,13 @@ class AiService {
         model: model,
         response_format: { type: 'json_object' },
         temperature: 0.7,
+        max_tokens: DEFAULT_MAX_TOKENS,
       });
 
       const content = completion.choices[0].message.content;
       if (!content) throw new Error('No response from AI');
 
-      return JSON.parse(content);
+      return normaliseResumeAnalysis(JSON.parse(content));
 
     } catch (error) {
       logger.error('AI Resume Optimization failed:', error);
@@ -438,17 +491,26 @@ Candidate answer: ${params.answer}`;
   }
 
   // Simulated responses for dev mode without API keys
-  private getSimulatedResumeResponse() {
+  /**
+   * What comes back when no model is configured. It used to be a fabricated
+   * 75% match, invented missing keywords and a rewritten resume for a fictional
+   * John Doe, none of it marked as simulated. Now: no score, no keywords, no
+   * rewrite, and general advice plainly framed as general. A member is told
+   * her resume was not analysed rather than shown an analysis that never ran.
+   */
+  private getSimulatedResumeResponse(): ResumeAnalysis {
     return {
-      matchScore: 75,
-      summary: "This is a simulated AI response. Your resume looks good but lacks specific metrics.",
-      missingKeywords: ["Python", "Data Analysis", "Cloud Computing"],
+      score: null,
+      strengths: null,
+      weaknesses: null,
       improvements: [
-        "Add numbers to your achievements (e.g., 'Managed budget of $50k')",
-        "Include a 'Skills' section at the top",
-        "Use more active verbs like 'Led', 'Developed', 'Architected'"
+        { section: null, suggestion: 'Quantify achievements with real numbers, such as budgets managed or growth delivered.' },
+        { section: null, suggestion: 'Lead each role with the outcome, not the duty.' },
+        { section: null, suggestion: 'Mirror the exact wording of the skills the job advertisement asks for, where they are true of you.' },
       ],
-      optimizedResume: "John Doe\nSoftware Engineer\n\nSummary:\nExperienced engineer...\n\nExperience:\n- Led team of 5..."
+      keywordsMatched: [],
+      keywordsMissing: [],
+      simulated: true,
     };
   }
 

@@ -24,7 +24,15 @@ import { downloadText } from '@/lib/download';
 export default function ResumeOptimizerPage() {
   const [resume, setResume] = useState('');
   const [jobDescription, setJobDescription] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<{
+    score: number | null;
+    strengths: string | null;
+    weaknesses: string | null;
+    improvements: Array<{ section: string | null; suggestion: string }>;
+    keywordsMatched: string[];
+    keywordsMissing: string[];
+    simulated: boolean;
+  } | null>(null);
   const [expandedSections, setExpandedSections] = useState<string[]>(['summary', 'keywords', 'improvements']);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -45,7 +53,7 @@ export default function ResumeOptimizerPage() {
     if (!resume || !jobDescription) return;
     
     optimize(
-      { resume, jobDescription },
+      { resumeText: resume, jobDescription },
       {
         onSuccess: (data) => {
           setResult(data);
@@ -195,24 +203,33 @@ export default function ResumeOptimizerPage() {
 
           {result && (
             <div className="space-y-4">
-              {/* Match Score */}
-              <div className="card bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">
-                      Match Score
-                    </p>
-                    <p className="text-3xl font-bold text-primary-600 dark:text-primary-400">
-                      {result.matchScore}%
-                    </p>
-                  </div>
-                  <div className="w-16 h-16 rounded-full border-4 border-primary-500 flex items-center justify-center">
-                    <span className="text-lg font-bold text-primary-600 dark:text-primary-400">
-                      {result.matchScore >= 80 ? 'A' : result.matchScore >= 60 ? 'B' : 'C'}
-                    </span>
+              {result.simulated && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                  Your resume was not analysed: the AI service is not available right now. What follows is
+                  general resume guidance, not a reading of your document.
+                </div>
+              )}
+
+              {/* Match score, only when one was actually made. */}
+              {result.score !== null && (
+                <div className="card bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Match Score
+                      </p>
+                      <p className="text-3xl font-bold text-primary-600 dark:text-primary-400">
+                        {result.score}%
+                      </p>
+                    </div>
+                    <div className="w-16 h-16 rounded-full border-4 border-primary-500 flex items-center justify-center">
+                      <span className="text-lg font-bold text-primary-600 dark:text-primary-400">
+                        {result.score >= 80 ? 'A' : result.score >= 60 ? 'B' : 'C'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Summary */}
               <div className="card">
@@ -231,9 +248,13 @@ export default function ResumeOptimizerPage() {
                   )}
                 </button>
                 {expandedSections.includes('summary') && (
-                  <p className="mt-4 text-slate-600 dark:text-slate-300">
-                    {result.summary || 'Your resume shows strong alignment with the job requirements. Focus on the suggested improvements to increase your match score.'}
-                  </p>
+                  <div className="mt-4 space-y-2 text-slate-600 dark:text-slate-300">
+                    {result.strengths && <p><span className="font-medium text-green-700 dark:text-green-400">Reads well:</span> {result.strengths}</p>}
+                    {result.weaknesses && <p><span className="font-medium text-amber-700 dark:text-amber-400">Could be stronger:</span> {result.weaknesses}</p>}
+                    {!result.strengths && !result.weaknesses && (
+                      <p className="text-sm text-slate-500 dark:text-slate-400">No written summary came back for this analysis.</p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -259,7 +280,7 @@ export default function ResumeOptimizerPage() {
                       Add these keywords to improve ATS compatibility:
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {(result.missingKeywords || ['project management', 'agile', 'stakeholder communication', 'data analysis']).map((keyword: string, i: number) => (
+                      {result.keywordsMissing.map((keyword: string, i: number) => (
                         <span
                           key={i}
                           className="px-3 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-full text-sm"
@@ -290,12 +311,7 @@ export default function ResumeOptimizerPage() {
                 </button>
                 {expandedSections.includes('improvements') && (
                   <ul className="mt-4 space-y-3">
-                    {(result.improvements || [
-                      'Add quantifiable achievements (e.g., "increased sales by 25%")',
-                      'Include more action verbs at the start of bullet points',
-                      'Add a professional summary section',
-                      'List relevant certifications prominently',
-                    ]).map((improvement: string, i: number) => (
+                    {result.improvements.map((improvement: { section: string | null; suggestion: string }, i: number) => (
                       <li
                         key={i}
                         className="flex items-start space-x-2 text-slate-600 dark:text-slate-300"
@@ -303,43 +319,17 @@ export default function ResumeOptimizerPage() {
                         <span className="w-5 h-5 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center text-purple-600 dark:text-purple-400 text-xs flex-shrink-0 mt-0.5">
                           {i + 1}
                         </span>
-                        <span>{improvement}</span>
+                        <span>{improvement.section ? improvement.section + ': ' : ''}{improvement.suggestion}</span>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
 
-              {/* Optimized Resume */}
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-slate-900 dark:text-white">
-                    Optimized Resume
-                  </h3>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => copyToClipboard(result.optimizedResume || resume)}
-                      className="btn-outline text-sm py-1.5 flex items-center space-x-1"
-                    >
-                      <Copy className="w-4 h-4" />
-                      <span>Copy</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadText('optimised-resume.txt', result.optimizedResume || resume)}
-                      className="btn-primary text-sm py-1.5 flex items-center space-x-1"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download</span>
-                    </button>
-                  </div>
-                </div>
-                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 max-h-64 overflow-y-auto">
-                  <pre className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap font-sans">
-                    {result.optimizedResume || 'Optimized resume content will appear here...'}
-                  </pre>
-                </div>
-              </div>
+              {/* There is deliberately no "optimized resume" download here. The
+                  analysis reviews her document; it does not rewrite it, and the
+                  panel that used to sit in this spot could only ever offer a
+                  fabricated sample or her own text back under a new name. */}
             </div>
           )}
         </div>

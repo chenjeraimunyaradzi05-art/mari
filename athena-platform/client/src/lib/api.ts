@@ -636,7 +636,7 @@ export const aiApi = {
 
   scanOpportunities: (data: any) => api.post('/ai/opportunity-radar', data),
 
-  resumeOptimizer: (data: { resumeText: string; targetJobId?: string }) =>
+  resumeOptimizer: (data: { resumeText: string; jobDescription?: string; targetJobId?: string }) =>
     api.post('/ai/resume-optimizer', data),
 
   interviewCoach: (data: { jobId: string; questionType?: string }) =>
@@ -1557,6 +1557,12 @@ export const creatorApi = {
   requestPayout: (data: { amount: number }) => api.post('/creator/payouts/request', data),
 
   getGifts: () => api.get('/creator/gifts'),
+
+  // A gift from a creator's profile, outside a live stream (the live path is
+  // livestreamApi.gift). The server checks the receiver is a monetized
+  // creator, debits the sender's points and credits the creator's share.
+  sendGift: (data: { receiverId: string; giftType: string; message?: string }) =>
+    api.post('/creator/gifts/send', data),
 
   getSentGifts: () => api.get('/creator/gifts/sent'),
 
