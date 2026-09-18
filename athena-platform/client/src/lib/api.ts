@@ -1062,7 +1062,10 @@ export const businessApi = {
     api.patch(`/business/grants/applications/${id}`, data),
 
   // Investors
-  getInvestors: (params?: { type?: string; industry?: string; stage?: string; region?: string; page?: number; limit?: number }) =>
+  // minCheck and maxCheck name the cheque range a round needs; an investor
+  // stays in the results when their published range overlaps it, and an
+  // investor with no published sizes is never hidden by the filter.
+  getInvestors: (params?: { type?: string; industry?: string; stage?: string; region?: string; minCheck?: number; maxCheck?: number; page?: number; limit?: number }) =>
     api.get('/business/investors', { params }),
 
   getInvestor: (id: string) => api.get(`/business/investors/${id}`),

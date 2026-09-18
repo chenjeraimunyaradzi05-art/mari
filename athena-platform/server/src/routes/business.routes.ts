@@ -1061,6 +1061,26 @@ router.get('/investors', async (req: AuthRequest, res: Response, next: NextFunct
       where.regions = { has: region as string };
     }
 
+    // Cheque size is an overlap test: the founder names the range her round
+    // needs and an investor stays in when their published range intersects it.
+    // An investor who has not published sizes stays in too, because an unknown
+    // range cannot be disproved and silently hiding them would make the
+    // directory look thinner than it is.
+    const wantsAtLeast = Number(minCheck);
+    if (Number.isFinite(wantsAtLeast)) {
+      where.AND = [
+        ...(where.AND ?? []),
+        { OR: [{ maxCheckSize: null }, { maxCheckSize: { gte: wantsAtLeast } }] },
+      ];
+    }
+    const wantsAtMost = Number(maxCheck);
+    if (Number.isFinite(wantsAtMost)) {
+      where.AND = [
+        ...(where.AND ?? []),
+        { OR: [{ minCheckSize: null }, { minCheckSize: { lte: wantsAtMost } }] },
+      ];
+    }
+
     const [investors, total] = await Promise.all([
       prisma.investor.findMany({
         where,

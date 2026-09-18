@@ -40,6 +40,8 @@ export default function InvestorsPage() {
   const [stage, setStage] = useState('');
   const [industry, setIndustry] = useState('');
   const [region, setRegion] = useState('');
+  const [minCheck, setMinCheck] = useState('');
+  const [maxCheck, setMaxCheck] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
@@ -58,6 +60,8 @@ export default function InvestorsPage() {
           stage: stage || undefined,
           industry: industry || undefined,
           region: region || undefined,
+          minCheck: minCheck ? Number(minCheck) : undefined,
+          maxCheck: maxCheck ? Number(maxCheck) : undefined,
         }),
         businessApi.getMyInvestorIntroductions(),
       ]);
@@ -74,7 +78,7 @@ export default function InvestorsPage() {
 
   useEffect(() => {
     loadData();
-  }, [type, stage, industry, region]);
+  }, [type, stage, industry, region, minCheck, maxCheck]);
 
   const handleRequestIntro = async (investorId: string) => {
     setSavingId(investorId);
@@ -125,8 +129,9 @@ export default function InvestorsPage() {
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid gap-4 md:grid-cols-4">
         <div>
-          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Type</label>
+          <label htmlFor="investor-type" className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Type</label>
           <select
+            id="investor-type"
             value={type}
             onChange={(event) => setType(event.target.value)}
             className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
@@ -139,8 +144,9 @@ export default function InvestorsPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Stage</label>
+          <label htmlFor="investor-stage" className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Stage</label>
           <input
+            id="investor-stage"
             value={stage}
             onChange={(event) => setStage(event.target.value)}
             placeholder="e.g. Seed"
@@ -148,8 +154,9 @@ export default function InvestorsPage() {
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Industry</label>
+          <label htmlFor="investor-industry" className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Industry</label>
           <input
+            id="investor-industry"
             value={industry}
             onChange={(event) => setIndustry(event.target.value)}
             placeholder="e.g. Health"
@@ -157,11 +164,38 @@ export default function InvestorsPage() {
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Region</label>
+          <label htmlFor="investor-region" className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Region</label>
           <input
+            id="investor-region"
             value={region}
             onChange={(event) => setRegion(event.target.value)}
             placeholder="e.g. ANZ"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label htmlFor="investor-min-check" className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Smallest cheque</label>
+          <input
+            id="investor-min-check"
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={minCheck}
+            onChange={(event) => setMinCheck(event.target.value)}
+            placeholder="e.g. 50000"
+            className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label htmlFor="investor-max-check" className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Largest cheque</label>
+          <input
+            id="investor-max-check"
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={maxCheck}
+            onChange={(event) => setMaxCheck(event.target.value)}
+            placeholder="e.g. 250000"
             className="mt-2 w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
           />
         </div>
