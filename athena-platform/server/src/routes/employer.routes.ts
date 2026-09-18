@@ -726,7 +726,12 @@ router.delete(
         where: { id: memberId },
       });
 
-      if (!targetMember) {
+      // The middleware proves the caller manages :orgId; this proves the row
+      // belongs to it. Without the second half, a manager of one organisation
+      // could delete memberships of any other by putting her own org in the
+      // URL and someone else's member id beside it. A foreign row answers the
+      // same 404 a missing one does, so ids cannot be probed.
+      if (!targetMember || targetMember.organizationId !== orgId) {
         throw new ApiError(404, 'Member not found');
       }
 
