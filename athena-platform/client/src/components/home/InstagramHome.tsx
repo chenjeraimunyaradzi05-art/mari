@@ -542,7 +542,10 @@ export default function InstagramHome() {
       <HomeHeader />
       {/* Wide container with tight gutters: the previous max-w-6xl left large
           empty margins either side of a single 470px column. */}
-      <div className="mx-auto flex w-full max-w-[1600px] gap-5 px-3 xl:gap-6 xl:px-5">
+      {/* The landing spot for "Skip to main content": the first thing after
+          the header, holding all three columns. A div rather than a second
+          main, because the feed column below already claims that landmark. */}
+      <div id="main-content" tabIndex={-1} className="mx-auto flex w-full max-w-[1600px] gap-5 px-3 xl:gap-6 xl:px-5">
         {/* Left column, empty for now: the navigation lives in the header. */}
         <aside aria-hidden className="hidden w-16 flex-shrink-0 md:block xl:w-56" />
 

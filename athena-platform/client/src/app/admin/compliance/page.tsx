@@ -105,7 +105,7 @@ export default function AdminCompliancePage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main id="main-content" tabIndex={-1} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-slate-600 dark:text-slate-300">Window (days)</span>

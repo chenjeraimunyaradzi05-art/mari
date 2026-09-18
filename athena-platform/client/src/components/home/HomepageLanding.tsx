@@ -136,7 +136,7 @@ const platformAbilities = [
 export default function HomepageLanding() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/90">
+      <nav id="main-nav" tabIndex={-1} className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex min-w-0 items-center gap-3">
             <Image
@@ -207,7 +207,7 @@ export default function HomepageLanding() {
         </div>
       </nav>
 
-      <main>
+      <main id="main-content" tabIndex={-1}>
         {/* Hero */}
         <section className="relative overflow-hidden bg-aurora">
           <div className="cyber-grid pointer-events-none absolute inset-0 opacity-40" aria-hidden="true" />

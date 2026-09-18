@@ -164,8 +164,8 @@ export default function DashboardLayout({
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-4 px-2">
+        {/* Navigation. The id is where "Skip to navigation" lands. */}
+        <nav id="main-nav" tabIndex={-1} className="flex-1 overflow-y-auto py-4 px-2">
           <ul className="space-y-1">
             {modeNavigation[mode].map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
@@ -450,8 +450,9 @@ export default function DashboardLayout({
           <WellnessPanel menu={wellness} className="hidden lg:block" />
         </header>
 
-        {/* Page content */}
-        <main className="min-h-[calc(100vh-4rem)]">{children}</main>
+        {/* Page content. The id is where "Skip to main content" lands, past
+            the header and the sidebar. */}
+        <main id="main-content" tabIndex={-1} className="min-h-[calc(100vh-4rem)]">{children}</main>
       </div>
     </div>
   );

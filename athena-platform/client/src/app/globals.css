@@ -414,11 +414,15 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:not([tabindex="-1"]):focus-visible {
   outline: 2px solid #f43f5e;
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+/* tabindex="-1" marks a skip-link landing spot: focus arrives there by
+ * programme, never by tabbing, and a ring drawn around an entire content
+ * region reads as the page malfunctioning rather than as feedback. */
 
 /* Dark values for the surface utilities, as plain rules outside the layer. */
 .dark .surface {

@@ -180,7 +180,7 @@ export default function AdminWomenGatePage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main id="main-content" tabIndex={-1} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <section className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <div className="flex items-center gap-2 mb-4">
             <KeyRound className="h-5 w-5 text-purple-600" />

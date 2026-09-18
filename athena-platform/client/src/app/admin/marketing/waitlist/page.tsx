@@ -18,7 +18,7 @@ export default function AdminMarketingWaitlistPage() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main id="main-content" tabIndex={-1} className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Sync waitlist data to see signup velocity and invite cohorts.

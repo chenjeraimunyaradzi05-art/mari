@@ -94,7 +94,10 @@ export function HomeHeader() {
   );
 
   return (
-    <header ref={rootRef} className="sticky top-0 z-40 border-b border-rose-100/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
+    // The header carries the "Skip to navigation" id rather than the nav
+    // inside it, because that nav is display:none below lg and a hidden
+    // landing spot silently swallows the jump on a phone.
+    <header id="main-nav" tabIndex={-1} ref={rootRef} className="sticky top-0 z-40 border-b border-rose-100/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       {/* A hairline of the brand gradient along the top edge. */}
       <div aria-hidden className="h-[2px] w-full bg-[linear-gradient(90deg,#f43f5e_0%,#a855f7_50%,#f59e0b_100%)] opacity-80" />
       <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-3 xl:px-5">
