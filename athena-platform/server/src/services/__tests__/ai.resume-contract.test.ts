@@ -49,6 +49,12 @@ describe('The resume analysis contract', () => {
     ]);
   });
 
+  it('a job match without a configured model is null, not a fabricated number', async () => {
+    // It used to answer 75% with "Skill A" missing; a zero on failure; or a
+    // thrown error in production. Null is the only honest value: no reading.
+    await expect(aiService.evaluateJobMatch('profile', 'job description')).resolves.toBeNull();
+  });
+
   it('reads the field names the model was asked for, old and new', () => {
     const result = normaliseResumeAnalysis({
       strengthAnalysis: 'Clear structure',

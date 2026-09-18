@@ -463,30 +463,46 @@ Candidate answer: ${params.answer}`;
      }
   }
 
-  async evaluateJobMatch(userProfile: string, jobDescription: string): Promise<any> {
+  /**
+   * Null means "no AI reading exists", and the caller keeps whatever heuristic
+   * it already had. The previous version answered three ways when it could not
+   * run, all of them fabrications: a 75% with "Skill A" missing when
+   * simulating, a thrown error in production without a key (taking the whole
+   * recommendations request down with it), and a score of 0 on failure, which
+   * reads as "you are not a match" when the truth is "nothing was evaluated".
+   */
+  async evaluateJobMatch(
+    userProfile: string,
+    jobDescription: string
+  ): Promise<{ score: number | null; analysis: string | null; missingSkills: string[] } | null> {
     if (!this.openai) {
-      this.ensureOpenAI('job match evaluation');
-        return {
-            score: 75,
-            analysis: "Simulated match analysis: Good skill overlap.",
-            missingSkills: ["Skill A"]
-        };
+      return null;
     }
-    
+
     try {
         const systemPrompt = "You are a recruiter. Evaluate the match between a candidate and a job. Return JSON: { score: 0-100, analysis: string, missingSkills: string[] }";
-        const userPrompt = `Candidate: ${userProfile}\nJob: ${jobDescription}`;
+        const parts = [
+          asUntrustedBlock('candidate profile', userProfile, 6000),
+          asUntrustedBlock('job description', jobDescription, 8000),
+        ];
 
         const completion = await this.openai.chat.completions.create({
-             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: parts.join('\n\n') }],
              model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
-             response_format: { type: 'json_object' }
+             response_format: { type: 'json_object' },
+             max_tokens: DEFAULT_MAX_TOKENS,
         });
-        const content = completion.choices[0]?.message?.content || '{}';
-        return JSON.parse(content);
+        const raw = JSON.parse(completion.choices[0]?.message?.content || '{}');
+        const score = Number(raw?.score);
+
+        return {
+          score: Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null,
+          analysis: stringOrNull(raw?.analysis),
+          missingSkills: stringList(raw?.missingSkills),
+        };
     } catch (e) {
         logger.error('AI Job Match failed', e);
-        return { score: 0, analysis: "Error analyzing match", missingSkills: [] };
+        return null;
     }
   }
 

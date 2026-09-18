@@ -153,17 +153,26 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
     // Sort by match score
     jobsWithScores.sort((a, b) => b.matchScore - a.matchScore);
 
-    // AI Enrich the top 3 matches with deeper analysis
+    // AI-enrich the top three matches. The AI reading is an upgrade, never a
+    // requirement: when it is null or fails, the job keeps its skill-overlap
+    // score and simply carries no insight, and one bad enrichment cannot take
+    // the other recommendations down with it. ?? rather than ||, because a
+    // genuine 0 from the model is an answer, not an absence.
     const topJobs = jobsWithScores.slice(0, 3);
     const enrichedTopJobs = await Promise.all(topJobs.map(async (job) => {
-        const profileContext = `Headline: ${user.headline}. Skills: ${skills.join(', ')}. Experience: ${user.experience.length} roles.`;
-        const analysis = await aiService.evaluateJobMatch(profileContext, job.description);
-        return {
-            ...job,
-            matchScore: analysis.score || job.matchScore, // Prefer AI score
-            aiInsight: analysis.analysis,
-            missingSkills: analysis.missingSkills
-        };
+        try {
+            const profileContext = `Headline: ${user.headline}. Skills: ${skills.join(', ')}. Experience: ${user.experience.length} roles.`;
+            const analysis = await aiService.evaluateJobMatch(profileContext, job.description);
+            if (!analysis) return job;
+            return {
+                ...job,
+                matchScore: analysis.score ?? job.matchScore,
+                aiInsight: analysis.analysis,
+                missingSkills: analysis.missingSkills,
+            };
+        } catch {
+            return job;
+        }
     }));
 
     // Combine enriched top jobs with the rest (unenriched)
