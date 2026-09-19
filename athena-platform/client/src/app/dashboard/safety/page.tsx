@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -21,6 +22,7 @@ import {
   DoorOpen,
   Eraser,
   ExternalLink,
+  Home,
   KeyRound,
   Loader2,
   Lock,
@@ -369,6 +371,18 @@ export default function SafetyPage() {
               <Toggle on={s.panicButtonEnabled} onChange={(v) => update.mutate({ panicButtonEnabled: v })} label="Safety alert button" description="Lets you tell your emergency contacts with one tap." disabled={update.isPending} />
               <Toggle on={s.safeExitEnabled} onChange={(v) => update.mutate({ safeExitEnabled: v })} label="Quick exit with the Escape key" description="Pressing Escape on this page leaves for the address below." disabled={update.isPending} />
             </div>
+            <Link
+              href="/dashboard/housing?dvSafe=true"
+              className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-sm hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800/60"
+            >
+              <Home className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-600" />
+              <span>
+                <span className="block font-medium text-slate-900 dark:text-white">Safe housing</span>
+                <span className="block text-xs text-slate-500 dark:text-slate-400">
+                  DV-safe places, checked by ATHENA staff, shown to members with Safe Mode on{s.isSafeMode ? '' : ' (turn it on above to see them)'}. The person who listed one sees you as an alias, not your name.
+                </span>
+              </span>
+            </Link>
             <form
               onSubmit={(event) => {
                 event.preventDefault();

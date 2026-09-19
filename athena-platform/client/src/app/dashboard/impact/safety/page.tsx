@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Shield, Loader2, Phone, MapPin, Lock, FileText, AlertTriangle } from 'lucide-react';
+import { Shield, Loader2, Phone, MapPin, Lock, FileText, AlertTriangle, Home } from 'lucide-react';
 import { impactApi } from '@/lib/api';
 import { SafeModeBanner } from '@/components/safety/SafeModeBanner';
 import { safeHref } from '@/lib/safe-href';
@@ -110,6 +110,17 @@ export default function SafetyPage() {
       </div>
 
       <SafeModeBanner />
+
+      {/* Safe housing: DV-safe places are checked by staff and shown only to members with Safe Mode on or a verified account. */}
+      <Link
+        href="/dashboard/housing?dvSafe=true"
+        className="flex items-start gap-3 rounded-xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900 hover:bg-purple-100 dark:border-purple-900/50 dark:bg-purple-900/20 dark:text-purple-100"
+      >
+        <Home className="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <span>
+          <span className="font-semibold">Safe housing.</span> DV-safe, emergency and transitional places, checked by ATHENA staff and shown only to members with Safe Mode on or a verified account. The address stays hidden until the lister answers you, and they see you as an alias, not your name.
+        </span>
+      </Link>
 
       {/* Emergency Banner */}
       <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">

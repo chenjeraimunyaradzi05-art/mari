@@ -113,11 +113,13 @@ export default function HousingPage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Section icon={ShieldCheck} title="Safe housing" description="Listings from agents and members who know what a safe home means, some of them only for women leaving a dangerous one.">
+        <Section icon={ShieldCheck} title="Safe housing" description="Listings from agents and members who know what a safe home means, some of them shown only to women leaving a dangerous one.">
           <ul className="space-y-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
             <li>Ask about a place through the platform; the address is not shown until the person who listed it answers you.</li>
+            <li>A listing marked DV-safe is checked by ATHENA staff before it shows, and only members with Safe Mode on or a verified account can see DV-safe, emergency and transitional places.</li>
+            <li>On a DV-safe listing the person who listed it sees you as an alias, not your name, until you are approved and choose to share it.</li>
             <li>Flexible leases, break clauses and emergency and transitional places are marked as such.</li>
-            <li>Safe mode hides this part of the site from anyone looking over your shoulder.</li>
+            <li>Safe Mode gives you a quick-exit key, keeps notifications vague and hides you from search while you look.</li>
           </ul>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href="/dashboard/housing" className="focusable rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900">See the listings</Link>
