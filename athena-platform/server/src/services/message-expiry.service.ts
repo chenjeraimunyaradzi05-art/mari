@@ -130,6 +130,13 @@ export async function setDisappearingTtl(conversationId: string, userId: string,
  * Deletes every message past its expiry, in batches, and tells both sides of
  * each affected thread which ids are gone. Unread counts are re-derived for
  * those threads, since a message that vanished unread must not stay counted.
+ *
+ * Everything after the delete used to run a query per row: a participant
+ * lookup for each conversation, then an unread count and an update for each
+ * participant of each conversation. A batch that cleared 500 messages spread
+ * over 200 threads therefore issued over a thousand round trips on a timer
+ * nobody is watching, and it got worse as the platform grew. It is now two
+ * reads and one write per batch, with the same arithmetic done in memory.
  */
 export async function sweepExpiredMessages(now = new Date()): Promise<number> {
   let removed = 0;
@@ -153,21 +160,79 @@ export async function sweepExpiredMessages(now = new Date()): Promise<number> {
       byConversation.set(message.conversationId, list);
     }
 
-    for (const [conversationId, messageIds] of byConversation) {
-      const participants = await prisma.conversationParticipant.findMany({
-        where: { conversationId },
-        select: { id: true, userId: true },
-      });
+    if (byConversation.size > 0) {
+      const conversationIds = [...byConversation.keys()];
 
+      const [participants, unreadBySender] = await Promise.all([
+        prisma.conversationParticipant.findMany({
+          where: { conversationId: { in: conversationIds } },
+          select: { id: true, userId: true, conversationId: true },
+        }),
+        // A participant's unread count is everything still unread in the thread
+        // that somebody else sent, so one count grouped by sender answers it for
+        // every participant of every affected thread at once. This runs after
+        // the delete above, so the rows that just vanished are already gone.
+        prisma.message.groupBy({
+          by: ['conversationId', 'senderId'],
+          where: { conversationId: { in: conversationIds }, isRead: false },
+          _count: { _all: true },
+        }),
+      ]);
+
+      const unreadInThread = new Map<string, number>();
+      const unreadFromSender = new Map<string, number>();
+      for (const row of unreadBySender) {
+        if (!row.conversationId) continue;
+        const count = row._count._all;
+        unreadInThread.set(row.conversationId, (unreadInThread.get(row.conversationId) ?? 0) + count);
+        unreadFromSender.set(`${row.conversationId}:${row.senderId}`, count);
+      }
+
+      const participantsByConversation = new Map<string, typeof participants>();
       for (const participant of participants) {
-        const unread = await prisma.message.count({
-          where: { conversationId, senderId: { not: participant.userId }, isRead: false },
+        const list = participantsByConversation.get(participant.conversationId) ?? [];
+        list.push(participant);
+        participantsByConversation.set(participant.conversationId, list);
+      }
+
+      // Participants that land on the same count share one updateMany, so the
+      // usual sweep — where everyone ends on nothing unread — is a single
+      // statement. updateMany also shrugs at a participant who left the thread
+      // mid-sweep, where update would have thrown and abandoned the rest.
+      const idsByUnread = new Map<number, string[]>();
+      const notices: Array<{ userId: string; conversationId: string; messageIds: string[] }> = [];
+
+      for (const [conversationId, messageIds] of byConversation) {
+        for (const participant of participantsByConversation.get(conversationId) ?? []) {
+          const unread =
+            (unreadInThread.get(conversationId) ?? 0) -
+            (unreadFromSender.get(`${conversationId}:${participant.userId}`) ?? 0);
+          const ids = idsByUnread.get(unread) ?? [];
+          ids.push(participant.id);
+          idsByUnread.set(unread, ids);
+          notices.push({ userId: participant.userId, conversationId, messageIds });
+        }
+      }
+
+      if (idsByUnread.size > 0) {
+        await prisma.$transaction(
+          [...idsByUnread].map(([unread, ids]) =>
+            prisma.conversationParticipant.updateMany({
+              where: { id: { in: ids } },
+              data: { unreadCount: unread, hasUnread: unread > 0 },
+            })
+          )
+        );
+      }
+
+      // The emission stays one call per participant: it goes to that person's
+      // own socket room, so there is nothing to group. It still happens after
+      // the counts are written, the order the per-row version used.
+      for (const notice of notices) {
+        emitToUserRoom(notice.userId, 'messages:expired', {
+          conversationId: notice.conversationId,
+          messageIds: notice.messageIds,
         });
-        await prisma.conversationParticipant.update({
-          where: { id: participant.id },
-          data: { unreadCount: unread, hasUnread: unread > 0 },
-        });
-        emitToUserRoom(participant.userId, 'messages:expired', { conversationId, messageIds });
       }
     }
 

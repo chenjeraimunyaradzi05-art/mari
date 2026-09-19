@@ -5,7 +5,7 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     conversation: { findUnique: jest.fn(), update: jest.fn() },
     conversationParticipant: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
-    message: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), updateMany: jest.fn(), deleteMany: jest.fn(), count: jest.fn() },
+    message: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), updateMany: jest.fn(), deleteMany: jest.fn(), count: jest.fn(), groupBy: jest.fn() },
     messageReaction: { findUnique: jest.fn(), create: jest.fn(), deleteMany: jest.fn() },
     user: { findUnique: jest.fn() },
     userSafetySettings: { findMany: jest.fn() },
@@ -176,26 +176,92 @@ describe('Disappearing messages', () => {
   });
 
   it('the sweep deletes expired rows, fixes unread counts and tells both sides', async () => {
-    prisma.message.findMany
-      .mockResolvedValueOnce([
-        { id: 'old-1', conversationId: CONVERSATION },
-        { id: 'old-2', conversationId: CONVERSATION },
-      ])
-      .mockResolvedValueOnce([]);
+    // One batch only. A second queued answer used to sit here as if the sweep
+    // came round again, but two rows is short of SWEEP_BATCH, so the loop
+    // breaks after the first read and that answer was never consumed.
+    prisma.message.findMany.mockResolvedValueOnce([
+      { id: 'old-1', conversationId: CONVERSATION },
+      { id: 'old-2', conversationId: CONVERSATION },
+    ]);
     prisma.message.deleteMany.mockResolvedValue({ count: 2 });
-    prisma.conversationParticipant.findMany.mockResolvedValue([{ id: 'cp-1', userId: VIEWER }, { id: 'cp-2', userId: OTHER }]);
-    prisma.message.count.mockResolvedValue(0);
-    prisma.conversationParticipant.update.mockResolvedValue({});
+    prisma.conversationParticipant.findMany.mockResolvedValue([
+      { id: 'cp-1', userId: VIEWER, conversationId: CONVERSATION },
+      { id: 'cp-2', userId: OTHER, conversationId: CONVERSATION },
+    ]);
+    // Nothing is left unread in the thread once the expired rows are deleted.
+    prisma.message.groupBy.mockResolvedValue([]);
+    prisma.conversationParticipant.updateMany.mockResolvedValue({ count: 2 });
+    prisma.$transaction.mockResolvedValue([{ count: 2 }]);
 
-    const removed = await sweepExpiredMessages(new Date('2026-09-04T10:00:00Z'));
+    const now = new Date('2026-09-04T10:00:00Z');
+    const removed = await sweepExpiredMessages(now);
 
     expect(removed).toBe(2);
+    // The read is bounded and happens once: a batch shorter than SWEEP_BATCH
+    // (500) means there is nothing left to sweep, so going round again would
+    // be a wasted query on a timer nobody is watching.
+    expect(prisma.message.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { expiresAt: { lte: now } }, take: 500 })
+    );
+    // Both ids go in one delete, not a delete per message.
+    expect(prisma.message.deleteMany).toHaveBeenCalledTimes(1);
     expect(prisma.message.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['old-1', 'old-2'] } } });
-    expect(prisma.conversationParticipant.update).toHaveBeenCalledTimes(2);
-    expect(prisma.conversationParticipant.update.mock.calls[0][0].data).toEqual({ unreadCount: 0, hasUnread: false });
 
+    // The sweep reads the whole batch at once: one participant lookup and one
+    // grouped count, never a count or an update per participant.
+    expect(prisma.conversationParticipant.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.conversationParticipant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { conversationId: { in: [CONVERSATION] } } })
+    );
+    expect(prisma.message.groupBy).toHaveBeenCalledTimes(1);
+    expect(prisma.message.count).not.toHaveBeenCalled();
+    expect(prisma.conversationParticipant.update).not.toHaveBeenCalled();
+
+    // Both sides land on nothing unread, so one write covers the pair.
+    expect(prisma.conversationParticipant.updateMany).toHaveBeenCalledTimes(1);
+    const write = prisma.conversationParticipant.updateMany.mock.calls[0][0];
+    expect([...write.where.id.in].sort()).toEqual(['cp-1', 'cp-2']);
+    expect(write.data).toEqual({ unreadCount: 0, hasUnread: false });
+
+    // Each side is told once, and told about both ids in the one payload,
+    // because the batch groups the deleted rows by conversation before it
+    // emits rather than emitting per message.
     const expired = (emitToUserRoom as jest.Mock).mock.calls.filter((c) => c[1] === 'messages:expired');
     expect(expired).toHaveLength(2);
+    expect(expired.map((c) => c[0]).sort()).toEqual([VIEWER, OTHER].sort());
     expect(expired[0][2]).toEqual({ conversationId: CONVERSATION, messageIds: ['old-1', 'old-2'] });
+    expect(expired[1][2]).toEqual({ conversationId: CONVERSATION, messageIds: ['old-1', 'old-2'] });
+  });
+
+  it('the unread count each side is left with still leaves out their own messages', async () => {
+    // clearAllMocks between tests clears the recorded calls, not a queued
+    // mockResolvedValueOnce, so this test empties the queue itself rather than
+    // trusting the test above to have consumed everything it set up.
+    prisma.message.findMany.mockReset();
+    prisma.message.findMany.mockResolvedValue([{ id: 'old-1', conversationId: CONVERSATION }]);
+    prisma.message.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.conversationParticipant.findMany.mockResolvedValue([
+      { id: 'cp-1', userId: VIEWER, conversationId: CONVERSATION },
+      { id: 'cp-2', userId: OTHER, conversationId: CONVERSATION },
+    ]);
+    // Three unread left in the thread: two the viewer sent, one from the other
+    // side. Each side should be left counting only what the other one sent, so
+    // the viewer ends on one and the other participant on two — not three
+    // apiece, which is what a plain per-thread count would have given them.
+    prisma.message.groupBy.mockResolvedValue([
+      { conversationId: CONVERSATION, senderId: VIEWER, _count: { _all: 2 } },
+      { conversationId: CONVERSATION, senderId: OTHER, _count: { _all: 1 } },
+    ]);
+    prisma.conversationParticipant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.$transaction.mockResolvedValue([]);
+
+    await sweepExpiredMessages(new Date('2026-09-04T10:00:00Z'));
+
+    const writes = prisma.conversationParticipant.updateMany.mock.calls.map((c: any) => c[0]);
+    const viewerWrite = writes.find((w: any) => w.where.id.in.includes('cp-1'));
+    const otherWrite = writes.find((w: any) => w.where.id.in.includes('cp-2'));
+    expect(viewerWrite.data).toEqual({ unreadCount: 1, hasUnread: true });
+    expect(otherWrite.data).toEqual({ unreadCount: 2, hasUnread: true });
   });
 });
