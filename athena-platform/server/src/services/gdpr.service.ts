@@ -1,7 +1,20 @@
 /**
- * GDPR Compliance Service
- * Handles DSAR requests, data export, deletion, and compliance operations
- * Phase 4: UK/EU Market Launch
+ * Privacy & Data Rights Service
+ *
+ * DSAR handling, export, erasure, the consent ledger, the processing register,
+ * privacy impact assessments and retention, for every member. The home regime
+ * is the Privacy Act 1988 (Cth) and the Australian Privacy Principles: access
+ * and correction under APP 12 and 13 within a reasonable period (30 days
+ * here), destruction or de-identification under APP 11.2 once information is
+ * no longer needed, and a record of what is held and why (APP 1.2). UK and EU
+ * GDPR rights (Articles 15 to 21, 30 and 35) are served by the same code paths
+ * for members there. Where the GDPR is wider than the APPs (restriction,
+ * portability) the right is offered to everyone rather than gated by region,
+ * since offering more than the law requires harms nobody.
+ *
+ * The class, file and /api/gdpr mount keep their GDPR names for import and
+ * API stability. The APP-by-APP map to this code lives in
+ * docs/compliance/AU_PRIVACY_ACT_AND_NDB.md.
  */
 
 import {
@@ -492,11 +505,20 @@ export class GDPRService {
   }
 
   /**
-   * Create a new DSAR request
+   * Create a new DSAR request.
+   *
+   * Every DSAR route sits behind `authenticate`, so the subject is verified by
+   * their session before the row exists: identityVerified is true from the
+   * start rather than a step somebody has to remember, and the request is
+   * acknowledged on receipt for the same reason. Both are shown to the member
+   * and are what a regulator asks to see. The due date is the APP 12
+   * reasonable period as the OAIC reads it, 30 days, which also covers the one
+   * month Article 12(3) gives UK and EU members.
    */
   async createDSARRequest(input: DSARRequestInput): Promise<any> {
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 30); // GDPR 30-day deadline
+    const receivedAt = new Date();
+    const dueDate = new Date(receivedAt);
+    dueDate.setDate(dueDate.getDate() + 30);
 
     const dsar = await prisma.dSARRequest.create({
       data: {
@@ -504,6 +526,8 @@ export class GDPRService {
         type: input.type,
         status: DSARStatus.PENDING,
         requestDetails: input.requestDetails,
+        identityVerified: true,
+        acknowledgedAt: receivedAt,
         dueDate,
       },
     });

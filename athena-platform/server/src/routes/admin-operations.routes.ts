@@ -15,7 +15,15 @@ import { BreachSeverity, BreachStatus, DataCategory } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
-import { breachNotificationService } from '../services/breach.service';
+import {
+  breachNotificationService,
+  BreachJurisdiction,
+  BREACH_JURISDICTIONS,
+  isBreachJurisdiction,
+  jurisdictionsOf,
+  ndbApplies,
+  seventyTwoHourClockApplies,
+} from '../services/breach.service';
 import {
   ESCALATION_STATUSES,
   EscalationStatus,
@@ -52,19 +60,31 @@ const parseStringArray = (value: unknown, field: string): string[] => {
 };
 
 // ============================================================================
-// BREACH NOTIFICATION (GDPR Articles 33 & 34)
+// BREACH NOTIFICATION
+// Australia: Notifiable Data Breaches scheme, Privacy Act 1988 Part IIIC.
+// UK and EU members: GDPR Articles 33 & 34.
 // ============================================================================
 
 // Article 33 gives 72 hours from becoming aware of a breach to notify the
-// supervisory authority. Everything below is measured against that clock.
+// supervisory authority. Only breaches that touch UK or EU members are
+// measured against it; an Australian-only breach reports NOT_APPLICABLE and
+// is watched through its 30-day NDB assessment window instead.
 const NOTIFICATION_DEADLINE_MS = 72 * 60 * 60 * 1000;
 const DUE_SOON_MS = 24 * 60 * 60 * 1000;
 
-type DeadlineState = 'NOT_REQUIRED' | 'MET' | 'MISSED' | 'OVERDUE' | 'DUE_SOON' | 'ON_TRACK';
+type DeadlineState =
+  | 'NOT_APPLICABLE'
+  | 'NOT_REQUIRED'
+  | 'MET'
+  | 'MISSED'
+  | 'OVERDUE'
+  | 'DUE_SOON'
+  | 'ON_TRACK';
 
 interface BreachDeadline {
-  deadlineAt: string;
-  hoursRemaining: number;
+  /** Null when the 72-hour clock does not apply to the breach. */
+  deadlineAt: string | null;
+  hoursRemaining: number | null;
   state: DeadlineState;
 }
 
@@ -72,15 +92,22 @@ interface DeadlineInput {
   detectedAt: Date | string;
   notificationRequired: boolean;
   regulatorNotifiedAt: Date | string | null;
+  jurisdiction?: string | null;
+  jurisdictions?: string[] | null;
 }
 
 /**
  * Resolve where a breach sits against its 72-hour deadline. MISSED is kept
  * distinct from OVERDUE deliberately: OVERDUE is a live obligation an operator
  * can still discharge, MISSED is a closed one that has to be explained to the
- * regulator instead.
+ * regulator instead. NOT_APPLICABLE is neither: the clock belongs to the UK
+ * and EU, and an Australian breach is not late against a deadline it never had.
  */
 function resolveDeadline(breach: DeadlineInput, now = Date.now()): BreachDeadline {
+  if (!seventyTwoHourClockApplies(breach)) {
+    return { deadlineAt: null, hoursRemaining: null, state: 'NOT_APPLICABLE' };
+  }
+
   const detectedAt = new Date(breach.detectedAt).getTime();
   const deadline = detectedAt + NOTIFICATION_DEADLINE_MS;
   const hoursRemaining = Math.round(((deadline - now) / (1000 * 60 * 60)) * 10) / 10;
@@ -106,6 +133,29 @@ const withDeadline = <T extends DeadlineInput>(breach: T, now = Date.now()) => (
   notificationDeadline: resolveDeadline(breach, now),
 });
 
+const deadlineMs = (deadline: BreachDeadline) =>
+  deadline.deadlineAt ? new Date(deadline.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
+
+/**
+ * The regimes an intake names, validated. Absent, a Queensland entity's
+ * default is Australia alone.
+ */
+const parseJurisdictions = (value: unknown): BreachJurisdiction[] => {
+  if (value === undefined || value === null) return ['AU'];
+  if (!Array.isArray(value)) {
+    throw new ApiError(400, 'jurisdictions must be an array');
+  }
+  const regimes = Array.from(new Set(value.map((entry) => String(entry).trim().toUpperCase())));
+  const unknown = regimes.find((regime) => !isBreachJurisdiction(regime));
+  if (unknown) {
+    throw new ApiError(400, `jurisdictions must be drawn from ${BREACH_JURISDICTIONS.join(', ')}`);
+  }
+  if (regimes.length === 0) {
+    throw new ApiError(400, 'At least one jurisdiction is required');
+  }
+  return regimes as BreachJurisdiction[];
+};
+
 const isBreachSeverity = (value: unknown): value is BreachSeverity =>
   Object.values(BreachSeverity).includes(value as BreachSeverity);
 
@@ -117,11 +167,14 @@ const isDataCategory = (value: unknown): value is DataCategory =>
 
 /**
  * POST /admin/breaches
- * Record a personal data breach and start the 72-hour clock
+ * Record a personal data breach and start whichever clock applies: the 30-day
+ * NDB assessment window for Australia (the default), the 72-hour regulator
+ * clock for UK and EU members, or both.
  */
 router.post('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { title, description, severity, dataCategories, affectedRecords, affectedUsers } = req.body ?? {};
+    const jurisdictions = parseJurisdictions(req.body?.jurisdictions);
 
     if (typeof title !== 'string' || !title.trim()) {
       throw new ApiError(400, 'title is required');
@@ -153,12 +206,15 @@ router.post('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, n
       affectedRecords: affectedRecords === undefined ? undefined : Number(affectedRecords),
       affectedUsers: affectedUsers === undefined ? undefined : Number(affectedUsers),
       occurredAt: parseDate(req.body?.occurredAt, 'occurredAt'),
+      jurisdictions,
     });
 
     logger.warn('Data breach recorded', {
       breachId: breach.id,
       severity: breach.severity,
+      jurisdictions,
       notificationRequired: breach.notificationRequired,
+      assessmentDueAt: breach.assessmentDueAt,
       adminId: req.user?.id,
     });
 
@@ -170,9 +226,10 @@ router.post('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, n
 
 /**
  * GET /admin/breaches/deadlines
- * The 72-hour monitor: every breach still owing a regulator notification,
- * soonest deadline first. Declared before /breaches/:id so that "deadlines" is
- * not read as an id.
+ * The 72-hour monitor: every UK/EU breach still owing a regulator
+ * notification, soonest deadline first. Australian-only breaches are not on
+ * this clock and are listed by /breaches/ndb-assessments-due instead.
+ * Declared before /breaches/:id so that "deadlines" is not read as an id.
  */
 router.get('/breaches/deadlines', ...adminOnly, async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -181,11 +238,10 @@ router.get('/breaches/deadlines', ...adminOnly, async (_req: AuthRequest, res: R
 
     const breaches = pending
       .map((breach) => withDeadline(breach, now))
-      .sort(
-        (a, b) =>
-          new Date(a.notificationDeadline.deadlineAt).getTime() -
-          new Date(b.notificationDeadline.deadlineAt).getTime()
-      );
+      // The query already excludes them; this keeps the monitor honest if a
+      // row arrives from a path that did not.
+      .filter((breach) => breach.notificationDeadline.state !== 'NOT_APPLICABLE')
+      .sort((a, b) => deadlineMs(a.notificationDeadline) - deadlineMs(b.notificationDeadline));
 
     res.json({
       breaches,
@@ -248,11 +304,15 @@ router.get('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, ne
 
     res.json({
       breaches,
+      // Overdue, due-soon and notified-late count only breaches the 72-hour
+      // clock applies to: an Australian breach is NOT_APPLICABLE and matches
+      // none of them. Its window is counted by /breaches/ndb-assessments-due.
       summary: {
         total: breaches.length,
         overdue: breaches.filter((b) => b.notificationDeadline.state === 'OVERDUE').length,
         dueWithin24Hours: breaches.filter((b) => b.notificationDeadline.state === 'DUE_SOON').length,
         notifiedLate: breaches.filter((b) => b.notificationDeadline.state === 'MISSED').length,
+        onSeventyTwoHourClock: breaches.filter((b) => b.notificationDeadline.state !== 'NOT_APPLICABLE').length,
       },
     });
   } catch (error) {
@@ -262,7 +322,9 @@ router.get('/breaches', ...adminOnly, async (req: AuthRequest, res: Response, ne
 
 /**
  * GET /admin/breaches/:id
- * Full compliance record: the breach, its timeline and its Article 33 position
+ * Full compliance record: the breach, its timeline, and its position against
+ * whichever clock applies (the NDB assessment window, the Article 33 deadline,
+ * or both)
  */
 router.get('/breaches/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -322,7 +384,10 @@ router.patch('/breaches/:id', ...adminOnly, async (req: AuthRequest, res: Respon
 
 /**
  * POST /admin/breaches/:id/ndb-assessment
- * Start the Australian thirty-day assessment window on a suspected eligible breach
+ * Start the Australian thirty-day assessment window on a suspected eligible
+ * breach. Intake already does this for a breach recorded as Australian; this
+ * is for one recorded under the GDPR alone that turns out to touch Australian
+ * members, or for a row from before intake opened the window.
  */
 router.post('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -373,14 +438,26 @@ router.patch('/breaches/:id/ndb-assessment', ...adminOnly, async (req: AuthReque
 
 /**
  * POST /admin/breaches/:id/notify-regulator
- * Discharge the Article 33 duty and record when it was discharged
+ * Record that the regulator was told, and when.
+ *
+ * Australia (jurisdiction 'AU'): the body carries the four parts of the
+ * eligible data breach statement (s 26WK) under `statement`, the parts are
+ * stored on the row, and the route refuses until the NDB assessment has found
+ * an eligible data breach, so an unassessed breach cannot be "notified". The
+ * OAIC takes the statement through its web form; the email is the record copy.
+ *
+ * UK and EU: `notificationContent` is the Article 33 notification, measured
+ * against the 72-hour clock.
+ *
+ * `jurisdiction` picks the path and defaults to the breach's first regime.
  */
 router.post(
   '/breaches/:id/notify-regulator',
   ...adminOnly,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { regulatorName, regulatorEmail, notificationContent } = req.body ?? {};
+      const { regulatorName, regulatorEmail, notificationContent, jurisdiction, statement } =
+        req.body ?? {};
 
       if (typeof regulatorName !== 'string' || !regulatorName.trim()) {
         throw new ApiError(400, 'regulatorName is required');
@@ -388,8 +465,8 @@ router.post(
       if (typeof regulatorEmail !== 'string' || !regulatorEmail.includes('@')) {
         throw new ApiError(400, 'A valid regulatorEmail is required');
       }
-      if (typeof notificationContent !== 'string' || !notificationContent.trim()) {
-        throw new ApiError(400, 'notificationContent is required');
+      if (jurisdiction !== undefined && !isBreachJurisdiction(jurisdiction)) {
+        throw new ApiError(400, `jurisdiction must be one of ${BREACH_JURISDICTIONS.join(', ')}`);
       }
 
       const breach = await prisma.dataBreach.findUnique({ where: { id: req.params.id } });
@@ -400,16 +477,41 @@ router.post(
         throw new ApiError(409, 'This breach has already been notified to a regulator');
       }
 
+      const regime: BreachJurisdiction =
+        jurisdiction ?? jurisdictionsOf(breach)[0] ?? 'UK';
+
+      if (regime === 'AU') {
+        const blocker = breachNotificationService.ndbNotificationBlocker(breach);
+        if (blocker) {
+          throw new ApiError(409, blocker);
+        }
+        const validated = breachNotificationService.validateNdbStatement(
+          statement && typeof statement === 'object' ? statement : undefined
+        );
+        if ('missing' in validated) {
+          throw new ApiError(
+            400,
+            `statement.${validated.missing} is required: the OAIC statement must carry the entity's identity and contact details, a description of the breach, the kinds of information concerned, and the steps individuals should take (Privacy Act 1988 s 26WK)`
+          );
+        }
+      } else if (typeof notificationContent !== 'string' || !notificationContent.trim()) {
+        throw new ApiError(400, 'notificationContent is required');
+      }
+
       const updated = await breachNotificationService.notifyRegulator({
         breachId: req.params.id,
         regulatorName: regulatorName.trim(),
         regulatorEmail: regulatorEmail.trim(),
-        notificationContent: notificationContent.trim(),
+        jurisdiction: regime,
+        notificationContent:
+          typeof notificationContent === 'string' ? notificationContent.trim() : undefined,
+        statement: regime === 'AU' ? statement : undefined,
       });
 
       logger.warn('Regulator notified of data breach', {
         breachId: req.params.id,
         regulator: regulatorName.trim(),
+        regime,
         adminId: req.user?.id,
       });
 
@@ -422,15 +524,17 @@ router.post(
 
 /**
  * POST /admin/breaches/:id/notify-users
- * Article 34 notification. The breach record holds only a count of affected
- * users, never their ids, so the ids to notify have to be supplied.
+ * Tell the people affected (Privacy Act s 26WL; GDPR Article 34). The breach
+ * record holds only a count of affected users, never their ids, so the ids to
+ * notify have to be supplied. An Australian breach must also tell them what
+ * they can do: the statement's recommended steps, or `recommendedSteps` here.
  */
 router.post(
   '/breaches/:id/notify-users',
   ...adminOnly,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { notificationContent } = req.body ?? {};
+      const { notificationContent, recommendedSteps } = req.body ?? {};
       const userIds = parseStringArray(req.body?.userIds, 'userIds');
 
       if (userIds.length === 0) {
@@ -439,16 +543,26 @@ router.post(
       if (typeof notificationContent !== 'string' || !notificationContent.trim()) {
         throw new ApiError(400, 'notificationContent is required');
       }
+      if (recommendedSteps !== undefined && typeof recommendedSteps !== 'string') {
+        throw new ApiError(400, 'recommendedSteps must be a string');
+      }
 
       const breach = await prisma.dataBreach.findUnique({ where: { id: req.params.id } });
       if (!breach) {
         throw new ApiError(404, 'Breach not found');
       }
+      if (ndbApplies(breach) && !recommendedSteps?.trim() && !breach.statementRecommendedSteps) {
+        throw new ApiError(
+          400,
+          'People affected by an Australian breach must be told what they can do (Privacy Act 1988 s 26WL). Record the OAIC statement first, or supply recommendedSteps.'
+        );
+      }
 
       await breachNotificationService.notifyAffectedUsers(
         req.params.id,
         userIds,
-        notificationContent.trim()
+        notificationContent.trim(),
+        recommendedSteps?.trim() || undefined
       );
 
       res.json({ success: true, requested: userIds.length });
@@ -862,7 +976,8 @@ router.get('/ops/summary', ...adminOnly, async (_req: AuthRequest, res: Response
     const now = Date.now();
     const deadlines = pendingBreaches
       .map((breach) => resolveDeadline(breach, now))
-      .sort((a, b) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
+      .filter((deadline) => deadline.state !== 'NOT_APPLICABLE')
+      .sort((a, b) => deadlineMs(a) - deadlineMs(b));
 
     res.json({
       maintenance,

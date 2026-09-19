@@ -1,7 +1,14 @@
 /**
  * Consent Management Service
- * Handles granular consent tracking, verification, and audit
- * Phase 4: UK/EU Market Launch
+ *
+ * Granular consent tracking, verification and audit for every member. Under
+ * the Privacy Act 1988 (Cth) consent is what APP 3 and APP 6 turn on for
+ * sensitive information and secondary use, APP 7 and the Spam Act 2003 require
+ * it (or an easy opt-out) for direct marketing, and the ledger here is the
+ * record an entity has to be able to show. For UK and EU members the same
+ * ledger is the GDPR Article 7 record of consent with its Article 6 lawful
+ * basis, and the cookie side follows PECR. One ledger, two regimes; nothing in
+ * this file is gated by region.
  */
 
 import { ConsentType, ConsentStatus, DSARStatus, DSARType } from '@prisma/client';

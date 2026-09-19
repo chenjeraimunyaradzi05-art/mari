@@ -361,6 +361,20 @@ describe('DSAR export and erasure leave an audit trail', () => {
     expect(auditRow.ipAddress).toBeNull();
     expect(auditRow.metadata).toMatchObject({ requestId: 'dsar-delete-1', accountRemoved: true });
   });
+
+  it('acknowledges the request and records the subject as verified on receipt', async () => {
+    prisma.dSARRequest.create.mockResolvedValue({ id: 'dsar-access-1' });
+
+    await gdprService.createDSARRequest({ userId: 'user-123', type: 'ACCESS' as any });
+
+    // The routes are authenticated, so the subject is verified by session
+    // before the row exists; a regulator reading the row sees both stamps.
+    const data = prisma.dSARRequest.create.mock.calls[0][0].data;
+    expect(data.identityVerified).toBe(true);
+    expect(data.acknowledgedAt).toBeInstanceOf(Date);
+    // APP 12's reasonable period, 30 days, counted from the acknowledgement.
+    expect(data.dueDate.getTime() - data.acknowledgedAt.getTime()).toBe(30 * 24 * 60 * 60 * 1000);
+  });
 });
 
 describe('Record of processing activities', () => {

@@ -1,7 +1,19 @@
 /**
- * GDPR & Privacy Routes
- * Handles DSAR requests, consent management, and privacy controls
- * Phase 4: UK/EU Market Launch
+ * Privacy & Data Rights Routes
+ *
+ * Serves every member under the Privacy Act 1988 (Cth) and the Australian
+ * Privacy Principles, the home regime for a Queensland company: access and
+ * correction (APP 12 and 13), the privacy centre's consent ledger (APP 7
+ * direct marketing, with the Spam Act 2003 behind it), cookie consent, the
+ * processing register and privacy impact assessments (APP 1.2), and retention
+ * (APP 11). UK and EU GDPR handling (Articles 15 to 21, cookie consent under
+ * PECR, the Article 30 record, Article 35 DPIAs) is layered on for members
+ * there: the routes are the same, the response periods and headers differ.
+ *
+ * The /api/gdpr mount name predates the Australian framing and is kept for
+ * API stability: the web client, the mobile app and the API contract check all
+ * address it. The APP-by-APP map to these routes lives in
+ * docs/compliance/AU_PRIVACY_ACT_AND_NDB.md.
  */
 
 import { Router, Response, NextFunction } from 'express';
@@ -413,10 +425,16 @@ router.post('/dsar/delete', erasureRateLimit, async (req: AuthRequest, res: Resp
       });
     }
 
+    // The reason is free text that goes straight into the DSAR record, so it
+    // is required to be text and kept to a size a reviewer would actually read.
+    if (reason !== undefined && typeof reason !== 'string') {
+      return res.status(400).json({ success: false, error: 'Reason must be text' });
+    }
+
     const dsar = await gdprService.createDSARRequest({
       userId,
       type: DSARType.DELETION,
-      requestDetails: reason || 'User-initiated account deletion',
+      requestDetails: (typeof reason === 'string' ? reason.trim().slice(0, 2000) : '') || 'User-initiated account deletion',
     });
 
     // Carried out here and now. Telling somebody their account is gone and then
@@ -560,7 +578,10 @@ router.post('/dsar/restrict', restrictRateLimit, async (req: AuthRequest, res: R
     const dsar = await gdprService.createDSARRequest({
       userId,
       type: DSARType.RESTRICTION,
-      requestDetails: JSON.stringify({ processingTypes: requested, reason }),
+      requestDetails: JSON.stringify({
+        processingTypes: requested,
+        reason: reason ? reason.trim().slice(0, 2000) : undefined,
+      }),
     });
 
     const applied = await gdprService.applyProcessingRestriction(dsar.id, requested);

@@ -31,6 +31,7 @@ jest.mock('../../utils/prisma', () => ({
     },
     privacyAuditLog: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     featureFlag: {
@@ -75,12 +76,16 @@ jest.mock('../../utils/logger', () => ({
 
 import app from '../../index';
 import { prisma } from '../../utils/prisma';
+import { sendEmail } from '../../utils/email';
 import { resetMaintenanceCache } from '../../services/feature-flags.service';
 
 const prismaAny: any = prisma;
+const sendEmailMock = sendEmail as unknown as jest.Mock;
 
 const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
+/** A breach from before the regime list existed: no jurisdiction, so the 72-hour clock is kept. */
 const breachRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'breach-1',
   title: 'Exported CV bucket left public',
@@ -92,11 +97,39 @@ const breachRow = (overrides: Record<string, unknown> = {}) => ({
   dataCategories: ['PII'],
   notificationRequired: true,
   regulatorNotifiedAt: null,
+  jurisdictions: [],
+  jurisdiction: null,
+  assessmentDueAt: null,
+  assessmentComplete: false,
+  seriousHarmLikely: null,
+  remediedBeforeHarm: false,
+  statementRecommendedSteps: null,
+  statementLodgedAt: null,
   containmentActions: [],
   remediationActions: [],
   rootCause: null,
   ...overrides,
 });
+
+/** An Australian breach whose assessment found an eligible data breach. */
+const assessedAuRow = (overrides: Record<string, unknown> = {}) =>
+  breachRow({
+    jurisdictions: ['AU'],
+    jurisdiction: 'AU',
+    assessmentDueAt: new Date(Date.now() + 20 * DAY_MS),
+    assessmentComplete: true,
+    seriousHarmLikely: true,
+    remediedBeforeHarm: false,
+    notificationRequired: true,
+    ...overrides,
+  });
+
+const oaicStatement = {
+  entityContact: 'ATHENA Platform Pty Ltd, Queensland, Australia. Privacy contact through the privacy centre.',
+  description: 'CV uploads were readable without credentials for six hours.',
+  informationKinds: ['names', 'employment history'],
+  recommendedSteps: 'Watch for unexpected recruiter contact and report anything odd through the privacy centre.',
+};
 
 describe('Admin operational routes', () => {
   beforeEach(() => {
@@ -112,8 +145,8 @@ describe('Admin operational routes', () => {
   });
 
   describe('Breach notification', () => {
-    it('POST /api/admin/breaches records the breach and reports its 72-hour position', async () => {
-      prismaAny.dataBreach.create.mockResolvedValue(breachRow());
+    it('POST /api/admin/breaches records a UK breach and reports its 72-hour position', async () => {
+      prismaAny.dataBreach.create.mockResolvedValue(breachRow({ jurisdictions: ['UK'], jurisdiction: 'UK' }));
       prismaAny.privacyAuditLog.create.mockResolvedValue({});
 
       const response = await request(app)
@@ -124,6 +157,7 @@ describe('Admin operational routes', () => {
           severity: 'HIGH',
           dataCategories: ['PII'],
           affectedUsers: 12,
+          jurisdictions: ['UK'],
         })
         .expect(201);
 
@@ -134,10 +168,62 @@ describe('Admin operational routes', () => {
           data: expect.objectContaining({
             severity: 'HIGH',
             detectedBy: 'admin-123',
+            jurisdictions: ['UK'],
             notificationRequired: true,
           }),
         })
       );
+    });
+
+    it('POST /api/admin/breaches defaults to Australia, opens the assessment window at intake and runs no 72-hour clock', async () => {
+      prismaAny.dataBreach.create.mockImplementation(async ({ data }: any) => breachRow({ ...data, id: 'breach-au' }));
+      prismaAny.privacyAuditLog.create.mockResolvedValue({});
+
+      const response = await request(app)
+        .post('/api/admin/breaches')
+        .send({
+          title: 'Mentoring note attached to the wrong member',
+          description: 'A session note was saved against another member and visible to her for a day.',
+          severity: 'CRITICAL',
+          dataCategories: ['PII', 'SENSITIVE'],
+        })
+        .expect(201);
+
+      expect(response.body.notificationDeadline).toEqual({
+        deadlineAt: null,
+        hoursRemaining: null,
+        state: 'NOT_APPLICABLE',
+      });
+
+      const data = prismaAny.dataBreach.create.mock.calls[0][0].data;
+      expect(data.jurisdictions).toEqual(['AU']);
+      expect(data.jurisdiction).toBe('AU');
+      // CRITICAL with sensitive data would be notifiable under the GDPR
+      // heuristic. Under the NDB scheme the assessment decides, not severity.
+      expect(data.notificationRequired).toBe(false);
+      expect(data.assessmentComplete).toBe(false);
+      expect(data.assessmentDueAt.getTime() - data.detectedAt.getTime()).toBe(30 * DAY_MS);
+      expect(prisma.privacyAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ action: 'NDB_ASSESSMENT_STARTED', resourceId: 'breach-au' }),
+        })
+      );
+    });
+
+    it('POST /api/admin/breaches rejects a regime it does not know', async () => {
+      const response = await request(app)
+        .post('/api/admin/breaches')
+        .send({
+          title: 'Something happened',
+          description: 'Details',
+          severity: 'HIGH',
+          dataCategories: ['PII'],
+          jurisdictions: ['AU', 'US'],
+        })
+        .expect(400);
+
+      expect(response.body.message).toContain('AU, UK, EU');
+      expect(prisma.dataBreach.create).not.toHaveBeenCalled();
     });
 
     it('POST /api/admin/breaches rejects a severity outside the enum', async () => {
@@ -212,6 +298,155 @@ describe('Admin operational routes', () => {
         .expect(400);
 
       expect(prisma.dataBreach.update).not.toHaveBeenCalled();
+    });
+
+    it('GET /api/admin/breaches/deadlines leaves an Australian breach off the 72-hour monitor', async () => {
+      prismaAny.dataBreach.findMany.mockResolvedValue([
+        breachRow({ id: 'au-only', jurisdictions: ['AU'], jurisdiction: 'AU', detectedAt: new Date(Date.now() - 90 * HOUR_MS) }),
+        breachRow({ id: 'uk', jurisdictions: ['UK'], jurisdiction: 'UK', detectedAt: new Date(Date.now() - 60 * HOUR_MS) }),
+      ]);
+
+      const response = await request(app).get('/api/admin/breaches/deadlines').expect(200);
+
+      expect(response.body.breaches.map((b: any) => b.id)).toEqual(['uk']);
+      expect(response.body.summary).toEqual({
+        awaitingNotification: 1,
+        overdue: 0,
+        dueWithin24Hours: 1,
+      });
+      // The query itself asks only for rows the clock applies to; the route
+      // filter above is the belt to that brace.
+      const where = prismaAny.dataBreach.findMany.mock.calls[0][0].where;
+      expect(where.OR).toEqual(
+        expect.arrayContaining([expect.objectContaining({ jurisdictions: { hasSome: ['UK', 'EU'] } })])
+      );
+    });
+
+    it('GET /api/admin/breaches counts Overdue and Notified late only against breaches on the 72-hour clock', async () => {
+      prismaAny.dataBreach.findMany.mockResolvedValue([
+        // Would have read OVERDUE against a clock it never had.
+        breachRow({ id: 'au-open', jurisdictions: ['AU'], jurisdiction: 'AU', detectedAt: new Date(Date.now() - 100 * HOUR_MS), notificationRequired: true }),
+        // Notified the OAIC on day 20 of the assessment: not late under the scheme.
+        breachRow({
+          id: 'au-notified',
+          jurisdictions: ['AU'],
+          jurisdiction: 'AU',
+          detectedAt: new Date(Date.now() - 20 * DAY_MS),
+          regulatorNotifiedAt: new Date(Date.now() - 10 * HOUR_MS),
+          status: 'NOTIFIED',
+          notificationRequired: true,
+        }),
+        breachRow({
+          id: 'uk-late',
+          jurisdictions: ['UK'],
+          jurisdiction: 'UK',
+          detectedAt: new Date(Date.now() - 100 * HOUR_MS),
+          regulatorNotifiedAt: new Date(Date.now() - 10 * HOUR_MS),
+          status: 'NOTIFIED',
+        }),
+      ]);
+
+      const response = await request(app).get('/api/admin/breaches').expect(200);
+
+      const states = Object.fromEntries(
+        response.body.breaches.map((b: any) => [b.id, b.notificationDeadline.state])
+      );
+      expect(states).toEqual({ 'au-open': 'NOT_APPLICABLE', 'au-notified': 'NOT_APPLICABLE', 'uk-late': 'MISSED' });
+      expect(response.body.summary).toEqual({
+        total: 3,
+        overdue: 0,
+        dueWithin24Hours: 0,
+        notifiedLate: 1,
+        onSeventyTwoHourClock: 1,
+      });
+    });
+
+    it('POST /api/admin/breaches/:id/notify-regulator will not notify the OAIC before the assessment finds an eligible data breach', async () => {
+      prismaAny.dataBreach.findUnique.mockResolvedValue(
+        assessedAuRow({ assessmentComplete: false, seriousHarmLikely: null, notificationRequired: false })
+      );
+
+      const response = await request(app)
+        .post('/api/admin/breaches/breach-1/notify-regulator')
+        .send({
+          regulatorName: 'Office of the Australian Information Commissioner',
+          regulatorEmail: 'enquiries@oaic.gov.au',
+          jurisdiction: 'AU',
+          statement: oaicStatement,
+        })
+        .expect(409);
+
+      expect(response.body.message).toContain('assessment has not been completed');
+      expect(prisma.dataBreach.update).not.toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it('POST /api/admin/breaches/:id/notify-regulator requires the four parts of the OAIC statement', async () => {
+      prismaAny.dataBreach.findUnique.mockResolvedValue(assessedAuRow());
+
+      const response = await request(app)
+        .post('/api/admin/breaches/breach-1/notify-regulator')
+        .send({
+          regulatorName: 'Office of the Australian Information Commissioner',
+          regulatorEmail: 'enquiries@oaic.gov.au',
+          jurisdiction: 'AU',
+          statement: { ...oaicStatement, recommendedSteps: '' },
+        })
+        .expect(400);
+
+      expect(response.body.message).toContain('statement.recommendedSteps');
+      expect(prisma.dataBreach.update).not.toHaveBeenCalled();
+    });
+
+    it('POST /api/admin/breaches/:id/notify-regulator records the OAIC statement without the Article 33 wording', async () => {
+      const row = assessedAuRow();
+      prismaAny.dataBreach.findUnique.mockResolvedValue(row);
+      prismaAny.privacyAuditLog.findFirst.mockResolvedValue({ createdAt: new Date(Date.now() - 2 * DAY_MS) });
+      prismaAny.dataBreach.update.mockImplementation(async ({ data }: any) => ({ ...row, ...data }));
+      prismaAny.privacyAuditLog.create.mockResolvedValue({});
+
+      const response = await request(app)
+        .post('/api/admin/breaches/breach-1/notify-regulator')
+        .send({
+          regulatorName: 'Office of the Australian Information Commissioner',
+          regulatorEmail: 'enquiries@oaic.gov.au',
+          jurisdiction: 'AU',
+          statement: oaicStatement,
+        })
+        .expect(200);
+
+      expect(response.body.status).toBe('NOTIFIED');
+      expect(response.body.notificationDeadline.state).toBe('NOT_APPLICABLE');
+
+      const data = prismaAny.dataBreach.update.mock.calls[0][0].data;
+      expect(data.statementInformationKinds).toEqual(['names', 'employment history']);
+      expect(data.statementRecommendedSteps).toBe(oaicStatement.recommendedSteps);
+      expect(data.statementLodgedAt).toBeInstanceOf(Date);
+
+      const email = sendEmailMock.mock.calls[0][0] as { subject: string; html: string };
+      expect(email.subject).toContain('Eligible data breach statement');
+      expect(email.html).not.toContain('72 Hours');
+
+      expect(prisma.privacyAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'REGULATOR_NOTIFIED',
+            details: expect.not.objectContaining({ within72Hours: expect.anything() }),
+          }),
+        })
+      );
+    });
+
+    it('POST /api/admin/breaches/:id/notify-users will not tell Australians about a breach without telling them what to do', async () => {
+      prismaAny.dataBreach.findUnique.mockResolvedValue(assessedAuRow({ statementRecommendedSteps: null }));
+
+      const response = await request(app)
+        .post('/api/admin/breaches/breach-1/notify-users')
+        .send({ userIds: ['user-1'], notificationContent: 'Your CV was exposed for six hours.' })
+        .expect(400);
+
+      expect(response.body.message).toContain('26WL');
+      expect(sendEmailMock).not.toHaveBeenCalled();
     });
   });
 

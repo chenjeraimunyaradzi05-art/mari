@@ -3595,7 +3595,7 @@ model DSARRequest {
 
   // Request details
   requestDetails   String? @db.Text
-  identityVerified Boolean @default(false)
+  identityVerified Boolean @default(false) // true from creation: every DSAR route is authenticated, so the subject is verified by session
 
   // Processing info
   assignedTo      String? // Admin user ID handling request
@@ -3607,8 +3607,8 @@ model DSARRequest {
 
   // Timing
   requestedAt    DateTime  @default(now())
-  acknowledgedAt DateTime? // Must acknowledge within 72 hours
-  dueDate        DateTime // Must complete within 30 days
+  acknowledgedAt DateTime? // Acknowledged on receipt; APP 12 asks for a response within a reasonable period, 30 days here
+  dueDate        DateTime // 30 days: the APP 12 reasonable period as the OAIC reads it; GDPR Art 12(3) one month for UK/EU members
   completedAt    DateTime?
 
   // Audit
@@ -3762,16 +3762,39 @@ model DataBreach {
   usersNotifiedAt      DateTime?
   notificationMethod   String? // Email, letter, etc.
 
+  // Which regimes the breach is handled under: AU, UK, EU. A breach can touch
+  // more than one. For a Queensland company the default is ['AU'], and the
+  // 72-hour clock above applies only when UK or EU is in the list.
+  //
+  // `jurisdiction` is the single-value column this list replaced. It is
+  // superseded, not dropped: it is still written with the first entry for one
+  // release so the seed and anything reading the old column keep working. Read
+  // `jurisdictions`; fall back to `jurisdiction` only when the list is empty.
+  jurisdictions String[] @default([])
+  jurisdiction  String? // superseded by jurisdictions; first entry, kept one release
+
   // Australia: the Notifiable Data Breaches scheme, which is not the 72-hour
   // GDPR clock. An entity that suspects an eligible data breach has 30 days to
   // complete a reasonable assessment, the threshold is that serious harm is
   // likely, and remedial action taken before that harm eventuates removes the
-  // obligation to notify at all.
-  jurisdiction       String? // AU, UK, EU
+  // obligation to notify at all. The window opens at intake, from detectedAt.
   assessmentDueAt    DateTime? // 30 days from awareness, NDB scheme
   assessmentComplete Boolean   @default(false)
   seriousHarmLikely  Boolean? // null until the assessment reaches a view
   remediedBeforeHarm Boolean   @default(false)
+
+  // Australia: the eligible data breach statement, Privacy Act 1988 s 26WK.
+  // The Commissioner is told four things: who the entity is and how to reach
+  // it, what happened, what kinds of information were involved, and what the
+  // people affected should do. The same content goes to those people (s 26WL),
+  // so it lives on the row rather than only in an outbound email. The OAIC
+  // takes the statement through its web form; the email is the record copy,
+  // and statementLodgedAt is when the statement was recorded here.
+  statementEntityContact    String?   @db.Text
+  statementDescription      String?   @db.Text
+  statementInformationKinds String[]  @default([])
+  statementRecommendedSteps String?   @db.Text
+  statementLodgedAt         DateTime?
 
   // Response actions
   containmentActions String[]
