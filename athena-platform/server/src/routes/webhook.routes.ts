@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import Stripe from 'stripe';
+import { Prisma } from '@prisma/client';
 import { getStripe } from '../utils/stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
@@ -23,6 +24,7 @@ import {
 } from '../services/invoice.service';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
+import { recordFailure, recordIgnored, recordSuccess } from '../utils/ops-metrics';
 
 const router = Router();
 
@@ -31,7 +33,19 @@ function paymentIntentIdOf(value: string | { id: string } | null | undefined): s
   return typeof value === 'string' ? value : value.id;
 }
 
-const stripe = getStripe();
+// The Stripe client is asked for per request, never held from module load, the
+// same way invoice.routes.ts asks for it. getStripe() caches per key, but a
+// client captured at import is whatever existed at import: on a deployment that
+// boots before STRIPE_SECRET_KEY reaches the environment that is the
+// placeholder - in production, a proxy that throws 503 on every use - and this
+// module went on holding it for the life of the process, long after the real
+// key arrived.
+//
+// Not gated on isStripeConfigured() the way the services are. Verifying the
+// signature is pure cryptography over STRIPE_WEBHOOK_SECRET and needs no API
+// key, so refusing the request for a missing key would reject events this
+// endpoint can read perfectly well. A handler that does go on to call Stripe
+// gets the 503 from the client itself.
 
 const PRICE_IDS = {
   PREMIUM_CAREER: process.env.STRIPE_PRICE_CAREER || 'price_career',
@@ -40,9 +54,21 @@ const PRICE_IDS = {
   PREMIUM_CREATOR: process.env.STRIPE_PRICE_CREATOR || 'price_creator',
 } as const;
 
-function tierFromPriceId(priceId?: string | null): string | null {
+/**
+ * The four tiers that can arrive on a Stripe checkout or subscription. They are
+ * a subset of the SubscriptionTier enum — FREE and ENTERPRISE are never sold
+ * through Stripe — and naming that subset is what lets PRICE_IDS be indexed and
+ * the tier be written to Prisma without casting either one away.
+ */
+type PaidTier = keyof typeof PRICE_IDS;
+
+function isPaidTier(value: unknown): value is PaidTier {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(PRICE_IDS, value);
+}
+
+function tierFromPriceId(priceId?: string | null): PaidTier | null {
   if (!priceId) return null;
-  const entry = Object.entries(PRICE_IDS).find(([, id]) => id === priceId);
+  const entry = (Object.entries(PRICE_IDS) as [PaidTier, string][]).find(([, id]) => id === priceId);
   return entry ? entry[0] : null;
 }
 
@@ -81,6 +107,10 @@ async function issueInvoiceForPaymentIntent(paymentIntent: Stripe.PaymentIntent)
     }
     await createInvoiceForPayment(payment.id);
   } catch (err: any) {
+    // Swallowed on purpose (see above), which is exactly the kind of failure
+    // that used to leave no trace outside the log. Counted so an operator can
+    // see unissued invoices piling up on /health/detailed.
+    recordFailure('stripe_webhook.invoice_for_payment_intent', err);
     logger.error('Invoice for a succeeded payment intent could not be filed', {
       paymentIntentId: paymentIntent.id,
       message: err?.message,
@@ -107,11 +137,30 @@ router.post(
         throw new ApiError(400, 'Missing Stripe signature');
       }
 
+      // Reached for outside the try on purpose. In production without
+      // STRIPE_SECRET_KEY getStripe() hands back a proxy that throws
+      // ApiError(503) on the first property access, so asking for .webhooks
+      // inside the try meant a deployment with no Stripe key at all was caught
+      // below and reported as an invalid signature - a total payments outage
+      // wearing the costume of a stranger posting junk, and counted as one.
+      const stripeWebhooks = getStripe().webhooks;
+
       let event: Stripe.Event;
       try {
         // req.body is a Buffer because of express.raw.
-        event = stripe.webhooks.constructEvent(req.body as any, signature, webhookSecret);
+        event = stripeWebhooks.constructEvent(req.body as any, signature, webhookSecret);
       } catch (err: any) {
+        // Counted as ignored, not as a failure. A post whose signature does not
+        // verify is a stranger being turned away before any identity check, on a
+        // public endpoint that is exempt from the global rate limiter (see the
+        // limiter's skip in index.ts). While this was a recordFailure() anyone on
+        // the internet could push twenty of them to evict every real payment
+        // failure from the ring buffer and hold /health/detailed at "degraded"
+        // for as long as they kept posting. recordIgnored is a plain counter, so
+        // it can do neither - and the case worth catching, a stale
+        // STRIPE_WEBHOOK_SECRET after a redeploy that silently drops every
+        // payment event, still shows up as this number climbing.
+        recordIgnored('stripe_webhook.bad_signature');
         logger.warn('Stripe webhook signature verification failed', {
           message: err?.message,
         });
@@ -120,7 +169,7 @@ router.post(
 
       // Idempotency: record Stripe event ID once.
       try {
-        await (prisma as any).stripeWebhookEvent.create({
+        await prisma.stripeWebhookEvent.create({
           data: { id: event.id, type: event.type },
         });
       } catch (err: any) {
@@ -130,6 +179,18 @@ router.post(
         }
         throw err;
       }
+
+      // Set by the default branch below, and read after the switch. Reaching the
+      // end of the switch used to be counted as a success whatever happened,
+      // which meant every event type nothing here handles - and Stripe sends a
+      // great many - was recorded as successful money-path work and inflated the
+      // success rate on the one report where it has to be true.
+      //
+      // Three outcomes, not two: the early `break`s inside handled cases also
+      // reach the end of the switch, so a checkout we looked at and could not
+      // act on was being counted alongside one that worked.
+      let outcome: 'handled' | 'ignored' | 'failed' = 'handled';
+      let failureReason: string | null = null;
 
       // Handle the event
       try {
@@ -252,7 +313,12 @@ router.post(
 
           case 'checkout.session.completed': {
             const session = event.data.object as Stripe.Checkout.Session;
-            if (session.mode !== 'subscription') break;
+            if (session.mode !== 'subscription') {
+              // A one-off payment checkout, not the membership flow this case is
+              // for. Nothing to do, and nothing went wrong.
+              outcome = 'ignored';
+              break;
+            }
 
             const userId = session.metadata?.userId;
             const tier = session.metadata?.tier;
@@ -260,9 +326,28 @@ router.post(
             const customerId = typeof session.customer === 'string' ? session.customer : null;
             const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
 
-            if (!userId || !tier) break;
+            if (!userId || !tier) {
+              // Stripe says a membership checkout completed and our own metadata
+              // cannot say whose. Somebody has paid and will not be given what
+              // she paid for, which is the loudest thing this counter exists to
+              // surface - it must never read as success.
+              outcome = 'failed';
+              failureReason = `Subscription checkout ${session.id} completed without userId/tier metadata`;
+              break;
+            }
 
-            await (prisma as any).subscription.upsert({
+            // tier arrives as a plain metadata string. Subscription.tier is the
+            // SubscriptionTier enum, and the cast that used to be here meant an
+            // unrecognised value reached Prisma and blew up deep inside the
+            // client. Checkout only ever writes one of these four, so anything
+            // else is a bug on our side: thrown rather than skipped, because
+            // skipping would quietly leave a member who has paid on the free
+            // plan, and throwing makes Stripe retry and show the failure.
+            if (!isPaidTier(tier)) {
+              throw new Error(`Checkout session ${session.id} carries an unknown tier "${tier}"`);
+            }
+
+            await prisma.subscription.upsert({
               where: { userId },
               create: {
                 user: { connect: { id: userId } },
@@ -270,7 +355,7 @@ router.post(
                 status: 'ACTIVE',
                 stripeCustomerId: customerId,
                 stripeSubscriptionId,
-                stripePriceId: (PRICE_IDS as any)[tier] || null,
+                stripePriceId: PRICE_IDS[tier] || null,
                 currency: currency || undefined,
               },
               update: {
@@ -278,7 +363,7 @@ router.post(
                 status: 'ACTIVE',
                 stripeCustomerId: customerId || undefined,
                 stripeSubscriptionId,
-                stripePriceId: (PRICE_IDS as any)[tier] || null,
+                stripePriceId: PRICE_IDS[tier] || null,
                 currency: currency || undefined,
               },
             });
@@ -296,19 +381,26 @@ router.post(
               (subscription.items as any)?.data?.[0]?.plan?.id ||
               null;
 
-            const dbSubscription = await (prisma as any).subscription.findFirst({
-              where: {
-                OR: [
-                  customerId ? { stripeCustomerId: customerId } : undefined,
-                  { stripeSubscriptionId },
-                ].filter(Boolean),
-              },
+            // Built up rather than filtered, because .filter(Boolean) does not
+            // narrow away the undefined and that is what the cast here was
+            // hiding. Same two branches as before, in the same order.
+            const matchers: Prisma.SubscriptionWhereInput[] = [];
+            if (customerId) matchers.push({ stripeCustomerId: customerId });
+            matchers.push({ stripeSubscriptionId });
+
+            const dbSubscription = await prisma.subscription.findFirst({
+              where: { OR: matchers },
             });
 
-            if (!dbSubscription) break;
+            if (!dbSubscription) {
+              // A subscription we hold no row for. Legitimate for anything created
+              // outside ATHENA, so not a failure - but not work done either.
+              outcome = 'ignored';
+              break;
+            }
 
             if (event.type === 'customer.subscription.deleted') {
-              await (prisma as any).subscription.update({
+              await prisma.subscription.update({
                 where: { id: dbSubscription.id },
                 data: {
                   tier: 'FREE',
@@ -324,7 +416,7 @@ router.post(
             }
 
             const inferredTier = tierFromPriceId(priceId);
-            await (prisma as any).subscription.update({
+            await prisma.subscription.update({
               where: { id: dbSubscription.id },
               data: {
                 stripeCustomerId: customerId || undefined,
@@ -359,6 +451,7 @@ router.post(
             });
             if (!badge) {
               logger.warn('Identity session with no badge behind it', { sessionId: session.id });
+              outcome = 'ignored';
               break;
             }
             if (event.type === 'identity.verification_session.verified') {
@@ -482,12 +575,20 @@ router.post(
           case 'invoice.payment_failed': {
             const invoice = event.data.object as Stripe.Invoice;
             const customerId = paymentIntentIdOf(invoice.customer as any);
-            if (!customerId) break;
+            if (!customerId) {
+              outcome = 'ignored';
+              break;
+            }
             const dbSubscription = await prisma.subscription.findFirst({
               where: { stripeCustomerId: customerId },
               include: { user: { select: { email: true, firstName: true } } },
             });
-            if (!dbSubscription) break;
+            if (!dbSubscription) {
+              // A failed invoice for a customer we hold no subscription row for.
+              // Nothing of ours went wrong, but nothing was done either.
+              outcome = 'ignored';
+              break;
+            }
             await prisma.subscription.update({ where: { id: dbSubscription.id }, data: { status: 'PAST_DUE' } });
             if (dbSubscription.user?.email) {
               const base = (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -505,21 +606,41 @@ router.post(
 
           default:
             // Ignore other events for now.
+            outcome = 'ignored';
             break;
         }
       } catch (handlerError) {
+        // Counted before anything else, so the failure is on the record even if
+        // releasing the idempotency row below also goes wrong. recordFailure
+        // cannot throw; see utils/ops-metrics.ts.
+        recordFailure(`stripe_webhook.${event.type}`, handlerError);
+
         // The idempotency row is written before the handler runs, so leaving it
         // behind after a failure would make Stripe's retry look like a replay
         // and the payment would never be applied. Release it and let the retry
         // through.
         try {
-          await (prisma as any).stripeWebhookEvent.delete({ where: { id: event.id } });
-        } catch {
+          await prisma.stripeWebhookEvent.delete({ where: { id: event.id } });
+        } catch (releaseError) {
           // Best effort: a stuck row is better than losing the original error.
+          // But a stuck row means Stripe's retry will be treated as a replay and
+          // the payment is lost for good, so it is worth its own counter.
+          recordFailure('stripe_webhook.idempotency_release', releaseError);
         }
         throw handlerError;
       }
 
+      // One bucket rather than one per event type: Stripe has hundreds of them
+      // and a name per type would push the real operation names past the cap in
+      // ops-metrics and into "(other)". Which types arrived is already on the
+      // StripeWebhookEvent rows.
+      if (outcome === 'failed') {
+        recordFailure(`stripe_webhook.${event.type}`, new Error(failureReason ?? 'Handled no further'));
+      } else if (outcome === 'ignored') {
+        recordIgnored('stripe_webhook.unhandled_event');
+      } else {
+        recordSuccess(`stripe_webhook.${event.type}`);
+      }
       res.json({ received: true });
     } catch (error) {
       next(error);

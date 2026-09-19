@@ -13,6 +13,12 @@ import { mlService } from '../services/ml.service';
 // import { getAllQueueStats } from '../utils/queue';
 import { logger } from '../utils/logger';
 import { secretMatchesAny } from '../utils/secret-compare';
+import {
+  OpsSnapshot,
+  RECENT_FAILURE_WINDOW_MS,
+  opsSnapshot,
+  recentFailureCount,
+} from '../utils/ops-metrics';
 import os from 'os';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -29,6 +35,13 @@ interface HealthStatus {
   version: string;
   uptime: number;
   checks: Record<string, ComponentHealth>;
+  /**
+   * What the money paths have actually been doing: per-operation counts and the
+   * last failure messages. Added alongside the existing fields rather than
+   * folded into checks, because a reader needs the messages, and ComponentHealth
+   * only has room for one.
+   */
+  ops: OpsSnapshot;
 }
 
 interface ComponentHealth {
@@ -227,6 +240,12 @@ router.get('/detailed', async (req: Request, res: Response) => {
   // System resources
   checks.system = checkSystemResources();
 
+  // Stripe webhooks and the escrow sweep. Everything above asks a dependency
+  // whether it is up; this one is the only check that knows whether the work
+  // those dependencies exist for has been succeeding.
+  const ops = opsSnapshot();
+  checks.money_paths = checkMoneyPaths(ops);
+
   // Determine overall status
   const allChecks = Object.values(checks);
   const hasDown = allChecks.some((c) => c.status === 'down');
@@ -244,6 +263,7 @@ router.get('/detailed', async (req: Request, res: Response) => {
     version: process.env.npm_package_version || '1.0.0',
     uptime: process.uptime(),
     checks,
+    ops,
   };
 
   const statusCode = overallStatus === 'healthy' ? 200 : overallStatus === 'degraded' ? 200 : 503;
@@ -484,6 +504,67 @@ async function checkQueues(): Promise<ComponentHealth> {
       message: error.message,
     };
   }
+}
+
+/**
+ * Stripe webhooks and the escrow expiry sweep, as recorded by utils/ops-metrics.
+ *
+ * Until this existed the endpoint reported "healthy" while every payment event
+ * was being rejected, because Postgres and Redis were both perfectly fine; the
+ * only thing that was broken was the work. A failure recorded inside the recent
+ * window now drags the whole report down to degraded.
+ *
+ * Never 'down', however bad the numbers look. /health/detailed is read by
+ * monitoring that can take an instance out of rotation, and pulling a server
+ * because one webhook handler threw would turn a single failed payment into an
+ * outage. Degraded (still HTTP 200) is the loudest this check is allowed to be.
+ */
+function checkMoneyPaths(ops: OpsSnapshot): ComponentHealth {
+  const recent = recentFailureCount();
+  const windowMinutes = Math.round(RECENT_FAILURE_WINDOW_MS / 60000);
+
+  // A standing condition is not a failure event and never enters the ring, so
+  // reading only recentFailureCount() missed the loudest thing there is: every
+  // escrow hold lapsed is recorded once as a condition and then never again,
+  // which left this check saying "up" through exactly the outage it exists to
+  // catch. A condition is clear when its count is zero, so a non-zero one is
+  // the current state of something, not a historical count.
+  const standing = Object.entries(ops.conditions).filter(([, condition]) => condition.count > 0);
+
+  const reasons: string[] = [];
+  if (recent > 0) {
+    reasons.push(`${recent} failure(s) in the last ${windowMinutes} minutes; ops.recentFailures says which`);
+  }
+  for (const [name, condition] of standing) {
+    reasons.push(condition.detail ? `${name}: ${condition.count} (${condition.detail})` : `${name}: ${condition.count}`);
+  }
+
+  let message: string;
+  if (reasons.length > 0) {
+    message = reasons.join('; ');
+  } else if (ops.totals.failure > 0) {
+    message = `Nothing has failed in the last ${windowMinutes} minutes (${ops.totals.failure} earlier, since this process started)`;
+  } else {
+    message = 'Nothing has failed since this process started';
+  }
+
+  return {
+    status: reasons.length > 0 ? 'degraded' : 'up',
+    message,
+    details: {
+      since: ops.since,
+      recentFailureWindowMinutes: windowMinutes,
+      recentFailures: recent,
+      totals: ops.totals,
+      operations: ops.operations,
+      // Carried whether or not anything is standing, so a reader can see the
+      // zero and know the question was asked rather than guess it was.
+      conditions: ops.conditions,
+      // The same honesty note the snapshot carries: these are one process's
+      // numbers, not the platform's.
+      note: ops.note,
+    },
+  };
 }
 
 function checkSystemResources(): ComponentHealth {

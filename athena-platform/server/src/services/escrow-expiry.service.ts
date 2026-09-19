@@ -19,6 +19,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { runExclusively } from '../utils/redis';
+import { recordCondition, recordFailure, recordSuccess } from '../utils/ops-metrics';
 import * as stripeConnect from './stripe-connect.service';
 
 /** How long a card authorisation is assumed to last. */
@@ -95,6 +96,11 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
 
     if (lapsed) {
       result.alreadyLapsed += 1;
+      // Counted after the loop as a condition rather than here as a failure.
+      // Nothing below moves a lapsed hold out of HELD_STATUSES, so the query
+      // above finds the same ones on every sweep; recording a failure per hold
+      // per sweep meant the count climbed by the same holds every six hours and
+      // /health/detailed could never go back to healthy after a single lapse.
       // An error rather than a warning: by this point the money is most likely
       // not collectable and somebody has to decide what happens to the order.
       logger.error('Escrow hold has outlived its authorisation', {
@@ -124,6 +130,7 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
       // has asked for this: it is being taken early only so the hold is not lost.
       await stripeConnect.captureEscrowPayment(escrow.paymentIntentId, { id: 'system', role: 'ADMIN' });
       result.captured += 1;
+      recordSuccess('escrow_expiry.capture');
       logger.info('Captured an escrow hold before its authorisation lapsed', {
         escrowId: escrow.id,
         amount: escrow.amount,
@@ -131,12 +138,28 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
       });
     } catch (error) {
       result.failed += 1;
+      // The hold will lapse in under two days and this was the last chance to
+      // save it, so the reason Stripe gave is worth keeping where an operator
+      // will actually look.
+      recordFailure('escrow_expiry.capture', error);
       logger.error('Could not capture an escrow hold before expiry', {
         escrowId: escrow.id,
         error: (error as Error).message,
       });
     }
   }
+
+  // A gauge, written on every sweep including the sweeps that find none, so the
+  // number falls back to zero once an operator has dealt with them. A lapsed
+  // hold is a standing condition that needs a human, not an event that happened
+  // again just because the sweep looked again.
+  recordCondition(
+    'escrow_expiry.lapsed',
+    result.alreadyLapsed,
+    result.alreadyLapsed > 0
+      ? 'Holds have outlived their card authorisation. The money is most likely no longer collectable and somebody has to decide what happens to each order.'
+      : null
+  );
 
   if (result.alreadyLapsed || result.failed) {
     await noteAdmins(
@@ -157,11 +180,19 @@ export function startEscrowExpirySweeper(intervalMs = 6 * 60 * 60 * 1000): void 
   const run = () =>
     runExclusively('escrow-expiry', () => runEscrowExpirySweep())
       .then(r => {
+        // runExclusively hands back null when another instance holds the lock,
+        // which is not a run of ours and so is neither a success nor a failure.
+        if (r) recordSuccess('escrow_expiry.sweep');
         if (r && (r.expiringSoon || r.alreadyLapsed || r.captured || r.failed)) {
           logger.info('Escrow expiry sweep', r);
         }
       })
-      .catch(err => logger.warn('Escrow expiry sweep failed', { error: (err as Error).message }));
+      .catch(err => {
+        // A sweep that never ran leaves every hold unwatched, which is the
+        // original silent failure this service exists to end.
+        recordFailure('escrow_expiry.sweep', err);
+        logger.warn('Escrow expiry sweep failed', { error: (err as Error).message });
+      });
 
   setTimeout(run, 180_000).unref();
   timer = setInterval(run, intervalMs);
