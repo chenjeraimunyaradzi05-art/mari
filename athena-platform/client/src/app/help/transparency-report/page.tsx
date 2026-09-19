@@ -1,7 +1,10 @@
 /**
  * Transparency Report Page
- * UK Online Safety Act Compliance
- * Phase 4: UK/EU Market Launch
+ *
+ * Published moderation metrics. The Online Safety Act 2021 (Cth) and the
+ * eSafety Commissioner's Basic Online Safety Expectations ask an Australian
+ * platform for this transparency; the UK Online Safety Act 2023 asks the same
+ * of one serving UK members. One report serves both.
  */
 
 'use client';
@@ -9,6 +12,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart3, Shield, AlertTriangle, Users, Clock, TrendingUp, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import Link from 'next/link';
+import OnlineSafetyNotice from '@/components/compliance/OnlineSafetyNotice';
 
 interface ReportMetrics {
   period: string;
@@ -139,22 +143,8 @@ export default function TransparencyReportPage() {
           </p>
         </div>
 
-        {/* UK Online Safety Notice */}
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 mb-8">
-          <div className="flex items-start gap-4">
-            <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
-                UK Online Safety Act 2023 Compliance
-              </h3>
-              <p className="text-blue-800 dark:text-blue-200">
-                This transparency report is published in accordance with the UK Online Safety Act 2023. 
-                We are committed to providing clear information about how we handle reports of harmful content 
-                and protect users from online harms.
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* Which online-safety law this meets, with the regulator for the reader's region */}
+        <OnlineSafetyNotice variant="transparency" className="mb-8" />
 
         {isLoadingReport ? (
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">

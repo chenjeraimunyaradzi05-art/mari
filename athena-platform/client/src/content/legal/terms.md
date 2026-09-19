@@ -1,8 +1,8 @@
 # ATHENA Terms of Service
 
-**Effective Date:** March 8, 2026  
-**Version:** 2.1  
-**Last Updated:** March 8, 2026
+**Effective Date:** September 19, 2026  
+**Version:** 2.2  
+**Last Updated:** September 19, 2026
 
 ---
 
@@ -25,7 +25,7 @@ Certain features of the Platform may be subject to additional terms and conditio
 ## 2. Eligibility and Account Registration
 
 ### 2.1 Age Requirements
-You must be at least 18 years old to create an account and use the Platform. By registering, you represent and warrant that you meet this age requirement.
+You must be at least {{platform.minimumAge}} years old to create an account and use the Platform. By registering, you represent and warrant that you meet this age requirement.
 
 ### 2.2 Account Registration
 To access certain features, you must register for an account. You agree to:
@@ -55,7 +55,7 @@ You agree to use the Platform only for lawful purposes and in accordance with th
 
 ### 3.2 Prohibited Content
 The following content is strictly prohibited on the Platform:
-- **Illegal Content**: Any content that violates applicable laws, including UK Online Safety Act 2023 prohibited content
+- **Illegal Content**: Any content that violates applicable laws, including material the Australian Online Safety Act 2021 and the UK Online Safety Act 2023 require us to act on
 - **Child Sexual Abuse Material (CSAM)**: Any content depicting child exploitation (immediately reported to relevant authorities)
 - **Terrorism Content**: Content promoting terrorism or violent extremism
 - **Hate Speech**: Content promoting hatred based on protected characteristics
@@ -65,7 +65,7 @@ The following content is strictly prohibited on the Platform:
 - **Spam**: Unsolicited promotional content or repetitive posts
 
 ### 3.3 Content Moderation
-We employ both automated systems and human review to moderate content. We may remove content that violates these Terms without prior notice. For UK users, we comply with the UK Online Safety Act 2023 requirements for content moderation.
+We employ both automated systems and human review to moderate content. We may remove content that violates these Terms without prior notice. As an Australian platform we moderate in line with the Online Safety Act 2021 (Cth) and the eSafety Commissioner's Basic Online Safety Expectations (section 12A); for UK users we also comply with the UK Online Safety Act 2023 (section 12).
 
 ### 3.4 Reporting Content
 If you encounter content that violates these Terms, please report it using our reporting tools or at /report. We prioritize reports of illegal content and aim to respond within:
@@ -138,7 +138,7 @@ We offer various subscription tiers with different features and pricing. By subs
 - Prices may change with 30 days' notice
 
 ### 6.3 Cancellation
-You may cancel your subscription at any time. Cancellation takes effect at the end of your current billing period. No refunds for partial periods unless required by law.
+You may cancel your subscription at any time. Cancellation takes effect at the end of your current billing period. Refunds for part of a billing period are not offered, except where the Australian Consumer Law or another law that applies to you requires a remedy, for example where a service has had a major failure (see section 9.4).
 
 ### 6.4 Free Trials
 Free trials convert to paid subscriptions automatically unless cancelled before the trial ends.
@@ -148,7 +148,7 @@ Free trials convert to paid subscriptions automatically unless cancelled before 
 ## 7. Privacy and Data Protection
 
 ### 7.1 Privacy Policy
-Your use of the Platform is also governed by our Privacy Policy, available at /privacy. For UK users, our UK Privacy Policy at /privacy/uk provides additional information about UK GDPR compliance.
+Your use of the Platform is also governed by our Privacy Policy, available at /privacy. The Australian Privacy Statement at /privacy/au explains how the Australian Privacy Principles apply to every member. For UK users, our UK Privacy Addendum at /privacy/uk provides additional information about UK GDPR compliance.
 
 ### 7.2 Data Processing
 We process personal data in accordance with applicable data protection laws, including:
@@ -198,6 +198,8 @@ Our total liability shall not exceed the greater of: (a) the amount you paid us 
 ### 9.4 Consumer Rights
 Nothing in these Terms affects your statutory consumer rights that cannot be waived or limited by contract.
 
+**Australian Consumer Law.** Our services come with guarantees that cannot be excluded under the Australian Consumer Law. For major failures with a service, you are entitled to cancel your service contract with us and to a refund for the unused portion, or to compensation for its reduced value. You are also entitled to be compensated for any other reasonably foreseeable loss or damage. If the failure does not amount to a major failure, you are entitled to have problems with the service rectified in a reasonable time and, if this is not done, to cancel your contract and obtain a refund for the unused portion of the contract. Sections 9.1 to 9.3 apply only to the extent the Australian Consumer Law permits.
+
 ---
 
 ## 10. Indemnification
@@ -217,7 +219,7 @@ Before filing a claim, you agree to contact us at {{email.legal}} to attempt inf
 
 ### 11.2 Governing Law
 For users outside the UK/EU:
-These Terms are governed by the laws of New South Wales, Australia.
+These Terms are governed by the laws of {{org.jurisdiction}}, and the Commonwealth laws that apply there. Nothing in this clause limits your rights under the Australian Consumer Law.
 
 For UK users:
 These Terms are governed by the laws of England and Wales. You may bring claims in the courts of England and Wales, and we may bring claims in the courts of your country of residence.
@@ -251,7 +253,30 @@ Our UK designated contact for regulatory matters:
 - Address: A UK regulatory postal contact will be published here before any public UK launch that requires one.
 
 ### 12.4 Children's Safety
-The Platform is not intended for users under 18. We implement age verification and do not knowingly collect data from children.
+The Platform is not intended for users under {{platform.minimumAge}}. We implement age verification and do not knowingly collect data from children.
+
+---
+
+## 12A. Australian Online Safety
+
+### 12A.1 Commitment to Safety
+ATHENA is an Australian platform and is subject to the Online Safety Act 2021 (Cth). We meet the eSafety Commissioner's Basic Online Safety Expectations through:
+- Content moderation systems and human review
+- Clear reporting mechanisms at /report, open to people without an account
+- An appeal process at /help/appeal reviewed by a different moderator
+- Transparency reporting at /help/transparency-report
+- Protection of children and vulnerable users, including DV Safe Mode
+
+### 12A.2 Removal Notices
+Where the eSafety Commissioner issues a removal notice or similar direction under the Act, we will comply within the time it specifies.
+
+### 12A.3 Complaints to the Regulator
+You can report cyber-abuse, image-based abuse and other harmful material directly to the eSafety Commissioner at esafety.gov.au/report, whether or not you have reported it to us.
+
+### 12A.4 Contact
+Our contact for online safety matters:
+- {{contact.legal}}
+- Address: {{org.legalName}}, {{org.jurisdiction}}. A registered office address for formal notices will be published here before public launch.
 
 ---
 

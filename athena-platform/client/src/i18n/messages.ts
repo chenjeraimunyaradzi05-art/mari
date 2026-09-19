@@ -23,7 +23,8 @@ type MessageKey =
   | 'cookie.acceptAll'
   | 'cookie.rejectOptional'
   | 'cookie.manage'
-  | 'cookie.ccpaNotice';
+  | 'cookie.ccpaNotice'
+  | 'cookie.appNotice';
 
 type Messages = Record<MessageKey, string>;
 
@@ -35,6 +36,7 @@ const EN_MESSAGES: Messages = {
   'cookie.rejectOptional': 'Reject optional',
   'cookie.manage': 'Manage in Settings',
   'cookie.ccpaNotice': 'California residents: You can opt out of certain data sharing at any time.',
+  'cookie.appNotice': 'Handled under the Australian Privacy Principles. You can change your mind any time in the privacy centre.',
 };
 
 const ES_MESSAGES: Messages = {
@@ -45,6 +47,7 @@ const ES_MESSAGES: Messages = {
   'cookie.rejectOptional': 'Rechazar opcionales',
   'cookie.manage': 'Gestionar en Ajustes',
   'cookie.ccpaNotice': 'Residentes de California: puedes excluirte del intercambio de datos en cualquier momento.',
+  'cookie.appNotice': 'Gestionado según los Principios de Privacidad de Australia. Puedes cambiar de opinión en cualquier momento en el centro de privacidad.',
 };
 
 const AR_MESSAGES: Messages = {
@@ -55,6 +58,7 @@ const AR_MESSAGES: Messages = {
   'cookie.rejectOptional': 'رفض الاختيارية',
   'cookie.manage': 'الإدارة من الإعدادات',
   'cookie.ccpaNotice': 'سكان كاليفورنيا: يمكنك إيقاف مشاركة بعض البيانات في أي وقت.',
+  'cookie.appNotice': 'تُعالج بياناتك وفق مبادئ الخصوصية الأسترالية. يمكنك تغيير رأيك في أي وقت من مركز الخصوصية.',
 };
 
 const VI_MESSAGES: Messages = {
@@ -65,6 +69,7 @@ const VI_MESSAGES: Messages = {
   'cookie.rejectOptional': 'Từ chối tùy chọn',
   'cookie.manage': 'Quản lý trong Cài đặt',
   'cookie.ccpaNotice': 'Cư dân California: bạn có thể từ chối một số hình thức chia sẻ dữ liệu bất cứ lúc nào.',
+  'cookie.appNotice': 'Được xử lý theo Các nguyên tắc quyền riêng tư của Úc. Bạn có thể thay đổi lựa chọn bất cứ lúc nào trong trung tâm quyền riêng tư.',
 };
 
 const MESSAGES: Record<string, Messages> = {

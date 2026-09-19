@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuthStore } from '@/lib/store';
-import { Shield, Download, Trash2, Eye, Bell, Lock, Cookie, ChevronRight, AlertTriangle, Check, Loader2, FileText } from 'lucide-react';
+import { Shield, Download, Trash2, Eye, Bell, Lock, Cookie, ChevronRight, AlertTriangle, Check, Loader2, FileText, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import complianceService from '@/lib/services/compliance.service';
 import type { LegalDocument, LegalAgreementRecord } from '@/lib/services/compliance.service';
 import { contactLink } from '@/lib/contact';
 import { safeHref } from '@/lib/safe-href';
+import { getStoredPreference } from '@/lib/utils';
 
 interface ConsentState {
   MARKETING_EMAIL: boolean;
@@ -72,8 +73,26 @@ function getAgreementKey(documentType: string, documentVersion: string): string 
   return `${documentType}:${documentVersion}`;
 }
 
+/** What POST /api/gdpr/dsar/export hands back: the file is ready at once. */
+interface ExportReady {
+  downloadUrl: string;
+  expiresAt?: string;
+}
+
+/**
+ * The region the member has chosen in Settings, else the one the browser
+ * suggests. ANZ is the platform's home and the fallback.
+ */
+function resolveRegion(): string {
+  return getStoredPreference('athena.region', '') || complianceService.detectUserRegion();
+}
+
 export default function PrivacyCenterPage() {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, logout } = useAuthStore();
+  const [region, setRegion] = useState('ANZ');
+  const [exportReady, setExportReady] = useState<ExportReady | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [consents, setConsents] = useState<ConsentState>({
     MARKETING_EMAIL: false,
     MARKETING_SMS: false,
@@ -120,7 +139,8 @@ export default function PrivacyCenterPage() {
   const fetchLegalDocuments = async () => {
     try {
       setLegalLoading(true);
-      const regionCode = complianceService.detectUserRegion();
+      const regionCode = resolveRegion();
+      setRegion(regionCode);
       const documents = await complianceService.getLegalDocuments(regionCode);
       setLegalDocuments(Array.isArray(documents) ? documents : []);
       setLegalError(null);
@@ -257,20 +277,25 @@ export default function PrivacyCenterPage() {
 
   const requestDataExport = async () => {
     setExportLoading(true);
+    setExportError(null);
     try {
       const res = await fetch('/api/gdpr/dsar/export', {
         method: 'POST',
         credentials: 'include',
       });
-      const { data } = await res.json();
-      if (data?.downloadUrl) {
-        // Refresh DSAR history
+      const payload = await res.json();
+      const data = payload?.data;
+      if (res.ok && data?.downloadUrl) {
+        // The export is built synchronously and the link comes back in this
+        // response; nothing is emailed. It is shown here, where it was asked for.
+        setExportReady({ downloadUrl: data.downloadUrl, expiresAt: data.expiresAt });
         fetchPrivacyData();
-        alert('Your data export is ready! Check your email for the download link.');
+      } else {
+        setExportError(payload?.error || payload?.message || 'We could not prepare your export just now. Please try again.');
       }
     } catch (error) {
       console.error('Failed to request export:', error);
-      alert('Failed to request data export. Please try again.');
+      setExportError('We could not prepare your export just now. Please try again.');
     } finally {
       setExportLoading(false);
     }
@@ -278,6 +303,7 @@ export default function PrivacyCenterPage() {
 
   const requestAccountDeletion = async () => {
     if (deleteInput !== 'DELETE_MY_ACCOUNT') return;
+    setDeleteError(null);
 
     try {
       const res = await fetch('/api/gdpr/dsar/delete', {
@@ -286,15 +312,23 @@ export default function PrivacyCenterPage() {
         credentials: 'include',
         body: JSON.stringify({ confirmation: 'DELETE_MY_ACCOUNT' }),
       });
+      const payload = await res.json();
       if (res.ok) {
-        alert('Your deletion request has been submitted. Your account will be deleted within 30 days.');
+        // Erasure runs when the request is made, not within 30 days, so the
+        // server's own account of what happened is what the member sees, and
+        // there is no account left to stay signed in to.
+        alert(payload?.message || 'Your personal data has been erased.');
         setDeleteConfirm(false);
         setDeleteInput('');
-        fetchPrivacyData();
+        logout();
+        window.location.href = '/';
+        return;
       }
+      // A legal hold or an open dispute can stop erasure; the route says why.
+      setDeleteError(payload?.error || payload?.message || 'Deletion could not be carried out right now.');
     } catch (error) {
       console.error('Failed to request deletion:', error);
-      alert('Failed to submit deletion request. Please try again.');
+      setDeleteError('We could not reach the server. Please try again.');
     }
   };
 
@@ -356,9 +390,55 @@ export default function PrivacyCenterPage() {
                 </div>
                 <div>
                   <h3 className="font-medium text-slate-900 dark:text-white">Delete My Account</h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Permanently delete all your data</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Erase your personal data now</p>
                 </div>
               </button>
+            </div>
+
+            {exportReady && (
+              <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-900/20">
+                <p className="font-medium text-blue-900 dark:text-blue-100">Your export is ready.</p>
+                <p className="mt-1 text-sm text-blue-800 dark:text-blue-200">
+                  It is a JSON file of everything we hold about you.
+                  {exportReady.expiresAt && ` The link works until ${formatDateLabel(exportReady.expiresAt)}.`}
+                </p>
+                <a
+                  href={safeHref(exportReady.downloadUrl)}
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  <Download className="h-4 w-4" /> Download my data
+                </a>
+              </div>
+            )}
+
+            {exportError && (
+              <p className="mt-4 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+            )}
+          </section>
+        )}
+
+        {/* Home regime: the Privacy Act and the APPs for Australian members */}
+        {region === 'ANZ' && (
+          <section className="rounded-xl border border-rose-100 bg-gradient-to-r from-rose-50 to-amber-50 p-6 dark:border-rose-900/40 dark:from-rose-950/30 dark:to-amber-950/20">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your rights in Australia</h2>
+            <p className="mt-2 text-slate-700 dark:text-slate-300">
+              ATHENA is a Queensland company, so the Privacy Act 1988 and the Australian Privacy Principles are the
+              rules we keep for you. You can see and correct what we hold, say no to marketing, and if something is
+              wrong, tell us first. We answer within 30 days, and if you are not satisfied you can take it to the
+              Office of the Australian Information Commissioner.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-4 text-sm">
+              <Link href="/privacy/au" className="inline-flex items-center gap-1 font-medium text-rose-700 hover:underline dark:text-rose-300">
+                Read the Australian Privacy Statement <ChevronRight className="h-4 w-4" />
+              </Link>
+              <a
+                href="https://www.oaic.gov.au/privacy/privacy-complaints"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-rose-700 hover:underline dark:text-rose-300"
+              >
+                Complain to the OAIC <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              </a>
             </div>
           </section>
         )}
@@ -613,23 +693,29 @@ export default function PrivacyCenterPage() {
               </div>
             </div>
             <p className="text-slate-600 dark:text-slate-400 mb-4">
-              Your account and all associated data will be permanently deleted within 30 days. This includes your profile, posts, messages, and all other content.
+              Your profile, posts, messages and other personal data are erased as soon as you confirm. Records the law
+              makes us keep, such as payment records, are held without anything that identifies you.
             </p>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+            <label htmlFor="delete-account-confirmation" className="block text-sm text-slate-600 dark:text-slate-400 mb-2">
               Type <strong>DELETE_MY_ACCOUNT</strong> to confirm:
-            </p>
+            </label>
             <input
+              id="delete-account-confirmation"
               type="text"
               value={deleteInput}
               onChange={(e) => setDeleteInput(e.target.value)}
               className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg mb-4 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               placeholder="DELETE_MY_ACCOUNT"
             />
+            {deleteError && (
+              <p className="mb-4 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={() => {
                   setDeleteConfirm(false);
                   setDeleteInput('');
+                  setDeleteError(null);
                 }}
                 className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
               >

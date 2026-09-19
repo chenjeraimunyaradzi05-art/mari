@@ -1,7 +1,10 @@
 /**
  * Appeal Page
- * UK Online Safety Act Compliance
- * Phase 4: UK/EU Market Launch
+ *
+ * The right to have a moderation decision reviewed. The Online Safety Act 2021
+ * (Cth) and the eSafety Commissioner's Basic Online Safety Expectations ask an
+ * Australian platform for this; the UK Online Safety Act 2023 asks the same of
+ * one serving UK members.
  */
 
 'use client';
@@ -11,6 +14,7 @@ import { Scale, Send, CheckCircle, ArrowLeft, AlertCircle, FileText } from 'luci
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
+import OnlineSafetyNotice from '@/components/compliance/OnlineSafetyNotice';
 
 interface AppealFormData {
   appealType: 'content_removal' | 'account_suspension' | 'account_ban' | 'warning' | 'other';
@@ -187,19 +191,8 @@ export default function AppealPage() {
           </div>
         </div>
 
-        {/* Info Box */}
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-8">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold text-blue-900 dark:text-blue-100">Your Right to Appeal</h3>
-              <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
-                Under the UK Online Safety Act 2023, you have the right to appeal any content moderation decision. 
-                All appeals are reviewed by a moderator who was not involved in the original decision.
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* Which online-safety law this meets, with the regulator for the reader's region */}
+        <OnlineSafetyNotice variant="appeal" className="mb-8" />
 
         {!isAuthLoading && !isAuthenticated && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-8">

@@ -26,6 +26,11 @@ export default function PrivacySettingsPage() {
     const region = getStoredPreference('athena.region', 'ANZ');
     return region === 'UK' || region === 'EU';
   }, []);
+  // The home regime: a Queensland company under the Privacy Act 1988.
+  const isAustralianRegion = useMemo(
+    () => getStoredPreference('athena.region', 'ANZ') === 'ANZ',
+    []
+  );
 
   useEffect(() => {
     let active = true;
@@ -214,6 +219,29 @@ export default function PrivacySettingsPage() {
           </div>
         </div>
       </div>
+
+      {isAustralianRegion && (
+        <div className="card">
+          <div className="flex items-start space-x-4">
+            <div className="p-2 bg-rose-50 dark:bg-rose-900/30 rounded-lg">
+              <ShieldCheck className="w-5 h-5 text-rose-600" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Your rights in Australia
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Under the Privacy Act 1988 and the Australian Privacy Principles you can see and correct what we
+                hold about you, opt out of marketing, and complain to us and then to the OAIC.
+              </p>
+              <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                How each principle applies is in the{' '}
+                <a className="text-primary-600 hover:underline" href="/privacy/au">Australian Privacy Statement</a>.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isUkEuRegion && (
         <div className="card">

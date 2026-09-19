@@ -3,16 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Cookie, Shield, Settings, Check, X } from 'lucide-react';
-import { getPreferredLocale, getStoredPreference, setStoredPreference } from '@/lib/utils';
+import { getPreferredLocale, getStoredPreference } from '@/lib/utils';
 import { getMessages } from '@/i18n/messages';
 import { userApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
-
-const CONSENT_KEY = 'athena.consentCookies';
-const CONSENT_MARKETING_KEY = 'athena.consentMarketing';
-const CONSENT_ANALYTICS_KEY = 'athena.consentAnalytics';
-const CONSENT_FUNCTIONAL_KEY = 'athena.consentFunctional';
-const CONSENT_DATA_KEY = 'athena.consentDataProcessing';
+import {
+  cookieConsentApi,
+  cacheCookieChoices,
+  readCachedCookieChoices,
+  type CookieChoices,
+} from '@/lib/cookie-consent';
 
 interface CookiePreferences {
   essential: boolean;
@@ -37,14 +37,55 @@ export default function CookieConsentBanner() {
 
   // Check if in GDPR region (UK/EU)
   const isGDPRRegion = region === 'UK' || region === 'EU';
+  // Australia is the home regime: the Privacy Act and the APPs, not GDPR.
+  const isAustralianRegion = region === 'ANZ';
 
   useEffect(() => {
-    const consent = getStoredPreference(CONSENT_KEY, '');
-    if (!consent) {
-      // Small delay for better UX
-      const timer = setTimeout(() => setVisible(true), 500);
-      return () => clearTimeout(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // This browser already decided: the cache is enough, the ledger was
+    // written when the choice was made.
+    const cached = readCachedCookieChoices();
+    if (cached) {
+      setPreferences({ essential: true, ...cached });
+      return;
     }
+
+    // Nothing cached here. The server knows the visitor cookie and, once the
+    // member is signed in, the consent ledger, so a choice made on another
+    // device or before the cache was cleared is honoured rather than asked for
+    // again. Only when the server has no record either does the banner open.
+    cookieConsentApi
+      .get()
+      .then((response) => {
+        if (cancelled) return;
+        const record = response.data?.data;
+        if (record?.hasConsented) {
+          const settled: CookiePreferences = {
+            essential: true,
+            analytics: record.analytics,
+            functional: record.functional,
+            marketing: record.marketing,
+          };
+          cacheCookieChoices(settled);
+          setPreferences(settled);
+          applyConsentToServices(settled);
+          return;
+        }
+        // Small delay for better UX
+        timer = setTimeout(() => setVisible(true), 500);
+      })
+      .catch(() => {
+        // The server could not be asked; the member must still be able to
+        // choose, so the banner opens on the cache alone.
+        if (!cancelled) timer = setTimeout(() => setVisible(true), 500);
+      });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -52,21 +93,51 @@ export default function CookieConsentBanner() {
   }, [user]);
 
   const persistConsents = async (prefs: CookiePreferences) => {
-    setStoredPreference(CONSENT_KEY, 'true');
-    setStoredPreference(CONSENT_ANALYTICS_KEY, String(prefs.analytics));
-    setStoredPreference(CONSENT_FUNCTIONAL_KEY, String(prefs.functional));
-    setStoredPreference(CONSENT_MARKETING_KEY, String(prefs.marketing));
-    setStoredPreference(CONSENT_DATA_KEY, 'true');
+    const choices: CookieChoices = {
+      analytics: prefs.analytics,
+      functional: prefs.functional,
+      marketing: prefs.marketing,
+    };
 
-    // Apply to analytics services
+    // Cached first so the banner does not reopen while the request is away.
+    cacheCookieChoices(choices);
     applyConsentToServices(prefs);
 
+    // The record: the visitor row and, once signed in, the ConsentRecord ledger
+    // that the Privacy Center and consentService.hasConsent() read.
+    try {
+      const response = await cookieConsentApi.save(choices);
+      const stored = response.data?.data;
+      // The server answers with what it will actually honour: a processing
+      // restriction can overrule a category the member just ticked.
+      if (stored) {
+        const settled: CookiePreferences = {
+          essential: true,
+          analytics: stored.analytics,
+          functional: stored.functional,
+          marketing: stored.marketing,
+        };
+        cacheCookieChoices(settled);
+        setPreferences(settled);
+        applyConsentToServices(settled);
+      }
+    } catch (error) {
+      console.error('Could not record cookie consent on the server', error);
+    }
+
+    // The settings page still reads the legacy booleans on the account, so a
+    // signed-in member's two screens are kept in step. Best effort: the ledger
+    // above is the record.
     if (user?.id) {
-      await userApi.updateConsents({
-        consentCookies: true,
-        consentMarketing: prefs.marketing,
-        consentDataProcessing: true,
-      });
+      try {
+        await userApi.updateConsents({
+          consentCookies: true,
+          consentMarketing: prefs.marketing,
+          consentDataProcessing: true,
+        });
+      } catch (error) {
+        console.error('Could not mirror cookie consent onto the account', error);
+      }
     }
   };
 
@@ -158,6 +229,13 @@ export default function CookieConsentBanner() {
               {region === 'US' && (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {messages['cookie.ccpaNotice'] || 'California residents: See our Privacy Policy for CCPA details.'}
+                </p>
+              )}
+
+              {isAustralianRegion && (
+                <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                  <Shield className="w-3 h-3 flex-shrink-0" />
+                  {messages['cookie.appNotice'] || 'Handled under the Australian Privacy Principles.'}
                 </p>
               )}
 
@@ -282,6 +360,11 @@ export default function CookieConsentBanner() {
             <Link href="/privacy" className="hover:text-purple-600 transition-colors">
               Privacy
             </Link>
+            {isAustralianRegion && (
+              <Link href="/privacy/au" className="hover:text-purple-600 transition-colors">
+                Your rights in Australia
+              </Link>
+            )}
           </div>
         </div>
       </div>

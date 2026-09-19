@@ -551,6 +551,7 @@ export default function HomepageLanding() {
             </div>
             <div className="flex flex-wrap gap-5">
               <Link href="/privacy" className="hover:text-slate-900 dark:hover:text-white">Privacy</Link>
+              <Link href="/privacy/au" className="hover:text-slate-900 dark:hover:text-white">Privacy (Australia)</Link>
               <Link href="/terms" className="hover:text-slate-900 dark:hover:text-white">Terms</Link>
               <Link href="/cookies" className="hover:text-slate-900 dark:hover:text-white">Cookies</Link>
               <Link href="/accessibility" className="hover:text-slate-900 dark:hover:text-white">Accessibility</Link>

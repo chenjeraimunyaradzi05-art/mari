@@ -1,16 +1,19 @@
 /**
  * Content Report Page
- * UK Online Safety Act Compliance
- * Phase 4: UK/EU Market Launch
+ *
+ * The reporting mechanism the Online Safety Act 2021 (Cth) and the eSafety
+ * Commissioner's Basic Online Safety Expectations ask of an Australian
+ * platform, and the UK Online Safety Act 2023 asks of one serving UK members.
  */
 
 'use client';
 
 import { Suspense, useState } from 'react';
-import { AlertTriangle, Send, CheckCircle, ArrowLeft, Shield } from 'lucide-react';
+import { AlertTriangle, Send, CheckCircle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import OnlineSafetyNotice from '@/components/compliance/OnlineSafetyNotice';
 
 interface ReportFormData {
   contentType: 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
@@ -32,7 +35,7 @@ const CONTENT_TYPES = [
 ];
 
 const REPORT_REASONS = [
-  { value: 'illegal', label: 'Illegal Content', description: 'Content that violates UK law', priority: 'high' },
+  { value: 'illegal', label: 'Illegal Content', description: 'Content that breaks the law', priority: 'high' },
   { value: 'csam', label: 'Child Sexual Abuse Material', description: 'Any content involving child exploitation', priority: 'critical' },
   { value: 'terrorism', label: 'Terrorism or Violent Extremism', description: 'Content promoting terrorism or extreme violence', priority: 'critical' },
   { value: 'harmful', label: 'Harmful Content', description: 'Content that could cause harm to individuals', priority: 'high' },
@@ -231,18 +234,8 @@ function ReportContent() {
           </div>
         </div>
 
-        {/* UK Online Safety Notice */}
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-8">
-          <div className="flex items-start gap-3">
-            <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold text-blue-900 dark:text-blue-100">UK Online Safety Act</h3>
-              <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
-                Under the UK Online Safety Act 2023, ATHENA is committed to providing effective mechanisms for users to report harmful content. All reports are reviewed by our Trust & Safety team and actioned in accordance with our policies and legal obligations.
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* Which online-safety law this meets, with the regulator for the reader's region */}
+        <OnlineSafetyNotice variant="report" className="mb-8" />
 
         {/* Report Form */}
         <form onSubmit={handleSubmit} className="space-y-6">

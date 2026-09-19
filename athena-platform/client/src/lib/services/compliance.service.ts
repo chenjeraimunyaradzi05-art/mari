@@ -197,61 +197,142 @@ export async function getRegionalPricing(region: string): Promise<PricingTier[]>
   });
 }
 
+export interface PrivacyRight {
+  id: string;
+  name: string;
+  description: string;
+  /** The APP number for the Australian set. */
+  principle?: string;
+  /** The GDPR article for the UK/EU set. */
+  article?: string;
+}
+
 /**
- * Get GDPR compliance information
+ * What GET /api/compliance/privacy/:region answers: the Australian Privacy
+ * Principles for ANZ (and everyone outside the UK/EU), the GDPR set layered on
+ * for UK and EU members. `contact.email` is null until ATHENA owns a domain;
+ * `contact.route` always works.
+ */
+export interface PrivacyRightsInfo {
+  region: string;
+  regime: 'APP' | 'GDPR';
+  law: string;
+  regulator: {
+    name: string;
+    shortName?: string;
+    url: string;
+    complaintUrl: string;
+  };
+  responseDays: number;
+  complaintAcknowledgeDays?: number;
+  ndbAssessmentDays?: number;
+  breachNotificationHours?: number;
+  rights: PrivacyRight[];
+  contact: { email: string | null; route: string };
+  statementUrl: string;
+}
+
+/**
+ * Get the privacy rights and regulator for a region
+ */
+export async function getPrivacyRights(region: string): Promise<PrivacyRightsInfo> {
+  const response = await fetch(`${API_BASE}/api/compliance/privacy/${encodeURIComponent(region)}`);
+
+  return parseApiResponse(response, 'Failed to fetch privacy rights');
+}
+
+/**
+ * Get GDPR compliance information (UK/EU layer only; see getPrivacyRights for
+ * the Australian Privacy Principles that apply to every member).
  */
 export async function getGDPRInfo(): Promise<{
-  dataController: {
-    name: string;
-    address: string;
-    email: string;
-    phone: string;
-  };
-  dpo: {
-    name: string;
-    email: string;
-  };
-  supervisoryAuthority: {
-    name: string;
-    website: string;
-  };
-  rights: string[];
-  legalBases: Array<{
-    purpose: string;
-    basis: string;
-  }>;
-  retentionPeriods: Array<{
-    dataType: string;
-    period: string;
-  }>;
-  transfers: {
-    countries: string[];
-    safeguards: string;
-  };
+  config: Record<string, unknown>;
+  applicableRegions: string[];
+  /** Null until a domain ATHENA owns is configured. */
+  dpoContact: string | null;
+  dpoContactRoute: string;
+  rights: PrivacyRight[];
 }> {
   const response = await fetch(`${API_BASE}/api/compliance/gdpr`);
 
   return parseApiResponse(response, 'Failed to fetch GDPR information');
 }
 
+export interface OnlineSafetyRegime {
+  region: string;
+  act: string;
+  expectations: string | null;
+  regulator: {
+    name: string;
+    url: string;
+    complaintUrl: string;
+    role: string;
+  };
+  reviewHours: { illegal: number; harmful: number };
+}
+
+export interface OnlineSafetyInfo {
+  region: string;
+  /** Which regime the caller is served under. */
+  applicable: 'ANZ' | 'UK';
+  regime: OnlineSafetyRegime;
+  regimes: Record<'ANZ' | 'UK', OnlineSafetyRegime>;
+  safetyFeatures: Array<{ name: string; description: string; available: boolean }>;
+}
+
+/**
+ * Get the online-safety regimes ATHENA answers to (Australia's Online Safety
+ * Act 2021 and the eSafety Commissioner; the UK Online Safety Act 2023 and
+ * Ofcom), and which one applies to the caller.
+ */
+export async function getOnlineSafetyInfo(region?: string): Promise<OnlineSafetyInfo> {
+  const query = region ? `?region=${encodeURIComponent(region)}` : '';
+  const response = await fetch(`${API_BASE}/api/compliance/online-safety${query}`);
+
+  return parseApiResponse(response, 'Failed to fetch online safety information');
+}
+
 /**
  * Get UK Online Safety Act compliance information
+ *
+ * Superseded by getOnlineSafetyInfo(), which covers both regimes; kept because
+ * the server still answers /uk-safety for callers written against it.
  */
 export async function getUKSafetyInfo(): Promise<{
-  contentModerationPolicy: string;
-  reportingMechanisms: string[];
-  appealProcess: string;
-  transparencyReports: string;
-  ageVerification: {
-    required: boolean;
-    methods: string[];
-  };
-  harmfulContentCategories: string[];
-  userEmpowermentTools: string[];
+  config: Record<string, unknown>;
+  safetyFeatures: Array<{ name: string; description: string; available: boolean }>;
+  regulatorInfo: { name: string; url: string; role: string };
+  supersededBy: string;
 }> {
   const response = await fetch(`${API_BASE}/api/compliance/uk-safety`);
 
   return parseApiResponse(response, 'Failed to fetch UK Online Safety information');
+}
+
+export interface DataTransfersInfo {
+  primaryDataLocation: string | null;
+  primaryRegionCode: string | null;
+  backupLocations: string[];
+  overseasDisclosures: Array<{
+    processor: string;
+    destination: string;
+    mechanism: string | null;
+    isEUAdequate: boolean;
+    dataCategories: string[];
+    dpaStatus: 'SIGNED' | 'EXPIRED' | 'NOT_RECORDED';
+  }>;
+  basis: { australia: string; ukEu: string };
+  adequacyDecisions: string[];
+}
+
+/**
+ * Where personal information is held and where it goes. Null when the
+ * deployment has not published a location or a subprocessor yet.
+ */
+export async function getDataTransfers(): Promise<DataTransfersInfo | null> {
+  const response = await fetch(`${API_BASE}/api/compliance/data-transfers`);
+
+  return parseApiResponse(response, 'Failed to fetch data transfer information');
 }
 
 /**
@@ -419,7 +500,10 @@ const complianceService = {
   getRegionConfig,
   getRegionalPricing,
   getGDPRInfo,
+  getPrivacyRights,
+  getOnlineSafetyInfo,
   getUKSafetyInfo,
+  getDataTransfers,
   reportContent,
   getComplianceStatus,
   getLegalDocuments,

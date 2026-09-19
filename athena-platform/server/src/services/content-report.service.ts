@@ -1,7 +1,12 @@
 /**
  * Content Report Service
- * UK Online Safety Act Compliance
- * Phase 4: UK/EU Market Launch
+ *
+ * The reporting, review and escalation mechanism behind /report. ATHENA is a
+ * Queensland company, so the home regime is the Online Safety Act 2021 (Cth)
+ * and the eSafety Commissioner's Basic Online Safety Expectations; the UK
+ * Online Safety Act 2023 (Ofcom) is layered on for members there. One queue
+ * and one set of review targets serve both; the regimes are described for a
+ * member by GET /api/compliance/online-safety.
  */
 
 import type { ContentReport } from '@prisma/client';

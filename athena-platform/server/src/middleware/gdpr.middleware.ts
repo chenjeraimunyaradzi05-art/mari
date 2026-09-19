@@ -1,7 +1,16 @@
 /**
- * GDPR Compliance Middleware
- * Adds GDPR headers and validates consent
- * Phase 4: UK/EU Market Launch
+ * Privacy Compliance Middleware
+ *
+ * Region detection, data-protection response headers, the consent gate, IP
+ * anonymisation and data-access auditing. The home regime is the Privacy Act
+ * 1988 (Cth) and the Australian Privacy Principles, which apply to every
+ * request this middleware sees: APP 11 (security) is why access is audited
+ * and IPs are truncated, APP 7 and the Spam Act 2003 are why a consent gate
+ * exists at all. GDPR and UK GDPR handling is layered on when the request is
+ * detected as coming from the UK, the EU/EEA or Switzerland, which is what
+ * the `gdpr` request context and the UK-GDPR / EU-GDPR value of the
+ * X-Data-Protection header record. The file keeps its GDPR name for import
+ * stability.
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -93,11 +102,12 @@ export function gdprRegionMiddleware(req: GDPRRequest, res: Response, next: Next
  */
 export function requireConsent(consentType: ConsentType) {
   return async (req: GDPRRequest, res: Response, next: NextFunction) => {
-    // Outside the GDPR/EEA/UK footprint consent is not the basis this
-    // processing runs on, so there is nothing for the gate to enforce.
-    if (!req.gdpr?.isGDPRRegion) {
-      return next();
-    }
+    // No region gate. This middleware used to wave everyone outside the UK/EU
+    // through, but consent is the basis the Privacy Center offers every member,
+    // and for a Queensland company APP 7 and the Spam Act 2003 make marketing
+    // consent a real obligation regardless of where the member is. The ledger
+    // is asked for everyone; whether the GDPR headers were set (req.gdpr) is
+    // irrelevant to whether the member agreed.
 
     // Check if user has given consent
     const userId = (req as any).user?.id;

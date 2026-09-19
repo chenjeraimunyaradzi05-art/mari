@@ -60,6 +60,13 @@ export const ORGANISATION = {
 export const HAS_LEGAL_IDENTITY =
   ORGANISATION.abn !== null && ORGANISATION.registeredOffice !== null;
 
+/**
+ * The one age the platform asks for at sign-up. The Terms (2.1), the Privacy
+ * Policy (11) and the server's ANZ region config all quote this number, so a
+ * reader never meets 18 on one page and 13 on the next.
+ */
+export const PLATFORM_MINIMUM_AGE = 18;
+
 export type Mailbox =
   | 'support'
   | 'privacy'
@@ -166,6 +173,7 @@ export function renderLegalTokens(markdown: string): string {
     'org.abn': ORGANISATION.abn ? `ABN ${ORGANISATION.abn}` : `ABN ${pending}`,
     'org.address': ORGANISATION.registeredOffice ?? `Registered office ${pending}`,
     'org.jurisdiction': ORGANISATION.jurisdiction,
+    'platform.minimumAge': String(PLATFORM_MINIMUM_AGE),
     'site.domain': CONTACT_DOMAIN ?? (siteOrigin().replace(/^https?:\/\//, '') || pending),
 
     // Whole lines, used where the document is listing a way to reach us.

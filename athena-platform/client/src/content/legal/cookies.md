@@ -1,227 +1,129 @@
 # ATHENA Cookie Policy
 
-**Effective Date:** March 8, 2026  
-**Last Updated:** March 8, 2026
+**Effective Date:** September 19, 2026
+**Version:** 1.1
+**Last Updated:** September 19, 2026
 
 ---
 
 ## 1. Introduction
 
-This Cookie Policy explains how {{org.legalName}} ("ATHENA", "we", "us", or "our") uses cookies and similar tracking technologies when you visit our website at {{site.domain}} and use our services (the "Platform").
+This Cookie Policy explains what {{org.legalName}} ("ATHENA", "we", "us", or "our") stores on your device when you visit {{site.domain}} and use our services (the "Platform"), and how to change your choices.
 
-By using our Platform, you consent to the use of cookies in accordance with this policy. You can manage your cookie preferences at any time through our cookie consent tool or your browser settings.
+ATHENA is a company in {{org.jurisdiction}}. For Australian members this policy is part of the notice we give under the Australian Privacy Principles (APP 1 and APP 5). For members in the UK and the EU, the optional categories below are set only with your consent.
 
----
-
-## 2. What Are Cookies?
-
-Cookies are small text files that are placed on your device (computer, tablet, or mobile phone) when you visit a website. They are widely used to make websites work more efficiently and provide information to website owners.
-
-### Types of Cookies
-
-**By Duration:**
-- **Session Cookies**: Temporary cookies that expire when you close your browser
-- **Persistent Cookies**: Remain on your device until they expire or you delete them
-
-**By Origin:**
-- **First-Party Cookies**: Set by the website you're visiting
-- **Third-Party Cookies**: Set by external services integrated into the website
+This page lists what the Platform actually sets today. If we add a tool later, we will name it here first and it will only run for people who said yes.
 
 ---
 
-## 3. How We Use Cookies
+## 2. What Cookies Are
 
-### 3.1 Essential Cookies (Always Active)
-
-These cookies are necessary for the Platform to function properly. They cannot be disabled.
-
-| Cookie Name | Purpose | Duration |
-|------------|---------|----------|
-| `athena_session` | User authentication and session management | Session |
-| `athena_csrf` | Security - prevents cross-site request forgery | Session |
-| `athena_consent` | Stores your cookie consent preferences | 1 year |
-| `athena_visitor_id` | Anonymous visitor identification | 1 year |
-
-### 3.2 Analytics Cookies (Optional)
-
-These cookies help us understand how visitors interact with the Platform, allowing us to improve our services.
-
-| Cookie Name | Provider | Purpose | Duration |
-|------------|----------|---------|----------|
-| `_ga` | Google Analytics | Distinguishes unique users | 2 years |
-| `_ga_*` | Google Analytics | Stores session state | 2 years |
-| `_gid` | Google Analytics | Distinguishes unique users | 24 hours |
-
-### 3.3 Functional Cookies (Optional)
-
-These cookies enable enhanced functionality and personalisation, such as remembering your preferences.
-
-| Cookie Name | Purpose | Duration |
-|------------|---------|----------|
-| `athena_theme` | Remembers your dark/light mode preference | 1 year |
-| `athena_lang` | Remembers your language preference | 1 year |
-| `athena_region` | Stores your regional settings | 1 year |
-
-### 3.4 Marketing Cookies (Optional)
-
-These cookies are used to deliver relevant advertisements and track the effectiveness of marketing campaigns.
-
-| Cookie Name | Provider | Purpose | Duration |
-|------------|----------|---------|----------|
-| `_fbp` | Facebook | Delivers targeted advertising | 90 days |
-| `_gcl_au` | Google Ads | Conversion tracking | 90 days |
-| `li_sugr` | LinkedIn | Marketing insights | 90 days |
+Cookies are small text files a website places on your device. The Platform also uses browser storage (often called local storage), which stays on your device and is not sent to our servers with each request. Both are described below so nothing is hidden behind the word "cookie".
 
 ---
 
-## 4. Managing Your Cookie Preferences
+## 3. What the Platform Sets Today
 
-### 4.1 Cookie Consent Tool
+### 3.1 Essential (always on)
 
-When you first visit our Platform, you will see a cookie consent banner. You can:
-- **Accept All**: Enable all cookies
-- **Reject Optional**: Accept only essential cookies
-- **Customise**: Choose specific cookie categories
+These are needed for the Platform to work and for your choices to be remembered. They are set by ATHENA, not by third parties.
 
-You can change your preferences at any time by:
-- Clicking the cookie icon in the footer
-- Visiting /privacy-center
-- Contacting us at {{email.privacy}}
+- `athena_visitor_id` (cookie, 1 year): a random identifier so your cookie choice can be recorded before you have an account, and matched to your account once you sign in.
+- `refreshToken` (cookie, HttpOnly): keeps you signed in between visits. Cleared when you sign out.
+- `athena.consentCookies`, `athena.consentAnalytics`, `athena.consentFunctional`, `athena.consentMarketing`, `athena.consentDataProcessing` (browser storage): a copy of the choice you made in the consent banner, kept in this browser so we do not ask again on every page. The record itself is held on our servers.
+- `athena-auth` and `athena-ui` (browser storage): your signed-in state and layout preferences such as theme and sidebar.
+- `athena.locale`, `athena.region`, `athena.currency`, `athena.timezone` (browser storage): the language, region, currency and timezone you chose in Settings.
+- `athena.anon` (browser storage): a random identifier used only to count how many people saw a post when they are not signed in. It is not linked to a name.
 
-### 4.2 Browser Settings
+### 3.2 Functional (optional)
 
-Most web browsers allow you to control cookies through their settings. Common options include:
-- Block all cookies
-- Block third-party cookies
-- Delete cookies when you close your browser
-- Browse in "private" or "incognito" mode
+Today every preference the Platform remembers is listed under Essential above, because we need it to show you the Platform the way you set it up. The Functional switch in the banner is kept so that, if we add an optional convenience later, it can be turned on only by people who want it.
 
-**Note:** Blocking essential cookies may prevent certain features from working properly.
+### 3.3 Analytics (optional)
 
-### Browser-Specific Instructions
+**No analytics cookies are set today.** The Platform does not load Google Analytics or any other measurement service. The Analytics switch in the banner records your preference in advance: if we add a measurement tool, it will only run for people who chose yes, and this policy will name it first.
 
-- **Chrome**: Settings > Privacy and Security > Cookies
-- **Firefox**: Options > Privacy & Security > Cookies
-- **Safari**: Preferences > Privacy > Cookies
-- **Edge**: Settings > Privacy & Security > Cookies
+### 3.4 Marketing (optional)
 
-### 4.3 Opt-Out Links
-
-You can opt out of specific third-party cookies:
-- Google Analytics: tools.google.com/dlpage/gaoptout
-- Facebook: facebook.com/ads/preferences
-- LinkedIn: linkedin.com/psettings/advertising
+**No advertising or marketing cookies are set today.** The Platform does not load Meta Pixel, Google Ads, LinkedIn or any similar tag. As with analytics, the Marketing switch records your preference for any future tool, and this policy will be updated before one is added.
 
 ---
 
-## 5. Similar Technologies
+## 4. Managing Your Choices
 
-In addition to cookies, we may use similar technologies:
+### 4.1 The consent banner
 
-### 5.1 Local Storage
-We use browser local storage to store preferences and cached data for better performance. Unlike cookies, local storage data is not sent to our servers with each request.
+When you first visit, the banner offers Accept All, Reject Optional and Customise. Your choice is recorded on our servers against `athena_visitor_id` and, once you sign in, against your account, so it follows you between devices.
 
-### 5.2 Pixel Tags (Web Beacons)
-Small transparent images that help us track user interactions with emails and web pages.
+You can change it at any time:
 
-### 5.3 Device Fingerprinting
-We may collect device characteristics (browser type, screen size, timezone) for fraud prevention. This data is processed in accordance with our Privacy Policy.
+- Use the "Change my cookie choices" button at the top of this page.
+- Open the privacy centre at /privacy-center.
+- Reach us at {{email.privacy}}.
 
----
+### 4.2 Browser settings
 
-## 6. International Data Transfers
-
-Some cookies are set by third-party services that may process data outside your country of residence. When this occurs:
-- We ensure appropriate safeguards are in place
-- Data transfers to non-UK/EU countries are protected by Standard Contractual Clauses or adequacy decisions
-- You can find more information in our Privacy Policy
+Most browsers let you block or delete cookies and clear site data. If you block the essential cookie or clear browser storage, you will be signed out and asked for your cookie choice again.
 
 ---
 
-## 7. UK and EU Users
+## 5. Where This Information Is Held
 
-### 7.1 Legal Basis
+Your cookie choice and the visitor identifier are stored with the rest of the Platform's data in Australia. Because no third-party analytics or advertising tools are loaded, no cookie data leaves the Platform today. If a provider outside Australia is ever involved in setting a cookie, we will name it here and in the Privacy Policy before it starts, and for UK and EU members the transfer will rest on Standard Contractual Clauses, the UK International Data Transfer Agreement or an adequacy decision.
 
-For UK and EU users, we rely on:
-- **Consent**: For analytics, functional, and marketing cookies
-- **Legitimate Interests**: For essential cookies necessary for Platform operation
+---
 
-### 7.2 Your Rights
+## 6. Australian Members
 
-Under UK GDPR and EU GDPR, you have the right to:
-- Withdraw consent at any time
-- Request information about cookies we use
-- Lodge a complaint with a supervisory authority
+ATHENA is bound by the Privacy Act 1988 (Cth) and the Australian Privacy Principles.
 
-### 7.3 Supervisory Authorities
+- This policy, together with the banner, is the notice APP 5 asks us to give at the point of collection: what is collected, why, and how to opt out.
+- Optional categories are off until you turn them on, and any direct marketing that follows a marketing choice can be opted out of at any time (APP 7).
+- You can ask what we hold about you, ask us to correct it, and complain to us first. If you are not satisfied, you can complain to the Office of the Australian Information Commissioner at oaic.gov.au/privacy/privacy-complaints.
 
-- **UK**: Information Commissioner's Office (ICO) - ico.org.uk
-- **EU**: Your local data protection authority
+The Australian Privacy Statement at /privacy/au explains how each principle applies to the Platform.
+
+---
+
+## 7. UK and EU Members
+
+### 7.1 Legal basis
+
+- **Consent** for the optional categories (analytics, functional, marketing).
+- **Legitimate interests** for the essential items needed to run the Platform.
+
+### 7.2 Your rights
+
+Under UK GDPR and EU GDPR you can withdraw consent at any time, ask what we store, and complain to a supervisory authority.
+
+### 7.3 Supervisory authorities
+
+- **UK:** Information Commissioner's Office (ICO), ico.org.uk
+- **EU:** your national data protection authority
+
+The UK Privacy Addendum at /privacy/uk has more for UK members.
 
 ---
 
 ## 8. Changes to This Policy
 
-We may update this Cookie Policy from time to time. We will notify you of material changes by:
-- Updating the "Last Updated" date
-- Displaying a notice on the Platform
-- Sending you an email (for significant changes)
+We will update the "Last Updated" date and show a notice on the Platform when this policy changes materially, and email you if the change affects what is set on your device.
 
 ---
 
 ## 9. Contact Us
 
-If you have questions about our use of cookies:
-
 **Contact:** {{contact.privacy}}
 
 **Data rights contact:** {{contact.dpo}}
 
-**Postal Address:**  
-{{org.legalName}}  
-Australia
+**Postal Address:**
+{{org.legalName}}
+{{org.address}}
+{{org.jurisdiction}}
 
 Registered office details will be published here before ATHENA accepts public legal or privacy notices through a live production launch.
 
-**UK Representative:**  
-If ATHENA launches a UK service that requires a local representative, the relevant contact details will be published here before that launch.
-
 ---
 
-## 10. Cookie Declaration
-
-Below is a detailed list of all cookies used on the Platform, updated regularly:
-
-### Essential Cookies
-| Name | Provider | Purpose | Type | Duration |
-|------|----------|---------|------|----------|
-| athena_session | ATHENA | Authentication | HTTP | Session |
-| athena_csrf | ATHENA | Security | HTTP | Session |
-| athena_consent | ATHENA | Cookie consent | HTTP | 1 year |
-| athena_visitor_id | ATHENA | Anonymous ID | HTTP | 1 year |
-
-### Analytics Cookies
-| Name | Provider | Purpose | Type | Duration |
-|------|----------|---------|------|----------|
-| _ga | Google | Analytics | HTTP | 2 years |
-| _ga_* | Google | Analytics | HTTP | 2 years |
-| _gid | Google | Analytics | HTTP | 24 hours |
-| _gat | Google | Rate limiting | HTTP | 1 minute |
-
-### Functional Cookies
-| Name | Provider | Purpose | Type | Duration |
-|------|----------|---------|------|----------|
-| athena_theme | ATHENA | Theme preference | HTTP | 1 year |
-| athena_lang | ATHENA | Language | HTTP | 1 year |
-| athena_region | ATHENA | Region settings | HTTP | 1 year |
-
-### Marketing Cookies
-| Name | Provider | Purpose | Type | Duration |
-|------|----------|---------|------|----------|
-| _fbp | Facebook | Advertising | HTTP | 90 days |
-| _gcl_au | Google | Conversion | HTTP | 90 days |
-| li_sugr | LinkedIn | Marketing | HTTP | 90 days |
-
----
-
-*Last declaration update: March 8, 2026*
+*Last declaration update: September 19, 2026*

@@ -1,7 +1,7 @@
 # ATHENA PRIVACY POLICY
 
-**Effective Date:** March 8, 2026
-**Version:** 1.1
+**Effective Date:** September 19, 2026
+**Version:** 1.2
 **Jurisdiction:** Australia and any additional markets where ATHENA formally launches services
 
 ---
@@ -10,6 +10,7 @@
 
 This summary provides key points from our privacy policy. You can find out more details about any of these topics by clicking the link or by using our table of contents below:
 
+- ATHENA is a company in {{org.jurisdiction}}, bound by the Privacy Act 1988 (Cth) and the Australian Privacy Principles (APPs) for every member
 - We collect personal information that you provide to us, as well as information automatically collected when you use our services
 - We process your information for legitimate business purposes, with your consent, and/or to comply with legal obligations
 - We share your information with service providers who assist in our operations
@@ -48,7 +49,7 @@ By using our Platform, you agree to the collection and use of information in acc
 
 **Data Controller:**
 {{org.legalName}}
-Australia
+{{org.jurisdiction}}
 
 **Primary privacy contact:**
 {{contact.privacy}}
@@ -155,10 +156,12 @@ You can withdraw consent at any time through your account settings or by contact
 We may share your information with:
 
 **Service Providers:**
-- Cloud hosting (AWS, based in Australia with EU data centers)
+- Cloud hosting (AWS, Sydney region, Australia)
 - Payment processing (Stripe)
-- Analytics (anonymized data only)
+- Email and push notification delivery
 - Customer support tools
+
+Some of these providers operate outside Australia. Section 7 explains what we do before your information goes to them.
 
 **Business Partners:**
 - Employers (only profile information you choose to make visible)
@@ -177,13 +180,17 @@ We DO NOT sell your personal information to third parties.
 
 ## 7. International Data Transfers
 
-Your information may be transferred to and processed in countries outside your residence. We ensure appropriate safeguards are in place:
+**Where your information is held.** The Platform's data is stored in Australia, in the AWS Sydney region. There are no ATHENA data centres elsewhere.
+
+**Overseas disclosure (APP 8).** Some of the providers named in section 6 process information outside Australia, for example a payment processor in the United States. Before we disclose personal information to a provider overseas we take reasonable steps, by contract, to make sure they handle it consistently with the Australian Privacy Principles, and we record the country and the safeguard for each provider. If you would prefer your information not to be disclosed overseas, you can export your data and close your account from the Privacy Center.
+
+**UK and EU members.** Where UK or EU data protection law applies to you, any transfer of your data outside the UK or the EEA, including to Australia, rests on one of:
 
 - **Standard Contractual Clauses** (SCCs) approved by the European Commission
-- **UK International Data Transfer Agreement** (IDTA) for UK transfers
-- Data processing agreements with all third-party processors
+- the **UK International Data Transfer Agreement** (IDTA) for UK transfers
+- an adequacy decision covering the destination
 
-For UK/EU users, your data is primarily stored in EU data centers. Any transfer outside the EEA/UK is protected by appropriate safeguards.
+and on a data processing agreement with the provider concerned.
 
 ---
 
@@ -198,7 +205,7 @@ We retain your information for as long as necessary to provide our services and 
 | Application data | 3 years after last activity |
 | Chat messages | 1 year |
 | Payment records | 7 years (legal requirement) |
-| Consent records | 5 years (GDPR compliance) |
+| Consent and privacy audit records | 7 years (legal obligation; kept as audit logs) |
 
 After the retention period, data is securely deleted or anonymized.
 
@@ -208,14 +215,15 @@ After the retention period, data is securely deleted or anonymized.
 
 ### 9.1 All Users
 
-You have the right to:
-- Access your personal information
-- Update or correct inaccurate data
+ATHENA is bound by the Australian Privacy Principles for every member, wherever you are. You have the right to:
+- Access your personal information (APP 12)
+- Update or correct inaccurate data (APP 13)
 - Delete your account and associated data
 - Export your data in a portable format
-- Opt out of marketing communications
+- Opt out of marketing communications (APP 7)
+- Complain to us, and then to the regulator for your region (section 9.3)
 
-### 9.2 UK and EU Users (GDPR Rights)
+### 9.2 UK and EU Members (GDPR Rights)
 
 Under UK GDPR and EU GDPR, you have additional rights:
 
@@ -232,6 +240,10 @@ To exercise these rights, visit our [Privacy Center](/privacy-center) or contact
 **Response Time:** We respond to all requests within 30 days. Complex requests may take up to 60 days (we will inform you).
 
 ### 9.3 Supervisory Authorities
+
+**Australia:** Office of the Australian Information Commissioner (OAIC)
+- Website: https://www.oaic.gov.au/privacy/privacy-complaints
+- Please write to us first; we acknowledge complaints within 7 days and aim to resolve them within 30
 
 **UK:** Information Commissioner's Office (ICO)
 - Website: https://ico.org.uk
@@ -257,7 +269,7 @@ Despite our efforts, no method of transmission over the Internet is 100% secure.
 
 ## 11. Children's Privacy
 
-Our Platform is not intended for users under 16 years of age in the UK/EU or under 13 years in other regions. We do not knowingly collect personal information from children. If we learn we have collected information from a child without parental consent, we will delete it promptly.
+You must be at least {{platform.minimumAge}} years old to create an account (Terms of Service 2.1), wherever you are. We do not knowingly collect personal information from anyone younger. If we learn we have, we will delete it promptly.
 
 ---
 
@@ -288,7 +300,8 @@ If you have questions about this Privacy Policy or our data practices, please co
 **Postal Address:**
 {{org.legalName}}
 Privacy Team
-Australia
+{{org.address}}
+{{org.jurisdiction}}
 
 Registered office and any local representative addresses will be published here before ATHENA accepts public legal or privacy notices in those jurisdictions.
 
@@ -304,4 +317,4 @@ Registered office and any local representative addresses will be published here 
 
 ---
 
-*Last updated: March 8, 2026*
+*Last updated: September 19, 2026*

@@ -1,7 +1,16 @@
 /**
- * UK/EU Compliance Routes
- * Handles region-specific compliance endpoints
- * Phase 4: UK/EU Market Launch
+ * Compliance Routes
+ *
+ * Region-aware compliance endpoints for every member. The home regime is the
+ * Privacy Act 1988 (Cth) and the Australian Privacy Principles, with the OAIC
+ * as regulator, AUD pricing inclusive of GST, and the Australian Consumer Law
+ * behind the consumer guarantees. UK and EU GDPR handling, ICO and DPA
+ * details, and the UK Online Safety Act endpoints are layered on for members
+ * in those regions and are selected by the region detected per request,
+ * never assumed. The default country when nothing is detected is AU.
+ *
+ * The APP-by-APP map to these routes lives in
+ * docs/compliance/AU_PRIVACY_ACT_AND_NDB.md.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -11,12 +20,17 @@ import { ConsentType } from '@prisma/client';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
 import { prisma } from '../utils/prisma';
-import { 
-  REGION_CONFIGS, 
-  UK_PRICING, 
+import {
+  REGION_CONFIGS,
+  UK_PRICING,
   EU_PRICING,
   UK_ONLINE_SAFETY_CONFIG,
+  AU_ONLINE_SAFETY_CONFIG,
+  AU_PRIVACY_CONFIG,
   GDPR_CONFIG,
+  GDPR_RIGHTS,
+  PRIVACY_CONTACT_ROUTE,
+  resolveContactEmail,
   getRegionFromCountry,
   isGDPRRegion,
 } from '../config/region.config';
@@ -104,7 +118,113 @@ const LEGAL_DOCUMENTS: LegalDocumentEntry[] = [
     required: true,
     regions: ['UK'],
   },
+  {
+    // The home-regime statement: how the Australian Privacy Principles and the
+    // Notifiable Data Breaches scheme apply. Informational rather than a
+    // contract, so it is listed for Australian members without asking them to
+    // acknowledge it.
+    id: 'au-privacy-statement-v1',
+    documentType: 'au_privacy_statement',
+    title: 'Australian Privacy Statement',
+    version: '1.0',
+    effectiveDate: '2026-09-17',
+    url: '/privacy/au',
+    required: false,
+    regions: ['ANZ'],
+  },
 ];
+
+/**
+ * The safety tools every member has, whichever regulator is reading. Listed
+ * once so /online-safety and its /uk-safety alias cannot disagree.
+ */
+const SAFETY_FEATURES = [
+  { name: 'Content Reporting', description: 'Report harmful or illegal content', available: true },
+  { name: 'User Blocking', description: 'Block users from contacting you', available: true },
+  { name: 'User Muting', description: 'Mute users without blocking them', available: true },
+  { name: 'Content Filtering', description: 'Filter content based on preferences', available: true },
+  { name: 'Safe Mode', description: 'Enhanced privacy for vulnerable users', available: true },
+];
+
+/**
+ * The online-safety regimes ATHENA answers to, keyed by region. Australia is
+ * the home regime (a Queensland company), the UK is layered on for members
+ * there. Anyone else is served under the home regime.
+ */
+const ONLINE_SAFETY_REGIMES = {
+  ANZ: {
+    region: 'ANZ',
+    act: AU_ONLINE_SAFETY_CONFIG.act,
+    expectations: AU_ONLINE_SAFETY_CONFIG.expectations,
+    regulator: {
+      name: AU_ONLINE_SAFETY_CONFIG.regulator,
+      url: AU_ONLINE_SAFETY_CONFIG.regulatorUrl,
+      complaintUrl: AU_ONLINE_SAFETY_CONFIG.complaintUrl,
+      role: 'Australian online safety regulator with removal-notice powers',
+    },
+    reviewHours: {
+      illegal: AU_ONLINE_SAFETY_CONFIG.illegalContentRemovalHours,
+      harmful: AU_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours,
+    },
+    config: AU_ONLINE_SAFETY_CONFIG,
+  },
+  UK: {
+    region: 'UK',
+    act: 'Online Safety Act 2023',
+    expectations: null,
+    regulator: {
+      name: 'Ofcom',
+      url: UK_ONLINE_SAFETY_CONFIG.ofcomUrl,
+      complaintUrl: UK_ONLINE_SAFETY_CONFIG.ofcomUrl,
+      role: 'UK communications regulator responsible for online safety',
+    },
+    reviewHours: {
+      illegal: UK_ONLINE_SAFETY_CONFIG.illegalContentRemovalHours,
+      harmful: UK_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours,
+    },
+    config: UK_ONLINE_SAFETY_CONFIG,
+  },
+} as const;
+
+type OnlineSafetyRegion = keyof typeof ONLINE_SAFETY_REGIMES;
+
+function applicableSafetyRegion(region: string): OnlineSafetyRegion {
+  return region === 'UK' ? 'UK' : 'ANZ';
+}
+
+/**
+ * Where an AWS region code actually is, for the data-transfers answer. Only
+ * codes the platform could plausibly be deployed to are named; anything else
+ * is published as the bare code rather than guessed at.
+ */
+const AWS_REGION_LOCATIONS: Record<string, string> = {
+  'ap-southeast-2': 'Australia (AWS Sydney)',
+  'ap-southeast-4': 'Australia (AWS Melbourne)',
+  'ap-southeast-1': 'Singapore (AWS Singapore)',
+  'eu-west-2': 'United Kingdom (AWS London)',
+  'eu-west-1': 'Ireland (AWS Dublin)',
+  'eu-central-1': 'Germany (AWS Frankfurt)',
+  'us-east-1': 'United States (AWS N. Virginia)',
+  'us-west-2': 'United States (AWS Oregon)',
+};
+
+function describeAwsRegion(code: string): string {
+  return AWS_REGION_LOCATIONS[code] ?? `AWS ${code}`;
+}
+
+const AUSTRALIA_LABELS = new Set(['AU', 'AUS', 'AUSTRALIA']);
+
+/** APP 8 turns on whether a disclosure leaves Australia. */
+function isOverseas(country: string): boolean {
+  return !AUSTRALIA_LABELS.has(country.trim().toUpperCase());
+}
+
+function privacyContact() {
+  return {
+    email: resolveContactEmail('privacy'),
+    route: PRIVACY_CONTACT_ROUTE,
+  };
+}
 
 /**
  * How to find the member behind a piece of reported content. A report has to
@@ -242,49 +362,127 @@ router.get('/pricing/:region', (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/compliance/gdpr
- * Get GDPR compliance information
+ * GET /api/compliance/privacy/:region
+ * The privacy rights a member in that region can exercise, and who to complain
+ * to. ANZ, US and ROW get the Australian Privacy Principles, the home regime
+ * for a Queensland company; UK and EU get the GDPR set layered on top.
  */
-router.get('/gdpr', (_req: Request, res: Response) => {
+router.get('/privacy/:region', (req: Request, res: Response) => {
+  const region = normalizeRegionCode(req.params.region);
+  const config = REGION_CONFIGS[region] || REGION_CONFIGS.ANZ;
+
+  if (isGDPRRegion(region)) {
+    return res.json({
+      success: true,
+      data: {
+        region,
+        regime: 'GDPR',
+        law: region === 'UK' ? 'UK GDPR and the Data Protection Act 2018' : 'EU General Data Protection Regulation',
+        regulator: {
+          name: config.regulatoryBody,
+          url: config.regulatoryUrl,
+          complaintUrl: config.regulatoryUrl,
+        },
+        responseDays: GDPR_CONFIG.dsarResponseDays,
+        breachNotificationHours: GDPR_CONFIG.breachNotificationHours,
+        rights: GDPR_RIGHTS,
+        contact: privacyContact(),
+        statementUrl: region === 'UK' ? '/privacy/uk' : '/privacy',
+      },
+    });
+  }
+
   res.json({
     success: true,
     data: {
-      config: GDPR_CONFIG,
+      region,
+      regime: 'APP',
+      law: `${AU_PRIVACY_CONFIG.act} and the ${AU_PRIVACY_CONFIG.principles}`,
+      regulator: {
+        name: AU_PRIVACY_CONFIG.regulator,
+        shortName: AU_PRIVACY_CONFIG.regulatorShortName,
+        url: AU_PRIVACY_CONFIG.regulatorUrl,
+        complaintUrl: AU_PRIVACY_CONFIG.complaintUrl,
+      },
+      responseDays: AU_PRIVACY_CONFIG.accessResponseDays,
+      complaintAcknowledgeDays: AU_PRIVACY_CONFIG.complaintAcknowledgeDays,
+      ndbAssessmentDays: AU_PRIVACY_CONFIG.ndbAssessmentDays,
+      rights: AU_PRIVACY_CONFIG.rights,
+      contact: privacyContact(),
+      statementUrl: '/privacy/au',
+    },
+  });
+});
+
+/**
+ * GET /api/compliance/gdpr
+ * Get GDPR compliance information
+ *
+ * UK/EU-scoped by design: this is the GDPR layer for members there, not the
+ * platform's privacy regime. The Australian Privacy Principles, which apply to
+ * every member, are served by GET /privacy/:region. The DPO mailbox is null
+ * until a domain ATHENA owns is configured (see resolveContactEmail); the
+ * privacy centre route is the contact that works meanwhile.
+ */
+router.get('/gdpr', (_req: Request, res: Response) => {
+  const dpoContact = resolveContactEmail('dpo');
+  res.json({
+    success: true,
+    data: {
+      config: { ...GDPR_CONFIG, dpoContact },
       applicableRegions: ['UK', 'EU'],
-      dpoContact: GDPR_CONFIG.dpoContact,
-      rights: [
-        { name: 'Right of Access', description: 'Request a copy of your personal data' },
-        { name: 'Right to Rectification', description: 'Correct inaccurate personal data' },
-        { name: 'Right to Erasure', description: 'Request deletion of your personal data' },
-        { name: 'Right to Restriction', description: 'Limit how we process your data' },
-        { name: 'Right to Portability', description: 'Receive your data in a portable format' },
-        { name: 'Right to Object', description: 'Object to certain types of processing' },
-      ],
+      dpoContact,
+      dpoContactRoute: PRIVACY_CONTACT_ROUTE,
+      rights: GDPR_RIGHTS,
+    },
+  });
+});
+
+/**
+ * GET /api/compliance/online-safety
+ * The online-safety regimes ATHENA answers to, keyed by region, and which one
+ * applies to the caller (?region=, else the Cloudflare country, else Australia).
+ */
+router.get('/online-safety', (req: Request, res: Response) => {
+  const requested = typeof req.query.region === 'string' ? req.query.region : undefined;
+  const country = typeof req.headers['cf-ipcountry'] === 'string' ? req.headers['cf-ipcountry'] : undefined;
+  const region = normalizeRegionCode(requested || country || 'AU');
+  const applicable = applicableSafetyRegion(region);
+
+  res.json({
+    success: true,
+    data: {
+      region,
+      applicable,
+      regime: ONLINE_SAFETY_REGIMES[applicable],
+      regimes: ONLINE_SAFETY_REGIMES,
+      safetyFeatures: SAFETY_FEATURES,
     },
   });
 });
 
 /**
  * GET /api/compliance/uk-safety
- * Get UK Online Safety Act compliance information
+ * Alias kept for callers written against the UK-only shape.
+ *
+ * Superseded by GET /online-safety, which serves both the Australian regime
+ * (Online Safety Act 2021, eSafety Commissioner) and the UK one keyed by
+ * region. This route answers with the UK regime only and is retained so an
+ * existing caller keeps working; new code should read /online-safety.
  */
 router.get('/uk-safety', (_req: Request, res: Response) => {
+  const uk = ONLINE_SAFETY_REGIMES.UK;
   res.json({
     success: true,
     data: {
       config: UK_ONLINE_SAFETY_CONFIG,
-      safetyFeatures: [
-        { name: 'Content Reporting', description: 'Report harmful or illegal content', available: true },
-        { name: 'User Blocking', description: 'Block users from contacting you', available: true },
-        { name: 'User Muting', description: 'Mute users without blocking them', available: true },
-        { name: 'Content Filtering', description: 'Filter content based on preferences', available: true },
-        { name: 'Safe Mode', description: 'Enhanced privacy for vulnerable users', available: true },
-      ],
+      safetyFeatures: SAFETY_FEATURES,
       regulatorInfo: {
-        name: 'Ofcom',
-        url: UK_ONLINE_SAFETY_CONFIG.ofcomUrl,
-        role: 'UK communications regulator responsible for online safety',
+        name: uk.regulator.name,
+        url: uk.regulator.url,
+        role: uk.regulator.role,
       },
+      supersededBy: '/api/compliance/online-safety',
     },
   });
 });
@@ -402,24 +600,82 @@ router.get('/subprocessors', async (_req: Request, res: Response, next: NextFunc
 
 /**
  * GET /api/compliance/data-transfers
- * Get information about international data transfers
+ * Where personal information is held and where it goes (APP 8, GDPR Chapter V)
+ *
+ * Derived, never asserted: the primary location comes from AWS_REGION, backup
+ * locations from BACKUP_AWS_REGIONS (comma-separated, optional), and overseas
+ * destinations from the Subprocessor register. This route once published
+ * Frankfurt and London data centres that did not exist; when nothing is
+ * configured it now says so with meta.status 'not_published', as
+ * /subprocessors does.
  */
-router.get('/data-transfers', (_req: Request, res: Response) => {
-  res.json({
-    success: true,
-    data: {
-      primaryDataLocation: 'EU (AWS Frankfurt)',
-      backupLocations: ['UK (AWS London)'],
-      transferMechanisms: [
-        {
-          destination: 'US',
-          mechanism: 'Standard Contractual Clauses (SCCs)',
-          additionalSafeguards: ['Encryption in transit and at rest', 'Access controls'],
+router.get('/data-transfers', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const primaryRegion = (process.env.AWS_REGION || '').trim();
+    const backupLocations = (process.env.BACKUP_AWS_REGIONS || '')
+      .split(',')
+      .map((code) => code.trim())
+      .filter(Boolean)
+      .map(describeAwsRegion);
+
+    const records = await prisma.subprocessor.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const overseasDisclosures = records
+      .filter((record) => isOverseas(record.country))
+      .map((record) => ({
+        processor: record.name,
+        destination: record.country,
+        mechanism: record.transferMechanism,
+        isEUAdequate: record.isEUAdequate,
+        dataCategories: record.dataCategories,
+        dpaStatus: resolveDpaStatus(record.dpaSignedAt, record.dpaExpiresAt),
+      }));
+
+    const configured = Boolean(primaryRegion) || records.length > 0;
+
+    if (!configured) {
+      return res.json({
+        success: true,
+        data: null,
+        meta: { status: 'not_published' },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        primaryDataLocation: primaryRegion ? describeAwsRegion(primaryRegion) : null,
+        primaryRegionCode: primaryRegion || null,
+        backupLocations,
+        overseasDisclosures,
+        // Kept under the old key too, so a reader of the previous shape still
+        // finds the destinations here.
+        transferMechanisms: overseasDisclosures.map((disclosure) => ({
+          destination: disclosure.destination,
+          processor: disclosure.processor,
+          mechanism: disclosure.mechanism,
+        })),
+        basis: {
+          australia:
+            'Before disclosing personal information overseas we take reasonable steps, by contract, so the recipient handles it consistently with the Australian Privacy Principles (APP 8.1).',
+          ukEu: 'Transfers of UK and EU members’ data outside the UK/EEA rely on Standard Contractual Clauses, the UK International Data Transfer Agreement, or an adequacy decision.',
         },
-      ],
-      adequacyDecisions: GDPR_CONFIG.adequacyDecisionCountries,
-    },
-  });
+        adequacyDecisions: GDPR_CONFIG.adequacyDecisionCountries,
+      },
+      meta: {
+        status: 'published',
+        source: {
+          primary: primaryRegion ? 'AWS_REGION' : null,
+          overseas: records.length > 0 ? 'subprocessor_register' : null,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 /**
@@ -440,10 +696,12 @@ router.get('/legal-documents', (req: Request, res: Response) => {
 
 /**
  * POST /api/compliance/report-content
- * Report illegal or harmful content (UK Online Safety requirement)
+ * Report illegal or harmful content
  *
+ * The reporting mechanism the Australian Online Safety Act 2021 (Basic Online
+ * Safety Expectations) and the UK Online Safety Act 2023 both require.
  * Deliberately open to people without an account: somebody who has just been
- * targeted may have no way to sign in, and the Act does not let us insist.
+ * targeted may have no way to sign in, and neither Act lets us insist.
  */
 router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -476,8 +734,10 @@ router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Respo
       });
     }
 
+    // One queue, one clock: the home regime's review target, which is the same
+    // 48 hours the UK config carries.
     const reviewDeadline = new Date(
-      Date.now() + UK_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours * 60 * 60 * 1000
+      Date.now() + AU_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours * 60 * 60 * 1000
     );
     const reporterId = req.user?.id;
     const description = typeof details === 'string' ? details : undefined;
