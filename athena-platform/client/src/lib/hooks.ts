@@ -910,6 +910,40 @@ export function useDeleteGroupPost() {
   });
 }
 
+// A group's admins edit it and can close it (the Settings tab).
+export function useUpdateGroup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ groupId, ...data }: { groupId: string; name?: string; description?: string; privacy?: 'public' | 'private' }) =>
+      groupsApi.update(groupId, data),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['groups'] });
+      queryClient.invalidateQueries({ queryKey: ['group', vars.groupId] });
+      toast.success('Saved');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not save the group');
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: groupsApi.remove,
+    onSuccess: (_res, id) => {
+      queryClient.invalidateQueries({ queryKey: ['groups'] });
+      queryClient.removeQueries({ queryKey: ['group', id] });
+      toast.success('Group closed');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Could not close the group');
+    },
+  });
+}
+
 // ============================================
 // STATUS / STORIES HOOKS
 // ============================================
@@ -1290,11 +1324,16 @@ export function useIdeaValidator() {
 // ============================================
 // MENTOR HOOKS
 // ============================================
+// GET /mentors answers { mentors, pagination } with no `data` wrapper
+// (mentor.routes.ts sends the service result as is), so the body itself is
+// what callers want: `data.mentors` for the list, `data.pagination.total` for
+// the true marketplace size. Selecting `.data.data` here left both the
+// marketplace page and the persona tile reading undefined.
 export function useMentors(params?: any) {
   return useQuery({
     queryKey: ['mentors', params],
     queryFn: () => mentorApi.getAll(params),
-    select: (response) => response.data.data,
+    select: (response) => response.data,
   });
 }
 
@@ -1735,4 +1774,138 @@ export function usePaymentMethods(region?: string) {
     enabled: Boolean(region),
     select: (response) => response.data.methods || response.data.data || [],
   });
+}
+
+// ============================================
+// AI CHAT USAGE
+// ============================================
+export type AIChatUsage = {
+  tier: string;
+  unlimited: boolean;
+  /** Null for paid tiers, which have no cap. */
+  usage: { limit: number; remaining: number; resetIn: number; windowSeconds: number } | null;
+};
+
+/**
+ * How many messages a free member has left in the chat window, read before
+ * she types anything so the cap is never a surprise mid-conversation. Each
+ * reply from POST /ai/chat carries the same object; the chat page prefers the
+ * freshest of the two.
+ */
+export function useAIChatUsage() {
+  return useQuery({
+    queryKey: ['ai-chat-usage'],
+    queryFn: aiApi.chatUsage,
+    select: (response) => response.data.data as AIChatUsage,
+    staleTime: 30 * 1000,
+  });
+}
+
+// ============================================
+// SETUP CHECKLIST (concierge onboarding)
+// ============================================
+export type OnboardingStep = {
+  id: string;
+  title: string;
+  description: string;
+  completed: boolean;
+  action: string;
+  priority: number;
+};
+
+// The per-member checklist behind the dashboard home's "Finish setting up"
+// card. Waits for the session to settle, like useFeed, so it is never fetched
+// signed out. The helper is imported lazily, as useOrganizationAnalytics does,
+// to keep this an append rather than an edit of the import block.
+export function useOnboardingSteps() {
+  const { isAuthenticated, isLoading } = useAuthStore();
+  return useQuery({
+    queryKey: ['concierge', 'onboarding'],
+    queryFn: async () => {
+      const { conciergeApi } = await import('./api');
+      return conciergeApi.onboarding();
+    },
+    enabled: isAuthenticated && !isLoading,
+    select: (response): OnboardingStep[] =>
+      Array.isArray(response.data?.steps) ? response.data.steps : [],
+  });
+}
+
+// ============================================
+// START HERE (feed cold start)
+// ============================================
+export type StartHerePickType = 'POST' | 'COURSE' | 'JOB' | 'MENTOR' | 'USER' | 'GROUP';
+
+export type StartHerePick = {
+  type: StartHerePickType;
+  id: string;
+  title: string;
+  reason: string;
+  href: string;
+};
+
+const START_HERE_HREF: Record<StartHerePickType, (id: string) => string> = {
+  POST: (id) => `/posts/${id}`,
+  COURSE: (id) => `/dashboard/learn/${id}`,
+  JOB: (id) => `/dashboard/jobs/${id}`,
+  MENTOR: (id) => `/dashboard/mentors/${id}`,
+  USER: (id) => `/profile/${id}`,
+  GROUP: (id) => `/dashboard/groups/${id}`,
+};
+
+// Builds new objects on purpose: the rows from GET /feed/cold-start carry a
+// `score` that is a fixed per-type constant (80/85/75/70/65/60), not a
+// measurement, and it must never reach a screen. Rows without a known type
+// or an id are skipped rather than rendered half-empty.
+export function toStartHerePicks(rows: unknown): StartHerePick[] {
+  if (!Array.isArray(rows)) return [];
+  const picks: StartHerePick[] = [];
+  for (const row of rows) {
+    const r = (row ?? {}) as { type?: unknown; id?: unknown; title?: unknown; reason?: unknown };
+    const type =
+      typeof r.type === 'string' && r.type in START_HERE_HREF ? (r.type as StartHerePickType) : null;
+    if (!type || typeof r.id !== 'string' || !r.id) continue;
+    picks.push({
+      type,
+      id: r.id,
+      title: typeof r.title === 'string' && r.title.trim() ? r.title.trim() : 'Untitled',
+      reason: typeof r.reason === 'string' ? r.reason : '',
+      href: START_HERE_HREF[type](r.id),
+    });
+  }
+  return picks;
+}
+
+// Whether the member still counts as "cold start" (few interactions, no
+// persona, or under three skills) and, only then, the picks for her. The
+// numeric score the status route also returns is a heuristic and is not
+// exposed; `isColdStart` is the only thing a screen needs.
+export function useStartHere() {
+  const { isAuthenticated, isLoading } = useAuthStore();
+  const status = useQuery({
+    queryKey: ['cold-start', 'status'],
+    queryFn: async () => {
+      const { feedApi } = await import('./api');
+      return feedApi.coldStartScore();
+    },
+    enabled: isAuthenticated && !isLoading,
+    staleTime: 5 * 60 * 1000,
+    select: (response) => Boolean(response.data?.data?.isColdStart),
+  });
+  const isColdStart = status.data === true;
+  const picks = useQuery({
+    queryKey: ['cold-start', 'picks'],
+    queryFn: async () => {
+      const { feedApi } = await import('./api');
+      return feedApi.coldStart(12);
+    },
+    enabled: isColdStart,
+    staleTime: 5 * 60 * 1000,
+    select: (response) => toStartHerePicks(response.data?.data),
+  });
+  return {
+    isColdStart,
+    picks: picks.data ?? [],
+    isLoading: status.isLoading || (isColdStart && picks.isLoading),
+  };
 }

@@ -85,7 +85,10 @@ export const wellnessApi = {
   slots: (id: string, day: string) => api.get(`/wellness/practitioners/${id}/slots`, { params: { day } }),
   practitionerReviews: (id: string, page = 1) => api.get(`/wellness/practitioners/${id}/reviews`, { params: { page } }),
   book: (id: string, data: Body) => api.post(`/wellness/practitioners/${id}/bookings`, data),
-  verifyPractitioner: (id: string, isVerified: boolean) => api.patch(`/wellness/practitioners/${id}/verify`, { isVerified }),
+  // Admin: the profiles waiting to be checked, and the decision on one.
+  // `isActive: false` hides a profile from the queue as well as the directory.
+  pendingPractitioners: () => api.get('/wellness/practitioners/pending'),
+  verifyPractitioner: (id: string, data: { isVerified: boolean; isActive?: boolean }) => api.patch(`/wellness/practitioners/${id}/verify`, data),
 
   practice: () => api.get('/wellness/practice'),
   savePractice: (data: Body) => api.put('/wellness/practice', data),

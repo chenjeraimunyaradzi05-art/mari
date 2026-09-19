@@ -108,6 +108,21 @@ export const videoApi = {
   getBookmarked: (params?: { page?: number; limit?: number }) =>
     api.get('/video/bookmarked', { params }),
 
+  // Author (or admin) only: the caption, tags and poster, and whether the
+  // reel is in the feed. HIDDEN keeps it for the author alone; PUBLISHED
+  // puts it back. Send only the fields that changed; an empty title or
+  // caption clears it, and an empty hashtags list clears the tags.
+  update: (
+    id: string,
+    data: {
+      title?: string;
+      description?: string;
+      hashtags?: string[];
+      status?: 'PUBLISHED' | 'HIDDEN';
+      thumbnailUrl?: string;
+    }
+  ) => api.patch(`/video/${id}`, data),
+
   // Delete video
   delete: (id: string) => api.delete(`/video/${id}`),
 };

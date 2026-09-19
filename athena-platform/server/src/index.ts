@@ -48,6 +48,10 @@ import messageRoutes from './routes/message.routes';
 import adminRoutes from './routes/admin.routes';
 import adminSeedRoutes from './routes/admin-seed.routes';
 import adminOperationsRoutes from './routes/admin-operations.routes';
+import adminConfigRoutes from './routes/admin-config.routes';
+import adminImpactRoutes from './routes/admin-impact.routes';
+import adminCatalogueRoutes from './routes/admin-catalogue.routes';
+import adminGrantsRoutes from './routes/admin-grants.routes';
 import adminMarketingRoutes from './routes/admin-marketing.routes';
 import marketingRoutes from './routes/marketing.routes';
 import blogRoutes from './routes/blog.routes';
@@ -115,8 +119,6 @@ import { startCarCatalogue } from './services/automotive/automotive-catalogue';
 import { startWellnessSweeper } from './services/wellness/wellness-reminders.service';
 import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
 import complianceRoutes from './routes/compliance.routes';
-// livestream routes require schema additions (StreamKey, LiveStream models) — not yet ready
-// import livestreamRoutes from './routes/livestream.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -598,6 +600,19 @@ app.use('/api/admin/seed', adminSeedRoutes);
 // with router.use, so the /api/admin paths it does not own fall straight
 // through to adminRoutes without being authenticated twice.
 app.use('/api/admin', adminOperationsRoutes);
+// Runtime facts and recorded revenue for the admin console; guards each route
+// itself, like the operations router.
+app.use('/api/admin', adminConfigRoutes);
+// Impact catalogues (programs, bridging, DV services, partners, First Nations)
+// and the overseas-credentials queue; guards each route itself, like the
+// operations router.
+app.use('/api/admin', adminImpactRoutes);
+// The catalogue editors (accelerator cohorts, investors, insurance products,
+// investor introductions) guard each route themselves, like the operations router.
+app.use('/api/admin', adminCatalogueRoutes);
+// Grant programmes (the directory's only write path) guard each route themselves
+// too; the application reviews under /admin/grants/applications stay in adminRoutes.
+app.use('/api/admin', adminGrantsRoutes);
 // The marketing hub guards its own routes, like the operations router.
 app.use('/api/admin/marketing', adminMarketingRoutes);
 app.use('/api/admin', adminRoutes);

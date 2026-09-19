@@ -362,6 +362,10 @@ export const organizationApi = {
   update: (id: string, data: any) => api.patch(`/organizations/${id}`, data),
 
   getJobs: (slug: string) => api.get(`/organizations/${slug}/jobs`),
+
+  // Take over an organisation nobody is staff of yet (a seeded TAFE, say):
+  // allowed from an email address at its website's domain, or by an admin.
+  claim: (id: string) => api.post(`/organizations/${id}/claim`),
 };
 
 // ============================================
@@ -652,6 +656,10 @@ export const aiApi = {
 
   chat: (message: string, context?: any[]) =>
     api.post('/ai/chat', { message, context }),
+
+  // How many free-tier chat messages are left in the window, before she types.
+  // Premium tiers come back `unlimited: true` with `usage: null`.
+  chatUsage: () => api.get('/ai/chat/usage'),
 };
 
 // ============================================
@@ -689,6 +697,11 @@ export const mediaApi = {
   },
 
   delete: (key: string) => api.delete('/media/delete', { data: { key } }),
+
+  // Access to a private upload (a résumé, a document) for whoever may read
+  // it: the owner, or a team member of the organisation an application went
+  // to. See lib/private-files.ts for the download itself.
+  downloadUrl: (key: string) => api.post('/media/download-url', { key }),
 };
 
 // ============================================
@@ -731,8 +744,12 @@ export const groupsApi = {
   updateMemberRole: (id: string, userId: string, role: 'ADMIN' | 'MODERATOR' | 'MEMBER') =>
     api.patch(`/groups/${id}/members/${userId}/role`, { role }),
   removeMember: (id: string, userId: string) => api.delete(`/groups/${id}/members/${userId}`),
-  muteMember: (id: string, userId: string, durationMinutes?: number) =>
-    api.post(`/groups/${id}/members/${userId}/mute`, durationMinutes ? { duration: durationMinutes } : {}),
+  // The reason is told to the person muted, so it is worth writing one.
+  muteMember: (id: string, userId: string, durationMinutes?: number, reason?: string) =>
+    api.post(`/groups/${id}/members/${userId}/mute`, {
+      ...(durationMinutes ? { duration: durationMinutes } : {}),
+      ...(reason ? { reason } : {}),
+    }),
   unmuteMember: (id: string, userId: string) => api.post(`/groups/${id}/members/${userId}/unmute`),
   banMember: (id: string, userId: string, reason?: string) => api.post(`/groups/${id}/members/${userId}/ban`, reason ? { reason } : {}),
 
@@ -743,6 +760,18 @@ export const groupsApi = {
   deleteChatMessage: (id: string, messageId: string) => api.delete(`/groups/${id}/chat/messages/${messageId}`),
   pinChatMessage: (id: string, messageId: string, pinned: boolean) =>
     api.patch(`/groups/${id}/chat/messages/${messageId}/pin`, { pinned }),
+
+  // A ban outlives leaving; admins see who is banned and can lift one.
+  listBannedMembers: (id: string) => api.get(`/groups/${id}/members/banned`),
+  unbanMember: (id: string, userId: string) => api.post(`/groups/${id}/members/${userId}/unban`),
+  // Bring someone in by name. Admins and moderators add her straight away
+  // (200); a member's suggestion in a private group becomes a request (202).
+  addMember: (id: string, userId: string, role?: 'ADMIN' | 'MODERATOR' | 'MEMBER') =>
+    api.post(`/groups/${id}/members`, { userId, ...(role ? { role } : {}) }),
+  // A group's admins tend its name, description and privacy, or close it.
+  update: (id: string, data: { name?: string; description?: string; privacy?: 'public' | 'private' }) =>
+    api.patch(`/groups/${id}`, data),
+  remove: (id: string) => api.delete(`/groups/${id}`),
 };
 
 // ============================================
@@ -1119,6 +1148,12 @@ export const businessApi = {
   claimVendor: (id: string) => api.post(`/business/vendors/${id}/claim`),
   updateVendor: (id: string, data: Record<string, unknown>) => api.patch(`/business/vendors/${id}`, data),
 
+  // Admin: member-registered listings waiting to be checked, and the decision
+  // on one. Verifying is what puts a listing in the public directory.
+  getPendingVendors: () => api.get('/business/vendors/pending'),
+  verifyVendor: (id: string, data: { isVerified: boolean; isPartner?: boolean }) =>
+    api.patch(`/business/vendors/${id}/verify`, data),
+
   // Proposals on an RFP: a vendor's owner pitches; the RFP's owner decides.
   respondToRfp: (rfpId: string, data: { vendorId: string; proposal: string; priceQuote?: number; timeline?: string }) =>
     api.post(`/business/rfps/${rfpId}/responses`, data),
@@ -1164,6 +1199,8 @@ export const housingApi = {
     features?: string[];
     safetyVerified?: boolean;
     dvSafe?: boolean;
+    /** Why the place is safe for a woman leaving violence; required with dvSafe, read by staff before it goes live. */
+    dvSafeNote?: string;
     petFriendly?: boolean;
     accessibleUnit?: boolean;
     availableFrom?: string;
@@ -1184,8 +1221,20 @@ export const housingApi = {
   answerInquiry: (listingId: string, inquiryId: string, data: { status: 'CONTACTED' | 'VIEWING_SCHEDULED' | 'APPROVED' | 'DECLINED'; viewingDate?: string; message?: string }) =>
     api.patch(`/housing/listings/${listingId}/inquiries/${inquiryId}`, data),
 
-  updateInquiry: (id: string, data: { status?: string; viewingDate?: string; notes?: string }) =>
+  updateInquiry: (id: string, data: { status?: string; viewingDate?: string; notes?: string; reply?: string }) =>
     api.patch(`/housing/inquiries/${id}`, data),
+
+  // Safety. The conversation on a DV-safe listing stays on the inquiry: the
+  // lister writes without changing the status, the asker replies, and only
+  // after approval does she choose to let the lister see who she is.
+  messageInquiry: (listingId: string, inquiryId: string, data: { message: string }) =>
+    api.patch(`/housing/listings/${listingId}/inquiries/${inquiryId}`, data),
+  shareContact: (inquiryId: string) => api.post(`/housing/inquiries/${inquiryId}/share-contact`),
+
+  // Staff: the DV-safe listings waiting for a check, and the outcome.
+  getPendingSafetyChecks: () => api.get('/housing/admin/pending'),
+  adminUpdateListing: (id: string, data: { safetyVerified?: boolean; dvSafe?: boolean; status?: string; note?: string }) =>
+    api.patch(`/housing/admin/listings/${id}`, data),
 };
 
 // ============================================
@@ -1570,6 +1619,43 @@ export const creatorApi = {
 
   getLeaderboard: (params?: { period?: string; limit?: number }) =>
     api.get('/creator/leaderboard', { params }),
+};
+
+// ============================================
+// CONCIERGE API
+// ============================================
+// The chat and suggestions calls are literal api.get/api.post calls inside
+// components/help/ConciergePanel.tsx. Onboarding is here because the
+// dashboard home reads it for its "Finish setting up" card. Response:
+// { steps: [{ id, title, description, completed, action, priority }] }.
+export const conciergeApi = {
+  onboarding: () => api.get('/concierge/onboarding'),
+};
+
+// ============================================
+// FEED (cold start) API
+// ============================================
+// GET /feed/cold-start returns real rows (posts, courses, jobs, mentors,
+// members, groups) for a member with little history yet, and
+// /feed/cold-start/score says whether she still counts as new. Each row
+// carries a `score` that is a fixed per-type constant, not a measurement;
+// useStartHere in hooks.ts drops it before anything renders. GET /feed and
+// /feed/opportunities are deliberately not wrapped: see the comments in
+// server/src/routes/feed.routes.ts.
+export const feedApi = {
+  coldStart: (limit = 12) => api.get('/feed/cold-start', { params: { limit } }),
+  coldStartScore: () => api.get('/feed/cold-start/score'),
+};
+
+// ============================================
+// REGION API
+// ============================================
+// Public. The regions, currencies and locales the server accepts, so a
+// settings page offers only choices that will save.
+export const regionApi = {
+  // The router is mounted at /api/regions; the singular path answers 404 and
+  // would have left the language settings page with no regions to offer.
+  get: () => api.get('/regions'),
 };
 
 export default api;
