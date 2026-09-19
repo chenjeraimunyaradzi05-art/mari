@@ -1,63 +1,104 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import {
-  Globe,
-  Check,
-  Search,
-  Info,
-} from 'lucide-react';
+/**
+ * Language and region.
+ *
+ * The choices here are built from GET /api/region, so nothing offered can
+ * be refused when it is saved. This page used to list 35 languages of which
+ * three did anything and 13 regions of which six the server rejected, and a
+ * Queensland member who chose Spanish, Arabic or Vietnamese (the three
+ * languages ATHENA translates in full) was told 'Failed to update
+ * preferences' because her region only allowed English. Language is now
+ * hers whatever her region; the region decides currency and compliance
+ * defaults. The Date and Time Format cards that saved nothing are gone.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Globe, Info, Loader2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { cn, getPreferredCurrency, getPreferredLocale, setStoredPreference } from '@/lib/utils';
 import { useAuthStore } from '@/lib/store';
-import { userApi } from '@/lib/api';
+import { regionApi, userApi } from '@/lib/api';
 import { setI18nLocale } from '@/i18n/next-i18n';
 import { translateDocument } from '@/i18n/domTranslator';
+import { DICTIONARIES } from '@/i18n/dictionary';
 
-const languages = [
-  { code: 'en', name: 'English', nativeName: 'English', region: 'Global' },
-  { code: 'en-AU', name: 'English (Australia)', nativeName: 'English', region: 'Australia' },
-  { code: 'en-GB', name: 'English (UK)', nativeName: 'English', region: 'United Kingdom' },
-  { code: 'en-US', name: 'English (US)', nativeName: 'English', region: 'United States' },
-  { code: 'en-SG', name: 'English (Singapore)', nativeName: 'English', region: 'Singapore' },
-  { code: 'en-PH', name: 'English (Philippines)', nativeName: 'English', region: 'Philippines' },
-  { code: 'en-AE', name: 'English (UAE)', nativeName: 'English', region: 'United Arab Emirates' },
-  { code: 'en-SA', name: 'English (Saudi Arabia)', nativeName: 'English', region: 'Saudi Arabia' },
-  { code: 'en-EG', name: 'English (Egypt)', nativeName: 'English', region: 'Egypt' },
-  { code: 'en-ZA', name: 'English (South Africa)', nativeName: 'English', region: 'South Africa' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español', region: 'Global' },
-  { code: 'es-MX', name: 'Spanish (Mexico)', nativeName: 'Español', region: 'Mexico' },
-  { code: 'es-US', name: 'Spanish (US)', nativeName: 'Español', region: 'United States' },
-  { code: 'fr', name: 'French', nativeName: 'Français', region: 'Global' },
-  { code: 'de', name: 'German', nativeName: 'Deutsch', region: 'Germany' },
-  { code: 'pt', name: 'Portuguese', nativeName: 'Português', region: 'Global' },
-  { code: 'pt-BR', name: 'Portuguese (Brazil)', nativeName: 'Português', region: 'Brazil' },
-  { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', region: 'China' },
-  { code: 'zh-TW', name: 'Chinese (Traditional)', nativeName: '繁體中文', region: 'Taiwan' },
-  { code: 'ja', name: 'Japanese', nativeName: '日本語', region: 'Japan' },
-  { code: 'ko', name: 'Korean', nativeName: '한국어', region: 'South Korea' },
-  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', region: 'India' },
-  { code: 'fil-PH', name: 'Filipino', nativeName: 'Filipino', region: 'Philippines' },
-  { code: 'id-ID', name: 'Indonesian', nativeName: 'Bahasa Indonesia', region: 'Indonesia' },
-  { code: 'th-TH', name: 'Thai', nativeName: 'ไทย', region: 'Thailand' },
-  { code: 'vi-VN', name: 'Vietnamese', nativeName: 'Tiếng Việt', region: 'Vietnam' },
-  { code: 'ms-MY', name: 'Malay', nativeName: 'Bahasa Melayu', region: 'Malaysia' },
-  { code: 'ar', name: 'Arabic', nativeName: 'العربية', region: 'Global' },
-  { code: 'ar-AE', name: 'Arabic (UAE)', nativeName: 'العربية', region: 'United Arab Emirates' },
-  { code: 'ar-SA', name: 'Arabic (Saudi Arabia)', nativeName: 'العربية', region: 'Saudi Arabia' },
-  { code: 'ar-EG', name: 'Arabic (Egypt)', nativeName: 'العربية', region: 'Egypt' },
-  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', region: 'Netherlands' },
-  { code: 'it', name: 'Italian', nativeName: 'Italiano', region: 'Italy' },
-  { code: 'ru', name: 'Russian', nativeName: 'Русский', region: 'Russia' },
-  { code: 'pl', name: 'Polish', nativeName: 'Polski', region: 'Poland' },
-];
+type RegionConfig = {
+  key: string;
+  label: string;
+  defaultLocale: string;
+  defaultCurrency: string;
+  supportedLocales: string[];
+  supportedCurrencies: string[];
+};
+type RegionResponse = {
+  regions: Record<string, RegionConfig>;
+  supportedCurrencies: string[];
+  supportedLocales: string[];
+};
+type RegionKey = NonNullable<Parameters<typeof userApi.updatePreferences>[0]['region']>;
+
+const FALLBACK_LOCALE = 'en-AU';
+const FALLBACK_CURRENCY = 'AUD';
+const FALLBACK_REGION = 'ANZ';
+
+const LANGUAGE_NAMES: Record<string, { name: string; nativeName: string; flag: string }> = {
+  en: { name: 'English', nativeName: 'English', flag: '🌐' },
+  'en-AU': { name: 'English (Australia)', nativeName: 'English', flag: '🇦🇺' },
+  'en-NZ': { name: 'English (New Zealand)', nativeName: 'English', flag: '🇳🇿' },
+  'en-GB': { name: 'English (UK)', nativeName: 'English', flag: '🇬🇧' },
+  'en-IE': { name: 'English (Ireland)', nativeName: 'English', flag: '🇮🇪' },
+  'en-US': { name: 'English (US)', nativeName: 'English', flag: '🇺🇸' },
+  'en-SG': { name: 'English (Singapore)', nativeName: 'English', flag: '🇸🇬' },
+  'en-PH': { name: 'English (Philippines)', nativeName: 'English', flag: '🇵🇭' },
+  'en-AE': { name: 'English (UAE)', nativeName: 'English', flag: '🇦🇪' },
+  'en-SA': { name: 'English (Saudi Arabia)', nativeName: 'English', flag: '🇸🇦' },
+  'en-EG': { name: 'English (Egypt)', nativeName: 'English', flag: '🇪🇬' },
+  'en-ZA': { name: 'English (South Africa)', nativeName: 'English', flag: '🇿🇦' },
+  es: { name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
+  'es-MX': { name: 'Spanish (Mexico)', nativeName: 'Español', flag: '🇲🇽' },
+  'es-US': { name: 'Spanish (US)', nativeName: 'Español', flag: '🇺🇸' },
+  ar: { name: 'Arabic', nativeName: 'العربية', flag: '🌐' },
+  'ar-AE': { name: 'Arabic (UAE)', nativeName: 'العربية', flag: '🇦🇪' },
+  'ar-SA': { name: 'Arabic (Saudi Arabia)', nativeName: 'العربية', flag: '🇸🇦' },
+  'ar-EG': { name: 'Arabic (Egypt)', nativeName: 'العربية', flag: '🇪🇬' },
+  vi: { name: 'Vietnamese', nativeName: 'Tiếng Việt', flag: '🇻🇳' },
+  'vi-VN': { name: 'Vietnamese (Vietnam)', nativeName: 'Tiếng Việt', flag: '🇻🇳' },
+};
+
+const CURRENCY_NAMES: Record<string, string> = {
+  AUD: 'Australian Dollar',
+  NZD: 'New Zealand Dollar',
+  USD: 'US Dollar',
+  GBP: 'British Pound',
+  EUR: 'Euro',
+  SGD: 'Singapore Dollar',
+  PHP: 'Philippine Peso',
+  IDR: 'Indonesian Rupiah',
+  THB: 'Thai Baht',
+  VND: 'Vietnamese Dong',
+  MYR: 'Malaysian Ringgit',
+  AED: 'Emirati Dirham',
+  SAR: 'Saudi Riyal',
+  ZAR: 'South African Rand',
+  EGP: 'Egyptian Pound',
+  JPY: 'Japanese Yen',
+  KRW: 'South Korean Won',
+  INR: 'Indian Rupee',
+  BRL: 'Brazilian Real',
+  MXN: 'Mexican Peso',
+};
 
 const timezones = [
-  { value: 'Australia/Sydney', label: 'Sydney (AEST)', offset: 'UTC+10/11' },
-  { value: 'Australia/Melbourne', label: 'Melbourne (AEST)', offset: 'UTC+10/11' },
   { value: 'Australia/Brisbane', label: 'Brisbane (AEST)', offset: 'UTC+10' },
+  { value: 'Australia/Sydney', label: 'Sydney (AEST/AEDT)', offset: 'UTC+10/11' },
+  { value: 'Australia/Melbourne', label: 'Melbourne (AEST/AEDT)', offset: 'UTC+10/11' },
+  { value: 'Australia/Hobart', label: 'Hobart (AEST/AEDT)', offset: 'UTC+10/11' },
+  { value: 'Australia/Adelaide', label: 'Adelaide (ACST/ACDT)', offset: 'UTC+9:30/10:30' },
+  { value: 'Australia/Darwin', label: 'Darwin (ACST)', offset: 'UTC+9:30' },
   { value: 'Australia/Perth', label: 'Perth (AWST)', offset: 'UTC+8' },
-  { value: 'Pacific/Auckland', label: 'Auckland (NZST)', offset: 'UTC+12/13' },
+  { value: 'Pacific/Auckland', label: 'Auckland (NZST/NZDT)', offset: 'UTC+12/13' },
   { value: 'Asia/Singapore', label: 'Singapore (SGT)', offset: 'UTC+8' },
   { value: 'Asia/Manila', label: 'Manila (PHT)', offset: 'UTC+8' },
   { value: 'Asia/Jakarta', label: 'Jakarta (WIB)', offset: 'UTC+7' },
@@ -73,84 +114,50 @@ const timezones = [
   { value: 'Africa/Cairo', label: 'Cairo (EET)', offset: 'UTC+2' },
   { value: 'Africa/Johannesburg', label: 'Johannesburg (SAST)', offset: 'UTC+2' },
   { value: 'Europe/London', label: 'London (GMT/BST)', offset: 'UTC+0/1' },
-  { value: 'Europe/Paris', label: 'Paris (CET)', offset: 'UTC+1/2' },
-  { value: 'America/New_York', label: 'New York (EST)', offset: 'UTC-5/-4' },
-  { value: 'America/Los_Angeles', label: 'Los Angeles (PST)', offset: 'UTC-8/-7' },
-  { value: 'America/Chicago', label: 'Chicago (CST)', offset: 'UTC-6/-5' },
+  { value: 'Europe/Paris', label: 'Paris (CET/CEST)', offset: 'UTC+1/2' },
+  { value: 'America/New_York', label: 'New York (EST/EDT)', offset: 'UTC-5/-4' },
+  { value: 'America/Chicago', label: 'Chicago (CST/CDT)', offset: 'UTC-6/-5' },
+  { value: 'America/Los_Angeles', label: 'Los Angeles (PST/PDT)', offset: 'UTC-8/-7' },
   { value: 'America/Sao_Paulo', label: 'São Paulo (BRT)', offset: 'UTC-3' },
-  { value: 'America/Mexico_City', label: 'Mexico City (CST)', offset: 'UTC-6/-5' },
+  { value: 'America/Mexico_City', label: 'Mexico City (CST)', offset: 'UTC-6' },
 ];
 
-const dateFormats = [
-  { value: 'DD/MM/YYYY', label: '31/12/2024', description: 'Day/Month/Year' },
-  { value: 'MM/DD/YYYY', label: '12/31/2024', description: 'Month/Day/Year' },
-  { value: 'YYYY-MM-DD', label: '2024-12-31', description: 'Year-Month-Day (ISO)' },
-];
+const isEnglish = (code: string) => code === 'en' || code.startsWith('en-');
+/** True for the languages the DOM translator carries a full dictionary for. */
+const isTranslated = (code: string) => Object.prototype.hasOwnProperty.call(DICTIONARIES, code);
 
-const timeFormats = [
-  { value: '12h', label: '2:30 PM', description: '12-hour clock' },
-  { value: '24h', label: '14:30', description: '24-hour clock' },
-];
+function describeLanguage(code: string) {
+  const known = LANGUAGE_NAMES[code];
+  if (known) return known;
+  try {
+    const name = new Intl.DisplayNames(['en'], { type: 'language' }).of(code);
+    return { name: name || code, nativeName: code, flag: '🌐' };
+  } catch {
+    return { name: code, nativeName: code, flag: '🌐' };
+  }
+}
 
-const regions = [
-  { value: 'ANZ', label: 'Australia / New Zealand' },
-  { value: 'US', label: 'United States' },
-  { value: 'UK', label: 'United Kingdom' },
-  { value: 'EU', label: 'European Union' },
-  { value: 'JP', label: 'Japan' },
-  { value: 'KR', label: 'South Korea' },
-  { value: 'IN', label: 'India' },
-  { value: 'BR', label: 'Brazil' },
-  { value: 'MX', label: 'Mexico' },
-  { value: 'LATAM', label: 'LatAm' },
-  { value: 'SEA', label: 'Southeast Asia' },
-  { value: 'MEA', label: 'Middle East & Africa' },
-  { value: 'ROW', label: 'Rest of World' },
-];
-
-const currencies = [
-  { value: 'AUD', label: 'AUD — Australian Dollar' },
-  { value: 'USD', label: 'USD — US Dollar' },
-  { value: 'GBP', label: 'GBP — British Pound' },
-  { value: 'EUR', label: 'EUR — Euro' },
-  { value: 'JPY', label: 'JPY — Japanese Yen' },
-  { value: 'KRW', label: 'KRW — South Korean Won' },
-  { value: 'INR', label: 'INR — Indian Rupee' },
-  { value: 'BRL', label: 'BRL — Brazilian Real' },
-  { value: 'MXN', label: 'MXN — Mexican Peso' },
-  { value: 'SGD', label: 'SGD — Singapore Dollar' },
-  { value: 'PHP', label: 'PHP — Philippine Peso' },
-  { value: 'IDR', label: 'IDR — Indonesian Rupiah' },
-  { value: 'THB', label: 'THB — Thai Baht' },
-  { value: 'VND', label: 'VND — Vietnamese Dong' },
-  { value: 'MYR', label: 'MYR — Malaysian Ringgit' },
-  { value: 'NZD', label: 'NZD — New Zealand Dollar' },
-  { value: 'AED', label: 'AED — Emirati Dirham' },
-  { value: 'SAR', label: 'SAR — Saudi Riyal' },
-  { value: 'ZAR', label: 'ZAR — South African Rand' },
-  { value: 'EGP', label: 'EGP — Egyptian Pound' },
-];
-
-const FALLBACK_LOCALE = 'en-AU';
-const FALLBACK_CURRENCY = 'AUD';
+const errorMessage = (e: unknown) => {
+  const data = (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
+  return data?.message || data?.error;
+};
 
 export default function LanguageSettingsPage() {
   const { user, updateUser } = useAuthStore();
-  const [selectedLanguage, setSelectedLanguage] = useState(
-    user?.preferredLocale || FALLBACK_LOCALE
-  );
-  const [selectedTimezone, setSelectedTimezone] = useState(
-    user?.timezone || 'Australia/Sydney'
-  );
-  const [selectedCurrency, setSelectedCurrency] = useState(
-    (user?.preferredCurrency || FALLBACK_CURRENCY).toUpperCase()
-  );
-  const [selectedRegion, setSelectedRegion] = useState<string>(user?.region || 'ANZ');
-  const [selectedDateFormat, setSelectedDateFormat] = useState('DD/MM/YYYY');
-  const [selectedTimeFormat, setSelectedTimeFormat] = useState('12h');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState(user?.preferredLocale || FALLBACK_LOCALE);
+  const [selectedTimezone, setSelectedTimezone] = useState(user?.timezone || 'Australia/Brisbane');
+  const [selectedCurrency, setSelectedCurrency] = useState((user?.preferredCurrency || FALLBACK_CURRENCY).toUpperCase());
+  const [selectedRegion, setSelectedRegion] = useState<string>(user?.region || FALLBACK_REGION);
   const [isSaving, setIsSaving] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+
+  const regionQuery = useQuery({
+    queryKey: ['region-config'],
+    queryFn: () => regionApi.get(),
+    select: (r) => (r.data?.data ?? r.data) as RegionResponse,
+    staleTime: 60 * 60 * 1000,
+  });
+  const config = regionQuery.data;
 
   useEffect(() => {
     setSelectedLanguage(user?.preferredLocale || getPreferredLocale());
@@ -160,11 +167,31 @@ export default function LanguageSettingsPage() {
     setIsHydrated(true);
   }, [user]);
 
-  const filteredLanguages = languages.filter(
-    (lang) =>
-      lang.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      lang.nativeName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const regions = useMemo(() => (config ? Object.values(config.regions) : []), [config]);
+  const region = config?.regions[selectedRegion] ?? regions[0];
+
+  // Only choices that change something: English variants (dates, spelling)
+  // and the languages carried in full. A saved locale outside that set stays
+  // selectable so saving the page never silently changes it.
+  const languages = useMemo(() => {
+    if (!config) return [];
+    const offered = config.supportedLocales.filter((code) => isEnglish(code) || isTranslated(code));
+    const saved = user?.preferredLocale;
+    if (saved && !offered.includes(saved) && config.supportedLocales.includes(saved)) offered.push(saved);
+    const rank = (code: string) => (code === FALLBACK_LOCALE ? 0 : isEnglish(code) ? 1 : isTranslated(code) ? 2 : 3);
+    return offered
+      .map((code) => ({ code, ...describeLanguage(code), translated: isTranslated(code) }))
+      .sort((a, b) => rank(a.code) - rank(b.code) || a.name.localeCompare(b.name));
+  }, [config, user?.preferredLocale]);
+
+  const currencies = region?.supportedCurrencies ?? [];
+
+  // A region only takes its own currencies; when the region changes and the
+  // current currency is not one of them, fall back to the region's default.
+  useEffect(() => {
+    if (!region) return;
+    if (!region.supportedCurrencies.includes(selectedCurrency)) setSelectedCurrency(region.defaultCurrency);
+  }, [region, selectedCurrency]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -173,7 +200,7 @@ export default function LanguageSettingsPage() {
         preferredLocale: selectedLanguage,
         preferredCurrency: selectedCurrency,
         timezone: selectedTimezone,
-        region: selectedRegion as 'ANZ' | 'US' | 'SEA' | 'MEA' | 'UK' | 'EU' | 'ROW' | 'JP' | 'KR' | 'IN' | 'BR' | 'MX' | 'LATAM',
+        region: selectedRegion as RegionKey,
       });
 
       updateUser(response.data.data);
@@ -183,9 +210,9 @@ export default function LanguageSettingsPage() {
       setStoredPreference('athena.region', selectedRegion);
       setI18nLocale(selectedLanguage);
       translateDocument(selectedLanguage);
-      toast.success('Preferences updated');
-    } catch {
-      toast.error('Failed to update preferences');
+      toast.success('Saved');
+    } catch (error) {
+      toast.error(errorMessage(error) || 'That did not save. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -193,81 +220,67 @@ export default function LanguageSettingsPage() {
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
-      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          Language & Region
-        </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Set your preferred language, timezone, and date formats
-        </p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Language & Region</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">Your language, your timezone, and the region that sets your currency</p>
       </div>
 
-      {/* Language Selection */}
+      {/* Language */}
       <div className="card">
         <div className="flex items-center space-x-2 mb-4">
           <Globe className="w-5 h-5 text-primary-500" />
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Language
-          </h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Language</h2>
         </div>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Select the language for the ATHENA interface
+          ATHENA is written in English and translated in full into Spanish, Arabic and Vietnamese. Another English variant changes how dates and times are shown.
         </p>
 
-        {/* Search */}
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search languages..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-          />
-        </div>
-
-        {/* Language List */}
-        <div className="max-h-64 overflow-y-auto space-y-1">
-          {filteredLanguages.map((lang) => (
-            <button
-              key={lang.code}
-              onClick={() => setSelectedLanguage(lang.code)}
-              className={cn(
-                'w-full flex items-center justify-between p-3 rounded-lg transition',
-                selectedLanguage === lang.code
-                  ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
-                  : 'hover:bg-slate-50 dark:hover:bg-slate-800'
-              )}
-            >
-              <div className="flex items-center space-x-3">
-                <span className="text-lg">{getLanguageFlag(lang.code)}</span>
-                <div className="text-left">
-                  <p className="font-medium text-slate-900 dark:text-white">
-                    {lang.name}
-                  </p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    {lang.nativeName}
-                  </p>
+        {regionQuery.isLoading ? (
+          <div className="flex items-center gap-2 py-6 text-sm text-slate-500" role="status">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading the languages ATHENA offers…
+          </div>
+        ) : !config ? (
+          <p className="py-4 text-sm text-slate-500">The list of languages could not be loaded. Please try again in a moment.</p>
+        ) : (
+          <div className="max-h-80 overflow-y-auto space-y-1" role="radiogroup" aria-label="Language">
+            {languages.map((lang) => (
+              <button
+                key={lang.code}
+                type="button"
+                role="radio"
+                aria-checked={selectedLanguage === lang.code}
+                onClick={() => setSelectedLanguage(lang.code)}
+                className={cn(
+                  'w-full flex items-center justify-between p-3 rounded-lg transition',
+                  selectedLanguage === lang.code
+                    ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-800'
+                )}
+              >
+                <div className="flex items-center space-x-3">
+                  <span className="text-lg" aria-hidden="true">{lang.flag}</span>
+                  <div className="text-left">
+                    <p className="font-medium text-slate-900 dark:text-white">{lang.name}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      {lang.nativeName}
+                      {lang.translated && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">Translated in full</span>}
+                      {!lang.translated && !isEnglish(lang.code) && <span className="ml-2 text-xs text-slate-400">No translation yet</span>}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              {selectedLanguage === lang.code && (
-                <Check className="w-5 h-5 text-primary-500" />
-              )}
-            </button>
-          ))}
-        </div>
+                {selectedLanguage === lang.code && <Check className="w-5 h-5 text-primary-500" />}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Timezone */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Timezone
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Used for displaying dates and scheduling
-        </p>
+        <label htmlFor="timezone" className="block text-lg font-semibold text-slate-900 dark:text-white mb-2">Timezone</label>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Used for dates, reminders and bookings</p>
         <select
+          id="timezone"
           value={selectedTimezone}
           onChange={(e) => setSelectedTimezone(e.target.value)}
           className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
@@ -280,179 +293,71 @@ export default function LanguageSettingsPage() {
         </select>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2" suppressHydrationWarning>
           Current time:{' '}
-          {isHydrated
-            ? new Date().toLocaleTimeString(selectedLanguage, { timeZone: selectedTimezone })
-            : '--:--'}
+          {isHydrated ? new Date().toLocaleTimeString(selectedLanguage, { timeZone: selectedTimezone }) : '--:--'}
         </p>
       </div>
 
       {/* Region */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Region
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Used for compliance defaults and regional experiences
-        </p>
-        <select
-          value={selectedRegion}
-          onChange={(e) => setSelectedRegion(e.target.value)}
-          className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-        >
-          {regions.map((region) => (
-            <option key={region.value} value={region.value}>
-              {region.label}
-            </option>
-          ))}
-        </select>
+        <label htmlFor="region" className="block text-lg font-semibold text-slate-900 dark:text-white mb-2">Region</label>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Sets your currency and the privacy rules that apply to you. It does not change your language.</p>
+        {config ? (
+          <select
+            id="region"
+            value={selectedRegion}
+            onChange={(e) => setSelectedRegion(e.target.value)}
+            className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          >
+            {regions.map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-sm text-slate-500">Loading…</p>
+        )}
       </div>
 
       {/* Currency */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Currency
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Used for pricing, billing, and earnings
-        </p>
-        <select
-          value={selectedCurrency}
-          onChange={(e) => setSelectedCurrency(e.target.value)}
-          className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-        >
-          {currencies.map((currency) => (
-            <option key={currency.value} value={currency.value}>
-              {currency.label}
-            </option>
-          ))}
-        </select>
+        <label htmlFor="currency" className="block text-lg font-semibold text-slate-900 dark:text-white mb-2">Currency</label>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Used for pricing, billing and earnings. Only the currencies your region bills in are offered.</p>
+        {config ? (
+          <select
+            id="currency"
+            value={selectedCurrency}
+            onChange={(e) => setSelectedCurrency(e.target.value)}
+            className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          >
+            {currencies.map((code) => (
+              <option key={code} value={code}>
+                {code}{CURRENCY_NAMES[code] ? ` — ${CURRENCY_NAMES[code]}` : ''}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-sm text-slate-500">Loading…</p>
+        )}
       </div>
 
-      {/* Date Format */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Date Format
-        </h2>
-        <div className="space-y-3">
-          {dateFormats.map((format) => (
-            <button
-              key={format.value}
-              onClick={() => setSelectedDateFormat(format.value)}
-              className={cn(
-                'w-full flex items-center justify-between p-4 rounded-lg border-2 transition',
-                selectedDateFormat === format.value
-                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-              )}
-            >
-              <div className="text-left">
-                <p className="font-medium text-slate-900 dark:text-white">
-                  {format.label}
-                </p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {format.description}
-                </p>
-              </div>
-              {selectedDateFormat === format.value && (
-                <Check className="w-5 h-5 text-primary-500" />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Time Format */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Time Format
-        </h2>
-        <div className="grid grid-cols-2 gap-4">
-          {timeFormats.map((format) => (
-            <button
-              key={format.value}
-              onClick={() => setSelectedTimeFormat(format.value)}
-              className={cn(
-                'p-4 rounded-lg border-2 text-center transition',
-                selectedTimeFormat === format.value
-                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-              )}
-            >
-              <p className="text-xl font-semibold text-slate-900 dark:text-white mb-1">
-                {format.label}
-              </p>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {format.description}
-              </p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Info Box */}
       <div className="card bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
         <div className="flex items-start space-x-3">
           <Info className="w-5 h-5 text-blue-500 mt-0.5" />
           <div>
-            <p className="font-medium text-slate-900 dark:text-white">
-              Translation Notice
-            </p>
+            <p className="font-medium text-slate-900 dark:text-white">About translations</p>
             <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-              Some content may not be fully translated in all languages. We're
-              continuously improving our translations. If you notice any issues,
-              please let us know.
+              Spanish, Arabic and Vietnamese are the community languages most spoken by women in Queensland after English, so those come first. If a phrase reads wrongly, tell us from the help centre and we will fix it.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Save Button */}
       <div className="flex justify-end">
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="btn-primary px-8"
-        >
-          {isSaving ? 'Saving...' : 'Save Changes'}
+        <button type="button" onClick={handleSave} disabled={isSaving || !config} className="btn-primary px-8">
+          {isSaving ? 'Saving…' : 'Save changes'}
         </button>
       </div>
     </div>
   );
-}
-
-// Helper function to get flag emoji
-function getLanguageFlag(code: string): string {
-  const flags: Record<string, string> = {
-    'en': '🌐',
-    'en-AU': '🇦🇺',
-    'en-GB': '🇬🇧',
-    'en-US': '🇺🇸',
-    'en-SG': '🇸🇬',
-    'en-PH': '🇵🇭',
-    'es': '🇪🇸',
-    'es-MX': '🇲🇽',
-    'fr': '🇫🇷',
-    'de': '🇩🇪',
-    'pt': '🇵🇹',
-    'pt-BR': '🇧🇷',
-    'zh': '🇨🇳',
-    'zh-TW': '🇹🇼',
-    'ja': '🇯🇵',
-    'ko': '🇰🇷',
-    'hi': '🇮🇳',
-    'fil-PH': '🇵🇭',
-    'id-ID': '🇮🇩',
-    'th-TH': '🇹🇭',
-    'vi-VN': '🇻🇳',
-    'ms-MY': '🇲🇾',
-    'ar': '🇸🇦',
-    'ar-AE': '🇦🇪',
-    'ar-SA': '🇸🇦',
-    'ar-EG': '🇪🇬',
-    'nl': '🇳🇱',
-    'it': '🇮🇹',
-    'ru': '🇷🇺',
-    'pl': '🇵🇱',
-  };
-  return flags[code] || '🌐';
 }

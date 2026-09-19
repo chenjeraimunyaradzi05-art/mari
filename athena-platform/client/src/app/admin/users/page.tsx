@@ -15,10 +15,66 @@ import {
   CheckCircle,
   XCircle,
   Users,
+  BarChart3,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { analyticsApi, type UserAnalytics } from '@/lib/admin-analytics-api';
+
+/** One member's last 30 days, from /analytics/user/:userId. */
+function UserLast30Days({ user, onClose }: { user: { id: string; firstName: string; lastName: string }; onClose: () => void }) {
+  const analytics = useQuery({
+    queryKey: ['admin-user-analytics', user.id],
+    queryFn: () => analyticsApi.user(user.id, 30),
+    select: (r) => r.data as UserAnalytics,
+  });
+  const s = analytics.data?.summary;
+  const tiles = s
+    ? [
+        ['Posts', s.totalPosts],
+        ['Views', s.totalViews],
+        ['Likes', s.totalLikes],
+        ['Comments', s.totalComments],
+        ['Followers', s.followers],
+        ['Following', s.following],
+      ]
+    : [];
+
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4 mb-6" aria-live="polite">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-semibold text-slate-900 dark:text-white">
+            {user.firstName} {user.lastName}: last 30 days
+          </h2>
+          <p className="text-xs text-slate-500">Her posts in the window, and the reactions and follows they drew.</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close the 30-day summary" className="p-1 text-slate-400 hover:text-slate-700">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {analytics.isLoading ? (
+        <p className="mt-3 text-sm text-slate-500">Counting…</p>
+      ) : !s ? (
+        <p className="mt-3 text-sm text-slate-500">The summary could not be read.</p>
+      ) : (
+        <>
+          <div className="mt-3 grid grid-cols-3 md:grid-cols-6 gap-3">
+            {tiles.map(([label, value]) => (
+              <div key={String(label)} className="rounded-lg bg-slate-50 dark:bg-slate-900 p-3">
+                <p className="text-xs text-slate-500">{label}</p>
+                <p className="text-lg font-semibold text-slate-900 dark:text-white">{Number(value).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+          {s.totalPosts === 0 && <p className="mt-3 text-sm text-slate-500">She has not posted in the last 30 days.</p>}
+        </>
+      )}
+    </div>
+  );
+}
 
 interface User {
   id: string;
@@ -168,6 +224,10 @@ export default function AdminUsersPage() {
           </div>
         </div>
 
+        {selectedUser && data?.users.find((u) => u.id === selectedUser) && (
+          <UserLast30Days user={data.users.find((u) => u.id === selectedUser)!} onClose={() => setSelectedUser(null)} />
+        )}
+
         {/* Users Table */}
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
           {isLoading ? (
@@ -262,10 +322,21 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUser(selectedUser === user.id ? null : user.id)}
+                          className="p-2 text-slate-500 hover:text-slate-700"
+                          title="Last 30 days"
+                          aria-label={`Last 30 days for ${user.firstName} ${user.lastName}`}
+                          aria-pressed={selectedUser === user.id}
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                        </button>
                         <Link
                           href={`/dashboard/profile/${user.id}`}
                           className="p-2 text-slate-500 hover:text-slate-700"
                           title="View Profile"
+                          aria-label={`View profile of ${user.firstName} ${user.lastName}`}
                         >
                           <Eye className="h-4 w-4" />
                         </Link>

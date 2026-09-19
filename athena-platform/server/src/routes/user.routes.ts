@@ -11,6 +11,7 @@ import {
 } from '../middleware/gdpr.middleware';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRegionConfig, normalizeRegion } from '../utils/region';
+import { isSupportedLocale } from '../config/regions';
 import { logger } from '../utils/logger';
 import { parsePagination } from '../utils/pagination';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
@@ -952,8 +953,11 @@ router.patch(
       const regionKey = normalizeRegion(req.body.region || existing?.region || 'ANZ');
       const regionConfig = getRegionConfig(regionKey);
 
-      if (req.body.preferredLocale && !regionConfig.supportedLocales.includes(req.body.preferredLocale)) {
-        throw new ApiError(400, 'Locale not supported for selected region');
+      // Language is the member's, not her region's: a Queensland member who
+      // reads Spanish, Arabic or Vietnamese keeps that whatever region she is
+      // in. The region still decides currency and compliance below.
+      if (req.body.preferredLocale && !isSupportedLocale(req.body.preferredLocale)) {
+        throw new ApiError(400, 'That language is not one ATHENA offers yet');
       }
 
       if (

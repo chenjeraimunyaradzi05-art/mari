@@ -25,6 +25,7 @@ const STATIC: Array<[string, Frequency, number]> = [
   ['/courses', 'weekly', 0.8],
   ['/mentors', 'weekly', 0.8],
   ['/events', 'weekly', 0.7],
+  ['/live', 'daily', 0.6],
   ['/communities', 'weekly', 0.7],
   ['/apprenticeships', 'weekly', 0.7],
   ['/learning', 'weekly', 0.7],

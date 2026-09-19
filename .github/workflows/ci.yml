@@ -104,6 +104,11 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # Every locale in i18n.registry.js must have a public/locales/<locale>/
+      # common.json with the same keys as the base locale.
+      - name: Check locale files
+        run: npm run lint:i18n
+
       - name: Run unit tests
         run: npm run test:unit -- --passWithNoTests
 

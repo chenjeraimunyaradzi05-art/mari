@@ -1,30 +1,13 @@
-import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
+/**
+ * Superseded by the lead register filtered by source.
+ *
+ * This page used to promise partner outreach tracking that was never built.
+ * Partnership enquiries are leads with source PARTNER, kept with a status,
+ * an owner and notes at /admin/marketing/leads?source=PARTNER, which the
+ * marketing hub already links to. Old bookmarks land there.
+ */
+import { redirect } from 'next/navigation';
 
 export default function AdminMarketingPartnershipsPage() {
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <header className="bg-white dark:bg-slate-800 shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center gap-4">
-            <Link href="/admin/marketing" className="text-slate-500 hover:text-slate-700">
-              <ChevronLeft className="h-5 w-5" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Partnerships</h1>
-              <p className="text-slate-600 dark:text-slate-400">Co-marketing and strategic alliances</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main id="main-content" tabIndex={-1} className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Track partner outreach and collaboration status here.
-          </p>
-        </div>
-      </main>
-    </div>
-  );
+  redirect('/admin/marketing/leads?source=PARTNER');
 }

@@ -126,9 +126,32 @@ export const SUPPORTED_CURRENCIES = Array.from(
   new Set(Object.values(REGION_CONFIG).flatMap((region) => region.supportedCurrencies))
 );
 
+/**
+ * The interface languages the web client translates in full, whatever the
+ * member's region: Spanish, Arabic and Vietnamese, the community languages
+ * most spoken by women in Queensland after English (client/src/i18n/
+ * dictionary.ts carries the dictionaries). A member's region decides her
+ * currency and compliance defaults; it must never stop her reading ATHENA in
+ * her own language, which is why these are accepted in every region.
+ */
+export const INTERFACE_LOCALES = ['es', 'es-US', 'es-MX', 'ar', 'ar-AE', 'ar-SA', 'ar-EG', 'vi', 'vi-VN'];
+
+/**
+ * Every locale a member may save as preferredLocale: the regional locales
+ * above plus the interface languages. Region-specific locales still pick the
+ * region's date, spelling and currency conventions; the interface languages
+ * pick the translation.
+ */
 export const SUPPORTED_LOCALES = Array.from(
-  new Set(Object.values(REGION_CONFIG).flatMap((region) => region.supportedLocales))
+  new Set([
+    ...Object.values(REGION_CONFIG).flatMap((region) => region.supportedLocales),
+    ...INTERFACE_LOCALES,
+  ])
 );
+
+export function isSupportedLocale(locale: unknown): locale is string {
+  return typeof locale === 'string' && SUPPORTED_LOCALES.includes(locale);
+}
 
 const BASE_PRICE_IDS = {
   PREMIUM_CAREER: process.env.STRIPE_PRICE_CAREER || 'price_career',

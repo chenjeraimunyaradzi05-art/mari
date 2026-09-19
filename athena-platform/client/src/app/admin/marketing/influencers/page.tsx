@@ -1,30 +1,14 @@
-import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
+/**
+ * Superseded by the lead register filtered by source.
+ *
+ * This page used to promise engagement, reach and ROI tracking for creator
+ * partnerships; nothing measured any of that. Influencer contacts are leads
+ * with source INFLUENCER at /admin/marketing/leads?source=INFLUENCER, and a
+ * paid collaboration is a campaign on the hub with channel INFLUENCER. Old
+ * bookmarks land on the register.
+ */
+import { redirect } from 'next/navigation';
 
 export default function AdminMarketingInfluencersPage() {
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <header className="bg-white dark:bg-slate-800 shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center gap-4">
-            <Link href="/admin/marketing" className="text-slate-500 hover:text-slate-700">
-              <ChevronLeft className="h-5 w-5" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Influencer Ops</h1>
-              <p className="text-slate-600 dark:text-slate-400">Creator partnerships and performance tracking</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main id="main-content" tabIndex={-1} className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Add creator partnerships to track engagement, reach, and ROI.
-          </p>
-        </div>
-      </main>
-    </div>
-  );
+  redirect('/admin/marketing/leads?source=INFLUENCER');
 }

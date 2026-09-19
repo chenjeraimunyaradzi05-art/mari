@@ -182,7 +182,7 @@ Assessment:
 
 Observed examples:
 
-- Livestream routes are commented out because schema additions are still missing
+- Livestream is wired and mounted at `/api/livestream` (the LiveStream models exist); an RTMP ingest server is optional, and without one a host pastes a playback URL
 - OpenSearch initialization is disabled in `server/src/index.ts`
 - Background workers are disabled by default and require env activation
 - Redis-backed behavior degrades when Redis is unavailable
@@ -350,7 +350,7 @@ Highest-value platform hardening:
 - Stripe Connect and checkout completeness
 - OpenSearch enablement or formal de-scope
 - worker activation strategy
-- livestream schema completion or formal removal
+- livestream: wired (RTMP ingest optional, playback-URL fallback); configuring an ingest server is an ops decision, not a code gap
 - ML placeholder removal and model artifact checks
 
 ### 6. Consolidate CI/CD around one deployment story

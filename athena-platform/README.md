@@ -118,7 +118,8 @@ athena-platform/
 | [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) | Production deployment checklist |
 | [docs/api/API_OVERVIEW.md](./docs/api/API_OVERVIEW.md) | API documentation |
 | [docs/runbooks/ONCALL.md](./docs/runbooks/ONCALL.md) | On-call procedures |
-| [docs/compliance/GDPR_CHECKLIST.md](./docs/compliance/GDPR_CHECKLIST.md) | GDPR compliance |
+| [docs/compliance/GDPR_CHECKLIST.md](./docs/compliance/GDPR_CHECKLIST.md) | GDPR compliance (UK and EU members) |
+| docs/compliance/AU_PRIVACY_ACT_AND_NDB.md | Privacy Act 1988, the APPs and the NDB runbook (home regime) |
 
 ---
 

@@ -9,11 +9,14 @@ const BACKEND_URL = (
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 ).replace(/\/$/, '');
 
-// Routes that require authentication
+// Routes that require authentication. /admin is here so the purely static
+// admin pages need a session too; the API's requireRole('ADMIN') still guards
+// every piece of data they show.
 const protectedRoutes = [
   '/dashboard',
   '/onboarding',
   '/settings',
+  '/admin',
 ];
 
 // Routes that should redirect to dashboard if authenticated

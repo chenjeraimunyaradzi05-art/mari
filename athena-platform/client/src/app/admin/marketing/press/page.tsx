@@ -1,30 +1,13 @@
-import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
+/**
+ * Superseded by the lead register filtered by source.
+ *
+ * This page used to say "publish updates to the press kit"; there is no press
+ * kit tool. Media enquiries arrive through the public /press form as leads
+ * with source PRESS and are worked at /admin/marketing/leads?source=PRESS.
+ * Old bookmarks land there.
+ */
+import { redirect } from 'next/navigation';
 
 export default function AdminMarketingPressPage() {
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <header className="bg-white dark:bg-slate-800 shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center gap-4">
-            <Link href="/admin/marketing" className="text-slate-500 hover:text-slate-700">
-              <ChevronLeft className="h-5 w-5" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Press</h1>
-              <p className="text-slate-600 dark:text-slate-400">Media inquiries and coverage</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main id="main-content" tabIndex={-1} className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Track press requests and publish updates to the press kit.
-          </p>
-        </div>
-      </main>
-    </div>
-  );
+  redirect('/admin/marketing/leads?source=PRESS');
 }

@@ -22,7 +22,13 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { contactLink } from '@/lib/contact';
+import { REFUND_DAYS, TRIAL_DAYS } from '@/lib/pricing';
 import ConciergePanel from '@/components/help/ConciergePanel';
+
+// The policy numbers come from lib/pricing so this page, the pricing page and
+// checkout cannot drift apart. Three answers that used to be here were untrue
+// (PayPal is not offered in Australia; no team reviews every report within 24
+// hours; there was no course refund rule) and have been corrected or removed.
 
 const faqCategories = [
   {
@@ -70,7 +76,11 @@ const faqCategories = [
     faqs: [
       {
         question: 'What payment methods do you accept?',
-        answer: 'We accept all major credit cards (Visa, Mastercard, American Express), as well as PayPal. Enterprise customers can also pay via invoice.',
+        answer: 'Credit and debit cards (Visa, Mastercard, American Express) through Stripe. That is the only method offered in Australia at the moment.',
+      },
+      {
+        question: 'Is there a free trial?',
+        answer: `Yes. Pro comes with a ${TRIAL_DAYS}-day free trial. You enter card details to start it, nothing is charged during the trial, and if you cancel before it ends you pay nothing.`,
       },
       {
         question: 'How do I cancel my subscription?',
@@ -78,7 +88,7 @@ const faqCategories = [
       },
       {
         question: 'Do you offer refunds?',
-        answer: 'We offer a 30-day money-back guarantee for first-time subscribers. Contact support within 30 days of your first payment for a full refund.',
+        answer: `First-time subscribers have ${REFUND_DAYS} days: contact support inside that window and we refund your first payment in full. Refunds are processed by hand, so allow a few working days.`,
       },
     ],
   },
@@ -97,7 +107,7 @@ const faqCategories = [
       },
       {
         question: 'How do I report inappropriate content?',
-        answer: 'Click the three dots menu on any content and select "Report". Our safety team reviews all reports within 24 hours.',
+        answer: 'Click the three dots menu on any content and select "Report". Every report is read by a person; we aim to act on critical reports within 24 hours.',
       },
     ],
   },
@@ -114,10 +124,9 @@ const faqCategories = [
         question: 'Do I get a certificate upon completion?',
         answer: 'Yes! All courses include a certificate of completion that you can add to your profile and share on LinkedIn.',
       },
-      {
-        question: 'Can I get a refund for a course?',
-        answer: 'Courses can be refunded within 7 days of purchase if you haven\'t completed more than 30% of the content.',
-      },
+      // A course refund answer ('within 7 days if under 30% complete') sat here
+      // with no rule behind it anywhere in the product. It returns when a real
+      // rule exists; until then, refunds are the subscription answer above.
     ],
   },
 ];

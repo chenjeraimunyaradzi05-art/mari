@@ -18,11 +18,45 @@ import {
   CheckCircle,
   XCircle,
   Calendar,
+  Car,
+  Stethoscope,
+  Store,
+  Home,
+  Landmark,
+  Rocket,
+  Wallet,
+  HeartHandshake,
+  Award,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { adminOpsApi, type RevenueSummary } from '@/lib/admin-ops-api';
 import { useAuthStore } from '@/lib/hooks';
+
+// The queues behind every directory partners join, so an admin has one door
+// for all of them. The automotive queue lives under /dashboard/cars because
+// the cars area guards its own admin page; the rest are under /admin.
+const partnerLinks = [
+  { href: '/dashboard/cars/admin', label: 'Automotive queues', icon: Car, description: 'Verify workshops and dealerships, held listings, disputes, finance' },
+  { href: '/admin/practitioners', label: 'Health practitioners', icon: Stethoscope, description: 'Verify practitioners against the AHPRA register before they are listed' },
+  { href: '/admin/vendors', label: 'Vendors', icon: Store, description: 'Verify the businesses members register for the supplier directory' },
+  { href: '/admin/housing', label: 'Housing', icon: Home, description: 'Review DV-safe listings before they go live' },
+  { href: '/admin/grants', label: 'Grants', icon: Landmark, description: 'Programmes and what the providers decided' },
+  { href: '/admin/accelerator', label: 'Accelerator', icon: Rocket, description: 'Cohorts and applications' },
+  { href: '/admin/investors', label: 'Investors', icon: Wallet, description: 'The investor directory' },
+  { href: '/admin/impact', label: 'Impact', icon: HeartHandshake, description: 'Community programmes and impact reports' },
+  { href: '/admin/credentials', label: 'Credentials', icon: Award, description: 'Certifications and the bodies that issue them' },
+];
+
+function formatMoney(amount: number, currency: string | null) {
+  if (!currency || currency === 'UNKNOWN') return amount.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  try {
+    return new Intl.NumberFormat('en-AU', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${currency} ${amount.toLocaleString()}`;
+  }
+}
 
 interface AdminStats {
   overview: {
@@ -53,6 +87,14 @@ export default function AdminDashboardPage() {
       const response = await api.get('/admin/stats');
       return response.data;
     },
+  });
+  // Recurring revenue is summed on the server from the amounts Stripe
+  // recorded, never from a price table: this card used to multiply tier
+  // counts by 29 and 99, prices no tier in the enum has.
+  const revenue = useQuery({
+    queryKey: ['admin-ops-revenue'],
+    queryFn: () => adminOpsApi.revenue(),
+    select: (r) => r.data as RevenueSummary,
   });
 
   if (isLoading) {
@@ -125,10 +167,10 @@ export default function AdminDashboardPage() {
     { href: '/admin/feedback', label: 'Feedback', icon: MessageSquare, description: 'What people send from the help centre, worked through' },
     { href: '/admin/verification', label: 'Verification Requests', icon: Shield, description: 'Approve employer, educator, mentor and creator badges' },
     { href: '/admin/feature-flags', label: 'Feature Flags', icon: Settings, description: 'Flags, rollouts and maintenance mode' },
-    { href: '/admin/settings', label: 'Settings', icon: Settings, description: 'Platform configuration' },
+    { href: '/admin/settings', label: 'Settings', icon: Settings, description: 'What is running and how it is configured, as the API reports it' },
   ];
 
-  const mrr = ((stats?.subscriptions.pro || 0) * 29) + ((stats?.subscriptions.business || 0) * 99);
+  const r = revenue.data;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
@@ -167,18 +209,40 @@ export default function AdminDashboardPage() {
           ))}
         </div>
 
-        {/* MRR Card */}
-        <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow p-6 mb-8">
-          <div className="flex items-center justify-between text-white">
+        {/* Recurring revenue, from recorded subscription amounts only */}
+        <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow p-6 mb-8 text-white">
+          {revenue.isLoading ? (
+            <p className="text-purple-100">Reading recorded subscription amounts…</p>
+          ) : !r ? (
+            <p className="text-purple-100">Recurring revenue could not be read.</p>
+          ) : r.mrr === null ? (
             <div>
-              <p className="text-purple-100">Monthly Recurring Revenue</p>
-              <p className="text-4xl font-bold">AU${mrr.toLocaleString()}</p>
+              <p className="text-purple-100">Monthly recurring revenue</p>
+              <p className="text-2xl font-semibold">
+                {r.mixedCurrencies ? 'More than one currency, so no single figure' : 'Not enough recorded amounts yet'}
+              </p>
+              <p className="mt-1 text-sm text-purple-100">
+                {r.subscriptions.paying === 0
+                  ? 'No paying subscriptions yet.'
+                  : `${r.subscriptions.paying} paying ${r.subscriptions.paying === 1 ? 'subscription' : 'subscriptions'}, ${r.subscriptions.recorded} with an amount recorded by Stripe.`}
+              </p>
             </div>
-            <div className="text-right">
-              <p className="text-purple-100">ARR</p>
-              <p className="text-2xl font-semibold">AU${(mrr * 12).toLocaleString()}</p>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-purple-100">Monthly recurring revenue</p>
+                <p className="text-4xl font-bold">{formatMoney(r.mrr, r.currency)}</p>
+                <p className="mt-1 text-sm text-purple-100">
+                  From {r.subscriptions.recorded} recorded {r.subscriptions.recorded === 1 ? 'subscription' : 'subscriptions'}
+                  {r.subscriptions.notRecorded > 0 && `; ${r.subscriptions.notRecorded} more paying with no amount recorded`}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-purple-100">Annualised</p>
+                <p className="text-2xl font-semibold">{r.arr === null ? '—' : formatMoney(r.arr, r.currency)}</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* User Breakdown */}
@@ -216,6 +280,29 @@ export default function AdminDashboardPage() {
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Quick Actions</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {adminLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+            >
+              <div className="flex items-start gap-4">
+                <div className="bg-slate-100 dark:bg-slate-700 p-3 rounded-lg">
+                  <link.icon className="h-6 w-6 text-slate-700 dark:text-slate-300" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{link.label}</h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{link.description}</p>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        {/* Partner listings: one door for every directory queue */}
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mt-10 mb-1">Partner listings</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">The queues behind every directory partners join: verify, approve or hide.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {partnerLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
