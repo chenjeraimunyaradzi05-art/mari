@@ -140,7 +140,9 @@ export async function getProactiveSuggestions(
     actions.push({
       type: 'navigate',
       label: 'Complete Profile',
-      target: '/dashboard/profile/edit',
+      // Headline, bio and skills are all edited on the profile settings page;
+      // /dashboard/profile/edit was never a page.
+      target: '/dashboard/settings/profile',
     });
   }
 
@@ -150,7 +152,7 @@ export async function getProactiveSuggestions(
     actions.push({
       type: 'navigate',
       label: 'Update Skills',
-      target: '/dashboard/profile/skills',
+      target: '/dashboard/settings/profile',
     });
   }
 
@@ -487,6 +489,24 @@ export function searchFAQ(query: string): Array<{ question: string; answer: stri
 
 /**
  * Get personalized onboarding steps based on user profile
+ *
+ * The dashboard home renders the incomplete steps as a "Finish setting up"
+ * card and hides it once every step is done, so each step has to be two
+ * things: checkable from the database, so `completed` really flips once she
+ * has done it, and reachable, so `action` lands on a page that exists.
+ *
+ * The earlier list was neither. It read headline, bio, resumeUrl and
+ * jobPreferences off Profile, where none of them live (headline and bio are
+ * on User; the others are on nothing), so no step could ever complete, and it
+ * pointed at /dashboard/profile/edit, /dashboard/profile/skills,
+ * /dashboard/settings/job-preferences and /dashboard/discover, none of which
+ * are pages in the web client.
+ *
+ * Three steps were dropped rather than repointed: "upload your resume" (no
+ * per-member resume is stored; JobApplication.resumeUrl is per application),
+ * "set job preferences" (no page edits Profile.preferredJobTypes or
+ * remotePreference) and "explore features" (nothing could mark it done). Add
+ * a step back only with a field to check and a page to send her to.
  */
 export async function getOnboardingSteps(userId: string): Promise<Array<{
   id: string;
@@ -499,9 +519,11 @@ export async function getOnboardingSteps(userId: string): Promise<Array<{
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        profile: true,
-        skills: true,
+      select: {
+        headline: true,
+        bio: true,
+        profile: { select: { aboutMe: true } },
+        skills: { select: { id: true } },
       },
     });
 
@@ -509,91 +531,36 @@ export async function getOnboardingSteps(userId: string): Promise<Array<{
       return [];
     }
 
-    const profile = user.profile as any;
-    const steps = [];
+    // Headline, bio and skills are all edited here.
+    const PROFILE_SETTINGS = '/dashboard/settings/profile';
+    const MIN_SKILLS = 3;
 
-    // Check profile completion
-    if (!profile?.headline || !profile?.bio) {
-      steps.push({
+    const hasHeadline = Boolean(user.headline?.trim());
+    const hasBio = Boolean(user.bio?.trim() || user.profile?.aboutMe?.trim());
+    const skillCount = user.skills?.length ?? 0;
+
+    const steps = [
+      {
         id: 'complete-profile',
-        title: 'Complete Your Profile',
-        description: 'Add a headline and bio to make your profile stand out',
-        completed: false,
-        action: '/dashboard/profile/edit',
+        title: 'Complete your profile',
+        description: hasHeadline && hasBio
+          ? 'Your headline and bio are in place'
+          : 'Add a headline and a short bio so people know who you are',
+        completed: hasHeadline && hasBio,
+        action: PROFILE_SETTINGS,
         priority: 1,
-      });
-    } else {
-      steps.push({
-        id: 'complete-profile',
-        title: 'Complete Your Profile',
-        description: 'Your profile is looking great!',
-        completed: true,
-        action: '/dashboard/profile/edit',
-        priority: 1,
-      });
-    }
-
-    // Check skills
-    if (!user.skills || user.skills.length < 3) {
-      steps.push({
+      },
+      {
         id: 'add-skills',
-        title: 'Add Your Skills',
-        description: 'Add at least 3 skills to improve job matching',
-        completed: false,
-        action: '/dashboard/profile/skills',
+        title: 'Add your skills',
+        description: skillCount >= MIN_SKILLS
+          ? `You have ${skillCount} skills listed`
+          : `List at least ${MIN_SKILLS} skills so job matches can find you`,
+        completed: skillCount >= MIN_SKILLS,
+        action: PROFILE_SETTINGS,
         priority: 2,
-      });
-    } else {
-      steps.push({
-        id: 'add-skills',
-        title: 'Add Your Skills',
-        description: `You have ${user.skills.length} skills listed`,
-        completed: true,
-        action: '/dashboard/profile/skills',
-        priority: 2,
-      });
-    }
-
-    // Check resume
-    if (!profile?.resumeUrl) {
-      steps.push({
-        id: 'upload-resume',
-        title: 'Upload Your Resume',
-        description: 'Upload your resume for AI-powered optimization',
-        completed: false,
-        action: '/dashboard/ai/resume-optimizer',
-        priority: 3,
-      });
-    } else {
-      steps.push({
-        id: 'upload-resume',
-        title: 'Upload Your Resume',
-        description: 'Resume uploaded and ready for optimization',
-        completed: true,
-        action: '/dashboard/ai/resume-optimizer',
-        priority: 3,
-      });
-    }
-
-    // Set job preferences
-    steps.push({
-      id: 'set-preferences',
-      title: 'Set Job Preferences',
-      description: 'Tell us what kind of opportunities you\'re looking for',
-      completed: !!profile?.jobPreferences,
-      action: '/dashboard/settings/job-preferences',
-      priority: 4,
-    });
-
-    // Explore features
-    steps.push({
-      id: 'explore-features',
-      title: 'Explore ATHENA Features',
-      description: 'Discover AI tools, mentors, and learning opportunities',
-      completed: false,
-      action: '/dashboard/discover',
-      priority: 5,
-    });
+      },
+    ];
 
     return steps.sort((a, b) => a.priority - b.priority);
   } catch (error) {

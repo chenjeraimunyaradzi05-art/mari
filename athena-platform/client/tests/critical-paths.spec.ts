@@ -110,7 +110,7 @@ test.describe('Critical Path: User to Mentor to Payment', () => {
       return;
     }
 
-    await expect(userPage.getByRole('heading', { name: /personality dashboards/i })).toBeVisible();
+    await expect(userPage.getByRole('heading', { name: /persona dashboards/i })).toBeVisible();
 
     const firstPersonaCard = userPage.locator('a[href^="/dashboard/persona/"]').first();
     await expect(firstPersonaCard).toBeVisible();

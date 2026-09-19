@@ -116,6 +116,17 @@ function countItems(value: unknown): number {
   return 0;
 }
 
+// The caps each list comes back with. A count at the cap is "at least this
+// many", so the tile says so instead of presenting a page size as a total.
+const RECOMMENDATION_LIMIT = 10; // GET /jobs/recommendations/for-me default
+const FEED_LIMIT = 5; // useFeed({ limit: FEED_LIMIT }) below
+const GROUPS_CAP = 50; // GET /groups take: 50
+const EVENTS_CAP = 100; // GET /events take: 100
+
+function boundedCount(count: number, cap: number): number | string {
+  return count >= cap ? `${cap}+` : count;
+}
+
 export default function PersonaDashboard() {
   const params = useParams();
   const rawPersona = typeof params.persona === 'string' ? params.persona : '';
@@ -128,10 +139,17 @@ export default function PersonaDashboard() {
   const { data: savedJobs, isLoading: loadingSavedJobs } = useSavedJobs();
   const { data: myCourses, isLoading: loadingMyCourses } = useMyCourses();
   const { data: coursesData, isLoading: loadingCourses } = useCourses({ limit: 6 });
-  const { data: feedData, isLoading: loadingFeed } = useFeed({ limit: 5 });
+  const { data: feedData, isLoading: loadingFeed } = useFeed({ limit: FEED_LIMIT });
   const { data: mentorData, isLoading: loadingMentors } = useMentors({ limit: 6 });
   const { data: groups, isLoading: loadingGroups } = useGroups();
   const { data: events, isLoading: loadingEvents } = useEvents();
+
+  // GET /mentors answers { mentors, pagination }; pagination.total is the
+  // whole marketplace, not the six fetched here.
+  const mentorTotal =
+    typeof mentorData?.pagination?.total === 'number'
+      ? mentorData.pagination.total
+      : countItems(mentorData?.mentors);
 
   if (!validPersona) {
     return (
@@ -172,8 +190,8 @@ export default function PersonaDashboard() {
     },
     {
       label: 'Job matches',
-      value: countItems(recommendations),
-      helper: 'Live role recommendations',
+      value: boundedCount(countItems(recommendations), RECOMMENDATION_LIMIT),
+      helper: 'Top matches for you',
       icon: Search,
       isLoading: loadingJobs,
     },
@@ -200,8 +218,8 @@ export default function PersonaDashboard() {
     },
     {
       label: 'Community updates',
-      value: countItems(feedData),
-      helper: 'Recent feed items',
+      value: boundedCount(countItems(feedData), FEED_LIMIT),
+      helper: 'Latest posts for you',
       icon: Users,
       isLoading: loadingFeed,
     },
@@ -217,21 +235,21 @@ export default function PersonaDashboard() {
     },
     {
       label: 'Mentors available',
-      value: countItems(mentorData),
+      value: mentorTotal,
       helper: 'Marketplace profiles',
       icon: HeartHandshake,
       isLoading: loadingMentors,
     },
     {
       label: 'Groups visible',
-      value: countItems(groups),
+      value: boundedCount(countItems(groups), GROUPS_CAP),
       helper: 'Community spaces',
       icon: Users,
       isLoading: loadingGroups,
     },
     {
       label: 'Events listed',
-      value: countItems(events),
+      value: boundedCount(countItems(events), EVENTS_CAP),
       helper: 'Upcoming sessions',
       icon: Calendar,
       isLoading: loadingEvents,
@@ -253,7 +271,7 @@ export default function PersonaDashboard() {
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
             <div className="font-semibold text-slate-900 dark:text-white">
-              {isCurrentPersona ? 'Active account persona' : 'Viewing alternate persona'}
+              {isCurrentPersona ? 'Your persona' : 'Exploring another persona'}
             </div>
             <div className="mt-1 text-slate-500 dark:text-slate-400">
               {userPersonaLabel ? `Your account: ${userPersonaLabel}` : 'Account persona not set'}

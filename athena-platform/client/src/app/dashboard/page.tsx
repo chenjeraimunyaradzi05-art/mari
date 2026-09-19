@@ -4,25 +4,58 @@ import Link from 'next/link';
 import {
   Briefcase,
   HeartPulse,
-  TrendingUp,
   Users,
   BookOpen,
   ArrowRight,
   Sparkles,
   Target,
-  Zap,
-  Calendar,
   CheckCircle,
-  Clock,
+  Bookmark,
+  ClipboardCheck,
 } from 'lucide-react';
-import { useAuth, useJobRecommendations, useMyApplications, useFeed } from '@/lib/hooks';
+import type { LucideIcon } from 'lucide-react';
+import {
+  useAuth,
+  useJobRecommendations,
+  useMyApplications,
+  useFeed,
+  useSavedJobs,
+  useMyCourses,
+  useOnboardingSteps,
+} from '@/lib/hooks';
 import { formatRelativeTime, PERSONA_LABELS, APPLICATION_STATUS_LABELS, APPLICATION_STATUS_COLORS } from '@/lib/utils';
+
+type Tile = {
+  name: string;
+  value: number | null;
+  isLoading: boolean;
+  href: string;
+  icon: LucideIcon;
+};
+
+// A count this page can prove: the length of a list the member owns.
+// Anything else is shown as a dash, never a guess.
+function countOf(value: unknown): number | null {
+  return Array.isArray(value) ? value.length : null;
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const { data: recommendations, isLoading: loadingJobs } = useJobRecommendations();
   const { data: applications, isLoading: loadingApps } = useMyApplications();
+  const { data: savedJobs, isLoading: loadingSaved } = useSavedJobs();
+  const { data: myCourses, isLoading: loadingCourses } = useMyCourses();
   const { data: feedData, isLoading: loadingFeed } = useFeed({ limit: 5 });
+  const { data: setupSteps } = useOnboardingSteps();
+
+  // GET /posts/feed returns the posts as `data` itself. An older shape put
+  // them under `posts`, which is why this card only ever showed its empty
+  // state; both are read so a change on either side degrades gracefully.
+  const feedPosts: any[] = Array.isArray(feedData) ? feedData : feedData?.posts ?? [];
+
+  // Only the steps she has not done. The card goes away entirely once the
+  // list is empty, rather than nagging with static copy.
+  const setupTodo = (setupSteps ?? []).filter((step) => !step.completed);
 
   const quickActions = [
     { name: 'Find Jobs', href: '/dashboard/jobs', icon: Briefcase, color: 'bg-blue-500' },
@@ -32,11 +65,14 @@ export default function DashboardPage() {
     { name: 'Check In', href: '/dashboard/wellness', icon: HeartPulse, color: 'bg-rose-500' },
   ];
 
-  const stats = [
-    { name: 'Profile Views', value: '234', change: '+12%', trend: 'up' },
-    { name: 'Search Appearances', value: '1,432', change: '+8%', trend: 'up' },
-    { name: 'Applications', value: applications?.length || 0, change: '+3', trend: 'up' },
-    { name: 'Saved Jobs', value: '18', change: '-2', trend: 'down' },
+  // Three tiles, each a list she owns. There is no history behind any of
+  // them to compute a change against, so no trend is shown. (Profile views
+  // and search appearances used to sit here as fixed numbers; nothing on the
+  // server counts either, so they are gone until something does.)
+  const tiles: Tile[] = [
+    { name: 'Applications', value: countOf(applications), isLoading: loadingApps, href: '/dashboard/applications', icon: Briefcase },
+    { name: 'Saved jobs', value: countOf(savedJobs), isLoading: loadingSaved, href: '/dashboard/jobs', icon: Bookmark },
+    { name: 'Courses', value: countOf(myCourses), isLoading: loadingCourses, href: '/dashboard/learn/my-courses', icon: BookOpen },
   ];
 
   return (
@@ -89,24 +125,62 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {stats.map((stat) => (
-          <div key={stat.name} className="card">
-            <div className="text-sm text-slate-500 dark:text-slate-400">{stat.name}</div>
-            <div className="mt-1 flex items-baseline">
-              <span className="text-2xl font-bold text-slate-900 dark:text-white">
-                {stat.value}
-              </span>
-              <span
-                className={`ml-2 text-sm ${
-                  stat.trend === 'up' ? 'text-green-600' : 'text-red-600'
-                }`}
-              >
-                {stat.change}
-              </span>
-            </div>
+      {/* Finish setting up: the incomplete concierge onboarding steps, gone
+          once they are all done. */}
+      {setupTodo.length > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="w-5 h-5 text-primary-600" aria-hidden="true" />
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+              Finish setting up
+            </h2>
           </div>
+          <p className="mt-1 mb-4 text-sm text-slate-500 dark:text-slate-400">
+            A couple of small things that make ATHENA work better for you.
+          </p>
+          <ul className="space-y-3">
+            {setupTodo.map((step) => (
+              <li key={step.id}>
+                <Link
+                  href={step.action}
+                  className="flex items-center justify-between gap-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-slate-700 transition group"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-900 dark:text-white group-hover:text-primary-700 dark:group-hover:text-primary-300">
+                      {step.title}
+                    </div>
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      {step.description}
+                    </div>
+                  </div>
+                  <ArrowRight className="w-4 h-4 flex-shrink-0 text-slate-400 group-hover:text-primary-600" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Your numbers */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {tiles.map((tile) => (
+          <Link
+            key={tile.name}
+            href={tile.href}
+            className="card flex items-center gap-4 hover:shadow-md transition group"
+          >
+            <div className="w-10 h-10 rounded-lg bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center text-primary-600 dark:text-primary-300">
+              <tile.icon className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-white">
+                {tile.isLoading ? '…' : tile.value ?? '—'}
+              </div>
+              <div className="text-sm text-slate-500 dark:text-slate-400 group-hover:text-primary-600 transition">
+                {tile.name}
+              </div>
+            </div>
+          </Link>
         ))}
       </div>
 
@@ -168,7 +242,13 @@ export default function DashboardPage() {
           ) : (
             <div className="text-center py-8 text-slate-500">
               <Briefcase className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p>Complete your profile to get job recommendations</p>
+              <p>Nothing matched yet. Adding your skills helps.</p>
+              <Link
+                href="/dashboard/settings/profile"
+                className="text-primary-600 hover:underline text-sm"
+              >
+                Add skills to your profile
+              </Link>
             </div>
           )}
         </div>
@@ -266,32 +346,40 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-        ) : feedData?.posts?.length ? (
+        ) : feedPosts.length ? (
           <div className="space-y-4">
-            {feedData.posts.slice(0, 3).map((post: any) => (
-              <Link
-                key={post.id}
-                href={`/posts/${post.id}`}
-                className="flex items-start space-x-4 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
-              >
-                <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 font-semibold">
-                  {post.author?.firstName?.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-medium text-slate-900 dark:text-white">
-                      {post.author?.firstName} {post.author?.lastName}
-                    </span>
-                    <span className="text-sm text-slate-500">
-                      {formatRelativeTime(post.createdAt)}
-                    </span>
+            {feedPosts.slice(0, 3).map((post: any) => {
+              // The feed selects displayName and avatar for the author; the
+              // following tab adds first and last name.
+              const name =
+                post.author?.displayName ||
+                [post.author?.firstName, post.author?.lastName].filter(Boolean).join(' ') ||
+                'ATHENA Member';
+              return (
+                <Link
+                  key={post.id}
+                  href={`/posts/${post.id}`}
+                  className="flex items-start space-x-4 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                >
+                  <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 font-semibold">
+                    {name.charAt(0)}
                   </div>
-                  <p className="text-slate-600 dark:text-slate-400 text-sm line-clamp-2">
-                    {post.content}
-                  </p>
-                </div>
-              </Link>
-            ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium text-slate-900 dark:text-white">
+                        {name}
+                      </span>
+                      <span className="text-sm text-slate-500">
+                        {formatRelativeTime(post.createdAt)}
+                      </span>
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-400 text-sm line-clamp-2">
+                      {post.content}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-8 text-slate-500">
@@ -299,37 +387,6 @@ export default function DashboardPage() {
             <p>Follow people to see their posts here</p>
           </div>
         )}
-      </div>
-
-      {/* Upcoming Events / Reminders */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-          Upcoming
-        </h2>
-        <div className="space-y-3">
-          <div className="flex items-center space-x-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-            <Calendar className="w-5 h-5 text-yellow-600" />
-            <div>
-              <div className="font-medium text-slate-900 dark:text-white">
-                Complete your profile
-              </div>
-              <div className="text-sm text-slate-500">
-                Add skills and experience to get better job matches
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center space-x-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-            <Clock className="w-5 h-5 text-blue-600" />
-            <div>
-              <div className="font-medium text-slate-900 dark:text-white">
-                Weekly career tips
-              </div>
-              <div className="text-sm text-slate-500">
-                New article: "5 Ways to Stand Out in Interviews"
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

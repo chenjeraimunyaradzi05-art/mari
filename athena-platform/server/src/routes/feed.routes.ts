@@ -89,6 +89,20 @@ router.get('/cold-start/score', authenticate, async (req: AuthRequest, res: Resp
  * @route GET /api/feed/onboarding
  * @desc Get onboarding suggestions
  * @access Private
+ *
+ * ## Superseded by GET /api/concierge/onboarding
+ *
+ * Same idea, older shape. `getOnboardingSuggestions` in cold-start.service.ts
+ * returns steps with no `completed` flag, so a screen built on it could never
+ * tick anything off, and its action paths (/onboarding/persona,
+ * /settings/profile, /settings/skills, /discover/people, /compose) are not
+ * pages in the web client. The concierge route (concierge.service.ts
+ * getOnboardingSteps) checks the same profile fields, reports completion and
+ * points at /dashboard/settings/profile; the dashboard home reads it through
+ * conciergeApi.onboarding().
+ *
+ * Do not build a screen against this route. It stays mounted rather than
+ * deleted, as the repo does with superseded routes (see salary.routes.ts).
  */
 router.get('/onboarding', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

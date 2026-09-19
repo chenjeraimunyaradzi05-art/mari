@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
@@ -15,6 +15,7 @@ import {
   Edit,
   ExternalLink,
   Flag,
+  Gift,
   Heart,
   Link as LinkIcon,
   Lock,
@@ -27,7 +28,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useAuth, useFollow, useProfile, useUnfollow } from '@/lib/hooks';
-import { postApi, safetyApi } from '@/lib/api';
+import { creatorApi, postApi, safetyApi } from '@/lib/api';
 import { videoApi } from '@/lib/api-extensions';
 import { formatDate, PERSONA_LABELS, cn } from '@/lib/utils';
 import { renderSocialText } from '@/lib/social-text';
@@ -43,6 +44,8 @@ import {
 import { ReportDialog } from '@/components/safety/ReportDialog';
 import { StoryHighlights } from '@/components/profile/StoryHighlights';
 import { originalAuthorName } from '@/components/community/RepostEmbed';
+import { SendGiftSheet } from '@/components/creator/SendGiftSheet';
+import { ManageReelSheet, REEL_STATUS_LABEL } from '@/components/video/ManageReelSheet';
 
 /**
  * A member's public profile, built on what GET /users/:id actually returns.
@@ -139,6 +142,9 @@ type ProfileVideo = {
   title?: string | null;
   description?: string | null;
   viewCount?: number;
+  // The author's own grid also carries processing and hidden reels.
+  status?: string | null;
+  hashtags?: string[] | null;
 };
 
 function fullName(user: ProfileUser): string {
@@ -185,8 +191,23 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
   const follow = useFollow();
   const unfollow = useUnfollow();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [reportOpen, setReportOpen] = useState(false);
   const [blocking, setBlocking] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  // The author's own reel being edited, hidden or deleted.
+  const [managingReel, setManagingReel] = useState<ProfileVideo | null>(null);
+
+  // Whether this member takes gifts. A 404 is the normal answer for anyone
+  // who is not a creator, so it is not retried and nothing is shown.
+  const { data: creator } = useQuery({
+    queryKey: ['creator-public-profile', userId],
+    queryFn: () => creatorApi.getPublicProfile(userId),
+    enabled: !!userId && isAuthenticated && viewer?.id !== userId,
+    retry: false,
+    select: (response) => (response.data?.data ?? null) as { isMonetized?: boolean } | null,
+  });
+  const acceptsGifts = Boolean(creator?.isMonetized);
 
   const { data: posts = [] } = useQuery({
     queryKey: ['user-posts', userId],
@@ -395,6 +416,16 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                       <MessageCircle className="h-4 w-4" />
                       <span>Message</span>
                     </Link>
+                    {acceptsGifts && (
+                      <button
+                        type="button"
+                        onClick={() => setGiftOpen(true)}
+                        className="btn-outline flex items-center gap-2 px-4 py-2"
+                      >
+                        <Gift className="h-4 w-4 text-rose-500" />
+                        <span>Send a gift</span>
+                      </button>
+                    )}
                     <DropdownMenu as="div" className="relative">
                       <DropdownMenuTrigger asChild>
                         <button
@@ -425,6 +456,14 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                       targetId={userId}
                       targetLabel={name}
                     />
+                    {acceptsGifts && (
+                      <SendGiftSheet
+                        isOpen={giftOpen}
+                        onClose={() => setGiftOpen(false)}
+                        receiverId={userId}
+                        receiverName={name}
+                      />
+                    )}
                   </>
                 ) : (
                   <Link
@@ -493,22 +532,58 @@ export function PublicProfile({ userId, backHref = '/feed' }: { userId: string; 
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Reels</h2>
                 <Play className="h-4 w-4 text-rose-500" />
               </div>
+              {isOwnProfile && (
+                <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+                  Only you see the hidden ones and the ones still processing.
+                </p>
+              )}
               <div className="grid grid-cols-3 gap-2">
-                {videos.map((video) => (
-                  <Link key={video.id} href={`/explore?video=${video.id}`} className="reel-tile group">
-                    {video.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={video.thumbnailUrl} alt={video.title || video.description || 'Reel'} className="reel-tile-media" />
-                    ) : (
-                      <video src={video.videoUrl} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-                    )}
-                    <div className="reel-scrim" />
-                    <p className="absolute inset-x-0 bottom-0 line-clamp-2 p-2 text-[11px] font-medium leading-4 text-white">
-                      {video.title || video.description || 'Untitled'}
-                    </p>
-                  </Link>
-                ))}
+                {videos.map((video) => {
+                  const label = video.title || video.description || 'Untitled';
+                  const statusLabel = video.status && video.status !== 'PUBLISHED' ? REEL_STATUS_LABEL[video.status] ?? video.status : null;
+                  return (
+                    <div key={video.id} className="relative">
+                      <Link href={`/explore?video=${video.id}`} className="reel-tile group">
+                        {video.thumbnailUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={video.thumbnailUrl} alt={label} className="reel-tile-media" />
+                        ) : (
+                          <video src={video.videoUrl} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                        )}
+                        <div className="reel-scrim" />
+                        <p className="absolute inset-x-0 bottom-0 line-clamp-2 p-2 text-[11px] font-medium leading-4 text-white">
+                          {label}
+                        </p>
+                      </Link>
+                      {isOwnProfile && (
+                        <>
+                          {statusLabel && (
+                            <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">
+                              {statusLabel}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setManagingReel(video)}
+                            aria-label={`Manage reel: ${label}`}
+                            className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5 text-white transition hover:bg-black/80"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+              {isOwnProfile && (
+                <ManageReelSheet
+                  reel={managingReel}
+                  onClose={() => setManagingReel(null)}
+                  onUpdated={() => void queryClient.invalidateQueries({ queryKey: ['user-videos', userId] })}
+                  onDeleted={() => void queryClient.invalidateQueries({ queryKey: ['user-videos', userId] })}
+                />
+              )}
             </section>
           )}
 

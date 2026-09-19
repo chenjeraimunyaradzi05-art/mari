@@ -27,6 +27,7 @@ import {
   useSavePost,
   useUnsavePost,
   useAuth,
+  useStartHere,
 } from '@/lib/hooks';
 import { useReactToPost } from '@/lib/social-hooks';
 import toast from 'react-hot-toast';
@@ -40,6 +41,7 @@ import { RepostButton } from '@/components/community/RepostButton';
 import { RepostEmbed, RepostedBy, type RepostOriginal } from '@/components/community/RepostEmbed';
 import { useImpression } from '@/lib/impressions';
 import { NewPostsPill } from '@/components/community/NewPostsPill';
+import StartHereRail from '@/components/feed/StartHereRail';
 import { altFor } from '@/components/community/PostCard';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -639,6 +641,9 @@ export default function FeedPage() {
   // all three tabs were returning the same for-you feed.
   const { data: posts, isLoading, error } = useFeed(FEED_QUERY[filter]);
   const { user, isAuthenticated } = useAuth();
+  // Real picks for a member who is still new here; the rail hides itself
+  // once GET /feed/cold-start/score says she has settled in.
+  const startHere = useStartHere();
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
@@ -713,6 +718,11 @@ export default function FeedPage() {
 
             {/* Create Post */}
             {isAuthenticated && <CreatePostBox />}
+
+            {/* New here? Start with these */}
+            {isAuthenticated && (
+              <StartHereRail isColdStart={startHere.isColdStart} picks={startHere.picks} />
+            )}
 
             {/* Posts */}
             {isLoading ? (

@@ -3,16 +3,19 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Subtitles, Check, Copy, Loader2, Music, Sparkles, Tag, UploadCloud, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ManageReelSheet, REEL_STATUS_LABEL, type ManagedReel } from '@/components/video/ManageReelSheet';
+import { useAuth } from '@/lib/hooks';
 import { mediaApi } from '@/lib/api';
 import { soundApi, videoApi, type SoundSummary, type TrendingSound } from '@/lib/api-extensions';
-import { cn } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 
 /**
- * Publish a reel.
+ * Publish a reel, and look after the ones already published.
  *
  * Publishing is: capture a poster frame and the duration in the browser,
  * upload the file, create the Video row (which the server hands to its
@@ -23,6 +26,10 @@ import { cn } from '@/lib/utils';
  *
  * A sound can be chosen from what is trending, handed in from a reel or the
  * sounds page as ?sound=<id>, or uploaded as an audio file.
+ *
+ * "Your reels" below the form lists everything she has published, including
+ * the hidden and still-processing ones only she can see, and opens the same
+ * ManageReelSheet the profile grid uses to edit, hide or delete one.
  */
 
 const VIDEO_TYPES = [
@@ -129,6 +136,87 @@ const errorMessage = (err: unknown, fallback: string) =>
   (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
   (err as Error)?.message ||
   fallback;
+
+type StudioReel = ManagedReel & {
+  videoUrl: string;
+  createdAt?: string;
+};
+
+/**
+ * The member's own reels, newest first, with the same sheet the profile grid
+ * opens. The key sits under the profile grid's ['user-videos', userId], so
+ * invalidating that prefix from either place refreshes both lists.
+ */
+function YourReels() {
+  const { user, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
+  const userId = user?.id as string | undefined;
+  const [managing, setManaging] = useState<StudioReel | null>(null);
+
+  const { data: reels = [], isLoading } = useQuery({
+    queryKey: ['user-videos', userId, 'studio'],
+    queryFn: () => videoApi.getUserVideos(userId as string, { limit: 24 }),
+    enabled: Boolean(userId) && isAuthenticated,
+    select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as StudioReel[]) : []),
+  });
+
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['user-videos', userId] });
+
+  if (!userId) return null;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Your reels</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">Fix a caption, hide one for a while, or let it go.</p>
+      </div>
+
+      {isLoading ? (
+        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">Finding your reels...</p>
+      ) : reels.length === 0 ? (
+        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
+          Nothing published yet. Your first reel will appear here the moment it is up.
+        </p>
+      ) : (
+        <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+          {reels.map((reel) => {
+            const label = reel.title || reel.description || 'Untitled';
+            const status = REEL_STATUS_LABEL[reel.status ?? ''] ?? reel.status ?? '';
+            return (
+              <li key={reel.id} className="flex items-center gap-3 py-3">
+                <div className="h-16 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-slate-900">
+                  {reel.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- media CDN
+                    <img src={reel.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <video src={reel.videoUrl} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{label}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {[status, reel.createdAt ? formatDate(reel.createdAt) : ''].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+                <Link
+                  href={`/explore?video=${reel.id}`}
+                  className="hidden text-xs font-medium text-rose-600 hover:underline sm:inline dark:text-rose-400"
+                >
+                  View
+                </Link>
+                <Button type="button" variant="outline" size="sm" onClick={() => setManaging(reel)}>
+                  Manage
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <ManageReelSheet reel={managing} onClose={() => setManaging(null)} onUpdated={refresh} onDeleted={refresh} />
+    </section>
+  );
+}
 
 function CreatorStudioContent() {
   const router = useRouter();
@@ -614,6 +702,8 @@ function CreatorStudioContent() {
           )}
         </div>
       </div>
+
+      <YourReels />
     </div>
   );
 }
