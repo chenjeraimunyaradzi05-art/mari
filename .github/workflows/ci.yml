@@ -43,6 +43,7 @@ jobs:
           cache-dependency-path: athena-platform/server/package-lock.json
 
       - name: Install dependencies
+        id: install
         run: npm ci
 
       - name: Generate Prisma client
@@ -76,6 +77,28 @@ jobs:
 
       - name: Run tests
         run: npm test --silent
+
+      # Last, and deliberately independent of everything above it: a console.log
+      # left behind should not stop the typecheck and the tests from reporting,
+      # and a failing test should not hide the lint result either, so this runs
+      # on its own outcome. It only needs node_modules, hence the install
+      # condition — without it a failed `npm ci` would fail twice and the second
+      # failure ("eslint: not found") would explain nothing.
+      # `--quiet` drops warnings so that only errors reach this log. Nothing
+      # that could fail the step is hidden by it: eslint exits non-zero on an
+      # error, and without --max-warnings no number of warnings fails it.
+      # Measured on server/src, 19 September 2026: `npx eslint src` reports 78
+      # problems — 0 errors, 78 warnings, every one of them
+      # @typescript-eslint/no-unused-vars — and `npx eslint src --quiet`
+      # prints nothing and exits 0. An earlier version of this comment blamed
+      # @typescript-eslint/no-explicit-any for "about a thousand" warnings;
+      # .eslintrc.cjs has since set that rule back to 'off' and it now emits
+      # none. The unused-vars list is read by running `npm run lint` locally,
+      # where it is the entire output. Making CI enforce that count would mean
+      # adding --max-warnings, not removing this flag.
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint -- --quiet
 
   client:
     name: Client

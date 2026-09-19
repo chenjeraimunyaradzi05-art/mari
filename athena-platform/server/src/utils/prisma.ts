@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import ws from 'ws';
 import { applyDatabaseUrlDefaults, isNeonConnectionString } from './database-url';
+import { logger } from './logger';
 
 const resolvedDatabaseUrls = applyDatabaseUrlDefaults();
 const prismaLog: Prisma.PrismaClientOptions['log'] =
@@ -42,8 +43,11 @@ export async function connectWithRetry(maxAttempts = 5, baseDelay = 500) {
     } catch (err) {
       attempt++;
       const delay = baseDelay * Math.pow(2, attempt - 1);
-      // eslint-disable-next-line no-console
-      console.warn(`Prisma connection attempt ${attempt} failed. Retrying in ${delay}ms...`);
+      // A retry that may still succeed, so this is a warning and not an error;
+      // the rethrow below is what actually reports the failure. It went to
+      // console.warn, which meant the one line explaining a slow start was the
+      // one line missing from the log file and from production's JSON output.
+      logger.warn('Prisma connection attempt failed; retrying', { attempt, delayMs: delay });
       if (attempt >= maxAttempts) throw err;
       await new Promise((r) => setTimeout(r, delay));
     }

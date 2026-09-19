@@ -738,8 +738,23 @@ export { app, httpServer };
  * Also called directly when this file is the entry point (require.main === module).
  */
 export async function startServer() {
-  console.log('[ATHENA] Starting server process...');
-  console.log(`[ATHENA] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT}`);
+  // The boot banner was two console.log lines, so the first thing the server
+  // ever said was the only thing it said outside the logger: no timestamp, no
+  // level, and no JSON in production, where every other line is searchable.
+  // The record is assembled key by key because passing the variables straight
+  // in put nodeEnv and port in it holding undefined whenever they were unset,
+  // which is not the same as leaving them out: the dev formatter then printed
+  // a bare "{}" after the message, and the record itself claimed to carry two
+  // facts it did not have. Unset variables are left out; the listen callback
+  // below reports the effective values.
+  const startupContext: Record<string, string> = {};
+  if (process.env.NODE_ENV) {
+    startupContext.nodeEnv = process.env.NODE_ENV;
+  }
+  if (process.env.PORT) {
+    startupContext.port = process.env.PORT;
+  }
+  logger.info('Starting server process', startupContext);
 
   // Startup sequence: load secrets, validate env, init Sentry, ensure DB
   try {
