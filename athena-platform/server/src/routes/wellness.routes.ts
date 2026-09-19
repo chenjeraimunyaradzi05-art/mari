@@ -21,6 +21,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import { logger } from '../utils/logger';
+import { notifyAdmins } from '../services/admin-notify.service';
 import { awardAchievement, getUserAchievements } from '../services/engagement.service';
 import { encryptJson, decryptJson } from '../services/wellness/health-crypto';
 import { buildBookingIcs, buildCircleIcs } from '../services/wellness/wellness-calendar';
@@ -1026,6 +1027,26 @@ router.get('/practitioners', authenticate, async (req: AuthRequest, res: Respons
   } catch (error) { next(error); }
 });
 
+// The approval queue: profiles members have created that nobody has verified
+// yet. Declared before '/practitioners/:slug' so "pending" is never read as a
+// slug. Only an admin sees it; the check is against the AHPRA register (or
+// the professional body for kinds AHPRA does not register), so the number,
+// the qualifications and the website are what the queue shows.
+router.get('/practitioners/pending', authenticate, requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const rows = await prisma.healthPractitioner.findMany({
+      where: { isActive: true, isVerified: false },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+      include: { owner: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true } } },
+    });
+    ok(res, rows.map((p) => ({
+      ...practitionerCard(p), bio: p.bio, ahpraNumber: p.ahpraNumber, createdAt: p.createdAt,
+      owner: p.owner ? { id: p.owner.id, name: p.owner.displayName?.trim() || [p.owner.firstName, p.owner.lastName].filter(Boolean).join(' ') || 'A member', email: p.owner.email } : null,
+    })));
+  } catch (error) { next(error); }
+});
+
 router.get('/practitioners/:slug', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const p = await prisma.healthPractitioner.findFirst({ where: { OR: [{ slug: req.params.slug }, { id: req.params.slug }], isActive: true } });
@@ -1104,10 +1125,14 @@ router.post('/practitioners/:id/bookings', authenticate, async (req: AuthRequest
   } catch (error) { next(error); }
 });
 
+// The admin's decision on a profile. `isVerified: true` puts it in the
+// directory; `isVerified: false` takes it out; `isActive: false` hides it
+// from the queue as well (a profile that is not a practice at all). The
+// owner is told either way, with the practice page as the place to fix it.
 router.patch('/practitioners/:id/verify', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { isVerified } = parse(z.object({ isVerified: z.boolean() }), req.body);
-    const p = await prisma.healthPractitioner.update({ where: { id: req.params.id }, data: { isVerified } });
+    const { isVerified, isActive } = parse(z.object({ isVerified: z.boolean(), isActive: z.boolean().optional() }), req.body);
+    const p = await prisma.healthPractitioner.update({ where: { id: req.params.id }, data: { isVerified, ...(isActive === undefined ? {} : { isActive }) } });
     if (p.ownerUserId) await prisma.notification.create({ data: { userId: p.ownerUserId, type: 'SYSTEM', title: isVerified ? 'Your practice profile is live' : 'Your practice profile is hidden', message: isVerified ? 'Members can now find and book you in the wellness directory.' : 'An admin has taken your profile out of the directory. Check the practice page for what to fix.', link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_VERIFY' } } }).catch(() => null);
     ok(res, practitionerCard(p));
   } catch (error) { next(error); }
@@ -1144,8 +1169,12 @@ router.put('/practice', authenticate, async (req: AuthRequest, res: Response, ne
     } else {
       let slug = slugify(data.name);
       if (await prisma.healthPractitioner.findUnique({ where: { slug } })) slug = `${slug}-${randomBytes(2).toString('hex')}`;
-      p = await prisma.healthPractitioner.create({ data: { ...payload, availability: availability ? (normaliseAvailability(availability) as Prisma.InputJsonValue) : undefined, slug, ownerUserId: req.user!.id, isVerified: false } });
-      logger.info('A practitioner profile was created and awaits verification', { practitionerId: p.id });
+      const created = await prisma.healthPractitioner.create({ data: { ...payload, availability: availability ? (normaliseAvailability(availability) as Prisma.InputJsonValue) : undefined, slug, ownerUserId: req.user!.id, isVerified: false } });
+      p = created;
+      logger.info('A practitioner profile was created and awaits verification', { practitionerId: created.id });
+      // Nothing happens to a new profile until an admin looks at it, so tell them.
+      const kindLabel = PRACTITIONER_KINDS.find((k) => k.key === created.kind)?.label ?? created.kind;
+      await notifyAdmins({ title: 'A practitioner wants to join the directory', message: `${created.name} (${kindLabel}) has listed a practice and is waiting to be verified.`, link: '/admin/practitioners', data: { kind: 'WELLNESS_PRACTITIONER_VERIFY', practitionerId: created.id } });
     }
     ok(res, { ...practitionerCard(p), bio: p.bio, ahpraNumber: p.ahpraNumber, availability: p.availability, slotMinutes: p.slotMinutes, pendingVerification: !p.isVerified }, existing ? 200 : 201);
   } catch (error) { next(error); }

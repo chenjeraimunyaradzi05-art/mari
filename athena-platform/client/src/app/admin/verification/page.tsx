@@ -11,8 +11,9 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, BadgeCheck, Loader2, X } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Building2, Loader2, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { abnLookupUrl, type OrganisationOutcome } from '@/lib/verification-api';
 import { cn } from '@/lib/utils';
 
 type Badge = {
@@ -44,11 +45,21 @@ export default function AdminVerificationPage() {
 
   const decide = useMutation({
     mutationFn: ({ id, next }: { id: string; next: 'APPROVED' | 'REJECTED' }) => api.patch(`/verification/badges/${id}`, { status: next, ...(reason.trim() ? { reason: reason.trim() } : {}) }),
-    onSuccess: (_r, { next }) => {
+    onSuccess: (r, { next }) => {
       queryClient.invalidateQueries({ queryKey: ['admin-verification'] });
       setReason('');
       setSelectedId(null);
-      toast.success(next === 'APPROVED' ? 'Approved. The badge is on their profile.' : 'Rejected. They can apply again.');
+      // An employer or educator badge applied for from an organisation page
+      // verifies the organisation in the same decision, unless the holder
+      // does not run it; the reviewer should know which happened.
+      const organisation = (r.data?.data?.organization ?? null) as OrganisationOutcome | null;
+      if (next === 'APPROVED' && organisation?.verified) {
+        toast.success(`Approved. ${organisation.name ?? 'The organisation'} is now verified.`);
+      } else if (next === 'APPROVED' && organisation) {
+        toast(organisation.reason ?? 'The badge was approved; the organisation was left unverified.', { icon: '!' });
+      } else {
+        toast.success(next === 'APPROVED' ? 'Approved. The badge is on their profile.' : 'Rejected. They can apply again.');
+      }
     },
     onError: (e) => toast.error(errorMessage(e) || 'Could not record that'),
   });
@@ -116,6 +127,20 @@ export default function AdminVerificationPage() {
               </h2>
               <p className="text-xs text-slate-500">{current.user.email}</p>
             </div>
+            {typeof current.metadata?.organizationId === 'string' && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
+                <p className="flex items-center gap-1.5 font-medium text-slate-900 dark:text-white">
+                  <Building2 className="h-4 w-4 text-slate-500" />
+                  {typeof current.metadata.organizationName === 'string' ? current.metadata.organizationName : 'An organisation'}
+                </p>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Approving also marks this organisation verified, if they own or administer it. Check the ABN on the public register first.</p>
+                {typeof current.metadata.abn === 'string' && current.metadata.abn.trim() && (
+                  <a href={abnLookupUrl(current.metadata.abn)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs font-medium text-primary-600 hover:underline">
+                    Look up ABN {current.metadata.abn} on ABN Lookup
+                  </a>
+                )}
+              </div>
+            )}
             {current.metadata && Object.keys(current.metadata).length > 0 && (
               <dl className="space-y-1 text-sm">
                 {Object.entries(current.metadata).map(([k, v]) => (

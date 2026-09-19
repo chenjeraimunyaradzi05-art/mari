@@ -1,9 +1,29 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { z, ZodError, type ZodTypeAny } from 'zod';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import {
+  ASSESSING_BODIES_AS_AT,
+  englishSupportFor,
+  listAssessingBodies,
+  suggestPathway,
+} from '../services/community-support/assessing-bodies';
 
 const router = Router();
+
+function parse<T extends ZodTypeAny>(schema: T, input: unknown): z.infer<T> {
+  try {
+    return schema.parse(input ?? {});
+  } catch (error) {
+    if (error instanceof ZodError) {
+      const issue = error.issues[0];
+      throw new ApiError(400, issue ? `${issue.path.join('.') || 'input'}: ${issue.message}` : 'Invalid input');
+    }
+    throw error;
+  }
+}
 
 // ===========================================
 // COMMUNITY SUPPORT PROGRAMS
@@ -407,6 +427,138 @@ router.post('/credentials', authenticate, async (req: AuthRequest, res: Response
     });
 
     res.status(201).json({ success: true, data: credential });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// CREDENTIAL PATHWAY: WHO ASSESSES WHAT
+// ===========================================
+// A credential on its own tells a member nothing about what to do next. The
+// pathway names the Australian body that assesses her profession, the
+// bridging programs on the platform that match it, and, when her English is
+// below vocational level, the free Commonwealth English program. The table
+// is public reference data (services/community-support/assessing-bodies.ts);
+// what the body eventually decides is recorded by her or by staff.
+
+// GET /api/community-support/assessing-bodies - The public reference table
+router.get('/assessing-bodies', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ success: true, data: { asAt: ASSESSING_BODIES_AS_AT, bodies: listAssessingBodies() } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/community-support/credentials/pathway
+ * ?credentialId=  one of the member's own credentials, or
+ * ?fieldOfStudy=&credentialName=  the words she is typing before saving one.
+ * With neither, only the English support is returned.
+ * Registered before /credentials/:id so the literal path is never shadowed.
+ */
+router.get('/credentials/pathway', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const q = (key: string) => (typeof req.query[key] === 'string' ? (req.query[key] as string).slice(0, 300) : undefined);
+
+    let subject: { fieldOfStudy?: string | null; credentialName?: string | null } = { fieldOfStudy: q('fieldOfStudy'), credentialName: q('credentialName') };
+    const credentialId = q('credentialId');
+    if (credentialId) {
+      const credential = await prisma.internationalCredential.findFirst({
+        where: { id: credentialId, userId },
+        select: { fieldOfStudy: true, credentialName: true },
+      });
+      if (!credential) {
+        return res.status(404).json({ success: false, error: 'Credential not found' });
+      }
+      subject = credential;
+    }
+
+    const hasText = Boolean(subject.fieldOfStudy?.trim() || subject.credentialName?.trim());
+    const pathway = hasText ? suggestPathway(subject) : null;
+
+    const bridgingPrograms = pathway && pathway.bridgingKeywords.length > 0
+      ? await prisma.bridgingProgram.findMany({
+          where: {
+            isActive: true,
+            OR: pathway.bridgingKeywords.map((word) => ({ profession: { contains: word, mode: 'insensitive' as const } })),
+          },
+          orderBy: { name: 'asc' },
+          take: 12,
+        })
+      : [];
+
+    const language = await prisma.languageProfile.findUnique({ where: { userId }, select: { englishProficiency: true } });
+
+    res.json({
+      success: true,
+      data: {
+        asAt: ASSESSING_BODIES_AS_AT,
+        pathway,
+        bridgingPrograms,
+        englishSupport: englishSupportFor(language?.englishProficiency),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const CREDENTIAL_STATUSES = ['PENDING_REVIEW', 'RECOGNIZED', 'PARTIALLY_RECOGNIZED', 'BRIDGING_REQUIRED', 'NOT_RECOGNIZED'] as const;
+
+const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();
+
+const recordOutcomeSchema = z
+  .object({
+    status: z.enum(CREDENTIAL_STATUSES).optional(),
+    australianEquiv: optionalText(200),
+    bridgingRequired: optionalText(500),
+    assessmentBody: optionalText(200),
+    assessmentDate: z
+      .string()
+      .trim()
+      .refine((value) => !Number.isNaN(new Date(value).getTime()), 'must be a date')
+      .nullable()
+      .optional(),
+    notes: optionalText(2000),
+  })
+  .strict();
+
+/**
+ * PATCH /api/community-support/credentials/:id
+ * The member records what the assessing body wrote to her: the outcome, the
+ * Australian equivalent it named, any bridging it asked for. Only her own.
+ */
+router.patch('/credentials/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const body = parse(recordOutcomeSchema, req.body);
+    if (Object.keys(body).length === 0) {
+      return res.status(400).json({ success: false, error: 'Nothing to record' });
+    }
+
+    const credential = await prisma.internationalCredential.findFirst({ where: { id: req.params.id, userId } });
+    if (!credential) {
+      return res.status(404).json({ success: false, error: 'Credential not found' });
+    }
+
+    const empty = (value: string | null | undefined) => (value === undefined ? undefined : value === null || value === '' ? null : value);
+    const updated = await prisma.internationalCredential.update({
+      where: { id: credential.id },
+      data: {
+        ...(body.status ? { status: body.status } : {}),
+        ...(body.australianEquiv !== undefined ? { australianEquiv: empty(body.australianEquiv) } : {}),
+        ...(body.bridgingRequired !== undefined ? { bridgingRequired: empty(body.bridgingRequired) } : {}),
+        ...(body.assessmentBody !== undefined ? { assessmentBody: empty(body.assessmentBody) } : {}),
+        ...(body.assessmentDate !== undefined ? { assessmentDate: body.assessmentDate ? new Date(body.assessmentDate) : null } : {}),
+        ...(body.notes !== undefined ? { notes: empty(body.notes) } : {}),
+      },
+    });
+
+    logger.info('Credential outcome recorded by member', { credentialId: credential.id, userId, status: body.status });
+    res.json({ success: true, data: updated });
   } catch (error) {
     next(error);
   }

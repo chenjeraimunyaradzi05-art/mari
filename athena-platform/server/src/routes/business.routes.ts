@@ -7,6 +7,7 @@ import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { createAcceleratorEnrollmentPayment } from '../services/payments-orchestration.service';
+import { notifyAdmins } from '../services/admin-notify.service';
 
 const router = Router();
 
@@ -1123,6 +1124,49 @@ router.get('/investors/:id', async (req: AuthRequest, res: Response, next: NextF
   }
 });
 
+// ---------------------------------------------------------------------------
+// Warm introductions are free but limited to three a month (blueprint 9.3).
+// The month is the calendar month in Queensland, where ATHENA is run, so a
+// founder's allowance resets at midnight Brisbane time on the first, not at
+// some UTC boundary in the middle of her evening. Brisbane has no daylight
+// saving, so the offset is a constant.
+// ---------------------------------------------------------------------------
+
+export const INTRO_MONTHLY_LIMIT = 3;
+const BRISBANE_OFFSET_MS = 10 * 60 * 60 * 1000;
+
+function brisbaneMonthStart(now: Date, monthsAhead: number): Date {
+  const local = new Date(now.getTime() + BRISBANE_OFFSET_MS);
+  return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth() + monthsAhead, 1) - BRISBANE_OFFSET_MS);
+}
+
+export const startOfBrisbaneMonth = (now = new Date()) => brisbaneMonthStart(now, 0);
+export const startOfNextBrisbaneMonth = (now = new Date()) => brisbaneMonthStart(now, 1);
+
+/**
+ * Requests that count against this month's three: the ones still waiting
+ * (REQUESTED) or already approved. A declined or expired one hands the slot
+ * back, because it produced no introduction.
+ */
+async function introductionsUsedThisMonth(userId: string, now = new Date()) {
+  return prisma.investorIntroduction.count({
+    where: {
+      userId,
+      status: { in: ['REQUESTED', 'APPROVED'] },
+      requestedAt: { gte: startOfBrisbaneMonth(now) },
+    },
+  });
+}
+
+function introductionAllowance(used: number, now = new Date()) {
+  return {
+    limit: INTRO_MONTHLY_LIMIT,
+    used,
+    remaining: Math.max(0, INTRO_MONTHLY_LIMIT - used),
+    resetsAt: startOfNextBrisbaneMonth(now).toISOString(),
+  };
+}
+
 // POST /api/business/investors/:id/request-intro - Request introduction
 router.post(
   '/investors/:id/request-intro',
@@ -1155,6 +1199,20 @@ router.post(
 
       if (existing) {
         throw new ApiError(409, 'You have already requested an introduction to this investor');
+      }
+
+      const now = new Date();
+      const used = await introductionsUsedThisMonth(userId, now);
+      if (used >= INTRO_MONTHLY_LIMIT) {
+        const opens = startOfNextBrisbaneMonth(now).toLocaleDateString('en-AU', {
+          day: 'numeric',
+          month: 'long',
+          timeZone: 'Australia/Brisbane',
+        });
+        throw new ApiError(
+          429,
+          `You've used your ${INTRO_MONTHLY_LIMIT} warm introductions for this month. The next one opens on ${opens}.`
+        );
       }
 
       const introduction = await prisma.investorIntroduction.create({
@@ -1191,7 +1249,8 @@ router.get(
       const userId = req.user!.id;
       const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
 
-      const [introductions, total] = await Promise.all([
+      const now = new Date();
+      const [introductions, total, used] = await Promise.all([
         prisma.investorIntroduction.findMany({
           where: { userId },
           include: {
@@ -1202,12 +1261,15 @@ router.get(
           take: limit,
         }),
         prisma.investorIntroduction.count({ where: { userId } }),
+        introductionsUsedThisMonth(userId, now),
       ]);
 
       res.json({
         success: true,
         data: introductions,
         pagination: buildPaginationMeta(total, page, limit),
+        // So the dashboard can say how many of this month's three are left.
+        allowance: introductionAllowance(used, now),
       });
     } catch (error) {
       next(error);
@@ -1220,7 +1282,14 @@ router.get(
 // ===========================================
 
 // GET /api/business/vendors - List vendors
-router.get('/vendors', async (req: AuthRequest, res: Response, next: NextFunction) => {
+//
+// Verified listings only, for everyone but an admin. The directory sells
+// itself as vetted, and until 2026-09 it returned every row unless the caller
+// happened to pass `verified=true`, so anyone who typed a name was shown
+// beside the checked ones with only a badge between them. An owner still sees
+// her own unverified listing through /vendors/mine; an admin sees everything
+// here (and the queue at /vendors/pending) so she can compare.
+router.get('/vendors', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { category, partner, verified, minRating } = req.query;
     const { page, limit, skip } = parsePagination(req.query as { page?: string; limit?: string });
@@ -1232,7 +1301,7 @@ router.get('/vendors', async (req: AuthRequest, res: Response, next: NextFunctio
     if (partner === 'true') {
       where.isPartner = true;
     }
-    if (verified === 'true') {
+    if (req.user?.role !== 'ADMIN' || verified === 'true') {
       where.isVerified = true;
     }
     if (minRating) {
@@ -1332,6 +1401,14 @@ router.post(
       });
 
       logger.info(`User ${req.user!.id} registered vendor ${vendor.id}`);
+      // A new listing stays out of the directory until an admin has looked at
+      // it, so the admins are told there is one to look at.
+      await notifyAdmins({
+        title: 'A business wants to join the vendor directory',
+        message: `${vendor.name} (${String(vendor.category).replace(/_/g, ' ').toLowerCase()}) has registered and is waiting to be verified.`,
+        link: '/admin/vendors',
+        data: { kind: 'VENDOR_VERIFY', vendorId: vendor.id },
+      });
       res.status(201).json({ success: true, data: vendor });
     } catch (error) {
       next(error);
@@ -1359,6 +1436,90 @@ router.get('/vendors/mine', authenticate, async (req: AuthRequest, res: Response
     next(error);
   }
 });
+
+// ===========================================
+// VENDOR VERIFICATION (admin)
+// ===========================================
+// A registered listing is invisible until an admin has checked the business
+// against the ABN Lookup and its website. These two routes are the only way
+// Vendor.isVerified and isPartner are ever set. Both are declared before
+// '/vendors/:id' so "pending" is never read as an id.
+
+function requireAdmin(req: AuthRequest) {
+  if (req.user?.role !== 'ADMIN') {
+    throw new ApiError(403, 'Only an admin can verify vendors');
+  }
+}
+
+// GET /api/business/vendors/pending - Member-registered listings nobody has verified
+router.get('/vendors/pending', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    requireAdmin(req);
+    const vendors = await prisma.vendor.findMany({
+      where: { isVerified: false, ownerId: { not: null } },
+      include: { owner: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    res.json({ success: true, data: vendors });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/business/vendors/:id/verify - The admin's decision on a listing
+router.patch(
+  '/vendors/:id/verify',
+  authenticate,
+  [body('isVerified').isBoolean(), body('isPartner').optional().isBoolean()],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      requireAdmin(req);
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+      const { id } = req.params;
+      const vendor = await prisma.vendor.findUnique({ where: { id }, select: { id: true, name: true, ownerId: true } });
+      if (!vendor) {
+        throw new ApiError(404, 'Vendor not found');
+      }
+
+      const isVerified = req.body.isVerified === true || req.body.isVerified === 'true';
+      const data: { isVerified: boolean; isPartner?: boolean } = { isVerified };
+      if (req.body.isPartner !== undefined) {
+        // A partner is always a verified one; hiding a listing ends the partnership too.
+        data.isPartner = isVerified && (req.body.isPartner === true || req.body.isPartner === 'true');
+      } else if (!isVerified) {
+        data.isPartner = false;
+      }
+
+      const updated = await prisma.vendor.update({ where: { id }, data });
+
+      if (vendor.ownerId) {
+        await prisma.notification
+          .create({
+            data: {
+              userId: vendor.ownerId,
+              type: 'SYSTEM',
+              title: isVerified ? 'Your business is listed' : 'Your listing has been hidden',
+              message: isVerified
+                ? `${vendor.name} is now in the vendor directory${data.isPartner ? ' as an ATHENA partner' : ''}. Members can find you and you can pitch for briefs.`
+                : `${vendor.name} has been taken out of the directory. Check the listing from your vendors page; you can still edit it.`,
+              link: '/dashboard/vendors',
+              data: { kind: 'VENDOR_VERIFY', vendorId: vendor.id, isVerified },
+            },
+          })
+          .catch(() => null);
+      }
+
+      logger.info(`Admin ${req.user!.id} set vendor ${id} verified=${isVerified}`);
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // POST /api/business/vendors/:id/claim - Take over an unowned catalogue entry
 router.post('/vendors/:id/claim', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {

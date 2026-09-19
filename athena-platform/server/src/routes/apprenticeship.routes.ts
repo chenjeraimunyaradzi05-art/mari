@@ -2,7 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -30,9 +30,13 @@ async function uniqueSlug(base: string): Promise<string> {
 type StaffUser = { id: string; role: string };
 
 // An apprenticeship belongs to the RTO and the host employer named on it, so
-// staff reach it through membership of one of those organizations. Holding the
-// EMPLOYER or EDUCATION_PROVIDER role is not by itself entitlement to another
-// provider's listing, its applicants or their evidence.
+// staff reach it through membership of one of those organizations. That
+// membership is the whole gate. The staff routes used to also require the
+// EMPLOYER or EDUCATION_PROVIDER account role, which nothing on the site ever
+// grants (registration stores a persona, and creating an organization makes
+// an OWNER membership, not a role), so every self-registered TAFE or host
+// employer got a 403 on her first listing. The role is no longer checked;
+// ADMIN still bypasses the membership test.
 //
 // Returns null both for "no such apprenticeship" and "not yours", so callers
 // answer 404 either way: a 403 would confirm an unpublished listing exists to a
@@ -187,8 +191,9 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 // Drafts included, which is the point: a listing created through POST / starts
 // as a draft and there was no route that could find it again. Declared before
-// '/:id' so Express does not hand "mine" to the id route.
-router.get('/mine', authenticate, requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'), async (req: AuthRequest, res, next) => {
+// '/:id' so Express does not hand "mine" to the id route. Any member may ask;
+// one who is staff of nothing gets an empty list, not a refusal.
+router.get('/mine', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const orgIds = await staffOrganizationIds(req.user!.id);
 
@@ -446,10 +451,11 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 // ===========================================
 // CREATE APPRENTICESHIP
 // ===========================================
+// Membership of the named RTO or host employer (requireOrgMembership below) is
+// the authorisation; no account role is needed.
 router.post(
   '/',
   authenticate,
-  requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'),
   [
     body('title').isString().notEmpty().isLength({ max: 200 }).withMessage('Title max 200 characters'),
     body('description').isString().notEmpty().isLength({ max: 10000 }).withMessage('Description max 10000 characters'),
@@ -529,7 +535,6 @@ router.post(
 router.patch(
   '/:id',
   authenticate,
-  requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'),
   [
     body('title').optional().isString(),
     body('description').optional().isString(),
@@ -595,7 +600,7 @@ router.patch(
 // ===========================================
 // PUBLISH APPRENTICESHIP
 // ===========================================
-router.post('/:id/publish', authenticate, requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const existing = await findApprenticeshipForStaff(id, req.user!);
@@ -765,7 +770,7 @@ router.delete('/applications/:applicationId', authenticate, async (req: AuthRequ
 // ===========================================
 // LIST APPLICATIONS FOR APPRENTICESHIP
 // ===========================================
-router.get('/:id/applications', authenticate, requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'), async (req: AuthRequest, res, next) => {
+router.get('/:id/applications', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
 
@@ -827,7 +832,6 @@ router.get('/:id/milestones', optionalAuth, async (req: AuthRequest, res, next) 
 router.post(
   '/:id/milestones',
   authenticate,
-  requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'),
   [
     body('title').isString().trim().notEmpty().isLength({ max: 200 }),
     body('description').optional().isString().isLength({ max: 2000 }),
@@ -997,7 +1001,6 @@ router.post(
 router.patch(
   '/milestones/submissions/:submissionId',
   authenticate,
-  requireRole('EMPLOYER', 'EDUCATION_PROVIDER', 'ADMIN'),
   [
     body('status').isIn(['APPROVED', 'REJECTED']),
     body('reviewNotes').optional().isString().isLength({ max: 2000 }),

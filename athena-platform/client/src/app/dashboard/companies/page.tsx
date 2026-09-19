@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { organizationApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { EmptyState } from '@/components/layout/PageShell';
 
 const types = [
   { id: 'all', label: 'All' },
@@ -150,9 +151,25 @@ export default function CompaniesPage() {
               Failed to load organizations. Please try again later.
             </div>
           ) : organizations.length === 0 ? (
-            <div className="bg-white p-8 rounded-lg border border-slate-200 text-center text-slate-500">
-              No organizations found. Try adjusting your filters.
-            </div>
+            /* "Adjust your filters" to someone who set none sends her hunting
+               for employers that are not there. Say which it is, and give an
+               employer or a TAFE the one door that actually works. */
+            <EmptyState
+              icon={Building2}
+              reason={search.trim() || activeType !== 'all' ? 'filtered' : 'empty'}
+              title={search.trim() || activeType !== 'all' ? 'Nothing matches those filters' : 'No employers have joined yet'}
+              description={
+                search.trim() || activeType !== 'all'
+                  ? 'Widen the search and see who else is here.'
+                  : 'Organisations appear here as they create a profile. If you hire, teach or train, yours can be the first.'
+              }
+              onClear={() => {
+                setSearch('');
+                setActiveType('all');
+              }}
+              primaryAction={search.trim() || activeType !== 'all' ? undefined : { label: 'Add your organisation', href: '/employer/organizations/new' }}
+              secondaryAction={search.trim() || activeType !== 'all' ? undefined : { label: 'Find roles instead', href: '/dashboard/jobs' }}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {organizations.map((org) => (
@@ -238,7 +255,7 @@ export default function CompaniesPage() {
               Create your organization profile and start attracting verified talent.
             </p>
             <Link
-              href="/dashboard/creator"
+              href="/employer/organizations/new"
               className="mt-4 inline-flex items-center gap-2 text-sm font-semibold bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg"
             >
               Get started <ArrowUpRight className="w-4 h-4" />

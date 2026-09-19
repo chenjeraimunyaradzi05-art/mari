@@ -1,7 +1,8 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
-import { UserRole } from '@prisma/client';
+import { UserRole, JobStatus, SubscriptionTier, SubscriptionStatus } from '@prisma/client';
+import { z } from 'zod';
 import { ApiError } from '../middleware/errorHandler';
 import { ModerationAction, processReportById } from '../services/content-report.service';
 import { logAudit } from '../utils/audit';
@@ -16,6 +17,48 @@ const generateInviteCode = (prefix?: string) => {
   const normalizedPrefix = prefix ? prefix.trim().toUpperCase() : '';
   return normalizedPrefix ? `${normalizedPrefix}-${base}` : base;
 };
+
+/**
+ * What an administrator may actually set, spelled out. These handlers used to
+ * pass the body straight into Prisma, so an unknown status arrived as a 500
+ * from the database layer and a string in a boolean column was attempted
+ * rather than refused. strict() also rejects unexpected keys, because an
+ * admin surface writing whatever it is sent is how a typo becomes data.
+ */
+const adminJobPatchSchema = z
+  .object({
+    status: z.nativeEnum(JobStatus).optional(),
+    isSponsored: z.boolean().optional(),
+    isFeatured: z.boolean().optional(),
+  })
+  .strict();
+
+const adminSubscriptionPatchSchema = z
+  .object({
+    tier: z.nativeEnum(SubscriptionTier).optional(),
+    status: z.nativeEnum(SubscriptionStatus).optional(),
+    periodEnd: z.coerce.date().optional(),
+  })
+  .strict();
+
+const inviteCodeCreateSchema = z
+  .object({
+    count: z.coerce.number().int().min(1).max(100).default(1),
+    maxUses: z.coerce.number().int().positive().nullish(),
+    expiresAt: z.coerce.date().nullish(),
+    // The prefix is stamped into every generated code, so it is kept short
+    // and plain rather than letting arbitrary text into the code space.
+    prefix: z.string().trim().regex(/^[A-Za-z0-9]{1,12}$/).optional(),
+  })
+  .strict();
+
+function parseOr400<T>(schema: { safeParse(input: unknown): { success: true; data: T } | { success: false; error: z.ZodError } }, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiError(400, parsed.error.issues.map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; '));
+  }
+  return parsed.data;
+}
 
 // All admin routes require authentication and ADMIN role
 router.use(authenticate);
@@ -1116,7 +1159,7 @@ router.get('/jobs', async (req: AuthRequest, res: Response, next: NextFunction) 
 router.patch('/jobs/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { status, isSponsored, isFeatured } = req.body;
+    const { status, isSponsored, isFeatured } = parseOr400(adminJobPatchSchema, req.body);
 
     const updateData: any = {};
 
@@ -1223,7 +1266,7 @@ router.get('/subscriptions', async (req: AuthRequest, res: Response, next: NextF
 router.patch('/subscriptions/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { tier, status, periodEnd } = req.body;
+    const { tier, status, periodEnd } = parseOr400(adminSubscriptionPatchSchema, req.body);
 
     const updateData: any = {};
 
@@ -1236,7 +1279,9 @@ router.patch('/subscriptions/:id', async (req: AuthRequest, res: Response, next:
     }
 
     if (periodEnd !== undefined) {
-      updateData.periodEnd = new Date(periodEnd);
+      // The column is currentPeriodEnd; writing periodEnd made Prisma refuse
+      // the whole update, so extending a subscription here always failed.
+      updateData.currentPeriodEnd = periodEnd;
     }
 
     const subscription = await prisma.subscription.update({
@@ -1361,13 +1406,12 @@ router.get('/invite-codes', async (req: AuthRequest, res: Response, next: NextFu
  */
 router.post('/invite-codes', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { count = 1, maxUses, expiresAt, prefix } = req.body;
-    const createCount = Math.min(Math.max(parseInt(String(count), 10) || 1, 1), 100);
+    const { count, maxUses, expiresAt, prefix } = parseOr400(inviteCodeCreateSchema, req.body);
 
-    const codes = Array.from({ length: createCount }).map(() => ({
+    const codes = Array.from({ length: count }).map(() => ({
       code: generateInviteCode(prefix),
-      maxUses: maxUses === undefined || maxUses === null ? null : Number(maxUses),
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      maxUses: maxUses ?? null,
+      expiresAt: expiresAt ?? null,
       createdById: req.user?.id ?? null,
     }));
 

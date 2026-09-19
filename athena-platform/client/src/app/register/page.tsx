@@ -37,6 +37,9 @@ const personaOptions = [
   { value: 'MENTOR', label: 'Mentor' },
   { value: 'ENTREPRENEUR', label: 'Entrepreneur' },
   { value: 'EMPLOYER', label: 'Employer' },
+  // The server has always accepted this persona; the form just never offered
+  // it, so a TAFE or RTO had to pick "Employer" to get in.
+  { value: 'EDUCATION_PROVIDER', label: 'Education provider (TAFE, RTO, university)' },
 ];
 
 const registerSchema = z

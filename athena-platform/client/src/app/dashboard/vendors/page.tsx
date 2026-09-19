@@ -154,7 +154,7 @@ export default function VendorsPage() {
         phone: form.phone || undefined,
         location: form.location || undefined,
       });
-      toast.success('Registered. You can now pitch for RFPs.');
+      toast.success('Registered. We will check the ABN and website and tell you when it is listed; you can pitch for RFPs meanwhile.');
       setShowRegister(false);
       setForm({ name: '', category: 'TECH_DEVELOPMENT', description: '', services: '', priceRange: '', website: '', email: '', phone: '', location: '' });
       await loadData();
@@ -221,7 +221,20 @@ export default function VendorsPage() {
           Loading vendors...
         </div>
       ) : vendors.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">No vendors found. Try different filters.</div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
+          {category || partnerOnly || verifiedOnly || minRating ? (
+            <>
+              Nothing matches those filters.{' '}
+              <button type="button" onClick={() => { setCategory(''); setPartnerOnly(false); setVerifiedOnly(false); setMinRating(''); }} className="text-primary-600 hover:underline">
+                Clear them
+              </button>
+            </>
+          ) : (
+            <>
+              No verified suppliers yet. Listings appear here once they have been checked; if you run a business, register it below and you will be first.
+            </>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {vendors.map((vendor) => {
@@ -310,7 +323,7 @@ export default function VendorsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your vendor listing</h2>
-            <p className="text-sm text-slate-500">Register your business to appear in the directory and pitch for RFPs.</p>
+            <p className="text-sm text-slate-500">Register your business to appear in the directory and pitch for RFPs. An admin checks the ABN and the website before it goes public; you are told when it is up.</p>
           </div>
           {!showRegister && (
             <button type="button" onClick={() => setShowRegister(true)} className="btn-primary text-sm">
@@ -326,7 +339,7 @@ export default function VendorsPage() {
                 <div>
                   <span className="font-medium text-slate-900 dark:text-white">{v.name}</span>
                   <span className="text-slate-500"> · {label(v.category)}</span>
-                  {v.isVerified ? <span className="ml-2 text-xs text-emerald-700">Verified</span> : <span className="ml-2 text-xs text-slate-500">Awaiting verification</span>}
+                  {v.isVerified ? <span className="ml-2 text-xs text-emerald-700">Verified</span> : <span className="ml-2 text-xs text-slate-500" title="An admin checks the ABN and the website. The listing is not public until then, but you can already pitch for briefs.">Awaiting verification</span>}
                 </div>
                 <Link href="/dashboard/rfps?tab=proposals" className="text-primary-600 hover:underline">
                   {(v.rfpResponses ?? []).length} {(v.rfpResponses ?? []).length === 1 ? 'proposal' : 'proposals'}

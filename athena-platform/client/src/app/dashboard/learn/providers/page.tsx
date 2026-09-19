@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Search, ChevronDown, GraduationCap } from 'lucide-react';
 import { useEducationProviders } from '@/lib/hooks';
 import { CardSkeleton } from '@/components/ui/loading';
+import { EmptyState } from '@/components/layout/PageShell';
 
 export default function EducationProvidersPage() {
   const [search, setSearch] = useState('');
@@ -69,13 +70,25 @@ export default function EducationProvidersPage() {
           ))}
         </div>
       ) : providers.length === 0 ? (
-        <div className="card p-10 text-center">
-          <div className="mx-auto w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
-            <GraduationCap className="w-6 h-6 text-slate-600 dark:text-slate-300" />
-          </div>
-          <p className="text-slate-900 dark:text-white font-medium">No providers found</p>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Try a different search.</p>
-        </div>
+        /* "Try a different search" when no search was made is the wrong
+           advice. When the list is simply empty, say so and show a TAFE or
+           university the door in. */
+        <EmptyState
+          icon={GraduationCap}
+          reason={search.trim() || type ? 'filtered' : 'empty'}
+          title={search.trim() || type ? 'Nothing matches that search' : 'No universities or TAFEs are listed yet'}
+          description={
+            search.trim() || type
+              ? 'Try another name, or clear the type.'
+              : 'Providers appear here as they create a profile. If you teach or train, yours can be the first.'
+          }
+          onClear={() => {
+            setSearch('');
+            setType('');
+          }}
+          primaryAction={search.trim() || type ? undefined : { label: 'Add your organisation', href: '/employer/organizations/new' }}
+          secondaryAction={search.trim() || type ? undefined : { label: 'Browse courses instead', href: '/dashboard/learn' }}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {providers.map((p) => (

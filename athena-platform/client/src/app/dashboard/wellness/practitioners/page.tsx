@@ -48,7 +48,7 @@ function Directory() {
       </div>
       {data.loading && <Loading />}
       <ErrorBox error={data.error} />
-      {data.data && data.data.practitioners.length === 0 && <Empty title="Nobody matches yet" body="Widen the filters, or search the national registers linked in the library. Practitioners are added as they join and are verified." />}
+      {data.data && data.data.practitioners.length === 0 && <Empty title="Nobody matches yet" body="Widen the filters, or search the national registers linked in the library. Practitioners are added as they join and are verified." action={<Link href="/dashboard/wellness/practice" className="btn-primary text-sm">List your practice</Link>} />}
       <ul className="grid gap-4 md:grid-cols-2">
         {(data.data?.practitioners ?? []).map((p) => (
           <li key={p.id} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">

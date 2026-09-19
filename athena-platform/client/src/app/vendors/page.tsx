@@ -131,7 +131,7 @@ export default function VendorsPage() {
             </div>
             <h1 className="text-4xl font-bold mb-4">Vendor Directory</h1>
             <p className="text-xl text-blue-100">
-              Browse service providers connected to the ATHENA business marketplace.
+              Accountants, lawyers, designers and developers who work with women-led businesses. Every listing here has been checked before it went up.
             </p>
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function VendorsPage() {
             description={
               searchQuery || selectedCategory
                 ? 'Widen the search and see who else is listed.'
-                : 'This is where members recommend suppliers they have actually used. Nobody has added one yet — if you run a business worth knowing about, put it forward.'
+                : 'Suppliers appear here once they have registered and been checked. Nobody has made it through yet — if you run a business worth knowing about, put it forward.'
             }
             onClear={() => {
               setSearchQuery('');
@@ -198,7 +198,7 @@ export default function VendorsPage() {
             primaryAction={
               searchQuery || selectedCategory
                 ? undefined
-                : { label: 'List your business', href: '/contact-sales?intent=vendors' }
+                : { label: 'List your business', href: '/dashboard/vendors#your-vendor' }
             }
             secondaryAction={
               searchQuery || selectedCategory
@@ -277,14 +277,19 @@ export default function VendorsPage() {
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-3xl p-8 md:p-12 text-white text-center">
           <h2 className="text-3xl font-bold mb-4">Become a Vendor</h2>
           <p className="text-blue-100 mb-8 max-w-2xl mx-auto">
-            Join the marketplace and connect with businesses looking for your services.
+            Register your business in a minute. We check the ABN and the website, then you are listed and can pitch for the briefs members post.
           </p>
-          <Link
-            href="/contact-sales"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition"
-          >
-            Apply to Join <ArrowRight className="w-4 h-4" />
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <Link
+              href="/dashboard/vendors#your-vendor"
+              className="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-slate-100 transition"
+            >
+              Register your business <ArrowRight className="w-4 h-4" />
+            </Link>
+            <Link href="/contact-sales?intent=vendors" className="text-sm font-medium text-blue-100 underline-offset-4 hover:underline">
+              Rather talk to us first?
+            </Link>
+          </div>
         </div>
       </section>
     </div>

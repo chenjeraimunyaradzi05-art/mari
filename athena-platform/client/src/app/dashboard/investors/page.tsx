@@ -33,7 +33,27 @@ type InvestorIntro = {
   status: string;
   investor: Investor;
   requestedAt: string;
+  introducedAt?: string | null;
+  respondedAt?: string | null;
+  /** The note ATHENA staff wrote when they moved the request along. */
+  outcome?: string | null;
 };
+
+/** How many of this month's warm introductions are used, from the server. */
+type IntroAllowance = { limit: number; used: number; remaining: number; resetsAt: string };
+
+// What each state means to the founder, in her words rather than the enum's.
+const INTRO_STATE: Record<string, { label: string; meaning: string; tone: string }> = {
+  REQUESTED: { label: 'Waiting for review', meaning: 'We are looking at your request.', tone: 'bg-amber-50 text-amber-700' },
+  APPROVED: { label: 'Approved', meaning: 'We are arranging the introduction.', tone: 'bg-primary-50 text-primary-700' },
+  INTRODUCED: { label: 'Introduced', meaning: 'Keep an eye on your inbox.', tone: 'bg-emerald-50 text-emerald-700' },
+  MEETING_SCHEDULED: { label: 'Meeting scheduled', meaning: 'A meeting is on the calendar.', tone: 'bg-emerald-50 text-emerald-700' },
+  DECLINED: { label: 'Not this time', meaning: 'This investor is not taking the introduction right now.', tone: 'bg-slate-100 text-slate-600' },
+  EXPIRED: { label: 'Expired', meaning: 'This request lapsed without a reply.', tone: 'bg-slate-100 text-slate-600' },
+};
+const introState = (status: string) => INTRO_STATE[status] ?? { label: status.replace(/_/g, ' ').toLowerCase(), meaning: '', tone: 'bg-slate-100 text-slate-600' };
+const onDay = (iso: string) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
+const apiMessage = (err: any, fallback: string) => err?.response?.data?.message || err?.response?.data?.error || fallback;
 
 export default function InvestorsPage() {
   const [type, setType] = useState('');
@@ -49,6 +69,7 @@ export default function InvestorsPage() {
   const [error, setError] = useState<string | null>(null);
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [introductions, setIntroductions] = useState<InvestorIntro[]>([]);
+  const [allowance, setAllowance] = useState<IntroAllowance | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -67,10 +88,12 @@ export default function InvestorsPage() {
       ]);
       setInvestors(investorsRes.data?.data || []);
       setIntroductions(introsRes.data?.data || []);
+      setAllowance(introsRes.data?.allowance ?? null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || 'Failed to load investors.');
+      setError(apiMessage(err, 'Failed to load investors.'));
       setInvestors([]);
       setIntroductions([]);
+      setAllowance(null);
     } finally {
       setLoading(false);
     }
@@ -91,7 +114,7 @@ export default function InvestorsPage() {
       setActiveRequestId(null);
       await loadData();
     } catch (err: any) {
-      setError(err?.response?.data?.error || 'Unable to request intro.');
+      setError(apiMessage(err, 'Unable to request intro.'));
     } finally {
       setSavingId(null);
     }
@@ -101,6 +124,9 @@ export default function InvestorsPage() {
     if (type) return `${type.replace('_', ' ').toLowerCase()} investors`;
     return 'All investors';
   }, [type]);
+
+  const introFor = (investorId: string) => introductions.find((intro) => intro.investor?.id === investorId);
+  const noneLeft = allowance !== null && allowance.remaining === 0;
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8">
@@ -235,7 +261,16 @@ export default function InvestorsPage() {
                 <div>Industries: {investor.industries?.length ? investor.industries.join(', ') : 'Multi-sector'}</div>
                 <div>Regions: {investor.regions?.length ? investor.regions.join(', ') : 'Global'}</div>
               </div>
-              {activeRequestId === investor.id ? (
+              {introFor(investor.id) ? (
+                <div className={`rounded-md px-3 py-2 text-sm ${introState(introFor(investor.id)!.status).tone}`}>
+                  <span className="font-semibold">{introState(introFor(investor.id)!.status).label}</span>
+                  <span className="block text-xs opacity-80">{introState(introFor(investor.id)!.status).meaning}</span>
+                </div>
+              ) : noneLeft ? (
+                <p className="text-sm text-slate-500">
+                  You have used this month&apos;s {allowance!.limit} warm introductions. The next one opens on {onDay(allowance!.resetsAt)}.
+                </p>
+              ) : activeRequestId === investor.id ? (
                 <div className="space-y-3">
                   <textarea
                     value={introMessage}
@@ -273,24 +308,44 @@ export default function InvestorsPage() {
       )}
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your introductions</h2>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your introductions</h2>
+          {allowance && (
+            <p className="text-sm text-slate-500">
+              {allowance.remaining === 0
+                ? `All ${allowance.limit} used this month. More open on ${onDay(allowance.resetsAt)}.`
+                : `${allowance.remaining} of ${allowance.limit} warm introductions left this month.`}
+            </p>
+          )}
+        </div>
         {introductions.length === 0 ? (
-          <p className="text-sm text-slate-500">No intro requests yet.</p>
+          <p className="text-sm text-slate-500">No intro requests yet. Ask for up to three warm introductions a month.</p>
         ) : (
           <div className="space-y-3">
-            {introductions.map((intro) => (
-              <div key={intro.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="font-semibold text-slate-900 dark:text-white">{intro.investor.name}</div>
-                    <div className="text-xs text-slate-500">{intro.investor.type.replace('_', ' ')}</div>
+            {introductions.map((intro) => {
+              const state = introState(intro.status);
+              return (
+                <div key={intro.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="font-semibold text-slate-900 dark:text-white">{intro.investor.name}</div>
+                      <div className="text-xs text-slate-500">{intro.investor.type.replace('_', ' ')}</div>
+                    </div>
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${state.tone}`}>{state.label}</span>
                   </div>
-                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary-50 text-primary-700">
-                    {intro.status.replace('_', ' ')}
-                  </span>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    {state.meaning}
+                    {intro.introducedAt ? ` Introduced on ${onDay(intro.introducedAt)}.` : ''}
+                  </p>
+                  {intro.outcome && (
+                    <p className="rounded-md bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-200">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">From the ATHENA team · </span>
+                      {intro.outcome}
+                    </p>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ApprenticeshipCard,
@@ -288,13 +289,22 @@ export default function ApprenticeshipsPage() {
                     <Button onClick={() => router.push('/register')}>
                       Get notified
                     </Button>
+                    {/* The real door: an RTO or host employer creates its
+                        organisation and publishes from its own page. The
+                        sales form is for those who want a conversation first. */}
                     <Button
                       variant="outline"
-                      onClick={() => router.push('/contact-sales?intent=apprenticeships')}
+                      onClick={() => router.push('/employer/organizations/new')}
                     >
                       List an apprenticeship
                     </Button>
                   </div>
+                  <p className="mt-3 text-sm text-slate-500">
+                    Rather talk to us first?{' '}
+                    <Link href="/contact-sales?intent=apprenticeships" className="font-medium text-rose-600 hover:underline">
+                      Send an enquiry
+                    </Link>
+                  </p>
                 </>
               )}
             </div>

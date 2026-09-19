@@ -93,6 +93,17 @@ export default function BusinessStrategyPage() {
 
   const recommended = structures.result?.options.find((o) => o.type === structures.result?.recommended);
 
+  // The grants page opens this programme's application with the profile
+  // above already filled in, so nothing is typed twice.
+  const applyHref = (grantId: string) => {
+    const q = new URLSearchParams({ apply: grantId });
+    if (form.stage) q.set('stage', form.stage);
+    if (form.grantIndustry.trim()) q.set('industry', form.grantIndustry.trim());
+    if (form.state) q.set('state', form.state);
+    if (form.amountNeeded.trim()) q.set('amount', form.amountNeeded.trim());
+    return `/dashboard/grants?${q.toString()}`;
+  };
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -324,7 +335,7 @@ export default function BusinessStrategyPage() {
         </Panel>
       </div>
 
-      <Panel id="grants" icon={BadgeCheck} title="Grants that fit" intro="Every grant listed on the platform, scored against your stage, industry, state and the amount you need. Apply from the grants page." aside={<Link href="/dashboard/grants" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">All grants</Link>}>
+      <Panel id="grants" icon={BadgeCheck} title="Grants that fit" intro="Every grant listed on the platform, scored against your stage, industry, state and the amount you need. Apply from here and these answers carry across." aside={<Link href="/dashboard/grants" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">All grants</Link>}>
         <div className="grid gap-4 md:grid-cols-4">
           <Field label="Stage"><SelectInput value={form.stage} onChange={set('stage')} options={STAGES} /></Field>
           <Field label="Industry"><input value={form.grantIndustry} onChange={(e) => set('grantIndustry')(e.target.value)} placeholder="e.g. Technology" className="w-full rounded-md border border-slate-200 bg-transparent px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:text-white" /></Field>
@@ -348,8 +359,11 @@ export default function BusinessStrategyPage() {
                         <h3 className="font-semibold text-slate-900 dark:text-white">{g.name}</h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">{g.provider}{g.maxFunding ? ` · up to ${aud(Number(g.maxFunding))}` : ''}{g.isRolling ? ' · rolling' : g.deadline ? ` · closes ${String(g.deadline).slice(0, 10)}` : ''}</p>
                       </div>
-                      <div className="w-32">
-                        <Bars rows={[{ label: 'Fit', value: g.match.score, display: `${g.match.score}%`, color: g.match.score >= 70 ? 'bg-emerald-500' : g.match.score >= 40 ? 'bg-amber-400' : 'bg-slate-400' }]} max={100} />
+                      <div className="flex items-center gap-3">
+                        <div className="w-32">
+                          <Bars rows={[{ label: 'Fit', value: g.match.score, display: `${g.match.score}%`, color: g.match.score >= 70 ? 'bg-emerald-500' : g.match.score >= 40 ? 'bg-amber-400' : 'bg-slate-400' }]} max={100} />
+                        </div>
+                        <Link href={applyHref(g.id)} className="rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700" aria-label={`Apply for ${g.name}`}>Apply</Link>
                       </div>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">

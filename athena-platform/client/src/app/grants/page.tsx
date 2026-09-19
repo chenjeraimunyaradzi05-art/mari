@@ -258,7 +258,7 @@ export default function GrantsPage() {
             description={
               searchQuery || selectedProviderType
                 ? 'Widen the search and see what else is open.'
-                : 'Grant bodies are still coming on board. Register and we will tell you when one opens that you are eligible for.'
+                : 'Programmes are listed by the ATHENA team from each funder’s published details, never invented. Register and we will tell you when one opens that you are eligible for; if you run a programme, send us the details and we will list it.'
             }
             onClear={() => {
               setSearchQuery('');
