@@ -15,6 +15,11 @@
  *   - server: `app.use('/api/x', yRoutes)` in index.ts, joined to the
  *     `router.<verb>('<path>')` calls in each mounted route file.
  *   - client: `api.<verb>('<path>')` calls anywhere under client/src.
+ *   - mobile: the same `api.<verb>('<path>')` calls under mobile/src, whose
+ *     helpers use an axios instance of the same name. Findings there are
+ *     labelled `mobile:` so the report says which app is wrong. The Expo app
+ *     drifted for months (`/videos/*` against a `/video` mount, PUT where the
+ *     server had PATCH) because only the web client was ever checked.
  *
  * Three failure classes are reported separately, because the fixes differ:
  *
@@ -40,6 +45,19 @@ const path = require('path');
 
 const SERVER_SRC = path.resolve(__dirname, '..', 'src');
 const CLIENT_SRC = path.resolve(__dirname, '..', '..', 'client', 'src');
+const MOBILE_SRC = path.resolve(__dirname, '..', '..', 'mobile', 'src');
+
+// Parts of mobile/src that nothing imports and that call an API that was
+// never built. They are documented as dead in their own headers and are kept
+// only so tsc keeps compiling them; walking them would fail the check on
+// code no screen can reach. Remove an entry when its directory or file is
+// deleted or wired up.
+const MOBILE_SKIP = [
+  ['hooks/', 'react-query hooks for an unbuilt API; see mobile/src/hooks/index.ts header'],
+  ['stores/', 'zustand stores for the same unbuilt API; see mobile/src/stores/index.ts header'],
+  ['services/camera.ts', 'unimported; posts to /upload/* which has no mount'],
+  ['services/socialAuth.ts', 'unimported; posts to /auth/google and /auth/apple which do not exist'],
+];
 
 // Calls that look broken to the static walk but are correct in practice.
 // Keep each entry justified — an unexplained entry is a bug in waiting.
@@ -159,18 +177,52 @@ function normalisePath(raw) {
     .replace(/\/+$/, '');
 }
 
+// The web client's calls, keyed "VERB /api/path" -> the files that make them,
+// then the Expo app's added under the same keys with a `mobile:` label. The
+// call-site count reported at the end is per app.
 function collectClientCalls() {
   if (!fs.existsSync(CLIENT_SRC)) fail(`cannot find ${CLIENT_SRC}`);
 
   const calls = new Map();
+  // Distinct "VERB path" keys per app, which is what the OK line has always
+  // counted for the client; a path both apps call counts once for each.
+  const seen = { client: new Set(), mobile: new Set() };
 
-  const record = (key, file) => {
+  const record = (key, label, app) => {
     if (!calls.has(key)) calls.set(key, new Set());
-    calls.get(key).add(path.relative(CLIENT_SRC, file).split(path.sep).join('/'));
+    calls.get(key).add(label);
+    seen[app].add(key);
   };
 
-  for (const file of walk(CLIENT_SRC)) {
+  const clientFiles = walk(CLIENT_SRC).map((file) => ({
+    file,
+    app: 'client',
+    label: path.relative(CLIENT_SRC, file).split(path.sep).join('/'),
+  }));
+
+  // A checkout without the Expo app (or one with it moved) still checks the
+  // web client; the mobile walk simply contributes nothing.
+  const mobileFiles = fs.existsSync(MOBILE_SRC)
+    ? walk(MOBILE_SRC)
+        .map((file) => ({
+          file,
+          app: 'mobile',
+          rel: path.relative(MOBILE_SRC, file).split(path.sep).join('/'),
+        }))
+        .filter(({ rel }) => !MOBILE_SKIP.some(([prefix]) => rel.startsWith(prefix)))
+        .map(({ file, app, rel }) => ({ file, app, label: `mobile:${rel}` }))
+    : [];
+
+  for (const { file, app, label } of [...clientFiles, ...mobileFiles]) {
     const src = fs.readFileSync(file, 'utf8');
+    collectCallsIn(src, (key) => record(key, label, app));
+  }
+  calls.counts = { client: seen.client.size, mobile: seen.mobile.size };
+  return calls;
+}
+
+function collectCallsIn(src, record) {
+  {
 
     // 1. The axios helper: `api.get('/posts/feed')`, path relative to /api.
     for (const m of src.matchAll(
@@ -178,7 +230,7 @@ function collectClientCalls() {
     )) {
       const raw = m[3];
       if (!raw.startsWith('/')) continue; // absolute URLs are not our contract
-      record(`${m[1].toUpperCase()} ${normalisePath(`/api${raw}`)}`, file);
+      record(`${m[1].toUpperCase()} ${normalisePath(`/api${raw}`)}`);
     }
 
     // 2. Anything calling with a full `/api/...` path:
@@ -194,10 +246,9 @@ function collectClientCalls() {
       const args = src.slice(m.index, m.index + 600);
       const pathMatch = args.match(FETCH_PATH);
       if (!pathMatch) continue;
-      record(`${verbForFetch(src, m.index, args)} ${normalisePath(pathMatch[0])}`, file);
+      record(`${verbForFetch(src, m.index, args)} ${normalisePath(pathMatch[0])}`);
     }
   }
-  return calls;
 }
 
 // ------------------------------------------------------------------- matching
@@ -369,17 +420,19 @@ function main() {
   }
 
   const total = missing.length + shadowed.length + wrongVerb.length + staleAllowances.size;
+  const { client: clientCount, mobile: mobileCount } = clientCalls.counts;
+  const sites = mobileCount > 0 ? `${clientCount} client and ${mobileCount} mobile call sites` : `${clientCount} client call sites`;
 
   if (total > 0) {
     console.error(
       `\n${total} API contract problem(s). ` +
-        `Checked ${clientCalls.size} client call sites against ${serverRoutes.length} server routes.\n`
+        `Checked ${sites} against ${serverRoutes.length} server routes.\n`
     );
     process.exit(1);
   }
 
   console.log(
-    `API contract OK — ${clientCalls.size} client call sites all resolve ` +
+    `API contract OK — ${sites} all resolve ` +
       `against ${serverRoutes.length} server routes.`
   );
 }

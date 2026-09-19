@@ -1,7 +1,18 @@
 /**
  * Mobile Hooks Index
  * Phase 5: Mobile Parity
- * 
+ *
+ * NOT WIRED. Nothing in the app imports this directory: there is no
+ * QueryClientProvider in App.tsx, and every screen reads the server through
+ * services/api.ts and services/api-extensions.ts with local state and
+ * AuthContext. The hooks below were written against an API that was never
+ * built (`/conversations`, `/jobs/featured`, `/videos/*`, `/users/profile`
+ * and so on), so a new screen must not reach for them; use the helpers in
+ * services/ instead, which server/scripts/check-api-contract.js verifies
+ * against the routes that exist. That check skips this directory for the
+ * same reason. Kept compiling under tsc rather than deleted, following the
+ * supersession-header convention in server/src/routes/salary.routes.ts.
+ *
  * Central export for all React Query hooks
  */
 

@@ -1,6 +1,14 @@
 /**
  * Skills Marketplace Screen
- * Browse and order skill-based services
+ * Browse the services members offer, then open one for its packages,
+ * reviews and a favourite toggle.
+ *
+ * GET /skills-marketplace/services answers { success, data: [...], pagination }
+ * and orders by rating, then newest; the chips come from
+ * GET /skills-marketplace/categories with a live count each. Ordering is
+ * completed on the web, where the card hold is authorised, so the detail
+ * screen says so and links there rather than pretending a tap here places
+ * an order.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -11,13 +19,24 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  Modal,
   ScrollView,
-  Alert,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { skillsMarketplaceApi, MarketplaceService } from '../services/api-extensions';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import {
+  skillsMarketplaceApi,
+  MarketplaceService,
+  ServiceCategoryCount,
+  categoryLabel,
+  formatAud,
+  providerName,
+  startingPrice,
+} from '../services/api-extensions';
+import { unwrapApiData } from '../services/api';
+import type { RootStackParamList } from '../navigation/AppNavigator';
+
+const PAGE_SIZE = 20;
 
 interface ServiceCardProps {
   service: MarketplaceService;
@@ -25,54 +44,33 @@ interface ServiceCardProps {
 }
 
 function ServiceCard({ service, onPress }: ServiceCardProps) {
-  const renderStars = (rating: number) => {
-    const stars = [];
-    const fullStars = Math.floor(rating);
-    const hasHalfStar = rating % 1 >= 0.5;
-
-    for (let i = 0; i < 5; i++) {
-      if (i < fullStars) {
-        stars.push(<Ionicons key={i} name="star" size={14} color="#fbbf24" />);
-      } else if (i === fullStars && hasHalfStar) {
-        stars.push(<Ionicons key={i} name="star-half" size={14} color="#fbbf24" />);
-      } else {
-        stars.push(<Ionicons key={i} name="star-outline" size={14} color="#fbbf24" />);
-      }
-    }
-    return stars;
-  };
+  const price = startingPrice(service);
+  const rated = typeof service.rating === 'number' && service.reviewCount > 0;
 
   return (
-    <TouchableOpacity style={styles.serviceCard} onPress={onPress}>
+    <TouchableOpacity style={styles.serviceCard} onPress={onPress} accessibilityRole="button" accessibilityLabel={service.title}>
       <View style={styles.thumbnailContainer}>
-        {service.thumbnailUrl ? (
-          <Image source={{ uri: service.thumbnailUrl }} style={styles.thumbnail} />
-        ) : (
-          <View style={styles.thumbnailPlaceholder}>
-            <Ionicons name="briefcase-outline" size={32} color="#9ca3af" />
-          </View>
-        )}
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryBadgeText}>{service.category}</Text>
+        <View style={styles.thumbnailPlaceholder}>
+          <Ionicons name="briefcase-outline" size={32} color="#9ca3af" />
         </View>
+        <View style={styles.categoryBadge}>
+          <Text style={styles.categoryBadgeText}>{categoryLabel(service.category)}</Text>
+        </View>
+        {service.isFavorite ? (
+          <View style={styles.favouriteBadge}>
+            <Ionicons name="heart" size={14} color="#e11d48" />
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.serviceInfo}>
         <View style={styles.providerRow}>
           <View style={styles.providerAvatar}>
-            <Text style={styles.providerAvatarText}>
-              {service.provider.displayName.charAt(0)}
-            </Text>
+            <Text style={styles.providerAvatarText}>{providerName(service).charAt(0)}</Text>
           </View>
           <Text style={styles.providerName} numberOfLines={1}>
-            {service.provider.displayName}
+            {providerName(service)}
           </Text>
-          <View style={styles.providerRating}>
-            <Ionicons name="star" size={12} color="#fbbf24" />
-            <Text style={styles.providerRatingText}>
-              {service.provider.rating.toFixed(1)}
-            </Text>
-          </View>
         </View>
 
         <Text style={styles.serviceTitle} numberOfLines={2}>
@@ -80,170 +78,51 @@ function ServiceCard({ service, onPress }: ServiceCardProps) {
         </Text>
 
         <View style={styles.ratingRow}>
-          <View style={styles.stars}>{renderStars(service.rating)}</View>
-          <Text style={styles.reviewCount}>({service.reviewCount})</Text>
+          {rated ? (
+            <>
+              <Ionicons name="star" size={13} color="#fbbf24" />
+              <Text style={styles.ratingText}>{service.rating!.toFixed(1)}</Text>
+              <Text style={styles.reviewCount}>({service.reviewCount})</Text>
+            </>
+          ) : (
+            <Text style={styles.reviewCount}>No reviews yet</Text>
+          )}
         </View>
 
-        <View style={styles.priceRow}>
+        {price ? (
           <Text style={styles.price}>
-            ${service.price}
-            {service.pricingType === 'hourly' && <Text style={styles.priceUnit}>/hr</Text>}
+            {formatAud(price.amount)}
+            <Text style={styles.priceUnit}> / {price.unit}</Text>
           </Text>
-          <View style={styles.deliveryBadge}>
-            <Ionicons name="time-outline" size={12} color="#6b7280" />
-            <Text style={styles.deliveryText}>{service.deliveryTime}</Text>
-          </View>
-        </View>
+        ) : (
+          <Text style={styles.priceUnit}>Price on request</Text>
+        )}
       </View>
     </TouchableOpacity>
   );
 }
 
-interface OrderModalProps {
-  visible: boolean;
-  service: MarketplaceService | null;
-  onClose: () => void;
-  onSubmit: (requirements: string) => void;
-  loading: boolean;
-}
-
-function OrderModal({ visible, service, onClose, onSubmit, loading }: OrderModalProps) {
-  const [requirements, setRequirements] = useState('');
-
-  const handleSubmit = () => {
-    if (!requirements.trim()) {
-      Alert.alert('Error', 'Please describe your requirements');
-      return;
-    }
-    onSubmit(requirements.trim());
-  };
-
-  if (!service) return null;
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Place Order</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#374151" />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.modalBody}>
-            {/* Service Summary */}
-            <View style={styles.serviceSummary}>
-              <Text style={styles.summaryTitle}>{service.title}</Text>
-              <View style={styles.summaryProvider}>
-                <Text style={styles.summaryProviderText}>
-                  by {service.provider.displayName}
-                </Text>
-              </View>
-              <View style={styles.summaryDetails}>
-                <View style={styles.summaryDetail}>
-                  <Ionicons name="cash-outline" size={18} color="#6366f1" />
-                  <Text style={styles.summaryDetailText}>
-                    ${service.price}
-                    {service.pricingType === 'hourly' ? '/hr' : ' fixed'}
-                  </Text>
-                </View>
-                <View style={styles.summaryDetail}>
-                  <Ionicons name="time-outline" size={18} color="#6366f1" />
-                  <Text style={styles.summaryDetailText}>{service.deliveryTime}</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Requirements */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Describe Your Requirements *</Text>
-              <TextInput
-                style={styles.requirementsInput}
-                value={requirements}
-                onChangeText={setRequirements}
-                placeholder="Explain what you need in detail. Include any specific requirements, deadlines, or preferences..."
-                placeholderTextColor="#9ca3af"
-                multiline
-                numberOfLines={6}
-                textAlignVertical="top"
-              />
-            </View>
-
-            {/* Attachments */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Attachments (Optional)</Text>
-              <TouchableOpacity style={styles.attachButton}>
-                <Ionicons name="cloud-upload-outline" size={24} color="#6366f1" />
-                <Text style={styles.attachButtonText}>Upload Files</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Order Summary */}
-            <View style={styles.orderSummary}>
-              <Text style={styles.orderSummaryTitle}>Order Summary</Text>
-              <View style={styles.orderRow}>
-                <Text style={styles.orderLabel}>Service Price</Text>
-                <Text style={styles.orderValue}>${service.price}</Text>
-              </View>
-              <View style={styles.orderRow}>
-                <Text style={styles.orderLabel}>Service Fee (5%)</Text>
-                <Text style={styles.orderValue}>${(service.price * 0.05).toFixed(2)}</Text>
-              </View>
-              <View style={[styles.orderRow, styles.orderTotal]}>
-                <Text style={styles.orderTotalLabel}>Total</Text>
-                <Text style={styles.orderTotalValue}>
-                  ${(service.price * 1.05).toFixed(2)}
-                </Text>
-              </View>
-            </View>
-          </ScrollView>
-
-          <View style={styles.modalFooter}>
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.orderButton, loading && styles.orderButtonDisabled]}
-              onPress={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.orderButtonText}>Place Order</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 export function SkillsMarketplaceScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [services, setServices] = useState<MarketplaceService[]>([]);
+  const [categories, setCategories] = useState<ServiceCategoryCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedService, setSelectedService] = useState<MarketplaceService | null>(null);
-  const [showOrderModal, setShowOrderModal] = useState(false);
-  const [ordering, setOrdering] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  const CATEGORIES = [
-    'All',
-    'Design',
-    'Development',
-    'Marketing',
-    'Writing',
-    'Video',
-    'Coaching',
-    'Consulting',
-    'Data',
-  ];
+  useEffect(() => {
+    skillsMarketplaceApi
+      .getCategories()
+      .then((res) => {
+        const list = unwrapApiData<ServiceCategoryCount[]>(res.data);
+        setCategories(Array.isArray(list) ? list : []);
+      })
+      .catch((error) => console.error('Failed to fetch categories:', error));
+  }, []);
 
   const fetchServices = useCallback(async (pageNum: number, isRefresh = false) => {
     try {
@@ -252,18 +131,17 @@ export function SkillsMarketplaceScreen() {
 
       const response = await skillsMarketplaceApi.getServices({
         page: pageNum,
-        category: selectedCategory && selectedCategory !== 'All' ? selectedCategory : undefined,
+        limit: PAGE_SIZE,
+        category: selectedCategory ?? undefined,
+        search: submittedSearch || undefined,
       });
 
-      const newItems = response.data.data?.services || [];
+      const list = unwrapApiData<MarketplaceService[]>(response.data);
+      const newItems = Array.isArray(list) ? list : [];
+      const pages: number | undefined = response.data?.pagination?.pages;
 
-      if (isRefresh || pageNum === 1) {
-        setServices(newItems);
-      } else {
-        setServices(prev => [...prev, ...newItems]);
-      }
-
-      setHasMore(newItems.length === 10);
+      setServices((prev) => (isRefresh || pageNum === 1 ? newItems : [...prev, ...newItems]));
+      setHasMore(typeof pages === 'number' ? pageNum < pages : newItems.length === PAGE_SIZE);
       setPage(pageNum);
     } catch (error) {
       console.error('Failed to fetch services:', error);
@@ -271,7 +149,7 @@ export function SkillsMarketplaceScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedCategory]);
+  }, [selectedCategory, submittedSearch]);
 
   useEffect(() => {
     fetchServices(1);
@@ -287,41 +165,26 @@ export function SkillsMarketplaceScreen() {
     }
   };
 
-  const handleOrder = async (requirements: string) => {
-    if (!selectedService) return;
-
-    try {
-      setOrdering(true);
-      await skillsMarketplaceApi.createOrder(selectedService.id, { requirements });
-      Alert.alert('Success', 'Your order has been placed! The provider will contact you shortly.');
-      setShowOrderModal(false);
-      setSelectedService(null);
-    } catch (error) {
-      console.error('Failed to place order:', error);
-      Alert.alert('Error', 'Failed to place order. Please try again.');
-    } finally {
-      setOrdering(false);
-    }
-  };
-
-  const openOrderModal = (service: MarketplaceService) => {
-    setSelectedService(service);
-    setShowOrderModal(true);
-  };
-
-  const filteredServices = services.filter(s =>
-    searchQuery === '' ||
-    s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.provider.displayName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const chips: Array<{ key: string | null; label: string }> = [
+    { key: null, label: 'All' },
+    ...categories.map((c) => ({ key: c.category, label: c.count > 0 ? `${categoryLabel(c.category)} (${c.count})` : categoryLabel(c.category) })),
+  ];
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Back" style={styles.headerButton}>
+          <Ionicons name="arrow-back" size={24} color="#374151" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Skills Marketplace</Text>
-        <TouchableOpacity>
-          <Ionicons name="options-outline" size={24} color="#374151" />
+        <TouchableOpacity
+          onPress={() => navigation.navigate('MyOrders')}
+          accessibilityRole="button"
+          accessibilityLabel="My orders"
+          style={styles.headerButton}
+        >
+          <Ionicons name="receipt-outline" size={24} color="#374151" />
         </TouchableOpacity>
       </View>
 
@@ -332,45 +195,52 @@ export function SkillsMarketplaceScreen() {
           style={styles.searchInput}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          onSubmitEditing={() => setSubmittedSearch(searchQuery.trim())}
+          returnKeyType="search"
           placeholder="Search services..."
           placeholderTextColor="#9ca3af"
+          accessibilityLabel="Search services"
         />
         {searchQuery !== '' && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
+          <TouchableOpacity
+            onPress={() => {
+              setSearchQuery('');
+              setSubmittedSearch('');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
             <Ionicons name="close-circle" size={20} color="#9ca3af" />
           </TouchableOpacity>
         )}
       </View>
 
       {/* Category Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {CATEGORIES.map((category) => (
-          <TouchableOpacity
-            key={category}
-            style={[
-              styles.filterChip,
-              (selectedCategory === category || (category === 'All' && !selectedCategory)) &&
-                styles.filterChipActive,
-            ]}
-            onPress={() => setSelectedCategory(category === 'All' ? null : category)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                (selectedCategory === category || (category === 'All' && !selectedCategory)) &&
-                  styles.filterChipTextActive,
-              ]}
-            >
-              {category}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {chips.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterContainer}
+          contentContainerStyle={styles.filterContent}
+        >
+          {chips.map((chip) => {
+            const active = selectedCategory === chip.key;
+            return (
+              <TouchableOpacity
+                key={chip.key ?? 'all'}
+                style={[styles.filterChip, active && styles.filterChipActive]}
+                onPress={() => setSelectedCategory(chip.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{chip.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      <Text style={styles.orderNote}>Highest rated first, then newest. Orders and payment are completed on the web.</Text>
 
       {/* Services Grid */}
       {loading && services.length === 0 ? (
@@ -379,10 +249,10 @@ export function SkillsMarketplaceScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredServices}
+          data={services}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <ServiceCard service={item} onPress={() => openOrderModal(item)} />
+            <ServiceCard service={item} onPress={() => navigation.navigate('ServiceDetail', { serviceId: item.id, title: item.title })} />
           )}
           numColumns={2}
           columnWrapperStyle={styles.columnWrapper}
@@ -399,24 +269,12 @@ export function SkillsMarketplaceScreen() {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="storefront-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>No services found</Text>
-              <Text style={styles.emptySubtext}>Try adjusting your search or filters</Text>
+              <Text style={styles.emptyText}>No services match</Text>
+              <Text style={styles.emptySubtext}>Try another category or clear your search.</Text>
             </View>
           }
         />
       )}
-
-      {/* Order Modal */}
-      <OrderModal
-        visible={showOrderModal}
-        service={selectedService}
-        onClose={() => {
-          setShowOrderModal(false);
-          setSelectedService(null);
-        }}
-        onSubmit={handleOrder}
-        loading={ordering}
-      />
     </View>
   );
 }
@@ -436,11 +294,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 8,
+    paddingTop: 52,
+    paddingBottom: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  headerButton: {
+    padding: 8,
   },
   headerTitle: {
     fontSize: 20,
@@ -497,6 +359,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '500',
   },
+  orderNote: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    fontSize: 12,
+    color: '#9ca3af',
+  },
   // List
   listContent: {
     padding: 12,
@@ -520,11 +388,7 @@ const styles = StyleSheet.create({
   },
   thumbnailContainer: {
     position: 'relative',
-    height: 100,
-  },
-  thumbnail: {
-    width: '100%',
-    height: '100%',
+    height: 90,
   },
   thumbnailPlaceholder: {
     width: '100%',
@@ -546,6 +410,14 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#fff',
     fontWeight: '500',
+  },
+  favouriteBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 3,
   },
   serviceInfo: {
     padding: 12,
@@ -574,16 +446,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
   },
-  providerRating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  providerRatingText: {
-    fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
   serviceTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -595,38 +457,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
+    gap: 3,
   },
-  stars: {
-    flexDirection: 'row',
-    gap: 1,
+  ratingText: {
+    fontSize: 12,
+    color: '#374151',
+    fontWeight: '600',
   },
   reviewCount: {
     fontSize: 12,
     color: '#9ca3af',
-    marginLeft: 4,
-  },
-  priceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
   },
   price: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#111827',
   },
   priceUnit: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: '#6b7280',
-  },
-  deliveryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  deliveryText: {
     fontSize: 11,
+    fontWeight: '400',
     color: '#6b7280',
   },
   footerLoader: {
@@ -635,6 +484,7 @@ const styles = StyleSheet.create({
   emptyContainer: {
     alignItems: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 24,
   },
   emptyText: {
     fontSize: 18,
@@ -645,176 +495,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     marginTop: 4,
-  },
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  serviceSummary: {
-    backgroundColor: '#f9fafb',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  summaryProvider: {
-    marginBottom: 12,
-  },
-  summaryProviderText: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  summaryDetails: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  summaryDetail: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  summaryDetailText: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  formGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  requirementsInput: {
-    backgroundColor: '#f9fafb',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: '#111827',
-    minHeight: 120,
-  },
-  attachButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    gap: 8,
-  },
-  attachButtonText: {
-    fontSize: 14,
-    color: '#6366f1',
-    fontWeight: '500',
-  },
-  orderSummary: {
-    backgroundColor: '#f9fafb',
-    padding: 16,
-    borderRadius: 12,
-  },
-  orderSummaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 12,
-  },
-  orderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  orderLabel: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  orderValue: {
-    fontSize: 14,
-    color: '#374151',
-  },
-  orderTotal: {
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    paddingTop: 8,
-    marginTop: 4,
-  },
-  orderTotalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  orderTotalValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#6366f1',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    gap: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  orderButton: {
-    flex: 2,
-    paddingVertical: 14,
-    borderRadius: 8,
-    backgroundColor: '#6366f1',
-    alignItems: 'center',
-  },
-  orderButtonDisabled: {
-    opacity: 0.7,
-  },
-  orderButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
+    textAlign: 'center',
   },
 });

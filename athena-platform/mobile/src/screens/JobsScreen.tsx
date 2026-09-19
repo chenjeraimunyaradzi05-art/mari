@@ -14,24 +14,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { jobsApi } from '../services/api';
+import { jobsApi, unwrapApiData, type JobSummary } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
-interface Job {
-  id: string;
-  title: string;
-  slug: string;
-  city?: string;
-  state?: string;
-  isRemote: boolean;
-  salaryMin?: number;
-  salaryMax?: number;
-  type: string;
-  organization: {
-    name: string;
-    logo?: string;
-  };
-}
+type Job = JobSummary;
 
 export function JobsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -43,7 +29,9 @@ export function JobsScreen() {
   const fetchJobs = useCallback(async () => {
     try {
       const response = await jobsApi.list({ limit: 20, search: searchQuery || undefined });
-      setJobs(response.data.jobs || []);
+      // GET /jobs answers { success, data: [...], pagination }; the list is `data`.
+      const list = unwrapApiData<Job[]>(response.data);
+      setJobs(Array.isArray(list) ? list : []);
     } catch (error) {
       console.error('Failed to fetch jobs:', error);
     } finally {
@@ -61,7 +49,7 @@ export function JobsScreen() {
     fetchJobs();
   };
 
-  const formatSalary = (min?: number, max?: number) => {
+  const formatSalary = (min?: number | null, max?: number | null) => {
     if (!min && !max) return null;
     const format = (n: number) => `$${(n / 1000).toFixed(0)}k`;
     if (min && max) return `${format(min)} - ${format(max)}`;
@@ -72,23 +60,26 @@ export function JobsScreen() {
   const formatLocation = (job: Job) => {
     if (job.isRemote) return 'Remote';
     if (job.city && job.state) return `${job.city}, ${job.state}`;
-    return job.city || job.state || 'Location TBD';
+    return job.city || job.state || 'Location to be confirmed';
   };
 
   const renderJob = ({ item }: { item: Job }) => (
     <TouchableOpacity
       style={styles.jobCard}
       onPress={() => navigation.navigate('JobDetail', { jobId: item.id })}
+      accessibilityRole="button"
+      accessibilityLabel={item.title}
     >
       <View style={styles.jobHeader}>
         <View style={styles.companyLogo}>
           <Text style={styles.logoText}>
-            {item.organization.name.charAt(0)}
+            {item.organization?.name?.charAt(0) || '?'}
           </Text>
         </View>
         <View style={styles.jobInfo}>
           <Text style={styles.jobTitle}>{item.title}</Text>
-          <Text style={styles.companyName}>{item.organization.name}</Text>
+          <Text style={styles.companyName}>{item.organization?.name ?? 'Employer'}</Text>
+          {item.hasApplied ? <Text style={styles.applied}>You've applied</Text> : null}
         </View>
       </View>
 
@@ -99,7 +90,7 @@ export function JobsScreen() {
         </View>
         <View style={styles.metaItem}>
           <Ionicons name="briefcase-outline" size={14} color="#666" />
-          <Text style={styles.metaText}>{item.type.replace('_', ' ')}</Text>
+          <Text style={styles.metaText}>{(item.type ?? '').replace(/_/g, ' ').toLowerCase()}</Text>
         </View>
       </View>
 
@@ -228,6 +219,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 2,
+  },
+  applied: {
+    fontSize: 12,
+    color: '#4338ca',
+    marginTop: 2,
+    fontWeight: '500',
   },
   jobMeta: {
     flexDirection: 'row',

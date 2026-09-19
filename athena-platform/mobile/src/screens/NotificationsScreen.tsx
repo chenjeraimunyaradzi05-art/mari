@@ -11,15 +11,20 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { notificationsApi } from '../services/api';
+import { notificationsApi, unwrapApiData } from '../services/api';
 import { socketService } from '../services/socket';
 
+// A row of GET /notifications. The server groups the social kinds ("Ana and
+// 3 others liked your post"), so a row can stand for several notifications:
+// `ids` lists them all and `count` says how many.
 interface Notification {
   id: string;
+  ids?: string[];
+  count?: number;
   type: string;
   title: string;
-  message: string;
-  link?: string;
+  message: string | null;
+  link?: string | null;
   isRead: boolean;
   createdAt: string;
 }
@@ -36,13 +41,17 @@ const NOTIFICATION_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
       const response = await notificationsApi.list({ limit: 50 });
-      setNotifications(response.data.notifications || []);
+      // The server answers { success, data: { notifications, unreadCount, pagination } }.
+      const data = unwrapApiData<{ notifications?: Notification[]; unreadCount?: number }>(response.data);
+      setNotifications(Array.isArray(data?.notifications) ? data.notifications : []);
+      setUnreadCount(typeof data?.unreadCount === 'number' ? data.unreadCount : 0);
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
     } finally {
@@ -57,6 +66,7 @@ export function NotificationsScreen() {
     // Listen for new notifications
     const unsubscribe = socketService.on('notification:new', (notification: Notification) => {
       setNotifications((prev) => [notification, ...prev]);
+      setUnreadCount((n) => n + 1);
     });
 
     return () => {
@@ -69,12 +79,18 @@ export function NotificationsScreen() {
     fetchNotifications();
   };
 
-  const handleMarkRead = async (notificationId: string) => {
+  const handleMarkRead = async (item: Notification) => {
+    if (item.isRead) return;
+    // A grouped row clears every notification it stands for in one call.
+    const ids = item.ids && item.ids.length > 0 ? item.ids : [item.id];
     try {
-      await notificationsApi.markRead(notificationId);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
-      );
+      if (ids.length > 1) {
+        await notificationsApi.markManyRead(ids);
+      } else {
+        await notificationsApi.markRead(ids[0]);
+      }
+      setNotifications((prev) => prev.map((n) => (n.id === item.id ? { ...n, isRead: true } : n)));
+      setUnreadCount((n) => Math.max(0, n - ids.length));
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
     }
@@ -84,6 +100,7 @@ export function NotificationsScreen() {
     try {
       await notificationsApi.markAllRead();
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      setUnreadCount(0);
     } catch (error) {
       console.error('Failed to mark all as read:', error);
     }
@@ -108,7 +125,9 @@ export function NotificationsScreen() {
   const renderNotification = ({ item }: { item: Notification }) => (
     <TouchableOpacity
       style={[styles.notificationCard, !item.isRead && styles.unreadCard]}
-      onPress={() => handleMarkRead(item.id)}
+      onPress={() => handleMarkRead(item)}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.title}${item.isRead ? '' : ', unread'}`}
     >
       <View style={[styles.iconContainer, !item.isRead && styles.unreadIcon]}>
         <Ionicons
@@ -121,16 +140,16 @@ export function NotificationsScreen() {
         <Text style={[styles.title, !item.isRead && styles.unreadText]}>
           {item.title}
         </Text>
-        <Text style={styles.message} numberOfLines={2}>
-          {item.message}
-        </Text>
+        {item.message ? (
+          <Text style={styles.message} numberOfLines={2}>
+            {item.message}
+          </Text>
+        ) : null}
         <Text style={styles.time}>{formatTime(item.createdAt)}</Text>
       </View>
       {!item.isRead && <View style={styles.unreadDot} />}
     </TouchableOpacity>
   );
-
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   if (isLoading) {
     return (
@@ -159,7 +178,7 @@ export function NotificationsScreen() {
         ListEmptyComponent={
           <View style={styles.centered}>
             <Ionicons name="notifications-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No notifications</Text>
+            <Text style={styles.emptyText}>Nothing here yet. We'll let you know when something happens.</Text>
           </View>
         }
       />
@@ -249,5 +268,6 @@ const styles = StyleSheet.create({
     marginTop: 15,
     color: '#999',
     fontSize: 16,
+    textAlign: 'center',
   },
 });

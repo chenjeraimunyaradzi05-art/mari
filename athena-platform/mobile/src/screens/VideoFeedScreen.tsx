@@ -1,6 +1,11 @@
 /**
  * Video Feed Screen
  * TikTok-style vertical scrolling video feed for mobile
+ *
+ * Reads GET /video/feed, which answers { success, data: [...], nextCursor }
+ * and is cursor-paginated; the tabs at the top pick the feed (newest, the
+ * people you follow, trending). Like and save use the viewer state the server
+ * attaches to every reel, so the icons show the truth on first load.
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
@@ -19,21 +24,33 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { videoApi, VideoPost } from '../services/api-extensions';
+import { videoApi, VideoPost, type VideoFeedKind } from '../services/api-extensions';
+import { unwrapApiData, webUrl } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const VIDEO_HEIGHT = SCREEN_HEIGHT - 80; // Account for tab bar
+const PAGE_SIZE = 10;
+
+type FeedTab = { key: 'newest' | VideoFeedKind; label: string };
+const FEED_TABS: FeedTab[] = [
+  { key: 'newest', label: 'For You' },
+  { key: 'following', label: 'Following' },
+  { key: 'trending', label: 'Trending' },
+];
+
+const authorName = (video: VideoPost) => video.author?.displayName?.trim() || 'ATHENA member';
 
 interface VideoItemProps {
   video: VideoPost;
   isActive: boolean;
   onLike: (id: string) => void;
+  onSave: (id: string) => void;
   onComment: (id: string) => void;
   onShare: (video: VideoPost) => void;
 }
 
-function VideoItem({ video, isActive, onLike, onComment, onShare }: VideoItemProps) {
+function VideoItem({ video, isActive, onLike, onSave, onComment, onShare }: VideoItemProps) {
   const videoRef = useRef<Video>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
@@ -69,9 +86,11 @@ function VideoItem({ video, isActive, onLike, onComment, onShare }: VideoItemPro
     return count.toString();
   };
 
+  const hashtags = Array.isArray(video.hashtags) ? video.hashtags : [];
+
   return (
     <View style={styles.videoContainer}>
-      <TouchableOpacity activeOpacity={1} onPress={togglePlayPause} style={styles.videoWrapper}>
+      <TouchableOpacity activeOpacity={1} onPress={togglePlayPause} style={styles.videoWrapper} accessibilityLabel={isPlaying ? 'Pause' : 'Play'}>
         <Video
           ref={videoRef}
           source={{ uri: video.videoUrl }}
@@ -81,13 +100,13 @@ function VideoItem({ video, isActive, onLike, onComment, onShare }: VideoItemPro
           shouldPlay={isActive}
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         />
-        
+
         {isBuffering && (
           <View style={styles.bufferingOverlay}>
             <ActivityIndicator size="large" color="#fff" />
           </View>
         )}
-        
+
         {!isPlaying && !isBuffering && (
           <View style={styles.playOverlay}>
             <Ionicons name="play" size={60} color="rgba(255,255,255,0.8)" />
@@ -106,19 +125,16 @@ function VideoItem({ video, isActive, onLike, onComment, onShare }: VideoItemPro
         <View style={styles.authorRow}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
-              {video.author.displayName.charAt(0).toUpperCase()}
+              {authorName(video).charAt(0).toUpperCase()}
             </Text>
           </View>
-          <Text style={styles.authorName}>@{video.author.displayName}</Text>
-          <TouchableOpacity style={styles.followButton}>
-            <Text style={styles.followButtonText}>Follow</Text>
-          </TouchableOpacity>
+          <Text style={styles.authorName}>@{authorName(video)}</Text>
         </View>
-        <Text style={styles.title} numberOfLines={2}>{video.title}</Text>
-        <Text style={styles.description} numberOfLines={2}>{video.description}</Text>
-        {video.tags.length > 0 && (
+        {video.title ? <Text style={styles.title} numberOfLines={2}>{video.title}</Text> : null}
+        {video.description ? <Text style={styles.description} numberOfLines={2}>{video.description}</Text> : null}
+        {hashtags.length > 0 && (
           <View style={styles.tagsRow}>
-            {video.tags.slice(0, 3).map((tag, index) => (
+            {hashtags.slice(0, 3).map((tag, index) => (
               <Text key={index} style={styles.tag}>#{tag}</Text>
             ))}
           </View>
@@ -127,37 +143,48 @@ function VideoItem({ video, isActive, onLike, onComment, onShare }: VideoItemPro
 
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity 
-          style={styles.actionButton} 
+        <TouchableOpacity
+          style={styles.actionButton}
           onPress={() => onLike(video.id)}
+          accessibilityRole="button"
+          accessibilityLabel={video.isLiked ? 'Unlike' : 'Like'}
         >
-          <Ionicons 
-            name={video.isLiked ? 'heart' : 'heart-outline'} 
-            size={32} 
-            color={video.isLiked ? '#ff4757' : '#fff'} 
+          <Ionicons
+            name={video.isLiked ? 'heart' : 'heart-outline'}
+            size={32}
+            color={video.isLiked ? '#ff4757' : '#fff'}
           />
           <Text style={styles.actionCount}>{formatCount(video.likeCount)}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.actionButton}
           onPress={() => onComment(video.id)}
+          accessibilityRole="button"
+          accessibilityLabel="Comments"
         >
           <Ionicons name="chatbubble-outline" size={30} color="#fff" />
           <Text style={styles.actionCount}>{formatCount(video.commentCount)}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.actionButton}
           onPress={() => onShare(video)}
+          accessibilityRole="button"
+          accessibilityLabel="Share"
         >
           <Ionicons name="share-social-outline" size={30} color="#fff" />
           <Text style={styles.actionCount}>{formatCount(video.shareCount)}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton}>
-          <Ionicons name="bookmark-outline" size={30} color="#fff" />
-          <Text style={styles.actionCount}>Save</Text>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => onSave(video.id)}
+          accessibilityRole="button"
+          accessibilityLabel={video.isSaved ? 'Remove from saved' : 'Save'}
+        >
+          <Ionicons name={video.isSaved ? 'bookmark' : 'bookmark-outline'} size={30} color={video.isSaved ? '#a5b4fc' : '#fff'} />
+          <Text style={styles.actionCount}>{video.isSaved ? 'Saved' : 'Save'}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -169,7 +196,8 @@ export function VideoFeedScreen() {
   const [videos, setVideos] = useState<VideoPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [page, setPage] = useState(1);
+  const [feed, setFeed] = useState<FeedTab['key']>('newest');
+  const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -183,41 +211,43 @@ export function VideoFeedScreen() {
     }
   });
 
-  const fetchVideos = useCallback(async (pageNum: number, isRefresh = false) => {
+  const fetchVideos = useCallback(async (after: string | null, isRefresh = false) => {
     try {
       if (isRefresh) setRefreshing(true);
-      else if (pageNum === 1) setLoading(true);
+      else if (!after) setLoading(true);
 
-      const response = await videoApi.getFeed({ page: pageNum, limit: 10 });
-      const newVideos = response.data.data?.videos || [];
-      
-      if (isRefresh || pageNum === 1) {
-        setVideos(newVideos);
-      } else {
-        setVideos(prev => [...prev, ...newVideos]);
-      }
-      
-      setHasMore(response.data.data?.hasMore ?? newVideos.length === 10);
-      setPage(pageNum);
+      const response = await videoApi.getFeed({
+        limit: PAGE_SIZE,
+        cursor: after ?? undefined,
+        feed: feed === 'newest' ? undefined : feed,
+      });
+      const page = unwrapApiData<VideoPost[]>(response.data);
+      const newVideos = Array.isArray(page) ? page : [];
+      const next: string | null = response.data?.nextCursor ?? null;
+
+      setVideos((prev) => (after ? [...prev, ...newVideos] : newVideos));
+      setCursor(next);
+      setHasMore(!!next);
     } catch (error) {
       console.error('Failed to fetch videos:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [feed]);
 
   useEffect(() => {
-    fetchVideos(1);
+    setActiveIndex(0);
+    fetchVideos(null);
   }, [fetchVideos]);
 
   const handleRefresh = () => {
-    fetchVideos(1, true);
+    fetchVideos(null, true);
   };
 
   const handleLoadMore = () => {
-    if (!loading && hasMore) {
-      fetchVideos(page + 1);
+    if (!loading && hasMore && cursor) {
+      fetchVideos(cursor);
     }
   };
 
@@ -231,11 +261,11 @@ export function VideoFeedScreen() {
       } else {
         await videoApi.likeVideo(videoId);
       }
-      
-      setVideos(prev => prev.map(v => 
-        v.id === videoId 
-          ? { 
-              ...v, 
+
+      setVideos(prev => prev.map(v =>
+        v.id === videoId
+          ? {
+              ...v,
               isLiked: !v.isLiked,
               likeCount: v.isLiked ? v.likeCount - 1 : v.likeCount + 1
             }
@@ -246,16 +276,31 @@ export function VideoFeedScreen() {
     }
   };
 
+  const handleSave = async (videoId: string) => {
+    const video = videos.find((v) => v.id === videoId);
+    if (!video) return;
+    try {
+      if (video.isSaved) {
+        await videoApi.unsaveVideo(videoId);
+      } else {
+        await videoApi.saveVideo(videoId);
+      }
+      setVideos((prev) => prev.map((v) => (v.id === videoId ? { ...v, isSaved: !v.isSaved } : v)));
+    } catch (error) {
+      console.error('Failed to save video:', error);
+    }
+  };
+
   const handleComment = (videoId: string) => {
     const video = videos.find((item) => item.id === videoId);
-    navigation.navigate('VideoComments', { videoId, title: video?.title });
+    navigation.navigate('VideoComments', { videoId, title: video?.title ?? undefined });
   };
 
   const handleShare = async (video: VideoPost) => {
     try {
       await Share.share({
-        message: `Check out this video on ATHENA: ${video.title}`,
-        url: video.videoUrl,
+        message: `Check out this video on ATHENA: ${video.title ?? authorName(video)}`,
+        url: webUrl(`/videos/${video.id}`),
       });
     } catch (error) {
       console.error('Failed to share:', error);
@@ -267,73 +312,79 @@ export function VideoFeedScreen() {
       video={item}
       isActive={index === activeIndex}
       onLike={handleLike}
+      onSave={handleSave}
       onComment={handleComment}
       onShare={handleShare}
     />
   );
 
-  if (loading && videos.length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6366f1" />
-        <Text style={styles.loadingText}>Loading videos...</Text>
-      </View>
-    );
-  }
+  const emptyCopy =
+    feed === 'following'
+      ? { title: 'Nothing from people you follow yet', sub: 'Follow a few creators on the web and their reels will show here.' }
+      : { title: 'No videos yet', sub: 'Be the first to share!' };
 
   return (
     <View style={styles.container}>
-      <FlatList
-        data={videos}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        pagingEnabled
-        showsVerticalScrollIndicator={false}
-        snapToInterval={VIDEO_HEIGHT}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        onViewableItemsChanged={onViewableItemsChanged.current}
-        viewabilityConfig={viewabilityConfig.current}
-        onRefresh={handleRefresh}
-        refreshing={refreshing}
-        onEndReached={handleLoadMore}
-        onEndReachedThreshold={0.5}
-        initialNumToRender={3}
-        windowSize={5}
-        maxToRenderPerBatch={3}
-        removeClippedSubviews
-        getItemLayout={(_, index) => ({
-          length: VIDEO_HEIGHT,
-          offset: VIDEO_HEIGHT * index,
-          index,
-        })}
-        ListFooterComponent={
-          loading && videos.length > 0 ? (
-            <View style={styles.footerLoader}>
-              <ActivityIndicator size="small" color="#6366f1" />
+      {loading && videos.length === 0 ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#6366f1" />
+          <Text style={styles.loadingText}>Loading videos...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={videos}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          snapToInterval={VIDEO_HEIGHT}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          onViewableItemsChanged={onViewableItemsChanged.current}
+          viewabilityConfig={viewabilityConfig.current}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
+          initialNumToRender={3}
+          windowSize={5}
+          maxToRenderPerBatch={3}
+          removeClippedSubviews
+          getItemLayout={(_, index) => ({
+            length: VIDEO_HEIGHT,
+            offset: VIDEO_HEIGHT * index,
+            index,
+          })}
+          ListFooterComponent={
+            loading && videos.length > 0 ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color="#6366f1" />
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="videocam-off-outline" size={64} color="#9ca3af" />
+              <Text style={styles.emptyText}>{emptyCopy.title}</Text>
+              <Text style={styles.emptySubtext}>{emptyCopy.sub}</Text>
             </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="videocam-off-outline" size={64} color="#9ca3af" />
-            <Text style={styles.emptyText}>No videos yet</Text>
-            <Text style={styles.emptySubtext}>Be the first to share!</Text>
-          </View>
-        }
-      />
+          }
+        />
+      )}
 
-      {/* Category Tabs */}
+      {/* Feed tabs */}
       <View style={styles.categoryTabs}>
-        <TouchableOpacity style={styles.categoryTab}>
-          <Text style={[styles.categoryText, styles.categoryActive]}>For You</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.categoryTab}>
-          <Text style={styles.categoryText}>Following</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.categoryTab}>
-          <Text style={styles.categoryText}>Career</Text>
-        </TouchableOpacity>
+        {FEED_TABS.map((tab) => (
+          <TouchableOpacity
+            key={tab.key}
+            style={styles.categoryTab}
+            onPress={() => setFeed(tab.key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: feed === tab.key }}
+          >
+            <Text style={[styles.categoryText, feed === tab.key && styles.categoryActive]}>{tab.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
     </View>
   );
@@ -419,17 +470,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
-  followButton: {
-    backgroundColor: '#6366f1',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  followButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
   title: {
     color: '#fff',
     fontSize: 16,
@@ -474,16 +514,19 @@ const styles = StyleSheet.create({
     height: VIDEO_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 32,
   },
   emptyText: {
     color: '#fff',
     fontSize: 18,
     marginTop: 16,
+    textAlign: 'center',
   },
   emptySubtext: {
     color: '#9ca3af',
     fontSize: 14,
     marginTop: 4,
+    textAlign: 'center',
   },
   categoryTabs: {
     position: 'absolute',

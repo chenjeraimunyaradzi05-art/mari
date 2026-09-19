@@ -11,24 +11,39 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { messagesApi } from '../services/api';
+import { messagesApi, unwrapApiData } from '../services/api';
 import { socketService } from '../services/socket';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
+// A row of GET /messages/conversations, which answers { success, data: [...] }.
 interface Conversation {
   id: string;
-  lastMessage?: {
+  lastMessage: {
     content: string;
     createdAt: string;
-  };
+    senderId?: string;
+    isRead?: boolean;
+    deletedAt?: string | null;
+  } | null;
   participant: {
     id: string;
-    displayName: string;
-    avatar?: string;
+    displayName: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    avatar?: string | null;
   };
   unreadCount: number;
+  isPinned?: boolean;
+  isMuted?: boolean;
+  isArchived?: boolean;
+  updatedAt?: string;
+}
+
+function participantName(c: Conversation): string {
+  const p = c.participant;
+  return p.displayName?.trim() || [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || 'Member';
 }
 
 export function MessagesScreen() {
@@ -40,7 +55,8 @@ export function MessagesScreen() {
   const fetchConversations = useCallback(async () => {
     try {
       const response = await messagesApi.getConversations();
-      setConversations(response.data.conversations || []);
+      const list = unwrapApiData<Conversation[]>(response.data);
+      setConversations(Array.isArray(list) ? list : []);
     } catch (error) {
       console.error('Failed to fetch conversations:', error);
     } finally {
@@ -53,7 +69,7 @@ export function MessagesScreen() {
     fetchConversations();
 
     // Listen for new messages
-    const unsubscribe = socketService.on('messages:new', (data: any) => {
+    const unsubscribe = socketService.on('messages:new', () => {
       // Refresh conversations when new message arrives
       fetchConversations();
     });
@@ -92,18 +108,20 @@ export function MessagesScreen() {
       onPress={() =>
         navigation.navigate('ChatDetail', {
           conversationId: item.id,
-          participantName: item.participant.displayName,
+          participantName: participantName(item),
         })
       }
+      accessibilityRole="button"
+      accessibilityLabel={`Conversation with ${participantName(item)}${item.unreadCount > 0 ? `, ${item.unreadCount} unread` : ''}`}
     >
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>
-          {item.participant.displayName?.charAt(0) || '?'}
+          {participantName(item).charAt(0)}
         </Text>
       </View>
       <View style={styles.conversationInfo}>
         <View style={styles.headerRow}>
-          <Text style={styles.participantName}>{item.participant.displayName}</Text>
+          <Text style={styles.participantName}>{participantName(item)}</Text>
           <Text style={styles.time}>{formatTime(item.lastMessage?.createdAt)}</Text>
         </View>
         <View style={styles.messageRow}>
@@ -114,7 +132,7 @@ export function MessagesScreen() {
             ]}
             numberOfLines={1}
           >
-            {item.lastMessage?.content || 'Start a conversation'}
+            {item.lastMessage?.deletedAt ? 'Message deleted' : item.lastMessage?.content || 'Say hello'}
           </Text>
           {item.unreadCount > 0 && (
             <View style={styles.badge}>
@@ -149,7 +167,7 @@ export function MessagesScreen() {
             <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
             <Text style={styles.emptyText}>No messages yet</Text>
             <Text style={styles.emptySubtext}>
-              Start connecting with others to begin messaging
+              When a mentor, a group or another member writes to you, the conversation will be here.
             </Text>
           </View>
         }

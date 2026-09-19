@@ -5,6 +5,9 @@
 import axios, { AxiosInstance } from 'axios';
 import Constants from 'expo-constants';
 
+// app.config.js sets extra.apiUrl from the build profile's API_URL with /api
+// already appended (every server mount is under /api). The localhost fallback
+// is only reached when the config layer is absent, such as in Jest.
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:5000/api';
 
 export function unwrapApiData<T>(payload: any): T {
@@ -160,26 +163,79 @@ export const jobsApi = {
 };
 
 // User
+//
+// The profile is PATCHed (user.routes.ts has no PUT /me, so Edit Profile
+// could never save), and the member's applications and saved jobs live under
+// /jobs/me on the server, not /users/me. Only the fields the route whitelists
+// are typed here; `avatar` is not one of them, so a photo is changed on the web.
+export interface ProfileUpdate {
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
+  headline?: string;
+  bio?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  currentJobTitle?: string;
+  currentCompany?: string;
+  timezone?: string;
+}
+
 export const userApi = {
   getProfile: () => api.get('/users/me'),
-  updateProfile: (data: any) => api.put('/users/me', data),
-  getApplications: () => api.get('/users/me/applications'),
-  getSavedJobs: () => api.get('/users/me/saved-jobs'),
+  updateProfile: (data: ProfileUpdate) => api.patch('/users/me', data),
+  getApplications: () => api.get('/jobs/me/applications'),
+  getSavedJobs: () => api.get('/jobs/me/saved'),
 };
 
 // Notifications
+//
+// Read receipts are PATCHes on the server. A grouped row ("Ana and 3 others
+// liked your post") carries every member's id in `ids`, and /read-many clears
+// them in one call.
 export const notificationsApi = {
-  list: (params?: { page?: number; limit?: number }) =>
+  list: (params?: { page?: number; limit?: number; unreadOnly?: boolean }) =>
     api.get('/notifications', { params }),
-  markRead: (id: string) => api.put(`/notifications/${id}/read`),
-  markAllRead: () => api.put('/notifications/read-all'),
+  markRead: (id: string) => api.patch(`/notifications/${id}/read`),
+  markManyRead: (ids: string[]) => api.patch('/notifications/read-many', { ids }),
+  markAllRead: () => api.patch('/notifications/read-all'),
   registerPushToken: (token: string) => api.post('/notifications/push-token', { token, provider: 'expo' }),
 };
 
+/** A job as the list, saved-jobs and applications routes return it. */
+export interface JobSummary {
+  id: string;
+  title: string;
+  slug?: string;
+  city?: string | null;
+  state?: string | null;
+  isRemote: boolean;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  type: string;
+  organization?: { id?: string; name: string; logo?: string | null } | null;
+  hasApplied?: boolean;
+  /** Present on GET /jobs/me/saved. */
+  savedAt?: string;
+}
+
+/** One row of GET /jobs/me/applications: the application with its job. */
+export interface JobApplication {
+  id: string;
+  status: string;
+  appliedAt: string;
+  updatedAt?: string;
+  job: JobSummary;
+}
+
 // Posts/Feed
+//
+// The feed is GET /posts/feed; GET /posts does not exist (POST /posts creates
+// a post), which is why the Home tab was empty.
 export const postsApi = {
   list: (params?: { page?: number; limit?: number }) =>
-    api.get('/posts', { params }),
+    api.get('/posts/feed', { params }),
   get: (id: string) => api.get(`/posts/${id}`),
   create: (data: { content: string; type?: string }) =>
     api.post('/posts', data),
@@ -201,6 +257,9 @@ export const messagesApi = {
 
 /** The web app, for links that open a page rather than call the API. */
 export const WEB_URL: string = Constants.expoConfig?.extra?.webUrl || API_URL.replace(/\/api\/?$/, '').replace('://api.', '://');
+
+/** A page on the web app, for the "opens on the web" rows and buttons. */
+export const webUrl = (path: string): string => `${WEB_URL}${path.startsWith('/') ? path : `/${path}`}`;
 
 export interface FeedPost {
   id: string;

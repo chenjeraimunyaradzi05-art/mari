@@ -1,6 +1,11 @@
 /**
  * Apprenticeships Screen
- * Browse and apply to apprenticeship opportunities
+ * Browse, bookmark and apply to open apprenticeships
+ *
+ * GET /apprenticeships answers { success, data: [...], pagination }; the
+ * chips are the training packages the server reports from
+ * GET /apprenticeships/categories, with a count each, rather than a list
+ * typed into this file. Search goes to the server too.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -16,14 +21,40 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { apprenticeshipApi, Apprenticeship } from '../services/api-extensions';
+import {
+  apprenticeshipApi,
+  apprenticeshipLevelLabel,
+  Apprenticeship,
+  ApprenticeshipFramework,
+} from '../services/api-extensions';
+import { unwrapApiData } from '../services/api';
+
+const PAGE_SIZE = 20;
+
+function organisation(a: Apprenticeship) {
+  return a.hostEmployer ?? a.rto;
+}
+
+function place(a: Apprenticeship): string {
+  if (a.isRemote) return 'Remote';
+  return [a.city, a.state].filter(Boolean).join(', ') || a.country || 'Location to be confirmed';
+}
+
+function wage(a: Apprenticeship): string | null {
+  const fmt = (n: number) => `$${n.toLocaleString('en-AU')}`;
+  if (typeof a.wageMin === 'number' && typeof a.wageMax === 'number') return `${fmt(a.wageMin)} – ${fmt(a.wageMax)}`;
+  if (typeof a.wageMin === 'number') return `From ${fmt(a.wageMin)}`;
+  if (typeof a.wageMax === 'number') return `Up to ${fmt(a.wageMax)}`;
+  return null;
+}
 
 interface ApprenticeshipCardProps {
   apprenticeship: Apprenticeship;
   onPress: () => void;
+  onToggleBookmark: () => void;
 }
 
-function ApprenticeshipCard({ apprenticeship, onPress }: ApprenticeshipCardProps) {
+function ApprenticeshipCard({ apprenticeship, onPress, onToggleBookmark }: ApprenticeshipCardProps) {
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -31,17 +62,18 @@ function ApprenticeshipCard({ apprenticeship, onPress }: ApprenticeshipCardProps
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
-    return date.toLocaleDateString();
+    return date.toLocaleDateString('en-AU');
   };
 
+  const org = organisation(apprenticeship);
+  const pay = wage(apprenticeship);
+
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress}>
+    <TouchableOpacity style={styles.card} onPress={onPress} accessibilityRole="button" accessibilityLabel={apprenticeship.title}>
       <View style={styles.cardHeader}>
         <View style={styles.logoPlaceholder}>
-          {apprenticeship.organization.logo ? (
-            <Text style={styles.logoText}>
-              {apprenticeship.organization.name.charAt(0)}
-            </Text>
+          {org ? (
+            <Text style={styles.logoText}>{org.name.charAt(0)}</Text>
           ) : (
             <Ionicons name="business" size={24} color="#6b7280" />
           )}
@@ -50,36 +82,44 @@ function ApprenticeshipCard({ apprenticeship, onPress }: ApprenticeshipCardProps
           <Text style={styles.cardTitle} numberOfLines={2}>
             {apprenticeship.title}
           </Text>
-          <Text style={styles.cardCompany}>{apprenticeship.organization.name}</Text>
+          <Text style={styles.cardCompany}>{org?.name ?? 'Provider to be confirmed'}</Text>
         </View>
+        <TouchableOpacity
+          onPress={onToggleBookmark}
+          accessibilityRole="button"
+          accessibilityLabel={apprenticeship.isBookmarked ? 'Remove bookmark' : 'Bookmark'}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name={apprenticeship.isBookmarked ? 'bookmark' : 'bookmark-outline'} size={22} color="#6366f1" />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.cardDetails}>
         <View style={styles.detailRow}>
           <Ionicons name="location-outline" size={16} color="#6b7280" />
-          <Text style={styles.detailText}>{apprenticeship.location}</Text>
+          <Text style={styles.detailText}>{place(apprenticeship)}</Text>
         </View>
         <View style={styles.detailRow}>
           <Ionicons name="time-outline" size={16} color="#6b7280" />
-          <Text style={styles.detailText}>{apprenticeship.duration}</Text>
+          <Text style={styles.detailText}>{apprenticeship.durationMonths} months</Text>
         </View>
         <View style={styles.detailRow}>
-          <Ionicons name="briefcase-outline" size={16} color="#6b7280" />
-          <Text style={styles.detailText}>{apprenticeship.type}</Text>
+          <Ionicons name="ribbon-outline" size={16} color="#6b7280" />
+          <Text style={styles.detailText}>{apprenticeshipLevelLabel(apprenticeship.level)}</Text>
         </View>
-        {apprenticeship.salary && (
+        {pay && (
           <View style={styles.detailRow}>
             <Ionicons name="cash-outline" size={16} color="#6b7280" />
-            <Text style={styles.detailText}>{apprenticeship.salary}</Text>
+            <Text style={styles.detailText}>{pay}</Text>
           </View>
         )}
       </View>
 
       <View style={styles.cardFooter}>
         <View style={styles.industryBadge}>
-          <Text style={styles.industryText}>{apprenticeship.industry}</Text>
+          <Text style={styles.industryText}>{apprenticeship.framework}</Text>
         </View>
-        <Text style={styles.postedDate}>{formatDate(apprenticeship.postedAt)}</Text>
+        <Text style={styles.postedDate}>{formatDate(apprenticeship.publishedAt ?? apprenticeship.createdAt)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -98,7 +138,7 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
 
   const handleSubmit = () => {
     if (!coverLetter.trim()) {
-      Alert.alert('Error', 'Please write a cover letter');
+      Alert.alert('Almost there', 'Tell them a little about why this apprenticeship is for you.');
       return;
     }
     onSubmit(coverLetter.trim());
@@ -112,7 +152,7 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Apply to Apprenticeship</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
               <Ionicons name="close" size={24} color="#374151" />
             </TouchableOpacity>
           </View>
@@ -120,12 +160,15 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
           <ScrollView style={styles.modalBody}>
             <View style={styles.apprenticeshipSummary}>
               <Text style={styles.summaryTitle}>{apprenticeship.title}</Text>
-              <Text style={styles.summaryCompany}>{apprenticeship.organization.name}</Text>
-              <Text style={styles.summaryLocation}>{apprenticeship.location}</Text>
+              <Text style={styles.summaryCompany}>{organisation(apprenticeship)?.name ?? apprenticeship.framework}</Text>
+              <Text style={styles.summaryLocation}>{place(apprenticeship)}</Text>
+              {apprenticeship.description ? (
+                <Text style={styles.summaryDescription} numberOfLines={6}>{apprenticeship.description}</Text>
+              ) : null}
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Cover Letter *</Text>
+              <Text style={styles.label} nativeID="coverLetterLabel">Cover Letter *</Text>
               <TextInput
                 style={styles.coverLetterInput}
                 value={coverLetter}
@@ -135,26 +178,24 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
                 multiline
                 numberOfLines={8}
                 textAlignVertical="top"
+                maxLength={2000}
+                accessibilityLabelledBy="coverLetterLabel"
               />
               <Text style={styles.charCount}>{coverLetter.length}/2000</Text>
             </View>
 
-            <View style={styles.uploadSection}>
-              <TouchableOpacity style={styles.uploadButton}>
-                <Ionicons name="document-attach-outline" size={24} color="#6366f1" />
-                <Text style={styles.uploadButtonText}>Attach Resume (Optional)</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.resumeNote}>A resume can be attached to your application on the web; it is not needed to apply.</Text>
           </ScrollView>
 
           <View style={styles.modalFooter}>
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onClose} accessibilityRole="button">
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.submitButton, loading && styles.submitButtonDisabled]}
               onPress={handleSubmit}
               disabled={loading}
+              accessibilityRole="button"
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
@@ -171,26 +212,27 @@ function ApplicationModal({ visible, apprenticeship, onClose, onSubmit, loading 
 
 export function ApprenticeshipsScreen() {
   const [apprenticeships, setApprenticeships] = useState<Apprenticeship[]>([]);
+  const [frameworks, setFrameworks] = useState<ApprenticeshipFramework[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
+  const [submittedSearch, setSubmittedSearch] = useState('');
+  const [selectedFramework, setSelectedFramework] = useState<string | null>(null);
   const [selectedApprenticeship, setSelectedApprenticeship] = useState<Apprenticeship | null>(null);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [applying, setApplying] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  const INDUSTRIES = [
-    'All',
-    'Technology',
-    'Healthcare',
-    'Finance',
-    'Education',
-    'Manufacturing',
-    'Retail',
-    'Creative',
-  ];
+  useEffect(() => {
+    apprenticeshipApi
+      .getCategories()
+      .then((res) => {
+        const data = unwrapApiData<{ frameworks?: ApprenticeshipFramework[] }>(res.data);
+        setFrameworks(Array.isArray(data?.frameworks) ? data.frameworks : []);
+      })
+      .catch((error) => console.error('Failed to fetch apprenticeship categories:', error));
+  }, []);
 
   const fetchApprenticeships = useCallback(async (pageNum: number, isRefresh = false) => {
     try {
@@ -199,18 +241,17 @@ export function ApprenticeshipsScreen() {
 
       const response = await apprenticeshipApi.getList({
         page: pageNum,
-        industry: selectedIndustry && selectedIndustry !== 'All' ? selectedIndustry : undefined,
+        limit: PAGE_SIZE,
+        framework: selectedFramework ?? undefined,
+        search: submittedSearch || undefined,
       });
 
-      const newItems = response.data.data?.apprenticeships || [];
+      const list = unwrapApiData<Apprenticeship[]>(response.data);
+      const newItems = Array.isArray(list) ? list : [];
+      const pages: number | undefined = response.data?.pagination?.pages;
 
-      if (isRefresh || pageNum === 1) {
-        setApprenticeships(newItems);
-      } else {
-        setApprenticeships(prev => [...prev, ...newItems]);
-      }
-
-      setHasMore(newItems.length === 10);
+      setApprenticeships((prev) => (isRefresh || pageNum === 1 ? newItems : [...prev, ...newItems]));
+      setHasMore(typeof pages === 'number' ? pageNum < pages : newItems.length === PAGE_SIZE);
       setPage(pageNum);
     } catch (error) {
       console.error('Failed to fetch apprenticeships:', error);
@@ -218,7 +259,7 @@ export function ApprenticeshipsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedIndustry]);
+  }, [selectedFramework, submittedSearch]);
 
   useEffect(() => {
     fetchApprenticeships(1);
@@ -240,14 +281,26 @@ export function ApprenticeshipsScreen() {
     try {
       setApplying(true);
       await apprenticeshipApi.apply(selectedApprenticeship.id, { coverLetter });
-      Alert.alert('Success', 'Your application has been submitted!');
+      Alert.alert('Application sent', 'The provider has your application. You can follow it under My Applications on the web.');
       setShowApplicationModal(false);
       setSelectedApprenticeship(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to apply:', error);
-      Alert.alert('Error', 'Failed to submit application. Please try again.');
+      Alert.alert('Not sent', error?.response?.data?.message || 'We could not submit your application. Please try again.');
     } finally {
       setApplying(false);
+    }
+  };
+
+  const toggleBookmark = async (item: Apprenticeship) => {
+    const next = !item.isBookmarked;
+    setApprenticeships((prev) => prev.map((a) => (a.id === item.id ? { ...a, isBookmarked: next } : a)));
+    try {
+      if (next) await apprenticeshipApi.bookmark(item.id);
+      else await apprenticeshipApi.unbookmark(item.id);
+    } catch (error) {
+      setApprenticeships((prev) => prev.map((a) => (a.id === item.id ? { ...a, isBookmarked: !next } : a)));
+      console.error('Failed to update bookmark:', error);
     }
   };
 
@@ -256,11 +309,10 @@ export function ApprenticeshipsScreen() {
     setShowApplicationModal(true);
   };
 
-  const filteredApprenticeships = apprenticeships.filter(a =>
-    searchQuery === '' ||
-    a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.organization.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const chips: Array<{ key: string | null; label: string }> = [
+    { key: null, label: 'All' },
+    ...frameworks.map((f) => ({ key: f.name, label: f.count > 0 ? `${f.name} (${f.count})` : f.name })),
+  ];
 
   return (
     <View style={styles.container}>
@@ -271,45 +323,50 @@ export function ApprenticeshipsScreen() {
           style={styles.searchInput}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          onSubmitEditing={() => setSubmittedSearch(searchQuery.trim())}
+          returnKeyType="search"
           placeholder="Search apprenticeships..."
           placeholderTextColor="#9ca3af"
+          accessibilityLabel="Search apprenticeships"
         />
         {searchQuery !== '' && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
+          <TouchableOpacity
+            onPress={() => {
+              setSearchQuery('');
+              setSubmittedSearch('');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
             <Ionicons name="close-circle" size={20} color="#9ca3af" />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Industry Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {INDUSTRIES.map((industry) => (
-          <TouchableOpacity
-            key={industry}
-            style={[
-              styles.filterChip,
-              (selectedIndustry === industry || (industry === 'All' && !selectedIndustry)) &&
-                styles.filterChipActive,
-            ]}
-            onPress={() => setSelectedIndustry(industry === 'All' ? null : industry)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                (selectedIndustry === industry || (industry === 'All' && !selectedIndustry)) &&
-                  styles.filterChipTextActive,
-              ]}
-            >
-              {industry}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Framework Filter */}
+      {chips.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterContainer}
+          contentContainerStyle={styles.filterContent}
+        >
+          {chips.map((chip) => {
+            const active = selectedFramework === chip.key;
+            return (
+              <TouchableOpacity
+                key={chip.key ?? 'all'}
+                style={[styles.filterChip, active && styles.filterChipActive]}
+                onPress={() => setSelectedFramework(chip.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{chip.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
 
       {/* Apprenticeship List */}
       {loading && apprenticeships.length === 0 ? (
@@ -318,12 +375,13 @@ export function ApprenticeshipsScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredApprenticeships}
+          data={apprenticeships}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <ApprenticeshipCard
               apprenticeship={item}
               onPress={() => openApplication(item)}
+              onToggleBookmark={() => toggleBookmark(item)}
             />
           )}
           contentContainerStyle={styles.listContent}
@@ -339,8 +397,8 @@ export function ApprenticeshipsScreen() {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="school-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>No apprenticeships found</Text>
-              <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
+              <Text style={styles.emptyText}>No open apprenticeships match</Text>
+              <Text style={styles.emptySubtext}>Try another training package or clear your search.</Text>
             </View>
           }
         />
@@ -442,6 +500,7 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     marginBottom: 12,
+    alignItems: 'flex-start',
   },
   logoPlaceholder: {
     width: 48,
@@ -459,6 +518,7 @@ const styles = StyleSheet.create({
   },
   cardHeaderInfo: {
     flex: 1,
+    marginRight: 8,
   },
   cardTitle: {
     fontSize: 16,
@@ -498,6 +558,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 4,
+    flexShrink: 1,
   },
   industryText: {
     fontSize: 12,
@@ -514,16 +575,19 @@ const styles = StyleSheet.create({
   emptyContainer: {
     alignItems: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 24,
   },
   emptyText: {
     fontSize: 18,
     color: '#6b7280',
     marginTop: 16,
+    textAlign: 'center',
   },
   emptySubtext: {
     fontSize: 14,
     color: '#9ca3af',
     marginTop: 4,
+    textAlign: 'center',
   },
   // Modal
   modalOverlay: {
@@ -574,6 +638,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6b7280',
   },
+  summaryDescription: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#4b5563',
+    lineHeight: 19,
+  },
   formGroup: {
     marginBottom: 16,
   },
@@ -599,24 +669,11 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 4,
   },
-  uploadSection: {
+  resumeNote: {
+    fontSize: 12,
+    color: '#9ca3af',
     marginBottom: 20,
-  },
-  uploadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    gap: 8,
-  },
-  uploadButtonText: {
-    fontSize: 14,
-    color: '#6366f1',
-    fontWeight: '500',
+    lineHeight: 18,
   },
   modalFooter: {
     flexDirection: 'row',

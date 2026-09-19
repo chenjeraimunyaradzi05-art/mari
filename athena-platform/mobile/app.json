@@ -65,9 +65,6 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "apiUrl": "https://api.athena.com"
-    },
     "plugins": [
       "expo-localization",
       "expo-secure-store",

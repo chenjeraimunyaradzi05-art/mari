@@ -1,7 +1,13 @@
 /**
- * Profile Screen
+ * Profile: who the member is, her two real counts, and her own settings.
+ * Everything else (the pillars, groups, mentors, help) lives under More.
+ *
+ * The counts are the lengths of GET /jobs/me/applications and
+ * GET /jobs/me/saved. Until they load, or if they fail, the tile shows a dash
+ * rather than a number nobody measured; the server keeps no profile-view
+ * counter, so there is no third tile.
  */
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -11,14 +17,40 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
+import { userApi, unwrapApiData } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
+
+type Counts = { applications: number | null; saved: number | null };
 
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, logout } = useAuth();
+  const [counts, setCounts] = useState<Counts>({ applications: null, saved: null });
+
+  // Re-read on every visit, so unsaving a job on the saved list is reflected
+  // when the member comes back.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        const [applications, saved] = await Promise.all([
+          userApi.getApplications().then((r) => unwrapApiData<unknown[]>(r.data)).catch(() => null),
+          userApi.getSavedJobs().then((r) => unwrapApiData<unknown[]>(r.data)).catch(() => null),
+        ]);
+        if (cancelled) return;
+        setCounts({
+          applications: Array.isArray(applications) ? applications.length : null,
+          saved: Array.isArray(saved) ? saved.length : null,
+        });
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -30,15 +62,11 @@ export function ProfileScreen() {
   const menuItems = [
     { icon: 'document-text-outline', label: 'My Applications', onPress: () => navigation.navigate('Applications') },
     { icon: 'bookmark-outline', label: 'Saved Jobs', onPress: () => navigation.navigate('SavedJobs') },
-    { icon: 'people-outline', label: 'Groups', onPress: () => navigation.navigate('Groups') },
-    { icon: 'school-outline', label: 'Mentors', onPress: () => navigation.navigate('Mentors') },
-    { icon: 'book-outline', label: 'Learn', onPress: () => navigation.navigate('Learn') },
-    { icon: 'shield-checkmark-outline', label: 'Safety', onPress: () => navigation.navigate('Safety') },
-    { icon: 'sparkles-outline', label: 'Membership', onPress: () => navigation.navigate('Upgrade') },
     { icon: 'notifications-outline', label: 'Notifications', onPress: () => navigation.navigate('Notifications') },
     { icon: 'settings-outline', label: 'Settings', onPress: () => navigation.navigate('Settings') },
-    { icon: 'help-circle-outline', label: 'Help & Support', onPress: () => navigation.navigate('HelpSupport') },
   ];
+
+  const stat = (value: number | null) => (value == null ? '—' : String(value));
 
   return (
     <ScrollView style={styles.container}>
@@ -56,20 +84,15 @@ export function ProfileScreen() {
       </View>
 
       <View style={styles.statsContainer}>
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>12</Text>
+        <TouchableOpacity style={styles.statItem} onPress={() => navigation.navigate('Applications')} accessibilityRole="button" accessibilityLabel="My applications">
+          <Text style={styles.statValue}>{stat(counts.applications)}</Text>
           <Text style={styles.statLabel}>Applications</Text>
-        </View>
+        </TouchableOpacity>
         <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>5</Text>
+        <TouchableOpacity style={styles.statItem} onPress={() => navigation.navigate('SavedJobs')} accessibilityRole="button" accessibilityLabel="Saved jobs">
+          <Text style={styles.statValue}>{stat(counts.saved)}</Text>
           <Text style={styles.statLabel}>Saved Jobs</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>128</Text>
-          <Text style={styles.statLabel}>Profile Views</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.menuContainer}>
@@ -85,6 +108,8 @@ export function ProfileScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      <Text style={styles.moreHint}>Wellness, cars, money plans, groups, mentors and help are under the More tab.</Text>
 
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={22} color="#ef4444" />
@@ -151,6 +176,7 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
+    flex: 1,
   },
   statValue: {
     fontSize: 24,
@@ -183,6 +209,13 @@ const styles = StyleSheet.create({
     marginLeft: 15,
     fontSize: 16,
     color: '#333',
+  },
+  moreHint: {
+    marginTop: 12,
+    marginHorizontal: 20,
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
   },
   logoutButton: {
     flexDirection: 'row',

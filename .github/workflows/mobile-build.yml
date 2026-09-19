@@ -60,6 +60,12 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # The same static walk the server and web run: every api.<verb>('/path')
+      # under mobile/src must match a route the server mounts. It needs no
+      # server dependencies, only its source tree, which the checkout has.
+      - name: API contract check (mobile against server routes)
+        run: node ../server/scripts/check-api-contract.js
+
   # EAS builds cost real build minutes, so a pull request stops at the type
   # check. Merges and manual runs are what actually produce a binary.
   preflight:

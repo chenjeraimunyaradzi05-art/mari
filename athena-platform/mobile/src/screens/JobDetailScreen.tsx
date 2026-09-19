@@ -13,27 +13,29 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useRoute } from '@react-navigation/native';
-import { jobsApi } from '../services/api';
+import { jobsApi, userApi, unwrapApiData } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 interface JobDetail {
   id: string;
   title: string;
   description: string;
-  city?: string;
-  state?: string;
+  city?: string | null;
+  state?: string | null;
   isRemote: boolean;
-  salaryMin?: number;
-  salaryMax?: number;
-  salaryType?: string;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  salaryType?: string | null;
   type: string;
-  experienceMin?: number;
-  experienceMax?: number;
+  experienceMin?: number | null;
+  experienceMax?: number | null;
+  /** Attached for a signed-in viewer. */
+  hasApplied?: boolean;
   organization: {
     name: string;
-    description?: string;
-    industry?: string;
-    size?: string;
+    description?: string | null;
+    industry?: string | null;
+    size?: string | null;
   };
 }
 
@@ -44,6 +46,7 @@ export function JobDetailScreen() {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
+  const [hasApplied, setHasApplied] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
 
   useEffect(() => {
@@ -52,8 +55,20 @@ export function JobDetailScreen() {
 
   const fetchJob = async () => {
     try {
-      const response = await jobsApi.get(jobId);
-      setJob(response.data.job);
+      // GET /jobs/:id answers { success, data: job }. The detail does not say
+      // whether the job is bookmarked, so the saved list is read alongside it
+      // rather than starting the bookmark as "not saved" for everyone.
+      const [jobRes, savedRes] = await Promise.all([
+        jobsApi.get(jobId),
+        userApi.getSavedJobs().catch(() => null),
+      ]);
+      const detail = unwrapApiData<JobDetail>(jobRes.data);
+      setJob(detail ?? null);
+      setHasApplied(!!detail?.hasApplied);
+      if (savedRes) {
+        const saved = unwrapApiData<Array<{ id: string }>>(savedRes.data);
+        setIsSaved(Array.isArray(saved) && saved.some((s) => s.id === jobId));
+      }
     } catch (error) {
       console.error('Failed to fetch job:', error);
       Alert.alert('Error', 'Failed to load job details');
@@ -79,6 +94,7 @@ export function JobDetailScreen() {
     setIsApplying(true);
     try {
       await jobsApi.apply(jobId, {});
+      setHasApplied(true);
       Alert.alert('Success', 'Your application has been submitted!');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to apply');
@@ -179,7 +195,12 @@ export function JobDetailScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          accessibilityRole="button"
+          accessibilityLabel={isSaved ? 'Remove from saved jobs' : 'Save job'}
+        >
           <Ionicons
             name={isSaved ? 'bookmark' : 'bookmark-outline'}
             size={24}
@@ -187,12 +208,13 @@ export function JobDetailScreen() {
           />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.applyButton, isApplying && styles.buttonDisabled]}
+          style={[styles.applyButton, (isApplying || hasApplied) && styles.buttonDisabled]}
           onPress={handleApply}
-          disabled={isApplying}
+          disabled={isApplying || hasApplied}
+          accessibilityRole="button"
         >
           <Text style={styles.applyButtonText}>
-            {isApplying ? 'Applying...' : 'Apply Now'}
+            {hasApplied ? 'Applied' : isApplying ? 'Applying...' : 'Apply Now'}
           </Text>
         </TouchableOpacity>
       </View>

@@ -1,7 +1,16 @@
 /**
  * Mobile Stores Index
  * Phase 5: Mobile Parity
- * 
+ *
+ * NOT WIRED. Nothing in the app imports this directory. Auth state lives in
+ * context/AuthContext.tsx, and every screen keeps its own list state next to
+ * the services/api.ts helper it calls; these Zustand stores describe an app
+ * that was never assembled and carry the same stale endpoints as ../hooks.
+ * A new screen must not build on them. Kept compiling under tsc rather than
+ * deleted, following the supersession-header convention in
+ * server/src/routes/salary.routes.ts; server/scripts/check-api-contract.js
+ * skips this directory for the same reason.
+ *
  * Central export for all Zustand stores
  */
 
