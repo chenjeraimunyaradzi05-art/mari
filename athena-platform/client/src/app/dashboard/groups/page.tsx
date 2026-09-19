@@ -13,6 +13,8 @@ type Group = {
   privacy: 'public' | 'private';
   memberCount: number;
   isMember: boolean;
+  /** For a private group she asked to join: where that request stands. */
+  joinRequestStatus?: 'pending' | 'approved' | 'denied' | null;
 };
 
 export default function GroupsPage() {
@@ -138,11 +140,15 @@ export default function GroupsPage() {
               <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
                 <Users className="w-4 h-4" />
                 <span>{g.memberCount} members</span>
-                {g.isMember && (
+                {g.isMember ? (
                   <span className="ml-auto text-xs px-2 py-1 rounded-full bg-primary-50 text-primary-700 border border-primary-100">
                     Joined
                   </span>
-                )}
+                ) : g.joinRequestStatus === 'pending' ? (
+                  <span className="ml-auto text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
+                    Requested
+                  </span>
+                ) : null}
               </div>
             </Link>
           ))

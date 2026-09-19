@@ -2,12 +2,14 @@
 
 /**
  * A group's chat room: the running conversation beside its posts. Members
- * read and send; a moderator pins and removes. The room refreshes every few
- * seconds while open, which is enough for a group's pace; live delivery over
- * the socket can follow.
+ * read and send; a moderator pins and removes. New messages arrive over the
+ * socket (the room is joined while the chat is open; the server checks
+ * membership), with a slow poll as the safety net and a faster one when
+ * there is no socket. History opens on the latest hundred messages and
+ * "Load earlier" walks back from there.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -15,6 +17,7 @@ import { format, isToday } from 'date-fns';
 import { Loader2, Pin, PinOff, Reply, Send, Trash2, X } from 'lucide-react';
 import { groupsApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
+import { useSocket } from '@/lib/hooks/use-socket';
 import { renderSocialText } from '@/lib/social-text';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
@@ -30,7 +33,14 @@ type ChatMessage = {
   replyTo?: { id: string; content: string; senderId: string } | null;
 };
 
-const REFRESH_MS = 8000;
+type ChatPage = { messages: ChatMessage[]; hasMore: boolean };
+type Held = { groupId: string; messages: ChatMessage[]; hasEarlier: boolean | null };
+
+const POLL_MS = 8000;
+/** With a live socket the poll is only a safety net. */
+const LIVE_POLL_MS = 60000;
+const PAGE_SIZE = 100;
+
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
@@ -39,23 +49,67 @@ function senderName(message: ChatMessage, selfId?: string): string {
   return message.sender?.displayName?.trim() || 'Member';
 }
 
+/** The server answers `{ messages, hasMore }`; an older shape was a bare list. */
+function readPage(response: { data?: { data?: unknown } }): ChatPage {
+  const payload = response.data?.data;
+  if (Array.isArray(payload)) return { messages: payload as ChatMessage[], hasMore: false };
+  const page = (payload ?? {}) as { messages?: unknown; hasMore?: unknown };
+  return {
+    messages: Array.isArray(page.messages) ? (page.messages as ChatMessage[]) : [],
+    hasMore: page.hasMore === true,
+  };
+}
+
+const byTime = (a: ChatMessage, b: ChatMessage) => a.createdAt.localeCompare(b.createdAt);
+
+/**
+ * Folds a fetched page into what is held. Anything the page covers by time
+ * but no longer contains was removed, so it goes too: that is how a poll
+ * notices a deletion without a separate event.
+ */
+function mergePage(held: ChatMessage[], page: ChatMessage[]): ChatMessage[] {
+  if (page.length === 0) return held;
+  const ids = new Set(page.map((message) => message.id));
+  const from = page[0].createdAt;
+  const to = page[page.length - 1].createdAt;
+  const kept = held.filter((message) => !ids.has(message.id) && (message.createdAt < from || message.createdAt > to));
+  return [...kept, ...page].sort(byTime);
+}
+
+function upsertMessage(held: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  return [...held.filter((m) => m.id !== message.id), message].sort(byTime);
+}
+
 export function GroupChat({ groupId, canModerate }: { groupId: string; canModerate: boolean }) {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
+  const { socket, connected } = useSocket();
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [held, setHeld] = useState<Held>({ groupId, messages: [], hasEarlier: null });
   const endRef = useRef<HTMLDivElement>(null);
 
-  const messages = useQuery({
+  const latest = useQuery({
     queryKey: ['group-chat', groupId],
-    queryFn: () => groupsApi.chatMessages(groupId, { limit: 100 }),
-    refetchInterval: REFRESH_MS,
-    select: (response) => {
-      const payload = response.data?.data;
-      const list = Array.isArray(payload?.messages) ? payload.messages : Array.isArray(payload) ? payload : [];
-      return list as ChatMessage[];
-    },
+    queryFn: () => groupsApi.chatMessages(groupId, { limit: PAGE_SIZE }),
+    refetchInterval: connected ? LIVE_POLL_MS : POLL_MS,
+    select: readPage,
   });
+
+  // Every fetch of the latest page folds into the history held here, so
+  // earlier pages and live messages survive a refetch.
+  const latestPage = latest.data;
+  useEffect(() => {
+    if (!latestPage) return;
+    setHeld((prev) => {
+      const base: Held = prev.groupId === groupId ? prev : { groupId, messages: [], hasEarlier: null };
+      return {
+        groupId,
+        messages: mergePage(base.messages, latestPage.messages),
+        hasEarlier: base.hasEarlier ?? latestPage.hasMore,
+      };
+    });
+  }, [latestPage, groupId]);
 
   const pinned = useQuery({
     queryKey: ['group-chat-pinned', groupId],
@@ -63,16 +117,65 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
     select: (response) => (Array.isArray(response.data?.data) ? (response.data.data as ChatMessage[]) : []),
   });
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['group-chat', groupId] });
     queryClient.invalidateQueries({ queryKey: ['group-chat-pinned', groupId] });
-  };
+  }, [queryClient, groupId]);
+
+  // Live delivery: join the room while the chat is open, leave on the way out.
+  useEffect(() => {
+    if (!socket || !connected) return;
+
+    const onMessage = (payload: { groupId?: string; message?: ChatMessage }) => {
+      if (payload?.groupId !== groupId || !payload.message?.id) return;
+      const message = payload.message;
+      setHeld((prev) => (prev.groupId === groupId ? { ...prev, messages: upsertMessage(prev.messages, message) } : prev));
+    };
+    const onRemoved = (payload: { groupId?: string; messageId?: string }) => {
+      if (payload?.groupId !== groupId || !payload.messageId) return;
+      const gone = payload.messageId;
+      setHeld((prev) => ({ ...prev, messages: prev.messages.filter((m) => m.id !== gone) }));
+      queryClient.invalidateQueries({ queryKey: ['group-chat-pinned', groupId] });
+    };
+    const onPinned = (payload: { groupId?: string }) => {
+      if (payload?.groupId === groupId) refresh();
+    };
+
+    socket.on('groups:message', onMessage);
+    socket.on('groups:message_removed', onRemoved);
+    socket.on('groups:message_pinned', onPinned);
+    socket.emit('groups:join', groupId);
+
+    return () => {
+      socket.off('groups:message', onMessage);
+      socket.off('groups:message_removed', onRemoved);
+      socket.off('groups:message_pinned', onPinned);
+      if (socket.connected) socket.emit('groups:leave', groupId);
+    };
+  }, [socket, connected, groupId, queryClient, refresh]);
+
+  const loadEarlier = useMutation({
+    mutationFn: (before: string) => groupsApi.chatMessages(groupId, { before, limit: PAGE_SIZE }),
+    onSuccess: (response) => {
+      const page = readPage(response);
+      setHeld((prev) => ({
+        groupId,
+        messages: mergePage(prev.groupId === groupId ? prev.messages : [], page.messages),
+        hasEarlier: page.hasMore,
+      }));
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not load earlier messages'),
+  });
 
   const send = useMutation({
     mutationFn: (data: { content: string; replyToId?: string }) => groupsApi.sendChatMessage(groupId, data),
-    onSuccess: () => {
+    onSuccess: (response) => {
       setDraft('');
       setReplyTo(null);
+      const message = (response as { data?: { data?: ChatMessage } })?.data?.data;
+      if (message?.id && message.createdAt) {
+        setHeld((prev) => (prev.groupId === groupId ? { ...prev, messages: upsertMessage(prev.messages, message) } : prev));
+      }
       refresh();
     },
     onError: (error) => toast.error(errorMessage(error) || 'Could not send that'),
@@ -80,7 +183,10 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
 
   const remove = useMutation({
     mutationFn: (messageId: string) => groupsApi.deleteChatMessage(groupId, messageId),
-    onSuccess: refresh,
+    onSuccess: (_res, messageId) => {
+      setHeld((prev) => ({ ...prev, messages: prev.messages.filter((m) => m.id !== messageId) }));
+      refresh();
+    },
     onError: (error) => toast.error(errorMessage(error) || 'Could not remove that message'),
   });
 
@@ -93,11 +199,19 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
     onError: (error) => toast.error(errorMessage(error) || 'Could not change the pin'),
   });
 
-  const list = useMemo(() => (messages.data ?? []).filter((m) => !m.deletedAt), [messages.data]);
-  const count = list.length;
+  const list = useMemo(
+    () => (held.groupId === groupId ? held.messages : []).filter((m) => !m.deletedAt),
+    [held, groupId]
+  );
+  const newestId = list[list.length - 1]?.id;
+  // Scroll to the end for a new message, not when older ones are added above.
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
-  }, [count]);
+  }, [newestId]);
+
+  const oldest = list[0];
+  const canLoadEarlier = held.groupId === groupId && held.hasEarlier === true && !!oldest;
+  const loading = latest.isLoading && list.length === 0;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -124,11 +238,23 @@ export function GroupChat({ groupId, canModerate }: { groupId: string; canModera
       )}
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        {messages.isLoading ? (
+        {canLoadEarlier && (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => loadEarlier.mutate(oldest.createdAt)}
+              disabled={loadEarlier.isPending}
+              className="text-xs font-medium text-primary-700 hover:underline disabled:opacity-60 dark:text-primary-300"
+            >
+              {loadEarlier.isPending ? 'Loading…' : 'Load earlier'}
+            </button>
+          </div>
+        )}
+        {loading ? (
           <div className="flex justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
           </div>
-        ) : messages.isError ? (
+        ) : latest.isError && list.length === 0 ? (
           <p className="py-8 text-center text-sm text-slate-500">Could not load the chat.</p>
         ) : list.length === 0 ? (
           <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">Nothing here yet. Say hello.</p>

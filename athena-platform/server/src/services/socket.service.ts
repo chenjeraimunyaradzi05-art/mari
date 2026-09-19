@@ -355,6 +355,38 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         .emit('channels:user_stopped_typing', { channelId, userId });
     });
 
+    // ==========================================
+    // GROUP CHAT HANDLERS
+    // ==========================================
+
+    // A group's chat room is for its members: GroupMember decides, and a
+    // banned row is not a member. The REST chat routes broadcast into the
+    // room (groups:message, groups:message_removed, groups:message_pinned).
+    socket.on('groups:join', async (groupId: string) => {
+      try {
+        if (typeof groupId !== 'string' || !groupId) return;
+
+        const membership = await prisma.groupMember.findUnique({
+          where: { groupId_userId: { groupId, userId } },
+          select: { isBanned: true },
+        });
+        if (!membership || membership.isBanned) {
+          socket.emit('groups:error', { groupId, message: 'Not a member of this group' });
+          return;
+        }
+
+        socket.join(getGroupRoomId(groupId));
+        logger.debug('User joined group room', { userId, groupId });
+      } catch (error) {
+        logger.error('Failed to join group room', { error, groupId });
+      }
+    });
+
+    socket.on('groups:leave', (groupId: string) => {
+      if (typeof groupId !== 'string' || !groupId) return;
+      socket.leave(getGroupRoomId(groupId));
+    });
+
     socket.on('messages:mark_read', async (senderId: string) => {
       try {
         if (typeof senderId !== 'string' || !senderId) return;
@@ -554,6 +586,20 @@ export function emitToChannel(channelId: string, event: string, payload: unknown
     return;
   }
   ioInstance.to(getChannelRoomId(channelId)).emit(event, payload);
+}
+
+export function getGroupRoomId(groupId: string): string {
+  return `group:${groupId}`;
+}
+
+// The group chat routes push new, removed and pinned messages to everyone
+// with the room open, without importing `io` from index.ts (as emitToChannel).
+export function emitToGroupRoom(groupId: string, event: string, payload: unknown): void {
+  if (!ioInstance) {
+    logger.debug('Socket.IO not initialized, skipping group broadcast', { groupId, event });
+    return;
+  }
+  ioInstance.to(getGroupRoomId(groupId)).emit(event, payload);
 }
 
 // Same reason as emitToChannel: the REST message routes need to push without

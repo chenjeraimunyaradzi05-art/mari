@@ -38,6 +38,8 @@ type Group = {
   privacy?: string | null;
   memberCount?: number | null;
   isMember?: boolean | null;
+  /** For a private group she asked to join: where that request stands. */
+  joinRequestStatus?: 'pending' | 'approved' | 'denied' | null;
 };
 
 /** Deterministic tile colours, matching the home rail so a group looks the same in both places. */
@@ -193,6 +195,7 @@ export default function CommunitiesPage() {
                 {visible.map((group, index) => {
                   const count = typeof group.memberCount === 'number' ? group.memberCount : null;
                   const isPrivate = (group.privacy ?? '').toLowerCase() === 'private';
+                  const requested = !group.isMember && group.joinRequestStatus === 'pending';
                   return (
                     <li key={group.id}>
                       <Link
@@ -226,11 +229,16 @@ export default function CommunitiesPage() {
                           </span>
                         )}
 
-                        {(group.isMember || isPrivate) && (
+                        {(group.isMember || requested || isPrivate) && (
                           <span className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
                             {group.isMember && (
                               <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
                                 Joined
+                              </span>
+                            )}
+                            {requested && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                                Requested
                               </span>
                             )}
                             {isPrivate && (

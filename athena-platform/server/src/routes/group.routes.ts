@@ -6,15 +6,51 @@ import { decoratePosts } from '../services/post-decoration.service';
 import { assertContentAllowed } from '../services/moderation.service';
 import { enrichPostLinkPreview } from '../services/link-preview.service';
 import { resolveMentionedUserIds } from '../utils/mentions';
-import { notifySocial, socialLinks } from '../utils/social-notifications';
+import { actorDisplayName, notifySocial, socialLinks } from '../utils/social-notifications';
 import { CONTENT_LIMITS, normalizeMediaUrls, normalizeUserText } from '../utils/contentSafety';
 import { postLimiter } from '../middleware/socialLimits';
+import { sendNotification } from '../services/socket.service';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
 type GroupPrivacy = 'public' | 'private';
 type GroupRole = 'admin' | 'moderator' | 'member';
 type DbGroupRole = 'ADMIN' | 'MODERATOR' | 'MEMBER';
+type JoinRequestStatus = 'pending' | 'approved' | 'denied';
+
+const GROUP_NAME_MAX = 100;
+const GROUP_DESCRIPTION_MAX = 2000;
+/** A declined request stays declined for this long before Join re-opens it. */
+const DENIED_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Banned rows stay in GroupMember so the ban outlives leaving; they are not members. */
+const ACTIVE_MEMBER = { isBanned: false } as const;
+
+/**
+ * Group notifications are a courtesy on top of a write that has already
+ * happened, so they are never awaited into the response (the same rule as
+ * notifySocial). A failed row is logged and the request still succeeds.
+ */
+function notifyQuietly(data: Parameters<typeof sendNotification>[0]): void {
+  void sendNotification(data).catch((error) => {
+    logger.warn('Group notification failed', {
+      userId: data.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
+/** Everyone who can act on a join request: the group's admins and moderators. */
+async function notifyGroupStaff(groupId: string, data: Omit<Parameters<typeof sendNotification>[0], 'userId'>): Promise<void> {
+  const staff = await (prisma as any).groupMember.findMany({
+    where: { groupId, role: { in: ['ADMIN', 'MODERATOR'] }, ...ACTIVE_MEMBER },
+    select: { userId: true },
+  });
+  for (const member of staff || []) {
+    notifyQuietly({ ...data, userId: member.userId });
+  }
+}
 
 function dbPrivacyFromParam(privacy: GroupPrivacy): 'PUBLIC' | 'PRIVATE' {
   return privacy === 'private' ? 'PRIVATE' : 'PUBLIC';
@@ -44,23 +80,25 @@ function isDbModeratorOrAdmin(role: any): boolean {
   return r === 'ADMIN' || r === 'MODERATOR';
 }
 
-function dbRoleFromParam(role: GroupRole): DbGroupRole {
-  switch (role) {
-    case 'admin':
-      return 'ADMIN';
-    case 'moderator':
-      return 'MODERATOR';
-    default:
-      return 'MEMBER';
-  }
-}
-
-async function getMembershipRole(groupId: string, userId: string): Promise<DbGroupRole | null> {
+/**
+ * The viewer's GroupMember row, banned or not. A banned row is kept on
+ * purpose (so Join keeps refusing after Leave), which is why the callers that
+ * mean "is she a member" go through getMembershipRole instead.
+ */
+async function getMembership(groupId: string, userId: string): Promise<{ role: DbGroupRole; isBanned: boolean } | null> {
   const membership = await (prisma as any).groupMember.findUnique({
     where: { groupId_userId: { groupId, userId } },
-    select: { role: true },
+    select: { role: true, isBanned: true },
   });
-  return membership?.role ?? null;
+  if (!membership) return null;
+  return { role: membership.role, isBanned: membership.isBanned === true };
+}
+
+/** The viewer's role, or null when she is not a member. A banned row counts as no membership. */
+async function getMembershipRole(groupId: string, userId: string): Promise<DbGroupRole | null> {
+  const membership = await getMembership(groupId, userId);
+  if (!membership || membership.isBanned) return null;
+  return membership.role ?? null;
 }
 
 async function getJoinRequestForUser(groupId: string, userId: string) {
@@ -69,14 +107,37 @@ async function getJoinRequestForUser(groupId: string, userId: string) {
   });
 }
 
+function apiJoinRequestStatus(status: unknown): JoinRequestStatus | null {
+  switch (String(status ?? '').toUpperCase()) {
+    case 'PENDING':
+      return 'pending';
+    case 'APPROVED':
+      return 'approved';
+    case 'DENIED':
+      return 'denied';
+    default:
+      return null;
+  }
+}
+
+/**
+ * What the viewer is told about a group. `joinRequestStatus` is only set for
+ * a non-member, so the page and the list cards can say "Requested" rather
+ * than showing Join again; `adminCount` only for an admin, who needs to know
+ * whether she is the last one before she leaves.
+ */
 async function getGroupView(groupId: string, userId?: string) {
   const include: any = {
-    _count: { select: { members: true } },
+    _count: { select: { members: { where: ACTIVE_MEMBER } } },
   };
   if (userId) {
     include.members = {
       where: { userId },
-      select: { role: true },
+      select: { role: true, isBanned: true },
+    };
+    include.joinRequests = {
+      where: { userId },
+      select: { status: true },
     };
   }
 
@@ -87,7 +148,14 @@ async function getGroupView(groupId: string, userId?: string) {
 
   if (!group) throw new ApiError(404, 'Group not found');
 
-  const membershipRole = userId ? group.members?.[0]?.role : null;
+  const membership = userId ? group.members?.[0] : null;
+  const membershipRole = membership && !membership.isBanned ? membership.role : null;
+  const joinRequestStatus = !membershipRole && userId ? apiJoinRequestStatus(group.joinRequests?.[0]?.status) : null;
+
+  let adminCount: number | undefined;
+  if (membershipRole && isDbAdmin(membershipRole)) {
+    adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
+  }
 
   return {
     id: group.id,
@@ -99,6 +167,9 @@ async function getGroupView(groupId: string, userId?: string) {
     memberCount: group._count?.members ?? 0,
     isMember: !!membershipRole,
     role: membershipRole ? apiRoleFromDb(membershipRole) : null,
+    joinRequestStatus,
+    allowMemberInvites: group.allowMemberInvites !== false,
+    ...(adminCount !== undefined ? { adminCount } : {}),
   };
 }
 
@@ -136,9 +207,11 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         : {}),
     };
 
-    const include: any = { _count: { select: { members: true } } };
+    const include: any = { _count: { select: { members: { where: ACTIVE_MEMBER } } } };
     if (req.user?.id) {
-      include.members = { where: { userId: req.user.id }, select: { role: true } };
+      include.members = { where: { userId: req.user.id }, select: { role: true, isBanned: true } };
+      // So a card can say "Requested" instead of offering Join a second time.
+      include.joinRequests = { where: { userId: req.user.id }, select: { status: true } };
     }
 
     const groups = await (prisma as any).group.findMany({
@@ -149,7 +222,8 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
     });
 
     const visible = (groups || []).map((g: any) => {
-      const membershipRole = req.user?.id ? g.members?.[0]?.role : null;
+      const membership = req.user?.id ? g.members?.[0] : null;
+      const membershipRole = membership && !membership.isBanned ? membership.role : null;
       return {
         id: g.id,
         name: g.name,
@@ -160,6 +234,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         memberCount: g._count?.members ?? 0,
         isMember: !!membershipRole,
         role: membershipRole ? apiRoleFromDb(membershipRole) : null,
+        joinRequestStatus: !membershipRole && req.user?.id ? apiJoinRequestStatus(g.joinRequests?.[0]?.status) : null,
       };
     });
 
@@ -222,25 +297,121 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
 });
 
 /**
+ * PATCH /api/groups/:id
+ * A group's own admins tend its name, description and privacy. Featuring,
+ * pinning and hiding stay with the operator console (admin.routes.ts).
+ */
+router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const group = await ensureVisibleGroup(req.params.id, req.user?.role);
+    const actorRole = await getMembershipRole(group.id, req.user!.id);
+    if (!isDbAdmin(actorRole)) throw new ApiError(403, 'Only group admins can change the group');
+
+    const data: { name?: string; description?: string; privacy?: 'PUBLIC' | 'PRIVATE' } = {};
+    if (req.body?.name !== undefined) {
+      const name = normalizeUserText(req.body.name, { field: 'name', maxLength: GROUP_NAME_MAX });
+      if (name.length < 3) throw new ApiError(400, 'Group name is required');
+      data.name = name;
+    }
+    if (req.body?.description !== undefined) {
+      data.description = normalizeUserText(req.body.description, { field: 'description', maxLength: GROUP_DESCRIPTION_MAX });
+    }
+    if (req.body?.privacy !== undefined) {
+      if (req.body.privacy !== 'public' && req.body.privacy !== 'private') throw new ApiError(400, 'Invalid privacy');
+      data.privacy = dbPrivacyFromParam(req.body.privacy);
+    }
+    if (Object.keys(data).length === 0) throw new ApiError(400, 'Nothing to change');
+
+    await (prisma as any).group.update({ where: { id: group.id }, data });
+    logger.info('Group updated by its admin', { groupId: group.id, actorId: req.user!.id, fields: Object.keys(data) });
+
+    res.json({ success: true, data: await getGroupView(group.id, req.user!.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/groups/:id
+ * Closes the group. Members, join requests and posts cascade with it; the
+ * chat's Conversation row (keyed by the group id) is cleared here because
+ * nothing else links it to the group.
+ */
+router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const group = await ensureVisibleGroup(req.params.id, req.user?.role);
+    const actorRole = await getMembershipRole(group.id, req.user!.id);
+    if (!isDbAdmin(actorRole)) throw new ApiError(403, 'Only group admins can close the group');
+
+    await (prisma as any).group.delete({ where: { id: group.id } });
+    try {
+      await (prisma as any).conversation.deleteMany({ where: { id: group.id } });
+    } catch (error) {
+      // The group is already gone; an orphaned chat row is not worth failing over.
+      logger.warn('Group chat conversation was not removed with its group', {
+        groupId: group.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    logger.info('Group closed by its admin', { groupId: group.id, actorId: req.user!.id });
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/groups/:id/join
  */
 router.post('/:id/join', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
 
+    const membership = await getMembership(group.id, req.user!.id);
+    // A ban outlives leaving: the row is kept so this refuses after Leave too.
+    if (membership?.isBanned) throw new ApiError(403, 'You cannot join this group');
+
     // If already a member, keep existing behavior.
-    const existingRole = await getMembershipRole(group.id, req.user!.id);
-    if (existingRole) {
+    if (membership) {
       return res.json({ success: true, data: await getGroupView(group.id, req.user!.id) });
     }
 
     // Private groups require approval.
     if (String(group.privacy).toUpperCase() === 'PRIVATE') {
+      const existing = await getJoinRequestForUser(group.id, req.user!.id);
+      if (existing && String(existing.status).toUpperCase() === 'PENDING') {
+        return res.status(202).json({ success: true, data: { status: 'pending' } });
+      }
+      // A declined request is not quietly re-opened by pressing Join again.
+      if (existing && String(existing.status).toUpperCase() === 'DENIED' && existing.reviewedAt) {
+        const reopensAt = new Date(existing.reviewedAt).getTime() + DENIED_COOLDOWN_MS;
+        if (reopensAt > Date.now()) {
+          const when = new Date(reopensAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
+          throw new ApiError(400, `Your last request wasn't approved. You can ask again from ${when}.`);
+        }
+      }
+
       const request = await (prisma as any).groupJoinRequest.upsert({
         where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
         update: { status: 'PENDING', reviewedAt: null, reviewedById: null },
         create: { groupId: group.id, userId: req.user!.id, status: 'PENDING' },
       });
+
+      // The admins hear about it now rather than when they next open the group.
+      const requesterId = req.user!.id;
+      void actorDisplayName(requesterId)
+        .then((name) =>
+          notifyGroupStaff(group.id, {
+            type: 'SYSTEM',
+            title: 'Someone asked to join',
+            message: `${name} asked to join ${group.name}`,
+            link: `/dashboard/groups/${group.id}?tab=requests`,
+          })
+        )
+        .catch((error) => {
+          logger.warn('Join-request notification failed', { groupId: group.id, error: error instanceof Error ? error.message : String(error) });
+        });
 
       return res.status(202).json({
         success: true,
@@ -400,6 +571,14 @@ router.post('/:id/join-requests/:requestId/approve', authenticate, async (req: A
       status: 'APPROVED',
     });
 
+    notifyQuietly({
+      userId: updated.userId,
+      type: 'SYSTEM',
+      title: "You're in",
+      message: `Your request to join ${group.name} was approved.`,
+      link: `/dashboard/groups/${group.id}`,
+    });
+
     res.json({ success: true, data: updated });
   } catch (err) {
     next(err);
@@ -423,6 +602,15 @@ router.post('/:id/join-requests/:requestId/deny', authenticate, async (req: Auth
       status: 'DENIED',
     });
 
+    // Told gently, and told at all: silence left her pressing Join again.
+    notifyQuietly({
+      userId: updated.userId,
+      type: 'SYSTEM',
+      title: 'About your request',
+      message: `Your request to join ${group.name} wasn't approved this time.`,
+      link: `/dashboard/groups/${group.id}`,
+    });
+
     res.json({ success: true, data: updated });
   } catch (err) {
     next(err);
@@ -431,10 +619,30 @@ router.post('/:id/join-requests/:requestId/deny', authenticate, async (req: Auth
 
 /**
  * POST /api/groups/:id/leave
+ * The last admin cannot walk out on a group that still has members: nobody
+ * would be left to admit, remove or edit anything. She promotes someone
+ * first, or closes the group if she is the only one in it.
  */
 router.post('/:id/leave', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
+    const membership = await getMembership(group.id, req.user!.id);
+
+    // Not a member: nothing to do. Banned: the row stays, so the ban holds.
+    if (!membership || membership.isBanned) {
+      return res.json({ success: true, data: await getGroupView(group.id, req.user!.id) });
+    }
+
+    if (isDbAdmin(membership.role)) {
+      const others = await (prisma as any).groupMember.count({
+        where: { groupId: group.id, userId: { not: req.user!.id }, ...ACTIVE_MEMBER },
+      });
+      if (others > 0) {
+        const adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
+        if (adminCount <= 1) throw new ApiError(400, 'Make someone else an admin before you leave');
+      }
+    }
+
     try {
       await (prisma as any).groupMember.delete({
         where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
@@ -572,6 +780,12 @@ router.delete('/:id/posts/:postId', authenticate, async (req: AuthRequest, res, 
 /**
  * DELETE /api/groups/:id/members/:userId
  * Moderation: group ADMIN/MODERATOR can remove members (admins only can remove admins)
+ *
+ * This is the handler that serves the path. group-chat.routes.ts declared the
+ * same DELETE for `groupChatService.removeMember`, but this router is mounted
+ * first (index.ts) and responds without next(), so that one never ran and
+ * its "you were removed" notification was never sent. The notification is
+ * sent from here now; the other declaration is retired with a note.
  */
 router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res, next) => {
   try {
@@ -590,7 +804,7 @@ router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res
     }
 
     if (isDbAdmin(targetMembership.role)) {
-      const adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN' } });
+      const adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
       if (adminCount <= 1) throw new ApiError(400, 'Group must have at least one admin');
     }
 
@@ -602,6 +816,15 @@ router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res
       if (err?.code !== 'P2025') throw err;
     }
 
+    if (req.params.userId !== req.user!.id) {
+      notifyQuietly({
+        userId: req.params.userId,
+        type: 'SYSTEM',
+        title: 'Removed from a group',
+        message: `You were removed from ${group.name}.`,
+      });
+    }
+
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -609,43 +832,17 @@ router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res
 });
 
 /**
- * PATCH /api/groups/:id/members/:userId
- * Role management: group ADMIN only
+ * ## Retired: PATCH /api/groups/:id/members/:userId
+ *
+ * This file used to declare a second role-change handler on this path
+ * (ADMIN only, lowercase 'admin' | 'moderator' | 'member' body, with a
+ * last-admin guard). Nothing in the app called it: the Members tab changes
+ * roles through `PATCH /api/groups/:groupId/members/:userId/role` in
+ * group-chat.routes.ts, which takes the uppercase GroupRole and goes through
+ * `groupChatService.updateMemberRole`. Two handlers with two contracts for
+ * one job meant whoever touched roles next would fix one and not the other,
+ * so the guard was moved into the service and this declaration was dropped.
+ * Add role rules to `updateMemberRole`, not here.
  */
-router.patch('/:id/members/:userId', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const group = await ensureVisibleGroup(req.params.id, req.user?.role);
-    const actorRole = await getMembershipRole(group.id, req.user!.id);
-    if (!isDbAdmin(actorRole)) throw new ApiError(403, 'Only group admins can manage roles');
-
-    const roleParam: GroupRole | null = req.body?.role === 'admin' || req.body?.role === 'moderator' || req.body?.role === 'member'
-      ? req.body.role
-      : null;
-    if (!roleParam) throw new ApiError(400, 'Invalid role');
-
-    const newRole = dbRoleFromParam(roleParam);
-
-    const existing = await (prisma as any).groupMember.findUnique({
-      where: { groupId_userId: { groupId: group.id, userId: req.params.userId } },
-      select: { role: true },
-    });
-    if (!existing) throw new ApiError(404, 'Member not found');
-
-    if (isDbAdmin(existing.role) && newRole !== 'ADMIN') {
-      const adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN' } });
-      if (adminCount <= 1) throw new ApiError(400, 'Group must have at least one admin');
-    }
-
-    const member = await (prisma as any).groupMember.update({
-      where: { groupId_userId: { groupId: group.id, userId: req.params.userId } },
-      data: { role: newRole },
-      select: { groupId: true, userId: true, role: true },
-    });
-
-    res.json({ success: true, data: member });
-  } catch (err) {
-    next(err);
-  }
-});
 
 export default router;

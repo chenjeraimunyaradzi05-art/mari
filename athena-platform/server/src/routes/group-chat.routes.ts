@@ -6,7 +6,7 @@
  */
 
 import { Router, Response, NextFunction } from 'express';
-import { groupChatService, validatePermission } from '../services/group-chat.service';
+import { groupChatService, validatePermission, type GroupRole } from '../services/group-chat.service';
 import { chatStorageService } from '../services/chat-storage.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
@@ -18,8 +18,20 @@ import {
   parseOptionalDate,
 } from '../utils/contentSafety';
 import { prisma } from '../utils/prisma';
+import { emitToGroupRoom } from '../services/socket.service';
 
 const router = Router();
+
+const GROUP_ROLES: GroupRole[] = ['ADMIN', 'MODERATOR', 'MEMBER'];
+/** A mute or ban reason is shown to the person it is about, so it is short and plain text. */
+const REASON_MAX = 300;
+
+/** An optional free-text reason from the body, trimmed and bounded; absent when blank. */
+function optionalReason(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const reason = normalizeUserText(raw, { field: 'reason', maxLength: REASON_MAX, allowEmpty: true });
+  return reason || undefined;
+}
 
 /**
  * Group chat messages are Message rows whose conversationId is the group's
@@ -43,6 +55,19 @@ router.get('/:groupId/members', authenticate, async (req: AuthRequest, res: Resp
   try {
     const members = await groupChatService.getGroupMembers(req.params.groupId, req.user!.id);
     res.json({ success: true, data: members });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/groups/:groupId/members/banned
+ * @desc The banned rows, so a ban can be seen and reversed. Admins only.
+ */
+router.get('/:groupId/members/banned', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const banned = await groupChatService.getBannedMembers(req.params.groupId, req.user!.id);
+    res.json({ success: true, data: banned });
   } catch (error) {
     next(error);
   }
@@ -122,7 +147,10 @@ router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res
       replyToId,
       metadata: { groupId, attachments },
     });
-    
+
+    // Everyone with the room open sees it now rather than on the next poll.
+    emitToGroupRoom(groupId, 'groups:message', { groupId, message });
+
     res.json({
       success: true,
       data: message,
@@ -168,28 +196,33 @@ router.get('/:groupId/chat/messages', authenticate, async (req: AuthRequest, res
 
 /**
  * @route POST /api/groups/:groupId/members
- * @desc Add a member to group
- * @access Private (Admin/Moderator)
+ * @desc Add someone to the group by name. Admins and moderators add her
+ *       straight away (200); a member's suggestion in a private group
+ *       becomes a join request for them to approve (202).
+ * @access Private (members with invite rights; the service decides)
  */
 router.post('/:groupId/members', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
-    const { userId, role = 'MEMBER' } = req.body;
-    
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
     if (!userId) {
       throw new ApiError(400, 'userId is required');
     }
-    
-    const member = await groupChatService.addMember(
-      groupId,
-      req.user!.id,
-      userId,
-      role
-    );
-    
+
+    const role: GroupRole = req.body?.role === undefined || req.body?.role === null ? 'MEMBER' : req.body.role;
+    if (!GROUP_ROLES.includes(role)) {
+      throw new ApiError(400, 'Valid role is required');
+    }
+
+    const member = await groupChatService.addMember(groupId, req.user!.id, userId, role);
+
+    if (!member) {
+      res.status(202).json({ success: true, data: { status: 'pending' } });
+      return;
+    }
     res.json({
       success: true,
-      data: member,
+      data: { status: 'added', ...member },
     });
   } catch (error) {
     next(error);
@@ -197,25 +230,18 @@ router.post('/:groupId/members', authenticate, async (req: AuthRequest, res: Res
 });
 
 /**
- * @route DELETE /api/groups/:groupId/members/:userId
- * @desc Remove a member from group
- * @access Private (Admin/Moderator)
+ * ## Retired: DELETE /api/groups/:groupId/members/:userId
+ *
+ * This file used to declare a remove-member handler on this path that called
+ * `groupChatService.removeMember` (role hierarchy, optional reason, a
+ * "removed from group" notification). It never ran: group.routes.ts is
+ * mounted on /api/groups first (index.ts) and its own DELETE on the same
+ * path responds without calling next(), so every request stopped there and
+ * the notification was never sent. The contract check could not see this
+ * because the client call matched both. The live handler in group.routes.ts
+ * now sends the notification; this declaration was dropped so there is one
+ * handler per path. Change removals there, not here.
  */
-router.delete('/:groupId/members/:userId', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { groupId, userId } = req.params;
-    const { reason } = req.body;
-    
-    await groupChatService.removeMember(groupId, req.user!.id, userId, reason);
-    
-    res.json({
-      success: true,
-      message: 'Member removed from group',
-    });
-  } catch (error) {
-    next(error);
-  }
-});
 
 /**
  * @route PATCH /api/groups/:groupId/members/:userId/role
@@ -255,15 +281,12 @@ router.patch('/:groupId/members/:userId/role', authenticate, async (req: AuthReq
 router.post('/:groupId/members/:userId/mute', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, userId } = req.params;
-    const { duration, reason } = req.body;
-    
-    await groupChatService.muteMember(
-      groupId,
-      req.user!.id,
-      userId,
-      duration || 24 * 60 // Default 24 hours
-    );
-    
+    // Default 24 hours; at most 30 days.
+    const duration = parseBoundedInteger(req.body?.duration, 'duration', 24 * 60, 1, 30 * 24 * 60);
+    const reason = optionalReason(req.body?.reason);
+
+    await groupChatService.muteMember(groupId, req.user!.id, userId, duration, reason);
+
     res.json({
       success: true,
       message: 'Member muted',
@@ -301,13 +324,33 @@ router.post('/:groupId/members/:userId/unmute', authenticate, async (req: AuthRe
 router.post('/:groupId/members/:userId/ban', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId, userId } = req.params;
-    const { reason } = req.body;
-    
+    const reason = optionalReason(req.body?.reason);
+
     await groupChatService.banMember(groupId, req.user!.id, userId, reason);
-    
+
     res.json({
       success: true,
       message: 'Member banned from group',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route POST /api/groups/:groupId/members/:userId/unban
+ * @desc Lift a ban so the person can join again
+ * @access Private (Admin)
+ */
+router.post('/:groupId/members/:userId/unban', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { groupId, userId } = req.params;
+
+    await groupChatService.unbanMember(groupId, req.user!.id, userId);
+
+    res.json({
+      success: true,
+      message: 'Ban lifted',
     });
   } catch (error) {
     next(error);
@@ -345,7 +388,9 @@ router.delete('/:groupId/chat/messages/:messageId', authenticate, async (req: Au
     if (!deleted) {
       throw new ApiError(403, 'You are not allowed to delete this message');
     }
-    
+
+    emitToGroupRoom(groupId, 'groups:message_removed', { groupId, messageId });
+
     res.json({
       success: true,
       message: 'Message deleted',
@@ -381,6 +426,8 @@ router.patch('/:groupId/chat/messages/:messageId/pin', authenticate, async (req:
     // { pinned: false } takes a pin down; anything else pins.
     const pinned = req.body?.pinned !== false;
     await chatStorageService.pinMessage(messageId, req.user!.id, pinned);
+
+    emitToGroupRoom(groupId, 'groups:message_pinned', { groupId, messageId, pinned });
 
     res.json({
       success: true,
