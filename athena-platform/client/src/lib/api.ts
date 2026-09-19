@@ -1380,7 +1380,9 @@ export const impactApi = {
 
 export const communitySupportApi = {
   // Support Programs
-  getPrograms: (params?: { communityType?: string; region?: string; active?: boolean }) =>
+  // page/limit are additive: these catalogues are paged server-side (default 50,
+  // maximum 100), so a caller that wants past the first page has to ask for it.
+  getPrograms: (params?: { communityType?: string; region?: string; active?: boolean; page?: number; limit?: number }) =>
     api.get('/community-support/programs', { params }),
 
   getProgram: (id: string) => api.get(`/community-support/programs/${id}`),
@@ -1397,14 +1399,14 @@ export const communitySupportApi = {
   }) => api.patch(`/community-support/enrollments/${enrollmentId}/milestone`, data),
 
   // Indigenous Communities
-  getIndigenousCommunities: (params?: { region?: string; womenOnly?: boolean; verified?: boolean }) =>
+  getIndigenousCommunities: (params?: { region?: string; womenOnly?: boolean; verified?: boolean; page?: number; limit?: number }) =>
     api.get('/community-support/indigenous/communities', { params }),
 
   getIndigenousCommunity: (id: string) => api.get(`/community-support/indigenous/communities/${id}`),
 
   joinIndigenousCommunity: (id: string) => api.post(`/community-support/indigenous/communities/${id}/join`),
 
-  getIndigenousResources: (params?: { type?: string; national?: boolean }) =>
+  getIndigenousResources: (params?: { type?: string; national?: boolean; page?: number; limit?: number }) =>
     api.get('/community-support/indigenous/resources', { params }),
 
   // Language Profile
@@ -1433,7 +1435,7 @@ export const communitySupportApi = {
   }) => api.post('/community-support/credentials', data),
 
   // Bridging Programs
-  getBridgingPrograms: (params?: { profession?: string; region?: string; fundingAvailable?: boolean }) =>
+  getBridgingPrograms: (params?: { profession?: string; region?: string; fundingAvailable?: boolean; page?: number; limit?: number }) =>
     api.get('/community-support/bridging-programs', { params }),
 
   enrollInBridgingProgram: (id: string, data?: { credentialId?: string }) =>

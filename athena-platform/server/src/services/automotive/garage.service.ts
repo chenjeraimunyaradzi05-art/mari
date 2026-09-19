@@ -4,7 +4,8 @@
  * kilometres, registration, insurance, the warranty running out), when
  * each was last sent so nobody is nagged, the next service after a
  * service is logged, and the workshop side: quotes summed line by line,
- * ratings recomputed from completed jobs, the fee on a job paid here.
+ * the booking long enough for the work, and a workshop's own price for it.
+ * Ratings are not here; the routes ask the database to average them.
  */
 
 import { serviceKind } from './automotive-library';
@@ -171,19 +172,13 @@ export function normaliseParts(value: unknown): PartRequest[] {
   return out;
 }
 
-export function recomputeMechanicRating(reviews: Array<{ rating: number; transparency: number; isHidden?: boolean }>): { ratingAvg: number; ratingCount: number; transparencyAvg: number } {
-  const shown = reviews.filter((r) => !r.isHidden);
-  if (shown.length === 0) return { ratingAvg: 0, ratingCount: 0, transparencyAvg: 0 };
-  const avg = (pick: (r: { rating: number; transparency: number }) => number) => Math.round(shown.reduce((s, r) => s + pick(r), 0) / shown.length * 10) / 10;
-  return { ratingAvg: avg((r) => r.rating), ratingCount: shown.length, transparencyAvg: avg((r) => r.transparency) };
-}
-
-export function recomputeCarRating(reviews: Array<{ rating: number; reliability: number; isHidden?: boolean }>): { ratingAvg: number; ratingCount: number; reliabilityAvg: number } {
-  const shown = reviews.filter((r) => !r.isHidden);
-  if (shown.length === 0) return { ratingAvg: 0, ratingCount: 0, reliabilityAvg: 0 };
-  const avg = (pick: (r: { rating: number; reliability: number }) => number) => Math.round(shown.reduce((s, r) => s + pick(r), 0) / shown.length * 10) / 10;
-  return { ratingAvg: avg((r) => r.rating), ratingCount: shown.length, reliabilityAvg: avg((r) => r.reliability) };
-}
+// recomputeMechanicRating and recomputeCarRating used to live here: they took
+// every review row a route had loaded and averaged the visible ones in memory.
+// The routes now ask the database for that average instead, so nothing could
+// call them without first re-loading the rows the aggregate exists to avoid.
+// Two copies of one averaging rule with nothing keeping them in step is how
+// the mechanic card and the car card drift apart, so this copy is gone rather
+// than kept as the "real" one.
 
 /** The minutes a booking should hold, from the service kind or the workshop's slot. */
 export function bookingMinutes(kind: string, slotMinutes: number): number {

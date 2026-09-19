@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 import {
   ASSESSING_BODIES_AS_AT,
   englishSupportFor,
@@ -26,6 +27,76 @@ function parse<T extends ZodTypeAny>(schema: T, input: unknown): z.infer<T> {
 }
 
 // ===========================================
+// PAGING THE PUBLIC CATALOGUES
+// ===========================================
+// The four public catalogue listings below ran findMany with no take, so each
+// request built the entire table into one response and grew slower with every
+// program, community and resource added. Fifty is a page of cards; a hundred
+// (parsePagination's own ceiling) is the most the server will assemble at
+// once. Everything goes through parsePagination because a limit of "abc" or
+// "-5" typed into the query string would otherwise reach Prisma as a NaN skip
+// or a negative take and fail the query outright.
+//
+// Every one of those listings also ends its orderBy with `{ id: 'asc' }`. Sorting
+// by name, title or membersCount alone is not a total order: two programs called
+// the same thing, or two communities with the same member count, have no defined
+// order between them, and Postgres is free to return them in a different order on
+// each query. With skip/take that is not cosmetic — a row can land on page one and
+// page two, while another is never returned at all. id is the @id column, so it
+// breaks every tie and pins the page boundary.
+const CATALOGUE_PAGE_SIZE = 50;
+
+// (page - 1) * limit has to stay something Postgres will accept as an OFFSET, so
+// a page number of twenty digits — which parses to a number too large to be exact
+// — is capped rather than handed on. At 100 rows a page this is still further than
+// any catalogue reaches.
+const MAX_CATALOGUE_PAGE = 100_000;
+
+function cataloguePage(query: Request['query']) {
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  // parsePagination defaults to 20 when it cannot read a limit; these
+  // catalogues want 50, so an absent or unusable limit is replaced here first.
+  // parseInt is what keeps a fractional limit away from Prisma: "7.5" truncates
+  // to 7 and "abc" becomes NaN, which falls through to the default, so take and
+  // skip are always non-negative integers.
+  const requested = Number.parseInt(text(query.limit) ?? '', 10);
+  const limit = Number.isFinite(requested) && requested > 0 ? requested : CATALOGUE_PAGE_SIZE;
+  const requestedPage = Number.parseInt(text(query.page) ?? '', 10);
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, MAX_CATALOGUE_PAGE) : 1;
+  return parsePagination({ page: String(page), limit: String(limit) });
+}
+
+// `data` stays a bare array: every client page reads `res.data.data` and maps
+// over it, so the total travels beside it in `pagination` rather than wrapping
+// it. The header is a convenience for clients that read counts from headers.
+// The web app does not need it, because buildPaginationMeta already puts the
+// same number in `pagination.total` in the body, and the three pages on this
+// data read `pagination.hasMore` from there to decide whether to offer a
+// "show more" button.
+//
+// This used to say the web app *cannot* read the header, because index.ts
+// does not list X-Total-Count in the CORS exposedHeaders. The premise is true
+// — that cors() call sets origin, credentials, methods and allowedHeaders and
+// nothing else — but the conclusion does not follow for these endpoints. The
+// client's axios baseURL is the relative '/api', so the pages that read this
+// data go to the Next.js origin, which forwards them (the proxy.ts rewrite
+// locally, app/api/[...path] on Netlify, and that handler copies every
+// upstream response header except four hop-by-hop ones). The response those
+// pages see is same-origin, so X-Total-Count is readable there.
+//
+// Not because nothing ever reaches this server cross-origin — something does:
+// components/status/StatusLive.tsx fetches API_ORIGIN directly, deliberately
+// bypassing the proxy so the status page can tell "the API is down" apart from
+// "the proxy in front of it is down". That call is subject to exposedHeaders,
+// and would not see this header. It does not read counts, so nothing is
+// missing today; anything new that reads a header cross-origin has to be added
+// to exposedHeaders first.
+function sendCatalogue(res: Response, data: unknown[], total: number, page: number, limit: number) {
+  res.setHeader('X-Total-Count', String(total));
+  res.json({ success: true, data, pagination: buildPaginationMeta(total, page, limit) });
+}
+
+// ===========================================
 // COMMUNITY SUPPORT PROGRAMS
 // ===========================================
 
@@ -33,26 +104,32 @@ function parse<T extends ZodTypeAny>(schema: T, input: unknown): z.infer<T> {
 router.get('/programs', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { communityType, region, active } = req.query;
+    const { page, limit, skip } = cataloguePage(req.query);
 
     const where: Record<string, unknown> = {};
     if (communityType) where.communityType = communityType;
     if (region) where.region = region;
     if (active !== 'false') where.isActive = true;
 
-    const programs = await prisma.communitySupportProgram.findMany({
-      where,
-      include: {
-        milestones: {
-          orderBy: { orderIndex: 'asc' },
+    const [programs, total] = await Promise.all([
+      prisma.communitySupportProgram.findMany({
+        where,
+        include: {
+          milestones: {
+            orderBy: { orderIndex: 'asc' },
+          },
+          _count: {
+            select: { enrollments: true },
+          },
         },
-        _count: {
-          select: { enrollments: true },
-        },
-      },
-      orderBy: { name: 'asc' },
-    });
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.communitySupportProgram.count({ where }),
+    ]);
 
-    res.json({ success: true, data: programs });
+    sendCatalogue(res, programs, total, page, limit);
   } catch (error) {
     next(error);
   }
@@ -217,18 +294,24 @@ router.patch('/enrollments/:id/milestone', authenticate, async (req: AuthRequest
 router.get('/indigenous/communities', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region, womenOnly, verified } = req.query;
+    const { page, limit, skip } = cataloguePage(req.query);
 
     const where: Record<string, unknown> = {};
     if (region) where.region = region;
     if (womenOnly === 'true') where.isWomenOnly = true;
     if (verified === 'true') where.isVerified = true;
 
-    const communities = await prisma.indigenousCommunityPage.findMany({
-      where,
-      orderBy: { membersCount: 'desc' },
-    });
+    const [communities, total] = await Promise.all([
+      prisma.indigenousCommunityPage.findMany({
+        where,
+        orderBy: [{ membersCount: 'desc' }, { id: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.indigenousCommunityPage.count({ where }),
+    ]);
 
-    res.json({ success: true, data: communities });
+    sendCatalogue(res, communities, total, page, limit);
   } catch (error) {
     next(error);
   }
@@ -300,17 +383,23 @@ router.post('/indigenous/communities/:id/join', authenticate, async (req: AuthRe
 router.get('/indigenous/resources', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type, national } = req.query;
+    const { page, limit, skip } = cataloguePage(req.query);
 
     const where: Record<string, unknown> = {};
     if (type) where.type = type;
     if (national === 'true') where.isNational = true;
 
-    const resources = await prisma.indigenousResource.findMany({
-      where,
-      orderBy: [{ isNational: 'desc' }, { title: 'asc' }],
-    });
+    const [resources, total] = await Promise.all([
+      prisma.indigenousResource.findMany({
+        where,
+        orderBy: [{ isNational: 'desc' }, { title: 'asc' }, { id: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.indigenousResource.count({ where }),
+    ]);
 
-    res.json({ success: true, data: resources });
+    sendCatalogue(res, resources, total, page, limit);
   } catch (error) {
     next(error);
   }
@@ -485,7 +574,9 @@ router.get('/credentials/pathway', authenticate, async (req: AuthRequest, res: R
             isActive: true,
             OR: pathway.bridgingKeywords.map((word) => ({ profession: { contains: word, mode: 'insensitive' as const } })),
           },
-          orderBy: { name: 'asc' },
+          // Only twelve of the matches are shown, so which twelve must not depend
+          // on how Postgres happened to break ties between programs of the same name.
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
           take: 12,
         })
       : [];
@@ -568,18 +659,24 @@ router.patch('/credentials/:id', authenticate, async (req: AuthRequest, res: Res
 router.get('/bridging-programs', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { profession, region, fundingAvailable } = req.query;
+    const { page, limit, skip } = cataloguePage(req.query);
 
     const where: Record<string, unknown> = { isActive: true };
     if (profession) where.profession = profession;
     if (region) where.region = region;
     if (fundingAvailable === 'true') where.fundingAvailable = true;
 
-    const programs = await prisma.bridgingProgram.findMany({
-      where,
-      orderBy: { name: 'asc' },
-    });
+    const [programs, total] = await Promise.all([
+      prisma.bridgingProgram.findMany({
+        where,
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.bridgingProgram.count({ where }),
+    ]);
 
-    res.json({ success: true, data: programs });
+    sendCatalogue(res, programs, total, page, limit);
   } catch (error) {
     next(error);
   }

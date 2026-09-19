@@ -53,22 +53,50 @@ export default function ProgramsPage() {
   const [enrolling, setEnrolling] = useState<string | null>(null);
   const [filterType, setFilterType] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // The catalogue is paged server-side, fifty programs to a page. This page only
+  // ever asked for the first one, so a fifty-first program could not be reached
+  // at all; "Show more" asks for the next page and adds it to what is already
+  // shown. hasMore is the server's own answer, not a guess from the row count —
+  // when a response carries no pagination block, no button is offered.
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const [programsRes, enrollmentsRes] = await Promise.all([
-        communitySupportApi.getPrograms({ communityType: filterType || undefined }),
+        communitySupportApi.getPrograms({ communityType: filterType || undefined, page: 1 }),
         communitySupportApi.getMyEnrollments(),
       ]);
       setPrograms(programsRes.data?.data || []);
+      setPage(1);
+      setHasMore(Boolean(programsRes.data?.pagination?.hasMore));
       setEnrollments(enrollmentsRes.data?.data || []);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load programs');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMorePrograms = async () => {
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const next = page + 1;
+      const res = await communitySupportApi.getPrograms({ communityType: filterType || undefined, page: next });
+      const more: Program[] = res.data?.data || [];
+      setPrograms((current) => [...current, ...more]);
+      setPage(next);
+      setHasMore(Boolean(res.data?.pagination?.hasMore));
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Failed to load more programs');
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -275,6 +303,14 @@ export default function ProgramsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!loading && hasMore && (
+        <div className="text-center">
+          <button onClick={loadMorePrograms} disabled={loadingMore} className="btn-secondary">
+            {loadingMore ? 'Loading more...' : 'Show more programs'}
+          </button>
         </div>
       )}
 

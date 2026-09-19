@@ -31,7 +31,7 @@ import { assessK10, buildDoctorReport, buildInsights, entriesToCsv, type Activit
 import { analyseMentalLoad } from '../services/wellness/mental-load.service';
 import { achievementForStreak, celebrate, challengeLeaderboard, goalProgress, goalReviewText, milestoneReached, streakFrom, templateByKey, weekProgress, type GoalData } from '../services/wellness/habits.service';
 import { detectCrisisLanguage, excerpt, isModeratorRole, normaliseWarning, presentAuthor } from '../services/wellness/forum.service';
-import { availableSlots, canCancel, nextAvailableDays, normaliseAvailability, recomputeRating, slugify, type Availability } from '../services/wellness/practitioners.service';
+import { availableSlots, canCancel, nextAvailableDays, normaliseAvailability, slugify, type Availability } from '../services/wellness/practitioners.service';
 import { currentWeek } from '../services/wellness/wellness-reminders.service';
 import {
   ACTIVITY_TYPES, CIRCLE_TOPICS, CONTENT_WARNINGS, COPING_STRATEGIES, CRISIS_LINES, HABIT_TEMPLATES, K10_OPTIONS, K10_QUESTIONS, LIBRARY, LIBRARY_AS_AT,
@@ -52,6 +52,21 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data });
+
+/** Deep paging still has to fit in the integer Prisma sends as `skip`. */
+const MAX_PAGE = 10000;
+
+/**
+ * A whole number out of the query string, clamped to a range. Number('7.5')
+ * is 7.5 and Number('1e999') is Infinity, and either one used to reach Prisma
+ * as a fractional or infinite `take`/`skip`, which Prisma refuses outright:
+ * `?limit=7.5` on a thread came back as a 500 rather than a page of replies.
+ * Anything that is not a usable number falls back to the default.
+ */
+function pageParam(raw: unknown, fallback: number, min: number, max: number): number {
+  const n = Math.trunc(Number(raw));
+  return Number.isFinite(n) && n !== 0 ? Math.min(max, Math.max(min, n)) : fallback;
+}
 
 /** Where the web app lives, for links written into files that leave the app. */
 const clientBase = () => (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -683,8 +698,8 @@ router.get('/forums/:slug', authenticate, async (req: AuthRequest, res: Response
   try {
     const forum = await prisma.wellnessForum.findUnique({ where: { slug: req.params.slug } });
     if (!forum || !forum.isActive) throw new ApiError(404, 'Forum not found');
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(5, Number(req.query.limit) || 20));
+    const page = pageParam(req.query.page, 1, 1, MAX_PAGE);
+    const limit = pageParam(req.query.limit, 20, 5, 50);
     const moderator = isModeratorRole(req.user!.role);
     const where = { forumId: forum.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }) };
     const [posts, total] = await Promise.all([
@@ -720,12 +735,23 @@ router.get('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Respo
     const post = await prisma.wellnessPost.findUnique({ where: { id: req.params.id }, select: postSelect });
     const moderator = isModeratorRole(req.user!.role);
     if (!post || (post.isHidden && !moderator && post.authorId !== req.user!.id)) throw new ApiError(404, 'Post not found');
-    const replies = await prisma.wellnessReply.findMany({ where: { postId: post.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }) }, orderBy: { createdAt: 'asc' }, include: { author: { select: AUTHOR_SELECT } } });
+    const page = pageParam(req.query.page, 1, 1, MAX_PAGE);
+    const limit = pageParam(req.query.limit, 50, 5, 100);
+    const replyWhere: Prisma.WellnessReplyWhereInput = { postId: post.id, ...(moderator ? {} : { OR: [{ isHidden: false }, { authorId: req.user!.id }] }) };
+    // A thread that ran for months used to come back whole. replyTotal counts
+    // the replies this viewer is allowed to see, so the thread can say how
+    // many there are rather than letting replies.length imply that the first
+    // page is all of them.
+    const [replies, replyTotal] = await Promise.all([
+      prisma.wellnessReply.findMany({ where: replyWhere, orderBy: { createdAt: 'asc' }, skip: (page - 1) * limit, take: limit, include: { author: { select: AUTHOR_SELECT } } }),
+      prisma.wellnessReply.count({ where: replyWhere }),
+    ]);
     const supported = await prisma.wellnessSupport.findFirst({ where: { postId: post.id, userId: req.user!.id }, select: { id: true } });
     const settings = await getSettings(req.user!.id);
     ok(res, {
       post: presentPost(post, req.user!.id, true, new Set(supported ? [post.id] : [])),
       replies: replies.map((r) => ({ id: r.id, body: r.body, isHidden: r.isHidden, isFromModerator: r.isFromModerator, createdAt: r.createdAt, author: presentAuthor(r.author, r.isAnonymous, req.user!.id, r.isFromModerator), canEdit: r.authorId === req.user!.id })),
+      replyPage: page, replyLimit: limit, replyTotal,
       isModerator: moderator, crisisLines: CRISIS_LINES.slice(0, 6), guidelines: post.forum, viewer: { hiddenWarnings: settings.hiddenWarnings, anonymousByDefault: settings.anonymousByDefault },
     });
   } catch (error) { next(error); }
@@ -1080,7 +1106,7 @@ router.get('/practitioners/:id/slots', authenticate, async (req: AuthRequest, re
 
 router.get('/practitioners/:id/reviews', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const page = Math.max(1, Number(req.query.page) || 1);
+    const page = pageParam(req.query.page, 1, 1, MAX_PAGE);
     const [reviews, total] = await Promise.all([
       prisma.healthReview.findMany({ where: { practitionerId: req.params.id, isHidden: false }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * 20, take: 20, include: { user: { select: { firstName: true } } } }),
       prisma.healthReview.count({ where: { practitionerId: req.params.id, isHidden: false } }),
@@ -1248,6 +1274,19 @@ router.get('/bookings/:id/ics', authenticate, async (req: AuthRequest, res: Resp
   } catch (error) { next(error); }
 });
 
+/**
+ * The practitioner's average, asked of the database rather than assembled by
+ * pulling every review row into memory and reducing over it. A practitioner
+ * with nothing showing aggregates to _avg.rating === null; ratingAvg is a
+ * non-null Decimal that the schema defaults to 0, so 0 is how "no ratings
+ * yet" is stored, and ratingCount being 0 is what tells a page there is no
+ * average to show.
+ */
+async function practitionerRating(practitionerId: string): Promise<{ ratingAvg: number; ratingCount: number }> {
+  const agg = await prisma.healthReview.aggregate({ where: { practitionerId, isHidden: false }, _avg: { rating: true }, _count: { rating: true } });
+  return { ratingAvg: agg._avg.rating === null ? 0 : Math.round(agg._avg.rating * 10) / 10, ratingCount: agg._count.rating };
+}
+
 /** A moderator can take a review out of the average without deleting the visit it came from. */
 router.patch('/reviews/:id', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -1256,8 +1295,7 @@ router.patch('/reviews/:id', authenticate, async (req: AuthRequest, res: Respons
     const existing = await prisma.healthReview.findUnique({ where: { id: req.params.id }, select: { id: true, practitionerId: true } });
     if (!existing) throw new ApiError(404, 'Review not found');
     const review = await prisma.healthReview.update({ where: { id: existing.id }, data: { isHidden } });
-    const all = await prisma.healthReview.findMany({ where: { practitionerId: existing.practitionerId }, select: { rating: true, isHidden: true } });
-    await prisma.healthPractitioner.update({ where: { id: existing.practitionerId }, data: recomputeRating(all) });
+    await prisma.healthPractitioner.update({ where: { id: existing.practitionerId }, data: await practitionerRating(existing.practitionerId) });
     ok(res, { id: review.id, isHidden: review.isHidden });
   } catch (error) { next(error); }
 });
@@ -1269,8 +1307,7 @@ router.post('/bookings/:id/review', authenticate, async (req: AuthRequest, res: 
     if (booking.status !== 'COMPLETED') throw new ApiError(400, 'Only a completed visit can be rated. That is what makes the ratings mean something.');
     const data = parse(z.object({ rating: scale, comment: z.string().max(1000).optional() }), req.body);
     const review = await prisma.healthReview.upsert({ where: { bookingId: booking.id }, create: { practitionerId: booking.practitionerId, userId: req.user!.id, bookingId: booking.id, rating: data.rating, comment: data.comment?.trim() || null }, update: { rating: data.rating, comment: data.comment?.trim() || null } });
-    const all = await prisma.healthReview.findMany({ where: { practitionerId: booking.practitionerId }, select: { rating: true, isHidden: true } });
-    await prisma.healthPractitioner.update({ where: { id: booking.practitionerId }, data: recomputeRating(all) });
+    await prisma.healthPractitioner.update({ where: { id: booking.practitionerId }, data: await practitionerRating(booking.practitionerId) });
     ok(res, review, 201);
   } catch (error) { next(error); }
 });

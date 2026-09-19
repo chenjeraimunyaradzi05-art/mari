@@ -48,7 +48,7 @@ import {
   normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection, type Party, type PurchaseStatus,
 } from '../services/automotive/marketplace.service';
 import {
-  bookingMinutes, nextServiceAfter, normaliseParts, normalisePriceList, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, recomputeCarRating, recomputeMechanicRating, vehicleName, vehicleReminders,
+  bookingMinutes, nextServiceAfter, normaliseParts, normalisePriceList, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, vehicleName, vehicleReminders,
 } from '../services/automotive/garage.service';
 
 const router = Router();
@@ -78,7 +78,12 @@ const money = z.coerce.number().min(0).max(5_000_000);
 const q = (req: AuthRequest, key: string): string | undefined => (typeof req.query[key] === 'string' && (req.query[key] as string).trim() ? (req.query[key] as string).trim() : undefined);
 const qBool = (req: AuthRequest, key: string): boolean => req.query[key] === 'true' || req.query[key] === '1';
 const qNum = (req: AuthRequest, key: string): number | undefined => { const v = Number(req.query[key]); return typeof req.query[key] === 'string' && Number.isFinite(v) ? v : undefined; };
-const page = (req: AuthRequest) => Math.max(1, Math.floor(qNum(req, 'page') ?? 1));
+// Math.floor is what keeps the page a whole number, because the skip it feeds
+// has to be an integer and `Number('7.5')` is 7.5. The ceiling is there for the
+// same reason at the other end: `?page=1e12` survives Number.isFinite and would
+// ask the database to skip more rows than it can count, which is a 500 for a
+// page that simply has nothing on it. Past the ceiling she gets an empty page.
+const page = (req: AuthRequest) => Math.min(1_000_000, Math.max(1, Math.floor(qNum(req, 'page') ?? 1)));
 const isAdmin = (req: AuthRequest) => req.user?.role === 'ADMIN';
 const clientBase = () => (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
@@ -101,6 +106,39 @@ const personName = (u: { firstName?: string | null; lastName?: string | null; di
 const shortName = (u: { firstName?: string | null; lastName?: string | null } | null | undefined) => [u?.firstName, u?.lastName ? `${u.lastName[0]}.` : null].filter(Boolean).join(' ') || 'A member';
 const photosOf = (value: unknown): string[] => (Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string').slice(0, 20) : []);
 const warrantyWords = (years: number | null, km: number | null) => (years ? `${years} year${years === 1 ? '' : 's'}, ${km ? `${km.toLocaleString('en-AU')} km` : 'unlimited km'}` : null);
+
+// ----------------------------------------------------------------- ratings
+
+/**
+ * The stored averages, asked of the database rather than assembled by pulling
+ * every review row into memory and reducing over it. With nothing showing, an
+ * aggregate gives _avg === null; every average column here is a non-null
+ * Decimal the schema defaults to 0, so 0 is how "no ratings yet" is stored and
+ * a ratingCount of 0 is what tells a card there is no average to show.
+ *
+ * The dealership figure is the one that most wanted the shared treatment: it
+ * divided a hand-rolled sum by the loaded array's length with no guard for an
+ * empty one. That never actually produced NaN — the update that writes this
+ * purchase's own rating runs first, so there was always at least one row to
+ * average — but the safety sat in the caller by accident rather than in the
+ * arithmetic, where avg1 now keeps it for whoever calls this next.
+ */
+const avg1 = (v: number | null): number => (v === null ? 0 : Math.round(v * 10) / 10);
+
+async function carRating(carModelId: string): Promise<{ ratingAvg: number; ratingCount: number; reliabilityAvg: number }> {
+  const agg = await prisma.carReview.aggregate({ where: { carModelId, isHidden: false }, _avg: { rating: true, reliability: true }, _count: { rating: true } });
+  return { ratingAvg: avg1(agg._avg.rating), ratingCount: agg._count.rating, reliabilityAvg: avg1(agg._avg.reliability) };
+}
+
+async function mechanicRating(mechanicId: string): Promise<{ ratingAvg: number; ratingCount: number; transparencyAvg: number }> {
+  const agg = await prisma.mechanicReview.aggregate({ where: { mechanicId, isHidden: false }, _avg: { rating: true, transparency: true }, _count: { rating: true } });
+  return { ratingAvg: avg1(agg._avg.rating), ratingCount: agg._count.rating, transparencyAvg: avg1(agg._avg.transparency) };
+}
+
+async function dealershipRating(dealershipId: string): Promise<{ ratingAvg: number; ratingCount: number }> {
+  const agg = await prisma.vehiclePurchase.aggregate({ where: { listing: { dealershipId }, reviewRating: { not: null } }, _avg: { reviewRating: true }, _count: { reviewRating: true } });
+  return { ratingAvg: avg1(agg._avg.reviewRating), ratingCount: agg._count.reviewRating };
+}
 
 // -------------------------------------------------------------- presenters
 
@@ -352,8 +390,7 @@ router.post('/catalogue/:slug/reviews', authenticate, async (req: AuthRequest, r
       create: { carModelId: c.id, userId: req.user!.id, ...data, ownedMonths: data.ownedMonths ?? null, videoUrl: data.videoUrl ?? null, isOwner: Boolean(owned) },
       update: { ...data, ownedMonths: data.ownedMonths ?? null, videoUrl: data.videoUrl ?? null, isOwner: Boolean(owned), isHidden: false },
     });
-    const all = await prisma.carReview.findMany({ where: { carModelId: c.id }, select: { rating: true, reliability: true, isHidden: true } });
-    await prisma.carModel.update({ where: { id: c.id }, data: recomputeCarRating(all) });
+    await prisma.carModel.update({ where: { id: c.id }, data: await carRating(c.id) });
     ok(res, { id: review.id, isOwner: review.isOwner }, 201);
   } catch (error) { next(error); }
 });
@@ -376,8 +413,7 @@ router.patch('/reviews/:id', authenticate, async (req: AuthRequest, res: Respons
     const data = parse(z.object({ isHidden: z.boolean().optional(), title: z.string().trim().min(3).max(120).optional(), body: z.string().trim().min(20).max(4000).optional() }), req.body);
     if (data.isHidden !== undefined && !isAdmin(req)) throw new ApiError(403, 'Only an admin can hide a review');
     const updated = await prisma.carReview.update({ where: { id: r.id }, data });
-    const all = await prisma.carReview.findMany({ where: { carModelId: r.carModelId }, select: { rating: true, reliability: true, isHidden: true } });
-    await prisma.carModel.update({ where: { id: r.carModelId }, data: recomputeCarRating(all) });
+    await prisma.carModel.update({ where: { id: r.carModelId }, data: await carRating(r.carModelId) });
     ok(res, { id: updated.id, isHidden: updated.isHidden });
   } catch (error) { next(error); }
 });
@@ -388,8 +424,7 @@ router.delete('/reviews/:id', authenticate, async (req: AuthRequest, res: Respon
     if (!r) throw new ApiError(404, 'Review not found');
     if (r.userId !== req.user!.id && !isAdmin(req)) throw new ApiError(403, 'Not your review');
     await prisma.carReview.delete({ where: { id: r.id } });
-    const all = await prisma.carReview.findMany({ where: { carModelId: r.carModelId }, select: { rating: true, reliability: true, isHidden: true } });
-    await prisma.carModel.update({ where: { id: r.carModelId }, data: recomputeCarRating(all) });
+    await prisma.carModel.update({ where: { id: r.carModelId }, data: await carRating(r.carModelId) });
     ok(res, { deleted: true });
   } catch (error) { next(error); }
 });
@@ -1068,7 +1103,7 @@ router.post('/purchases/:id/review', authenticate, async (req: AuthRequest, res:
     if (p.status !== 'RELEASED') throw new ApiError(400, 'A purchase is reviewed once it is complete');
     const data = parse(z.object({ rating: z.coerce.number().int().min(1).max(5), comment: z.string().trim().max(1000).optional() }), req.body);
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { reviewRating: data.rating, reviewComment: data.comment ?? null }, include: purchaseInclude });
-    if (p.listing.dealershipId) { const all = await prisma.vehiclePurchase.findMany({ where: { listing: { dealershipId: p.listing.dealershipId }, reviewRating: { not: null } }, select: { reviewRating: true } }); await prisma.dealership.update({ where: { id: p.listing.dealershipId }, data: { ratingAvg: Math.round(all.reduce((s, r) => s + (r.reviewRating ?? 0), 0) / all.length * 10) / 10, ratingCount: all.length } }); }
+    if (p.listing.dealershipId) await prisma.dealership.update({ where: { id: p.listing.dealershipId }, data: await dealershipRating(p.listing.dealershipId) });
     ok(res, purchaseCard(updated, req.user!.id));
   } catch (error) { next(error); }
 });
@@ -1264,8 +1299,7 @@ router.post('/bookings/:id/review', authenticate, async (req: AuthRequest, res: 
     if (b.status !== 'COMPLETED') throw new ApiError(400, 'Only a completed job can be rated. That is what makes the ratings mean something.');
     const data = parse(z.object({ rating: z.coerce.number().int().min(1).max(5), transparency: z.coerce.number().int().min(1).max(5), comment: z.string().trim().max(1000).optional() }), req.body);
     const review = await prisma.mechanicReview.upsert({ where: { bookingId: b.id }, create: { mechanicId: b.mechanicId, userId: req.user!.id, bookingId: b.id, rating: data.rating, transparency: data.transparency, comment: data.comment ?? null }, update: { rating: data.rating, transparency: data.transparency, comment: data.comment ?? null } });
-    const all = await prisma.mechanicReview.findMany({ where: { mechanicId: b.mechanicId }, select: { rating: true, transparency: true, isHidden: true } });
-    await prisma.mechanic.update({ where: { id: b.mechanicId }, data: recomputeMechanicRating(all) });
+    await prisma.mechanic.update({ where: { id: b.mechanicId }, data: await mechanicRating(b.mechanicId) });
     ok(res, { id: review.id }, 201);
   } catch (error) { next(error); }
 });
@@ -1678,8 +1712,7 @@ router.patch('/admin/mechanic-reviews/:id', authenticate, requireRole('ADMIN'), 
     if (!r) throw new ApiError(404, 'Review not found');
     const data = parse(z.object({ isHidden: z.boolean() }), req.body);
     await prisma.mechanicReview.update({ where: { id: r.id }, data });
-    const all = await prisma.mechanicReview.findMany({ where: { mechanicId: r.mechanicId }, select: { rating: true, transparency: true, isHidden: true } });
-    await prisma.mechanic.update({ where: { id: r.mechanicId }, data: recomputeMechanicRating(all) });
+    await prisma.mechanic.update({ where: { id: r.mechanicId }, data: await mechanicRating(r.mechanicId) });
     ok(res, { id: r.id, isHidden: data.isHidden });
   } catch (error) { next(error); }
 });

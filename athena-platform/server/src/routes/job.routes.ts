@@ -657,27 +657,47 @@ router.get('/:id/applications', authenticate, async (req: AuthRequest, res, next
       throw new ApiError(403, 'Not authorized');
     }
 
-    const applications = await prisma.jobApplication.findMany({
-      where: { jobId: id },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            avatar: true,
-            headline: true,
-            currentJobTitle: true,
-            yearsExperience: true,
+    // A listing that does well collects hundreds of applications, and this
+    // route used to load and serialise every one of them into a single
+    // response. The page is 50 rather than the platform-wide 20 of
+    // parsePagination because the employer screen is a long scrolling list.
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+
+    const [applications, total] = await Promise.all([
+      prisma.jobApplication.findMany({
+        where: { jobId: id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              avatar: true,
+              headline: true,
+              currentJobTitle: true,
+              yearsExperience: true,
+            },
           },
         },
-      },
-      orderBy: { appliedAt: 'desc' },
-    });
+        orderBy: { appliedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.jobApplication.count({ where: { jobId: id } }),
+    ]);
 
+    // `data` is still the plain array of applications, so a caller that only
+    // reads it is unaffected; the counts it needs to page sit beside it.
     res.json({
       success: true,
       data: applications,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     next(error);

@@ -17,14 +17,15 @@ import { formatRelativeTime } from '@/lib/utils';
 
 type Post = { id: string; title: string; body: string; contentWarning: string | null; isHidden: boolean; hiddenReason: string | null; isPinned: boolean; isLocked: boolean; supportCount: number; createdAt: string; author: Author; supportedByMe: boolean; canEdit: boolean; forum: { slug: string; name: string } };
 type Reply = { id: string; body: string; isHidden: boolean; isFromModerator: boolean; createdAt: string; author: Author; canEdit: boolean };
-type Data = { post: Post; replies: Reply[]; isModerator: boolean; crisisLines: CrisisLine[]; viewer?: { hiddenWarnings: string[]; anonymousByDefault: boolean } };
+type Data = { post: Post; replies: Reply[]; replyPage: number; replyLimit: number; replyTotal: number; isModerator: boolean; crisisLines: CrisisLine[]; viewer?: { hiddenWarnings: string[]; anonymousByDefault: boolean } };
 
 const REPORT_REASONS = [{ value: 'INAPPROPRIATE', label: 'Not right for this forum' }, { value: 'HARASSMENT', label: 'Harassment' }, { value: 'HATE_SPEECH', label: 'Hate speech' }, { value: 'MISINFORMATION', label: 'Medical misinformation' }, { value: 'SPAM', label: 'Spam or selling' }, { value: 'OTHER', label: 'Something else' }];
 
 export default function ThreadPage() {
   const params = useParams<{ slug: string; postId: string }>();
   const router = useRouter();
-  const data = useLoad<Data>(() => wellnessApi.post(params.postId), [params.postId]);
+  const [replyPage, setReplyPage] = useState(1);
+  const data = useLoad<Data>(() => wellnessApi.post(params.postId, replyPage), [params.postId, replyPage]);
   const [reply, setReply] = useState({ body: '', isAnonymous: false });
   const [busy, setBusy] = useState(false);
   const [crisis, setCrisis] = useState<CrisisLine[] | null>(null);
@@ -34,13 +35,46 @@ export default function ThreadPage() {
   const anonymousByDefault = data.data?.viewer?.anonymousByDefault ?? false;
   useEffect(() => { setReply((r) => ({ ...r, isAnonymous: anonymousByDefault })); }, [anonymousByDefault]);
 
+  // The replies come back oldest first, a page at a time, so replies.length is
+  // only what is on screen. replyTotal is the whole conversation: the heading
+  // and the pager come from it, because a thread that stops at reply fifty
+  // with nothing said about it reads as though that is all there ever was.
+  const replyLimit = data.data?.replyLimit ?? 50;
+  const replyTotal = data.data?.replyTotal ?? 0;
+  const replyPages = Math.max(1, Math.ceil(replyTotal / replyLimit));
+  // Counted off the page the server answered with, not the page she has just
+  // asked for, so the label matches the replies actually on screen.
+  const answeredPage = data.data?.replyPage;
+  const shownCount = data.data?.replies.length ?? 0;
+  const shownFrom = shownCount ? ((answeredPage ?? 1) - 1) * replyLimit + 1 : 0;
+  const shownTo = shownFrom + shownCount - 1;
+  // The page she is on can disappear under her when a moderator takes replies
+  // down, so snap back rather than leaving her on an empty page of a thread
+  // that still has one.
+  //
+  // Only ever against the answer for the page she is on, though. useLoad keeps
+  // the previous response on screen while it refetches, so between asking for a
+  // new page and getting it, replyPages still describes the page she was
+  // reading. Snapping back on that number undid the jump below: she posted the
+  // reply that started a new last page, was moved to it, and the page count
+  // left over from the response still in hand pulled her straight back to the
+  // page her reply was not on. answeredPage is the page the server actually
+  // answered with, so this waits until the two agree before deciding the page
+  // is gone.
+  useEffect(() => { if (answeredPage === replyPage && replyPage > replyPages) setReplyPage(replyPages); }, [answeredPage, replyPage, replyPages]);
+
   const send = async () => {
     if (!p) return;
     setBusy(true);
     try {
       const res = await wellnessApi.reply(p.id, { body: reply.body.trim(), isAnonymous: reply.isAnonymous });
       if (res.data?.data?.crisis?.flagged) setCrisis(res.data.data.crisis.lines);
-      setReply({ body: '', isAnonymous: anonymousByDefault }); data.reload();
+      setReply({ body: '', isAnonymous: anonymousByDefault });
+      // Her reply joins the end of the thread, which on a long one is a later
+      // page than the one she is reading. Landing on that page is what keeps
+      // the thread from looking as though it swallowed what she just wrote.
+      const landsOn = Math.max(1, Math.ceil((replyTotal + 1) / replyLimit));
+      if (landsOn === replyPage) data.reload(); else setReplyPage(landsOn);
     } catch (err) { toast.error(wellnessError(err, 'That could not be posted.')); } finally { setBusy(false); }
   };
   const support = async () => { if (!p) return; try { await wellnessApi.support(p.id); data.reload(); } catch (err) { toast.error(wellnessError(err, 'That did not go through.')); } };
@@ -80,7 +114,15 @@ export default function ThreadPage() {
           </article>
 
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{data.data!.replies.length} repl{data.data!.replies.length === 1 ? 'y' : 'ies'}</h2>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{replyTotal} repl{replyTotal === 1 ? 'y' : 'ies'}</h2>
+              {/* Nothing to count off when the answered page came back empty,
+                  which happens when replies are taken down while she is on a
+                  later page: shownFrom is 0 and shownTo is one less than that,
+                  so this line used to offer her a negative reply number until
+                  the snap-back above moved her. Say nothing instead. */}
+              {replyPages > 1 && shownCount > 0 && <p className="text-xs text-slate-500">Showing {shownFrom}–{shownTo}, oldest first</p>}
+            </div>
             {data.data!.replies.map((r) => (
               <div key={r.id} className={`rounded-xl border p-4 ${r.isFromModerator ? 'border-sky-200 bg-sky-50/50 dark:border-sky-900/40 dark:bg-sky-900/10' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'}`}>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><AuthorChips author={{ ...r.author, isModerator: r.isFromModerator || r.author.isModerator }} /><span>{formatRelativeTime(r.createdAt)}</span>{r.isHidden && <Chip tone="rose">Hidden</Chip>}</div>
@@ -88,6 +130,13 @@ export default function ThreadPage() {
                 <div className="mt-2 flex gap-3 text-xs text-slate-500">{(r.canEdit || data.data?.isModerator) && <button type="button" onClick={() => removeReply(r)} className="hover:text-rose-600">Remove</button>}{data.data?.isModerator && <button type="button" onClick={() => hideReply(r)} className="hover:text-rose-600">{r.isHidden ? 'Unhide' : 'Hide'}</button>}</div>
               </div>
             ))}
+            {replyPages > 1 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <button type="button" disabled={replyPage <= 1} onClick={() => setReplyPage((n) => Math.max(1, n - 1))} className="btn-ghost disabled:opacity-40">Earlier replies</button>
+                <span className="text-xs text-slate-500">Page {replyPage} of {replyPages}</span>
+                <button type="button" disabled={replyPage >= replyPages} onClick={() => setReplyPage((n) => Math.min(replyPages, n + 1))} className="btn-ghost disabled:opacity-40">Later replies</button>
+              </div>
+            )}
           </section>
 
           {!p.isLocked && (

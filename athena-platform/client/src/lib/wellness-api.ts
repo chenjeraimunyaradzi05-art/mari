@@ -62,7 +62,10 @@ export const wellnessApi = {
   forums: () => api.get('/wellness/forums'),
   forum: (slug: string, page = 1) => api.get(`/wellness/forums/${slug}`, { params: { page } }),
   createPost: (slug: string, data: Body) => api.post(`/wellness/forums/${slug}/posts`, data),
-  post: (id: string) => api.get(`/wellness/forum-posts/${id}`),
+  // The replies are paged oldest first, so a thread with more than a page of
+  // them needs the page number: without it the thread stopped at reply fifty
+  // and the newest replies could not be reached at all.
+  post: (id: string, page = 1) => api.get(`/wellness/forum-posts/${id}`, { params: { page } }),
   reply: (id: string, data: Body) => api.post(`/wellness/forum-posts/${id}/replies`, data),
   support: (id: string) => api.post(`/wellness/forum-posts/${id}/support`),
   reportPost: (id: string, data: Body) => api.post(`/wellness/forum-posts/${id}/report`, data),

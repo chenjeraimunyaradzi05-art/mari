@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
-const store: { entries: any[]; settings: any; posts: any[]; habits: any[]; logs: any[]; circles: any[]; members: any[] } = { entries: [], settings: null, posts: [], habits: [], logs: [], circles: [], members: [] };
+const store: { entries: any[]; settings: any; posts: any[]; replies: any[]; reviews: any[]; habits: any[]; logs: any[]; circles: any[]; members: any[] } = { entries: [], settings: null, posts: [], replies: [], reviews: [], habits: [], logs: [], circles: [], members: [] };
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
@@ -38,7 +38,13 @@ jest.mock('../../utils/prisma', () => ({
       findUnique: jest.fn(async ({ where }: any) => store.posts.find((p) => p.id === where.id) ?? null),
       update: jest.fn(async ({ where, data }: any) => { const row = store.posts.find((p) => p.id === where.id); Object.assign(row, { supportCount: row.supportCount + (data.supportCount?.increment ?? 0) - (data.supportCount?.decrement ?? 0) }); return row; }),
     },
-    wellnessReply: { findMany: jest.fn(async () => []) },
+    // A thread comes back a page at a time, so the mock has to honour skip and
+    // take: a findMany that ignored them could not tell a thread that stops at
+    // reply fifty from one that is only fifty replies long.
+    wellnessReply: {
+      findMany: jest.fn(async ({ skip = 0, take }: any) => store.replies.slice(skip, take === undefined ? undefined : skip + take)),
+      count: jest.fn(async () => store.replies.length),
+    },
     wellnessSupport: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), create: jest.fn(async () => ({})), delete: jest.fn() },
     adminFlag: { create: jest.fn(async () => ({})) },
     contentReport: { create: jest.fn(async ({ data }: any) => ({ id: 'r1', status: 'PENDING', ...data })) },
@@ -73,7 +79,20 @@ jest.mock('../../utils/prisma', () => ({
       create: jest.fn(async ({ data }: any) => ({ id: 'b1', status: 'REQUESTED', createdAt: new Date(), practitionerNote: null, meetingLink: null, shareId: null, followUpOfId: null, ...data, practitioner: { id: 'pr1', slug: 'dr-k', name: 'Dr K', kind: 'GP', headline: 'GP', telehealth: true, inPerson: false, ownerUserId: 'doctor' }, review: null })),
       update: jest.fn(async () => ({})),
     },
-    healthReview: { findMany: jest.fn(async () => [{ rating: 5, isHidden: true }, { rating: 3, isHidden: false }]), findUnique: jest.fn(async ({ where }: any) => (where.id === 'r1' ? { id: 'r1', practitionerId: 'pr1' } : null)), update: jest.fn(async ({ where, data }: any) => ({ id: where.id, isHidden: data.isHidden })) },
+    healthReview: {
+      findMany: jest.fn(async () => store.reviews.filter((r) => !r.isHidden).map((r) => ({ ...r, comment: null, createdAt: new Date(), user: { firstName: 'Ana' } }))),
+      count: jest.fn(async () => store.reviews.filter((r) => !r.isHidden).length),
+      // practitionerRating() asks the database for the average rather than
+      // pulling every review row into memory, so the mock answers aggregate
+      // the way Prisma does: _avg.rating is null when nothing is showing, and
+      // _count.rating counts only the rows the where clause matched.
+      aggregate: jest.fn(async ({ where }: any) => {
+        const showing = store.reviews.filter((r) => (where?.isHidden === false ? !r.isHidden : true));
+        return { _avg: { rating: showing.length ? showing.reduce((sum: number, r: any) => sum + r.rating, 0) / showing.length : null }, _count: { rating: showing.length } };
+      }),
+      findUnique: jest.fn(async ({ where }: any) => store.reviews.find((r) => r.id === where.id) ?? null),
+      update: jest.fn(async ({ where, data }: any) => { const row = store.reviews.find((r) => r.id === where.id); Object.assign(row, data); return row; }),
+    },
     article: { findMany: jest.fn(async () => []) },
     $transaction: jest.fn(async (ops: any[]) => Promise.all(ops)),
   },
@@ -107,7 +126,9 @@ const TODAY = '2026-09-11';
 describe('The wellness routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    store.entries = []; store.settings = null; store.posts = []; store.habits = []; store.logs = []; store.circles = []; store.members = [];
+    store.entries = []; store.settings = null; store.posts = []; store.replies = []; store.habits = []; store.logs = []; store.circles = []; store.members = [];
+    // Three showing reviews to start with; hiding one has to move the average.
+    store.reviews = [{ id: 'r1', practitionerId: 'pr1', rating: 5, isHidden: false }, { id: 'r2', practitionerId: 'pr1', rating: 4, isHidden: false }, { id: 'r3', practitionerId: 'pr1', rating: 3, isHidden: false }];
   });
 
   it('opens the reference, the library and the K10 to anyone', async () => {
@@ -165,6 +186,26 @@ describe('The wellness routes', () => {
     expect(support.body.data).toEqual({ supported: true, supportCount: 1 });
     await request(app).post('/api/wellness/forum-posts/p1/report').set(as('member')).send({ reason: 'SPAM' }).expect(400);
     await request(app).post('/api/wellness/forum-posts/p1/report').set(as('other')).send({ reason: 'SPAM' }).expect(201);
+  });
+
+  it('pages a long thread rather than stopping at the fiftieth reply', async () => {
+    await request(app).post('/api/wellness/forums/anxiety/posts').set(as('member')).send({ title: 'The thread that ran for months', body: 'Long enough that the replies do not fit on one page, which is the whole point of this one.' }).expect(201);
+    store.replies = Array.from({ length: 137 }, (_, i) => ({ id: `re${i + 1}`, postId: 'p1', authorId: 'other', isAnonymous: false, isFromModerator: false, isHidden: false, body: `Reply ${i + 1}`, createdAt: new Date(Date.UTC(2026, 8, 1, 0, i)), author: { id: 'other', firstName: 'Ana', lastName: 'M', displayName: null, avatar: null, role: 'USER', practitionerProfile: null } }));
+
+    const first = await request(app).get('/api/wellness/forum-posts/p1').set(as('member')).expect(200);
+    expect(first.body.data).toMatchObject({ replyPage: 1, replyLimit: 50, replyTotal: 137 });
+    expect(first.body.data.replies).toHaveLength(50);
+    expect(first.body.data.replies[0].body).toBe('Reply 1');
+    // The newest replies were unreachable: the thread stopped at reply fifty
+    // with no way to ask for the rest, so the last page has to come back.
+    const last = await request(app).get('/api/wellness/forum-posts/p1').set(as('member')).query({ page: 3 }).expect(200);
+    expect(last.body.data.replies).toHaveLength(37);
+    expect(last.body.data.replies[36].body).toBe('Reply 137');
+    // A fractional page or limit reached Prisma as a fractional skip or take,
+    // which it refuses, so '?limit=7.5' turned a thread into a 500.
+    const fractional = await request(app).get('/api/wellness/forum-posts/p1').set(as('member')).query({ page: '2.7', limit: '7.5' }).expect(200);
+    expect(prisma.wellnessReply.findMany.mock.calls.at(-1)[0]).toMatchObject({ skip: 7, take: 7 });
+    expect(fractional.body.data.replies.map((r: any) => r.body)).toEqual(['Reply 8', 'Reply 9', 'Reply 10', 'Reply 11', 'Reply 12', 'Reply 13', 'Reply 14']);
   });
 
   it('logs a habit, counts the streak and celebrates the milestone', async () => {
@@ -290,7 +331,11 @@ describe('The wellness routes', () => {
     await request(app).patch('/api/wellness/reviews/r1').set(as('member')).send({ isHidden: true }).expect(403);
     const res = await request(app).patch('/api/wellness/reviews/r1').set(as('mod', 'MODERATOR')).send({ isHidden: true }).expect(200);
     expect(res.body.data).toEqual({ id: 'r1', isHidden: true });
-    expect(prisma.healthPractitioner.update).toHaveBeenCalledWith(expect.objectContaining({ data: { ratingAvg: 3, ratingCount: 1 } }));
+    // The five is out, so the average is the four and the three that are left:
+    // what the aggregate the route asks the database for implies, rather than
+    // a number the mock was told to hand back whatever happened.
+    expect(prisma.healthReview.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where: { practitionerId: 'pr1', isHidden: false } }));
+    expect(prisma.healthPractitioner.update).toHaveBeenCalledWith(expect.objectContaining({ data: { ratingAvg: 3.5, ratingCount: 2 } }));
     await request(app).patch('/api/wellness/reviews/none').set(as('mod', 'MODERATOR')).send({ isHidden: true }).expect(404);
   });
 

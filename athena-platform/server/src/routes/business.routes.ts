@@ -1814,8 +1814,13 @@ router.get(
         include: {
           responses: {
             include: {
-              vendor: true,
+              // The four fields the page renders, not the whole row. These are
+              // other people's vendors - a founder reading the proposals on her
+              // own RFP was being sent each vendor's email, phone and the user
+              // id of the member who owns it, none of which is on the screen.
+              vendor: { select: { id: true, name: true, category: true, isVerified: true } },
             },
+            orderBy: { createdAt: 'desc' },
           },
         },
         orderBy: { createdAt: 'desc' },

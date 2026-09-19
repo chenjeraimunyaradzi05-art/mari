@@ -114,11 +114,21 @@ const errorOf = (err: unknown, fallback: string) => {
   return data?.error || data?.message || fallback;
 };
 const dataOf = <T,>(res: { data?: { data?: T } }): T | undefined => res.data?.data;
+// Whether the server says another page of a catalogue exists. It is the server's
+// own answer rather than a guess from how many rows came back, so a response
+// without a pagination block offers no "show more" at all.
+const moreAfter = (res: { data?: { pagination?: { hasMore?: boolean } } }): boolean => Boolean(res.data?.pagination?.hasMore);
 
 export default function MigrantPage() {
   const [languageProfile, setLanguageProfile] = useState<LanguageProfile | null>(null);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [bridgingPrograms, setBridgingPrograms] = useState<BridgingProgram[]>([]);
+  // The bridging catalogue is paged server-side, fifty to a page, and this page
+  // only ever asked for the first one — so a fifty-first program could not be
+  // reached at all. "Show more" fetches the next page and appends it.
+  const [bridgingPage, setBridgingPage] = useState(1);
+  const [hasMoreBridging, setHasMoreBridging] = useState(false);
+  const [loadingMoreBridging, setLoadingMoreBridging] = useState(false);
   const [pathways, setPathways] = useState<Record<string, PathwayData>>({});
   const [englishSupport, setEnglishSupport] = useState<EnglishSupport | null>(null);
   const [englishCourses, setEnglishCourses] = useState<EnglishCourse[] | null>(null);
@@ -160,12 +170,14 @@ export default function MigrantPage() {
       const [langRes, credRes, bridgingRes] = await Promise.all([
         communitySupportApi.getLanguageProfile(),
         communitySupportApi.getCredentials(),
-        communitySupportApi.getBridgingPrograms(),
+        communitySupportApi.getBridgingPrograms({ page: 1 }),
       ]);
       const creds: Credential[] = dataOf<Credential[]>(credRes) || [];
       setLanguageProfile(dataOf<LanguageProfile | null>(langRes) || null);
       setCredentials(creds);
       setBridgingPrograms(dataOf<BridgingProgram[]>(bridgingRes) || []);
+      setBridgingPage(1);
+      setHasMoreBridging(moreAfter(bridgingRes));
 
       // The pathway for each credential, and the English support on its own when there are none.
       const pathwayResponses = await Promise.all(creds.map((c) => credentialPathwayApi.pathway({ credentialId: c.id })));
@@ -181,6 +193,22 @@ export default function MigrantPage() {
       setError(errorOf(err, 'Failed to load data'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreBridging = async () => {
+    setLoadingMoreBridging(true);
+    setError(null);
+    try {
+      const next = bridgingPage + 1;
+      const res = await communitySupportApi.getBridgingPrograms({ page: next });
+      setBridgingPrograms((current) => [...current, ...(dataOf<BridgingProgram[]>(res) || [])]);
+      setBridgingPage(next);
+      setHasMoreBridging(moreAfter(res));
+    } catch (err: unknown) {
+      setError(errorOf(err, 'Failed to load more bridging programs'));
+    } finally {
+      setLoadingMoreBridging(false);
     }
   };
 
@@ -736,6 +764,13 @@ export default function MigrantPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+            {hasMoreBridging && (
+              <div className="text-center mt-4">
+                <button type="button" onClick={loadMoreBridging} disabled={loadingMoreBridging} className="btn-secondary">
+                  {loadingMoreBridging ? 'Loading more...' : 'Show more programs'}
+                </button>
               </div>
             )}
           </section>

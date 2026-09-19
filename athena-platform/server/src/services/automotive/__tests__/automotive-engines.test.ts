@@ -4,7 +4,7 @@ import { benchmarkPrice, estimateValue, projectValue, retainedShare, upgradePath
 import { compareInsuranceQuotes, estimatePremium } from '../car-insurance.service';
 import { dealerSaleFee, referralFee, summariseReferrals } from '../referrals.service';
 import { assessListingRisk, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin, normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection } from '../marketplace.service';
-import { bookingMinutes, markSent, nextServiceAfter, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, recomputeCarRating, recomputeMechanicRating, shouldSend, vehicleReminders } from '../garage.service';
+import { bookingMinutes, markSent, nextServiceAfter, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, shouldSend, vehicleReminders } from '../garage.service';
 import { CAR_SEEDS, SAFETY_FEATURES, SERVICE_KINDS, ancapStatus, co2ForCar } from '../automotive-library';
 
 describe('car finance', () => {
@@ -225,15 +225,18 @@ describe('the garage', () => {
     expect(nxt.dueKm).toBe(82500);
   });
 
-  it('sums a quote by kind, prices from the workshop\'s list or the typical range, and rates by completed jobs only', () => {
+  // The averaging this case used to assert on lives in the database now, so
+  // the two rating assertions moved out with recomputeMechanicRating and
+  // recomputeCarRating. What replaces them is in automotive.routes.test.ts,
+  // where the stored figure is checked against the aggregate the route asked
+  // for rather than against arithmetic the test did for itself.
+  it('sums a quote by kind, prices from the workshop\'s list or the typical range, and sizes the booking', () => {
     const lines = normaliseQuoteLines([{ label: 'Pads', amount: 180, kind: 'PARTS' }, { label: 'Fit', amount: 120.5, kind: 'LABOUR' }, { label: '', amount: 5 }, { label: 'Disposal', amount: 10 }]);
     expect(lines).toHaveLength(3);
     expect(quoteTotal(lines)).toEqual({ total: 310.5, parts: 180, labour: 120.5, other: 10 });
     expect(priceFor([{ kind: 'logbook', from: 299, to: 399 }], 'logbook')).toMatchObject({ from: 299, own: true });
     expect(priceFor(null, 'brakes')).toMatchObject({ from: 250, to: 800, own: false });
     expect(bookingMinutes('logbook', 60)).toBe(120);
-    expect(recomputeMechanicRating([{ rating: 5, transparency: 4 }, { rating: 1, transparency: 1, isHidden: true }])).toEqual({ ratingAvg: 5, ratingCount: 1, transparencyAvg: 4 });
-    expect(recomputeCarRating([{ rating: 4, reliability: 5 }, { rating: 2, reliability: 3 }])).toEqual({ ratingAvg: 3, ratingCount: 2, reliabilityAvg: 4 });
   });
 });
 

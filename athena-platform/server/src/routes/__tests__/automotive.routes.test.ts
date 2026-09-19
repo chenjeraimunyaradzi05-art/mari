@@ -26,6 +26,23 @@ const matches = (row: Row, where: Row | undefined): boolean => {
     return row[k] === v;
   });
 };
+/**
+ * The arithmetic an aggregate does once its rows are picked, kept apart from
+ * the picking so a delegate that resolves relations can hand it related rows
+ * instead of raw ones. It has to be faithful as well as present: an average
+ * over no rows is null and never 0, and _count counts the rows whose field is
+ * set. A mock that answered 0 would hide the one case the route has to get
+ * right, which is "no ratings yet" against "everyone gave it nothing".
+ */
+const aggregateOver = (hit: Row[], { _avg, _count, _sum }: any = {}) => {
+  const numbers = (k: string) => hit.map((r) => r[k]).filter((v): v is number => typeof v === 'number');
+  const over = (spec: any, f: (key: string) => unknown): Row => Object.fromEntries(Object.keys(spec ?? {}).map((k) => [k, f(k)]));
+  return {
+    _avg: over(_avg, (k) => { const v = numbers(k); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; }),
+    _count: _count === true ? hit.length : over(_count, (k) => hit.filter((r) => r[k] !== null && r[k] !== undefined).length),
+    _sum: over(_sum, (k) => { const v = numbers(k); return v.length ? v.reduce((s, x) => s + x, 0) : null; }),
+  };
+};
 const table = (rows: () => Row[], defaults: () => Row = () => ({})) => ({
   findMany: jest.fn(async ({ where, take, skip, orderBy }: any = {}) => { let out = rows().filter((r) => matches(r, where)); if (Array.isArray(orderBy)) { for (const o of [...orderBy].reverse()) { const [k, dir] = Object.entries(o)[0] as [string, string]; out = [...out].sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * (dir === 'desc' ? -1 : 1)); } } return out.slice(skip ?? 0, (skip ?? 0) + (take ?? out.length)).map((r) => ({ ...r })); }),
   findFirst: jest.fn(async ({ where }: any = {}) => { const r = rows().find((x) => matches(x, where)); return r ? { ...r } : null; }),
@@ -38,12 +55,28 @@ const table = (rows: () => Row[], defaults: () => Row = () => ({})) => ({
   delete: jest.fn(async ({ where }: any) => { const i = rows().findIndex((r) => matches(r, where)); const [row] = rows().splice(i, 1); return row; }),
   deleteMany: jest.fn(async () => ({ count: 0 })),
   groupBy: jest.fn(async () => []),
+  // The rating helpers ask the database for the average instead of pulling
+  // every review row into memory, so every mocked model needs this or the
+  // handler dies with "prisma.carReview.aggregate is not a function". This is
+  // the plain version, over the store's own rows; a delegate wrapped in
+  // withRelations replaces it with one that can see across a relation.
+  aggregate: jest.fn(async (args: any = {}) => aggregateOver(rows().filter((r) => matches(r, args.where)), args)),
 });
 
 const users: Record<string, Row> = { member: { id: 'member', firstName: 'Mei', lastName: 'Lin', displayName: null, email: 'mei@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date('2025-01-01') }, seller: { id: 'seller', firstName: 'Ana', lastName: 'Ruiz', displayName: null, email: 'ana@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date('2025-01-01') }, mech: { id: 'mech', firstName: 'Jo', lastName: 'Park', displayName: null, email: 'jo@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date('2025-01-01') }, admin: { id: 'admin', firstName: 'Ad', lastName: 'Min', displayName: null, email: 'admin@athena.com', role: 'ADMIN', timezone: 'Australia/Brisbane', createdAt: new Date('2024-01-01') }, newbie: { id: 'newbie', firstName: 'New', lastName: 'One', displayName: null, email: 'new@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date() } };
 
 jest.mock('../../utils/prisma', () => {
-  const withRelations = (t: ReturnType<typeof table>, relate: (row: Row, args: any) => Row) => ({ ...t, findMany: jest.fn(async (args: any = {}) => (await t.findMany(args)).map((r: Row) => relate(r, args))), findFirst: jest.fn(async (args: any = {}) => { const r = await t.findFirst(args); return r ? relate(r, args) : null; }), findUnique: jest.fn(async (args: any) => { const r = await t.findUnique(args); return r ? relate(r, args) : null; }), create: jest.fn(async (args: any) => relate(await t.create(args), args)), update: jest.fn(async (args: any) => relate(await t.update(args), args)) });
+  /**
+   * A delegate whose rows carry their relations. aggregate belongs in here
+   * with the rest and not in the bare table: dealershipRating filters on
+   * `where: { listing: { dealershipId } }`, and a raw store row for a purchase
+   * holds only listingId, so matches() walks into an absent `listing`, finds
+   * nothing, and hands back an average of null over no rows. That is the same
+   * answer a dealership with no reviews gets, so a test asserting it would
+   * have passed however wrong the filter was. Relating the rows first, then
+   * filtering, is what makes the filter mean something.
+   */
+  const withRelations = (t: ReturnType<typeof table>, relate: (row: Row, args: any) => Row) => ({ ...t, findMany: jest.fn(async (args: any = {}) => (await t.findMany(args)).map((r: Row) => relate(r, args))), findFirst: jest.fn(async (args: any = {}) => { const r = await t.findFirst(args); return r ? relate(r, args) : null; }), findUnique: jest.fn(async (args: any) => { const r = await t.findUnique(args); return r ? relate(r, args) : null; }), create: jest.fn(async (args: any) => relate(await t.create(args), args)), update: jest.fn(async (args: any) => relate(await t.update(args), args)), aggregate: jest.fn(async (args: any = {}) => aggregateOver((await t.findMany({})).map((r: Row) => relate(r, args)).filter((r: Row) => matches(r, args.where)), args)) });
   const listingRel = (r: Row) => ({ ...r, seller: users[r.sellerId], dealership: r.dealershipId ? store.dealerships.find((d) => d.id === r.dealershipId) ?? null : null, inspections: store.inspections.filter((i) => i.listingId === r.id), purchases: store.purchases.filter((p) => p.listingId === r.id) });
   const purchaseRel = (r: Row) => ({ ...r, listing: listingRel(store.listings.find((l) => l.id === r.listingId)!), buyer: users[r.buyerId], seller: users[r.sellerId], escrow: r.escrowPaymentId ? store.escrows.find((e) => e.id === r.escrowPaymentId) ?? null : null });
   const bookingRel = (r: Row) => ({ ...r, mechanic: store.mechanics.find((m) => m.id === r.mechanicId), vehicle: r.vehicleId ? store.vehicles.find((v) => v.id === r.vehicleId) ?? null : null, review: store.mechanicReviews.find((x) => x.bookingId === r.id) ?? null, escrow: r.escrowPaymentId ? store.escrows.find((e) => e.id === r.escrowPaymentId) ?? null : null, user: users[r.userId] });
@@ -91,11 +124,42 @@ jest.mock('../../middleware/auth', () => ({
 jest.mock('../../utils/logger', () => ({ logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() } }));
 
 import { app } from '../../index';
+import { prisma } from '../../utils/prisma';
 import { CAR_SEEDS } from '../../services/automotive/automotive-library';
 import { createEscrowPayment } from '../../services/stripe-connect.service';
 
 const as = (userId: string, role = 'USER') => ({ 'x-test-user': userId, 'x-test-role': role });
+/**
+ * What the handler's own aggregate() call came back with. A test that only
+ * checks the stored average against a figure it worked out for itself would
+ * pass even if the route ignored the database and wrote a number of its own,
+ * so the assertions below compare the two.
+ */
+const lastAggregate = async (delegate: { aggregate: unknown }): Promise<{ _avg: Row; _count: Row }> => {
+  const results = (delegate.aggregate as jest.Mock).mock.results;
+  expect(results.length).toBeGreaterThan(0);
+  return (await results[results.length - 1].value) as { _avg: Row; _count: Row };
+};
 const seedCars = () => { store.cars = CAR_SEEDS.slice(0, 12).map((s, i) => ({ id: `car${i}`, ...s, variant: s.variant ?? null, transmission: s.transmission ?? 'AUTOMATIC', seats: s.seats ?? 5, ancapStars: s.ancapStars ?? null, ancapYear: s.ancapYear ?? null, fuelPer100: s.fuelPer100 ?? null, kwhPer100: s.kwhPer100 ?? null, rangeKm: s.rangeKm ?? null, servicingCostYear: s.servicingCostYear ?? null, co2GramsKm: null, sourceUrl: null, asAt: 'test', isActive: true, ratingAvg: 0, ratingCount: 0, reliabilityAvg: 0, createdAt: new Date(), updatedAt: new Date() })); };
+/**
+ * A listing walked the whole way to a released, reviewed purchase, because
+ * that is the only path that reaches the dealership average. `member` is
+ * always the buyer; the seller decides whether the sale counts as a
+ * dealership's, since a listing picks up a dealershipId when its seller owns
+ * a verified one.
+ */
+const soldAndRated = async (sellerId: string, listing: Row, rating: number): Promise<Row> => {
+  const l = await request(app).post('/api/automotive/listings').set(as(sellerId)).send({ ...listing, state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], ppsrChecked: true, serviceHistory: 'FULL', publish: true }).expect(201);
+  expect(l.body.data.status).toBe('ACTIVE');
+  const offer = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: listing.price }).expect(201);
+  const pid = offer.body.data.id;
+  await request(app).post(`/api/automotive/purchases/${pid}/accept`).set(as(sellerId)).expect(200);
+  await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+  await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(200);
+  await request(app).post(`/api/automotive/purchases/${pid}/release`).set(as('member')).expect(200);
+  await request(app).post(`/api/automotive/purchases/${pid}/review`).set(as('member')).send({ rating }).expect(200);
+  return l.body.data;
+};
 const workshop = () => ({ id: 'm1', slug: 'jos-garage', name: "Jo's Garage", ownerUserId: 'mech', headline: 'Women-owned, plain-spoken', about: 'We explain every charge before we touch the car.', womenOwned: true, womenMechanics: true, services: ['logbook', 'brakes', 'pre_purchase'], makes: [], evCapable: false, mobile: false, loanCar: true, afterHours: false, doesInspections: true, languages: ['English'], suburb: 'Annerley', city: 'Brisbane', state: 'QLD', postcode: '4103', address: null, phone: '07 3000 0000', website: null, bookingUrl: null, licenceNumber: null, priceList: [{ kind: 'logbook', from: 299, to: 399 }], labourRateHour: 120, partsWarrantyMonths: 12, labourWarrantyMonths: 6, warrantyNote: null, availability: { '1': [['08:00', '16:00']], '2': [['08:00', '16:00']], '3': [['08:00', '16:00']], '4': [['08:00', '16:00']], '5': [['08:00', '16:00']] }, slotMinutes: 60, acceptsBookings: true, isVerified: true, isActive: true, isFeatured: false, featuredUntil: null, ratingAvg: 0, ratingCount: 0, transparencyAvg: 0, createdAt: new Date(), updatedAt: new Date() });
 
 describe('The automotive routes', () => {
@@ -283,10 +347,41 @@ describe('The automotive routes', () => {
     expect(store.escrows.at(-1)!.status).toBe('CAPTURED');
     const reviewed = await request(app).post(`/api/automotive/bookings/${bid}/review`).set(as('member')).send({ rating: 5, transparency: 5, comment: 'Explained every line.' }).expect(201);
     expect(reviewed.body.data.id).toBeTruthy();
-    expect(store.mechanics[0].ratingAvg).toBe(5);
+    // The workshop's card carries the average the database worked out over its
+    // visible reviews, and the count that says how many stand behind it.
+    const agg = await lastAggregate(prisma.mechanicReview);
+    expect(agg._avg.rating).toBe(5);
+    expect(agg._count.rating).toBe(1);
+    expect(store.mechanics[0].ratingAvg).toBe(agg._avg.rating);
+    expect(store.mechanics[0].ratingCount).toBe(agg._count.rating);
     expect(store.mechanics[0].transparencyAvg).toBe(5);
     const ics = await request(app).get(`/api/automotive/bookings/${bid}/ics`).set(as('member')).expect(200);
     expect(ics.text).toContain('BEGIN:VCALENDAR');
+  });
+
+  it('leaves a hidden review out of the workshop average', async () => {
+    // The only assertion anywhere that hiding a mechanic review changes what
+    // her card says used to live on recomputeMechanicRating, which the routes
+    // no longer call. The rule now lives in the aggregate's `isHidden: false`,
+    // so it is checked here, through the route a moderator actually uses.
+    store.mechanics = [{ ...workshop(), ratingAvg: 3, ratingCount: 2, transparencyAvg: 2.5 }];
+    store.mechanicReviews = [
+      { id: 'mr1', mechanicId: 'm1', userId: 'member', bookingId: 'b1', rating: 5, transparency: 4, comment: 'Explained every line.', isHidden: false, createdAt: new Date() },
+      { id: 'mr2', mechanicId: 'm1', userId: 'member2', bookingId: 'b2', rating: 1, transparency: 1, comment: 'Abusive and untrue.', isHidden: false, createdAt: new Date() },
+    ];
+
+    await request(app).patch('/api/automotive/admin/mechanic-reviews/mr2').set(as('member')).send({ isHidden: true }).expect(403);
+    await request(app).patch('/api/automotive/admin/mechanic-reviews/mr2').set(as('admin', 'ADMIN')).send({ isHidden: true }).expect(200);
+
+    // Hiding the one leaves only the five, so the average has to rise to it and
+    // the count has to fall with it. An average that moved while the count
+    // stayed at two would mean the card still counts a review nobody can read.
+    const agg = await lastAggregate(prisma.mechanicReview);
+    expect(agg._avg.rating).toBe(5);
+    expect(agg._count.rating).toBe(1);
+    expect(store.mechanics[0].ratingAvg).toBe(5);
+    expect(store.mechanics[0].ratingCount).toBe(1);
+    expect(store.mechanics[0].transparencyAvg).toBe(4);
   });
 
   it('takes a workshop profile that waits for verification, and an admin verifies and features it', async () => {
@@ -311,14 +406,75 @@ describe('The automotive routes', () => {
     expect(r.body.data.isOwner).toBe(true);
     await request(app).post('/api/automotive/catalogue/toyota-rav4-hybrid/reviews').set(as('seller')).send({ rating: 3, reliability: 4, safetyFeel: 4, runningCosts: 3, title: 'Fine, a bit dull', body: 'Does everything it should and nothing more. The infotainment is behind the Koreans and the wait list was long.' }).expect(201);
     const car = store.cars.find((c) => c.slug === 'toyota-rav4-hybrid')!;
-    expect(car.ratingAvg).toBe(4);
-    expect(car.ratingCount).toBe(2);
+    // Fives and threes: the stored figure has to be the aggregate's average of
+    // the two, not the last rating written, and reliability rounds to one place.
+    const both = await lastAggregate(prisma.carReview);
+    expect(both._avg.rating).toBe(4);
+    expect(both._count.rating).toBe(2);
+    expect(car.ratingAvg).toBe(both._avg.rating);
+    expect(car.ratingCount).toBe(both._count.rating);
+    expect(car.reliabilityAvg).toBe(4.5);
     const detail = await request(app).get('/api/automotive/catalogue/toyota-rav4-hybrid').set(as('member')).expect(200);
     expect(detail.body.data.womenSay.owners).toBe(1);
+    expect(detail.body.data.womenSay.rating).toBe(4);
     expect(detail.body.data.myReview.rating).toBe(5);
     await request(app).patch(`/api/automotive/reviews/${r.body.data.id}`).set(as('seller')).send({ isHidden: true }).expect(403);
     await request(app).patch(`/api/automotive/reviews/${r.body.data.id}`).set(as('admin', 'ADMIN')).send({ isHidden: true }).expect(200);
+    // Hiding the five leaves the three showing, so the average has to fall to
+    // it. A count that dropped while the average stayed at 4 would mean the
+    // card was still quoting a review nobody can read.
+    const visible = await lastAggregate(prisma.carReview);
+    expect(visible._avg.rating).toBe(3);
+    expect(car.ratingAvg).toBe(visible._avg.rating);
     expect(car.ratingCount).toBe(1);
+    expect(car.reliabilityAvg).toBe(4);
+  });
+
+  it('goes back to having no average at all when the last review is deleted', async () => {
+    const r = await request(app).post('/api/automotive/catalogue/toyota-rav4-hybrid/reviews').set(as('member')).send({ rating: 4, reliability: 4, safetyFeel: 4, runningCosts: 4, title: 'Steady and easy to park', body: 'Two years of school runs and one long drive to Sydney, and it has not missed a beat or cost me anything unplanned.' }).expect(201);
+    const car = store.cars.find((c) => c.slug === 'toyota-rav4-hybrid')!;
+    expect(car.ratingAvg).toBe(4);
+    expect(car.ratingCount).toBe(1);
+    await request(app).delete(`/api/automotive/reviews/${r.body.data.id}`).set(as('member')).expect(200);
+    // With the last review gone the aggregate has nothing to average, so it
+    // gives back null rather than 0.
+    const empty = await lastAggregate(prisma.carReview);
+    expect(empty._avg.rating).toBeNull();
+    expect(empty._count.rating).toBe(0);
+    // The column is a non-null Decimal defaulting to 0, so 0 is how "no
+    // ratings yet" is stored; the count beside it at 0 is what tells a card
+    // there is no average to show, and the detail page says nothing rather
+    // than showing her a zero out of five.
+    expect(car.ratingAvg).toBe(0);
+    expect(car.ratingCount).toBe(0);
+    expect(car.reliabilityAvg).toBe(0);
+    const detail = await request(app).get('/api/automotive/catalogue/toyota-rav4-hybrid').expect(200);
+    expect(detail.body.data.womenSay).toBeNull();
+    expect(detail.body.data.reviews).toHaveLength(0);
+  });
+
+  it('averages a dealership\'s stars over its own sales and nobody else\'s', async () => {
+    const dealerId = randomUUID();
+    store.dealerships = [{ id: dealerId, slug: 'sunny-motors', name: 'Sunny Motors', ownerUserId: 'seller', brands: ['Mazda'], headline: 'Women-led, no games', about: null, suburb: 'Ipswich', city: 'Ipswich', state: 'QLD', postcode: null, address: null, phone: null, website: null, email: null, womenLed: true, financeAvailable: false, financePartners: [], hours: null, isVerified: true, isActive: true, isFeatured: false, featuredUntil: null, ratingAvg: 0, ratingCount: 0, createdAt: new Date(), updatedAt: new Date() }];
+    // A private sale by someone who owns no dealership, rated one star, and
+    // sold first so that it is already on the books when the dealership's own
+    // average is worked out. Keeping it out of that average is the whole job
+    // of `where: { listing: { dealershipId } }`, and the three ways that
+    // filter can be wrong all show here: were it dropped the figures below
+    // would be 3 over 2, and were it matching nothing they would be 0 over 0.
+    await soldAndRated('mech', { title: '2020 Toyota Corolla hybrid', make: 'Toyota', model: 'Corolla', year: 2020, bodyType: 'HATCH', fuelType: 'HYBRID', odometerKm: 80000, price: 22000, vin: 'JTNKN3JE0L0123456', description: 'Full Toyota history, tyres and brakes done, one owner from new, garaged.' }, 1);
+    const sold = await soldAndRated('seller', { title: '2021 Mazda CX-5 Maxx, one owner', make: 'Mazda', model: 'CX-5', year: 2021, bodyType: 'SUV', fuelType: 'PETROL', odometerKm: 70000, price: 27000, vin: 'JM0KF4WLA00123456', description: 'Serviced at Mazda every year, two keys, new tyres in June. Happy to meet at a workshop for an inspection.' }, 5);
+    expect(sold.sellerKind).toBe('DEALER');
+    expect(sold.dealership.id).toBe(dealerId);
+    expect(store.purchases.filter((p) => p.reviewRating !== null)).toHaveLength(2);
+    const agg = await lastAggregate(prisma.vehiclePurchase);
+    expect(agg._avg.reviewRating).toBe(5);
+    expect(agg._count.reviewRating).toBe(1);
+    expect(store.dealerships[0].ratingAvg).toBe(agg._avg.reviewRating);
+    expect(store.dealerships[0].ratingCount).toBe(agg._count.reviewRating);
+    const page = await request(app).get('/api/automotive/dealerships/sunny-motors').expect(200);
+    expect(page.body.data.ratingAvg).toBe(5);
+    expect(page.body.data.ratingCount).toBe(1);
   });
 
   it('tracks a finance pre-approval from draft to a decision', async () => {

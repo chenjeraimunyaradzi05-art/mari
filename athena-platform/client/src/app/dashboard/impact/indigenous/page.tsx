@@ -43,22 +43,74 @@ export default function IndigenousPage() {
   const [joining, setJoining] = useState<string | null>(null);
   const [resourceType, setResourceType] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Both catalogues are paged server-side, fifty to a page, and this page only
+  // ever asked for the first one — so a fifty-first community or resource could
+  // not be reached at all. Each list gets its own "Show more", which fetches the
+  // next page and adds it to what is already on screen. hasMore is the server's
+  // own answer: a response without a pagination block offers no button rather
+  // than guessing from how many rows came back.
+  const [communityPage, setCommunityPage] = useState(1);
+  const [hasMoreCommunities, setHasMoreCommunities] = useState(false);
+  const [loadingMoreCommunities, setLoadingMoreCommunities] = useState(false);
+  const [resourcePage, setResourcePage] = useState(1);
+  const [hasMoreResources, setHasMoreResources] = useState(false);
+  const [loadingMoreResources, setLoadingMoreResources] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const [communitiesRes, resourcesRes] = await Promise.all([
-        communitySupportApi.getIndigenousCommunities(),
-        communitySupportApi.getIndigenousResources({ type: resourceType || undefined }),
+        communitySupportApi.getIndigenousCommunities({ page: 1 }),
+        communitySupportApi.getIndigenousResources({ type: resourceType || undefined, page: 1 }),
       ]);
       setCommunities(communitiesRes.data?.data || []);
+      setCommunityPage(1);
+      setHasMoreCommunities(Boolean(communitiesRes.data?.pagination?.hasMore));
       setResources(resourcesRes.data?.data || []);
+      setResourcePage(1);
+      setHasMoreResources(Boolean(resourcesRes.data?.pagination?.hasMore));
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreCommunities = async () => {
+    setLoadingMoreCommunities(true);
+    setError(null);
+    try {
+      const next = communityPage + 1;
+      const res = await communitySupportApi.getIndigenousCommunities({ page: next });
+      const more: IndigenousCommunity[] = res.data?.data || [];
+      setCommunities((current) => [...current, ...more]);
+      setCommunityPage(next);
+      setHasMoreCommunities(Boolean(res.data?.pagination?.hasMore));
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Failed to load more communities');
+    } finally {
+      setLoadingMoreCommunities(false);
+    }
+  };
+
+  const loadMoreResources = async () => {
+    setLoadingMoreResources(true);
+    setError(null);
+    try {
+      const next = resourcePage + 1;
+      const res = await communitySupportApi.getIndigenousResources({ type: resourceType || undefined, page: next });
+      const more: IndigenousResource[] = res.data?.data || [];
+      setResources((current) => [...current, ...more]);
+      setResourcePage(next);
+      setHasMoreResources(Boolean(res.data?.pagination?.hasMore));
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error?.response?.data?.error || 'Failed to load more resources');
+    } finally {
+      setLoadingMoreResources(false);
     }
   };
 
@@ -171,6 +223,13 @@ export default function IndigenousPage() {
                 ))}
               </div>
             )}
+            {hasMoreCommunities && (
+              <div className="text-center mt-4">
+                <button onClick={loadMoreCommunities} disabled={loadingMoreCommunities} className="btn-secondary">
+                  {loadingMoreCommunities ? 'Loading more...' : 'Show more communities'}
+                </button>
+              </div>
+            )}
           </section>
 
           {/* Resources */}
@@ -236,6 +295,13 @@ export default function IndigenousPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+            {hasMoreResources && (
+              <div className="text-center mt-4">
+                <button onClick={loadMoreResources} disabled={loadingMoreResources} className="btn-secondary">
+                  {loadingMoreResources ? 'Loading more...' : 'Show more resources'}
+                </button>
               </div>
             )}
           </section>
