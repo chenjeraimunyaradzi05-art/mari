@@ -14,7 +14,18 @@ const TRIAL_DAYS = 14;
 
 const router = Router();
 
-const stripe = getStripe();
+// The Stripe client is fetched per call rather than held in a module constant.
+// Capturing it at import time froze whatever getStripe() could build at that
+// moment: if STRIPE_SECRET_KEY was not in the environment yet when this router
+// loaded, every checkout, portal and cancellation for the life of the process
+// went to Stripe with the sk_test_not_configured placeholder, and getStripe()
+// rebuilding its cache when the key appears could never reach it.
+//
+// Nothing here degrades gracefully - these routes have no non-Stripe path and
+// are not meant to - so there is no isStripeConfigured() gate. An unconfigured
+// deployment fails exactly as it did before: in production the client from
+// getStripe() throws 503 'Payments are not configured on this deployment' on
+// first use, and elsewhere the placeholder key is refused by Stripe.
 
 const VALID_TIERS: SubscriptionTierKey[] = [
   'PREMIUM_CAREER',
@@ -71,7 +82,7 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
     let customerId = user.subscription?.stripeCustomerId;
 
     if (!customerId) {
-      const customer = await stripe.customers.create({
+      const customer = await getStripe().customers.create({
         email: user.email,
         name: `${user.firstName} ${user.lastName}`,
         metadata: {
@@ -93,7 +104,7 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
     // Whether this customer has already used their trial. Stripe will happily
     // grant a fresh trial on every new subscription, so without this check
     // someone could cancel and resubscribe indefinitely and never pay.
-    const previousSubscriptions = await stripe.subscriptions.list({
+    const previousSubscriptions = await getStripe().subscriptions.list({
       customer: customerId,
       status: 'all',
       limit: 1,
@@ -106,7 +117,7 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
     // carried no trial at all, so anyone who took that offer was charged the
     // full amount immediately — a representation we made and did not honour.
     // TRIAL_DAYS is the same constant the marketing copy renders from.
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
       payment_method_types: ['card'],
@@ -160,7 +171,7 @@ router.post('/portal', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'No Stripe customer found');
     }
 
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: subscription.stripeCustomerId,
       return_url: `${process.env.CLIENT_URL}/settings/billing`,
     });
@@ -190,7 +201,7 @@ router.post('/cancel', authenticate, async (req: AuthRequest, res, next) => {
     }
 
     // Cancel at period end
-    await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+    await getStripe().subscriptions.update(subscription.stripeSubscriptionId, {
       cancel_at_period_end: true,
     });
 

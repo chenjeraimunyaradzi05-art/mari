@@ -9,12 +9,15 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { getStripe, isStripeConfigured } from '../utils/stripe';
 import { transition } from './formation-state-machine.service';
 
-// Initialize Stripe
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
-  : null;
+// Stripe comes from the one shared client in utils/stripe, so this module cannot
+// drift onto a different API version from the rest of the server. Whether a key
+// exists is asked separately with isStripeConfigured(), because getStripe() never
+// returns null - outside production it hands back a placeholder client - and the
+// simulated-payment path below depends on being able to tell "no Stripe here"
+// apart from "Stripe, ready to charge".
 const isProduction =
   process.env.NODE_ENV === 'production' ||
   process.env.VERCEL_ENV === 'production';
@@ -209,7 +212,7 @@ async function ensureFormationPaymentIntent(registration: {
   const amountCents = FORMATION_FEES[registration.type];
   const existingId = nonEmptyString(asRecord(registration.data).stripePaymentIntentId);
 
-  if (!stripe) {
+  if (!isStripeConfigured()) {
     assertStripeAvailable(registration.id);
     // Development without Stripe keys: a deterministic id so the rest of the
     // flow (and its tests) can run end to end without taking money.
@@ -224,7 +227,7 @@ async function ensureFormationPaymentIntent(registration: {
 
   if (existingId && !isSimulatedIntent(existingId)) {
     try {
-      const existing = await stripe.paymentIntents.retrieve(existingId);
+      const existing = await getStripe().paymentIntents.retrieve(existingId);
       // The fee table can change between attempts, so only reuse an intent that
       // still asks for exactly what we would charge today.
       if (REUSABLE_INTENT_STATUSES.has(existing.status) && existing.amount === amountCents) {
@@ -245,7 +248,7 @@ async function ensureFormationPaymentIntent(registration: {
 
   try {
     const user = await prisma.user.findUnique({ where: { id: registration.userId } });
-    const paymentIntent = await stripe.paymentIntents.create({
+    const paymentIntent = await getStripe().paymentIntents.create({
       amount: amountCents,
       currency: FORMATION_FEE_CURRENCY,
       metadata: {
@@ -489,9 +492,9 @@ export async function confirmFormationPayment(
   let amountCents = FORMATION_FEES[registration.type];
   let currency: string = FORMATION_FEE_CURRENCY;
 
-  if (stripe) {
+  if (isStripeConfigured()) {
     try {
-      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      const paymentIntent = await getStripe().paymentIntents.retrieve(paymentIntentId);
 
       if ((paymentIntent.metadata as any)?.registrationId !== registrationId) {
         throw new ApiError(400, 'Payment does not belong to this registration');

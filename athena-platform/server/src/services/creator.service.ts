@@ -10,7 +10,17 @@ import { getStripe } from '../utils/stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { sendNotification } from './socket.service';
 
-const stripe = getStripe();
+// getStripe() is called at each use rather than once into a module constant.
+// Capturing it at import time froze whatever client could be built the moment
+// this module loaded: with STRIPE_SECRET_KEY not yet in the environment, every
+// Connect account, gift-balance charge and creator payout for the life of the
+// process went out with the sk_test_not_configured placeholder, and the cache
+// getStripe() rebuilds when the real key arrives could never be reached here.
+//
+// There is no isStripeConfigured() gate because nothing in this module has a
+// fallback to gate: an unconfigured deployment fails as it always has - 503
+// from the production client on first use, a refused key elsewhere. `Stripe`
+// is still imported for the PaymentIntent type below.
 
 // ==========================================
 // TYPES
@@ -175,7 +185,7 @@ export async function enableCreatorMode(userId: string, stripeAccountId?: string
 
     if (!user) throw new Error('User not found');
 
-    const account = await stripe.accounts.create({
+    const account = await getStripe().accounts.create({
       type: 'express',
       email: user.email,
       capabilities: {
@@ -313,7 +323,7 @@ export async function purchaseGiftBalance(userId: string, amount: number) {
   const giftPoints = Math.floor(amount / GIFT_POINT_VALUE);
 
   // Create Stripe payment intent
-  const paymentIntent = await stripe.paymentIntents.create({
+  const paymentIntent = await getStripe().paymentIntents.create({
     amount: amount * 100, // Convert to cents
     currency: currency.toLowerCase(),
     metadata: {
@@ -397,7 +407,7 @@ export async function confirmGiftPurchaseFromPaymentIntent(
 }
 
 export async function confirmGiftPurchase(actorUserId: string, paymentIntentId: string) {
-  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const paymentIntent = await getStripe().paymentIntents.retrieve(paymentIntentId);
   return confirmGiftPurchaseFromPaymentIntent(actorUserId, paymentIntent as any);
 }
 
@@ -623,7 +633,7 @@ export async function requestPayout(userId: string) {
   const currency = await resolveUserCurrency(userId);
 
   // Create payout via Stripe
-  const transfer = await stripe.transfers.create({
+  const transfer = await getStripe().transfers.create({
     amount: Math.floor(pendingAmount * 100), // Convert to cents
     currency: currency.toLowerCase(),
     destination: profile.stripeAccountId,
@@ -669,7 +679,7 @@ export async function generateStripeOnboardingLink(userId: string) {
     throw new Error('Creator profile or Stripe account not found. Enable creator mode first.');
   }
 
-  const accountLink = await stripe.accountLinks.create({
+  const accountLink = await getStripe().accountLinks.create({
     account: profile.stripeAccountId,
     refresh_url: `${process.env.CLIENT_URL}/dashboard/creator/onboarding-refresh`,
     return_url: `${process.env.CLIENT_URL}/dashboard/creator`,
@@ -689,7 +699,7 @@ export async function generateStripeLoginLink(userId: string) {
   }
 
   try {
-    const loginLink = await stripe.accounts.createLoginLink(profile.stripeAccountId);
+    const loginLink = await getStripe().accounts.createLoginLink(profile.stripeAccountId);
     return loginLink.url;
   } catch (error: any) {
     if (error.code === 'account_invalid') {

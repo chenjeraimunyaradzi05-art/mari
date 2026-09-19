@@ -6,10 +6,14 @@
 import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { getStripe, isStripeConfigured } from '../utils/stripe';
 
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
-  : null;
+// Stripe comes from the one shared client in utils/stripe; `Stripe` is still
+// imported here for the PaymentIntent type the webhook handlers take. Whether a
+// key exists is asked with isStripeConfigured() rather than by null-testing a
+// client, because getStripe() never returns null - outside production it hands
+// back a placeholder - and the routing below has to be able to report "stripe is
+// not configured in this environment" instead of attempting a charge.
 
 export type PaymentProvider = 'stripe' | 'paypal' | 'wise' | 'gcash' | 'grabpay' | 'mpesa' | 'pix' | 'upi';
 export type Currency = 'AUD' | 'USD' | 'GBP' | 'EUR' | 'NZD' | 'SGD' | 'PHP' | 'IDR' | 'INR' | 'BRL' | 'KES';
@@ -260,7 +264,7 @@ export async function processPayment(
  * Process Stripe payment
  */
 async function processStripePayment(request: PaymentRequest): Promise<PaymentResult> {
-  if (!stripe) {
+  if (!isStripeConfigured()) {
     assertProviderConfigured('stripe');
     return {
       success: false,
@@ -275,7 +279,7 @@ async function processStripePayment(request: PaymentRequest): Promise<PaymentRes
   
   if (!customerId) {
     const user = await prisma.user.findUnique({ where: { id: request.userId } });
-    const customer = await stripe.customers.create({
+    const customer = await getStripe().customers.create({
       email: user?.email || undefined,
       name: user?.displayName || undefined,
       metadata: { userId: request.userId },
@@ -285,7 +289,7 @@ async function processStripePayment(request: PaymentRequest): Promise<PaymentRes
   }
 
   // Create payment intent
-  const paymentIntent = await stripe.paymentIntents.create({
+  const paymentIntent = await getStripe().paymentIntents.create({
     amount: Math.round(request.amount * 100), // Convert to cents
     currency: request.currency.toLowerCase(),
     customer: customerId,
@@ -432,7 +436,7 @@ export async function processCreatorPayout(
  * Process Stripe Connect payout
  */
 async function processStripeConnectPayout(request: PayoutRequest): Promise<PaymentResult> {
-  if (!stripe) {
+  if (!isStripeConfigured()) {
     assertProviderConfigured('stripe');
     return {
       success: false,
@@ -454,7 +458,7 @@ async function processStripeConnectPayout(request: PayoutRequest): Promise<Payme
     };
   }
 
-  const transfer = await stripe.transfers.create({
+  const transfer = await getStripe().transfers.create({
     amount: Math.round(request.amount * 100),
     currency: request.currency.toLowerCase(),
     destination: connectedAccountId,

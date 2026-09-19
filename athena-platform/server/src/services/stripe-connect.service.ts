@@ -4,21 +4,25 @@
  * Phase 2: Backend Logic & Integrations
  */
 
-import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
-
-// Initialize Stripe
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
-  : null;
+import { getStripe, isStripeConfigured } from '../utils/stripe';
 
 // Platform fee percentage (e.g., 15% of mentor/creator earnings)
 const PLATFORM_FEE_PERCENT = 15;
 
+/**
+ * Whether this deployment should fall back to the development mocks below.
+ *
+ * The key is checked with isStripeConfigured() rather than by null-testing a
+ * client: getStripe() never returns null - outside production it hands back a
+ * placeholder client - so a null test would always say "Stripe is ready" and
+ * every mock path here would instead try to move real money with a key that
+ * could only fail.
+ */
 function canUseMockStripe(feature: string): boolean {
-  if (stripe) {
+  if (isStripeConfigured()) {
     return false;
   }
 
@@ -85,7 +89,7 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
 
   try {
     // Create the Express connected account
-    const account = await stripe!.accounts.create({
+    const account = await getStripe().accounts.create({
       type: 'express',
       country: input.country,
       email: input.email,
@@ -110,7 +114,7 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
     });
 
     // Create the account onboarding link
-    const accountLink = await stripe!.accountLinks.create({
+    const accountLink = await getStripe().accountLinks.create({
       account: account.id,
       refresh_url: `${process.env.CLIENT_URL}/dashboard/payments/refresh`,
       return_url: `${process.env.CLIENT_URL}/dashboard/payments/success`,
@@ -146,7 +150,7 @@ export async function getOnboardingLink(userId: string): Promise<string> {
     return `${process.env.CLIENT_URL}/dashboard/payments/mock-onboarding`;
   }
 
-  const accountLink = await stripe!.accountLinks.create({
+  const accountLink = await getStripe().accountLinks.create({
     account: user.stripeConnectAccountId,
     refresh_url: `${process.env.CLIENT_URL}/dashboard/payments/refresh`,
     return_url: `${process.env.CLIENT_URL}/dashboard/payments/success`,
@@ -187,7 +191,7 @@ export async function getAccountStatus(userId: string): Promise<{
   }
 
   try {
-    const account = await stripe!.accounts.retrieve(user.stripeConnectAccountId);
+    const account = await getStripe().accounts.retrieve(user.stripeConnectAccountId);
 
     const isOnboarded = account.details_submitted || false;
     const payoutsEnabled = account.payouts_enabled || false;
@@ -275,7 +279,7 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
 
   try {
     // Create payment intent with manual capture (escrow)
-    const paymentIntent = await stripe!.paymentIntents.create({
+    const paymentIntent = await getStripe().paymentIntents.create({
       amount: input.amount,
       currency: input.currency,
       capture_method: 'manual', // Don't capture immediately - hold in escrow
@@ -335,8 +339,8 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
  */
 export async function getEscrowClientSecret(paymentIntentId: string): Promise<string | null> {
   if (paymentIntentId.startsWith('pi_mock_')) return `${paymentIntentId}_secret_mock`;
-  if (!stripe) return null;
-  const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  if (!isStripeConfigured()) return null;
+  const intent = await getStripe().paymentIntents.retrieve(paymentIntentId);
   return intent.client_secret ?? null;
 }
 
@@ -402,7 +406,7 @@ export async function captureEscrowPayment(
   }
 
   try {
-    const paymentIntent = await stripe!.paymentIntents.capture(paymentIntentId);
+    const paymentIntent = await getStripe().paymentIntents.capture(paymentIntentId);
 
     await prisma.escrowPayment.update({
       where: { paymentIntentId },
@@ -455,7 +459,7 @@ export async function cancelEscrowPayment(
   try {
     // If captured, refund; if not captured, cancel
     if (escrow.status === 'CAPTURED') {
-      await stripe!.refunds.create({
+      await getStripe().refunds.create({
         payment_intent: paymentIntentId,
         reason: 'requested_by_customer',
       });
@@ -467,7 +471,7 @@ export async function cancelEscrowPayment(
 
       return { status: 'refunded' };
     } else {
-      await stripe!.paymentIntents.cancel(paymentIntentId);
+      await getStripe().paymentIntents.cancel(paymentIntentId);
 
       await prisma.escrowPayment.update({
         where: { paymentIntentId },
@@ -513,9 +517,9 @@ export async function getEarningsDashboard(userId: string): Promise<{
 
   let availableBalance = 0;
 
-  if (stripe && user?.stripeConnectAccountId) {
+  if (isStripeConfigured() && user?.stripeConnectAccountId) {
     try {
-      const balance = await stripe.balance.retrieve({
+      const balance = await getStripe().balance.retrieve({
         stripeAccount: user.stripeConnectAccountId,
       });
 
@@ -552,7 +556,7 @@ export async function createPayout(input: PayoutInput): Promise<{ payoutId: stri
   }
 
   try {
-    const payout = await stripe!.payouts.create(
+    const payout = await getStripe().payouts.create(
       {
         amount: input.amount,
         currency: input.currency,
@@ -623,7 +627,7 @@ export async function listPayoutMethods(userId: string): Promise<PayoutMethod[]>
   const accountId = await requireConnectedAccountId(userId);
 
   try {
-    const external = await stripe!.accounts.listExternalAccounts(accountId, { limit: 100 });
+    const external = await getStripe().accounts.listExternalAccounts(accountId, { limit: 100 });
 
     return external.data.map((account) => {
       const isBank = account.object === 'bank_account';
@@ -678,7 +682,7 @@ export async function setDefaultPayoutMethod(
   }
 
   try {
-    const updated = await stripe!.accounts.updateExternalAccount(accountId, payoutMethodId, {
+    const updated = await getStripe().accounts.updateExternalAccount(accountId, payoutMethodId, {
       default_for_currency: true,
     });
 

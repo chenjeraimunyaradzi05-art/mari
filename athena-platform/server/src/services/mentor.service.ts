@@ -12,7 +12,19 @@ import Stripe from 'stripe';
 import { getStripe } from '../utils/stripe';
 import { logger } from '../utils/logger';
 
-const stripe = getStripe();
+// getStripe() is called at each use rather than once into a module constant.
+// Capturing it at import time froze whatever client could be built the moment
+// this module loaded: with STRIPE_SECRET_KEY not yet in the environment, every
+// Connect account, session authorisation, capture and cancellation for the life
+// of the process went out with the sk_test_not_configured placeholder, and the
+// cache getStripe() rebuilds when the real key arrives could never be reached
+// from here.
+//
+// There is no isStripeConfigured() gate because nothing in this module has a
+// fallback to gate. An unconfigured deployment fails exactly as it did before:
+// booking a session surfaces the failure to the mentee, while the capture and
+// cancel paths below keep swallowing it into a logged warning, leaving the
+// payment status untouched.
 
 const MENTOR_PLATFORM_FEE_RATE = 0.2;
 const SUPPORTED_SESSION_CURRENCIES = new Set([
@@ -233,7 +245,7 @@ export async function enableMentorMonetization(userId: string) {
     return profile;
   }
 
-  const account = await stripe.accounts.create({
+  const account = await getStripe().accounts.create({
     type: 'express',
     email: profile.user?.email,
     capabilities: {
@@ -267,7 +279,7 @@ export async function generateMentorStripeOnboardingLink(userId: string) {
     throw new ApiError(400, 'Mentor Stripe account not found. Enable monetization first.');
   }
 
-  const accountLink = await stripe.accountLinks.create({
+  const accountLink = await getStripe().accountLinks.create({
     account: profile.stripeAccountId,
     refresh_url: `${process.env.CLIENT_URL}/dashboard/mentor/onboarding-refresh`,
     return_url: `${process.env.CLIENT_URL}/dashboard/mentor`,
@@ -287,7 +299,7 @@ export async function generateMentorStripeLoginLink(userId: string) {
   }
 
   try {
-    const loginLink = await stripe.accounts.createLoginLink(profile.stripeAccountId);
+    const loginLink = await getStripe().accounts.createLoginLink(profile.stripeAccountId);
     return loginLink.url;
   } catch (error: any) {
     if (error.code === 'account_invalid') {
@@ -358,7 +370,7 @@ export async function requestSession(
   const amountCents = Math.max(1, Math.round(sessionAmount * 100));
   const feeCents = Math.max(0, Math.round(platformFee * 100));
 
-  const paymentIntent = await stripe.paymentIntents.create({
+  const paymentIntent = await getStripe().paymentIntents.create({
     amount: amountCents,
     currency: currency.toLowerCase(),
     capture_method: 'manual',
@@ -443,7 +455,7 @@ export async function updateSessionStatus(
 
   if (status === 'CANCELED' && session.stripePaymentIntentId) {
     try {
-      await stripe.paymentIntents.cancel(session.stripePaymentIntentId);
+      await getStripe().paymentIntents.cancel(session.stripePaymentIntentId);
       paymentUpdates = {
         paymentStatus: 'CANCELED' as MentorPaymentStatus,
         paymentCanceledAt: new Date(),
@@ -458,7 +470,7 @@ export async function updateSessionStatus(
 
   if (status === 'COMPLETED' && session.stripePaymentIntentId) {
     try {
-      const captured = await stripe.paymentIntents.capture(session.stripePaymentIntentId);
+      const captured = await getStripe().paymentIntents.capture(session.stripePaymentIntentId);
       if (captured.status === 'succeeded' || captured.status === 'processing') {
         paymentUpdates = {
           paymentStatus: 'CAPTURED' as MentorPaymentStatus,
@@ -637,7 +649,7 @@ export async function getSessionPaymentSecret(sessionId: string, menteeId: strin
   if (!session.stripePaymentIntentId) {
     throw new ApiError(409, 'No payment has been set up for this session');
   }
-  const intent = await stripe.paymentIntents.retrieve(session.stripePaymentIntentId);
+  const intent = await getStripe().paymentIntents.retrieve(session.stripePaymentIntentId);
   return { ...base, clientSecret: intent.client_secret };
 }
 

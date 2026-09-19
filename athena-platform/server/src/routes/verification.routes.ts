@@ -4,7 +4,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { logAudit } from '../utils/audit';
-import Stripe from 'stripe';
+import { getStripe, isStripeConfigured } from '../utils/stripe';
 
 const router = Router();
 
@@ -12,7 +12,12 @@ const router = Router();
 // member photographs her document and a selfie on Stripe's hosted page, and
 // the webhook approves the badge when the check passes. Without a key the
 // badge is applied for and reviewed by hand, as before.
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' }) : null;
+//
+// The "is there a key" question is asked with isStripeConfigured() rather than
+// by holding a client and testing it for null: getStripe() never returns null -
+// outside production it hands back a placeholder client - so a null test
+// against it would always pass and this route would call Stripe with a key that
+// could only fail, instead of falling back to the human reviewer.
 
 // ===========================================
 // ORGANISATION VERIFICATION
@@ -132,7 +137,7 @@ router.get('/badges/pending', authenticate, requireRole('ADMIN'), async (req: Au
 // ===========================================
 router.post('/identity/session', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (!stripe) {
+    if (!isStripeConfigured()) {
       throw new ApiError(503, 'Automated identity checks are not set up on this server yet. You can still apply for the badge and a person will review it.');
     }
     const userId = req.user!.id;
@@ -142,7 +147,7 @@ router.post('/identity/session', authenticate, async (req: AuthRequest, res: Res
     }
 
     const base = (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
-    const session = await stripe.identity.verificationSessions.create({
+    const session = await getStripe().identity.verificationSessions.create({
       type: 'document',
       metadata: { userId },
       options: { document: { require_matching_selfie: true } },
