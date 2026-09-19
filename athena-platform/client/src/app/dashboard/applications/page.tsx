@@ -17,8 +17,10 @@ import {
   Filter,
   Search,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useMyApplications, useUpdateMyApplication } from '@/lib/hooks';
 import { ReferencesPanel } from '@/components/jobs/ReferencesPanel';
+import { downloadPrivateUpload } from '@/lib/private-files';
 import { formatRelativeTime, JOB_TYPE_LABELS } from '@/lib/utils';
 
 const statusConfig = {
@@ -89,8 +91,23 @@ const FALLBACK_STATUS = {
 export default function ApplicationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [fetchingResumeFor, setFetchingResumeFor] = useState<string | null>(null);
   const { data: applications, isLoading } = useMyApplications();
   const updateApplication = useUpdateMyApplication();
+
+  // Her résumé is a private upload, so the link on the application never
+  // opened on its own; access is minted for her, then the file handed over.
+  const downloadResume = async (application: { id: string; resumeUrl?: string | null }) => {
+    if (!application.resumeUrl) return;
+    setFetchingResumeFor(application.id);
+    try {
+      await downloadPrivateUpload(application.resumeUrl, 'resume');
+    } catch {
+      toast.error('Your résumé could not be fetched just now.');
+    } finally {
+      setFetchingResumeFor(null);
+    }
+  };
 
   const filteredApplications = applications?.filter((app: any) => {
     const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
@@ -340,6 +357,17 @@ export default function ApplicationsPage() {
                         }}
                       >
                         Withdraw
+                      </button>
+                    )}
+                    {application.resumeUrl && (
+                      <button
+                        type="button"
+                        onClick={() => downloadResume(application)}
+                        disabled={fetchingResumeFor === application.id}
+                        className="flex items-center text-sm text-slate-600 dark:text-slate-300 hover:underline disabled:opacity-60"
+                      >
+                        <FileText className="w-4 h-4 mr-1" />
+                        {fetchingResumeFor === application.id ? 'Fetching…' : 'Your résumé'}
                       </button>
                     )}
                     <Link
