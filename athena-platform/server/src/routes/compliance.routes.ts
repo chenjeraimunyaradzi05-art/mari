@@ -16,7 +16,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
-import { ConsentType } from '@prisma/client';
+import { ConsentType, Prisma } from '@prisma/client';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
 import { prisma } from '../utils/prisma';
@@ -497,12 +497,12 @@ router.get('/transparency-report', async (req: Request, res: Response, next: Nex
       ? req.query.period.trim()
       : '';
 
-    const where: any = {
+    const where: Prisma.TransparencyReportWhereInput = {
       publishedAt: { not: null },
       ...(requestedPeriod ? { period: requestedPeriod } : {}),
     };
 
-    const report = await (prisma as any).transparencyReport.findFirst({
+    const report = await prisma.transparencyReport.findFirst({
       where,
       orderBy: [{ endDate: 'desc' }, { publishedAt: 'desc' }],
     });

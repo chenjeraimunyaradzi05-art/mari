@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { Prisma, type EventType as DbEventType, type EventFormat as DbEventFormat } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
 
@@ -9,7 +10,10 @@ const router = Router();
 type EventType = 'webinar' | 'workshop' | 'networking' | 'conference' | 'meetup';
 type EventFormat = 'virtual' | 'in-person' | 'hybrid';
 
-function dbEventTypeFromParam(type: string): string | null {
+// The return types are the Prisma enums rather than bare strings, so the value
+// that ends up in a `where` or a `create` is checked against the schema here
+// instead of failing in the database.
+function dbEventTypeFromParam(type: string): DbEventType | null {
   const t = String(type || '').toLowerCase();
   switch (t) {
     case 'webinar':
@@ -42,7 +46,7 @@ function apiEventTypeFromDb(type: string): EventType {
   }
 }
 
-function dbEventFormatFromParam(format: EventFormat): string {
+function dbEventFormatFromParam(format: EventFormat): DbEventFormat {
   const f = String(format).toLowerCase();
   if (f === 'in-person') return 'IN_PERSON';
   if (f === 'hybrid') return 'HYBRID';
@@ -90,7 +94,7 @@ function eventView(dbEvent: any, userId?: string) {
 }
 
 async function getEventView(eventId: string, userId?: string, viewerRole?: string) {
-  const include: any = {
+  const include: Prisma.EventInclude = {
     _count: { select: { registrations: true } },
   };
   if (userId) {
@@ -98,7 +102,7 @@ async function getEventView(eventId: string, userId?: string, viewerRole?: strin
     include.saves = { where: { userId }, select: { id: true } };
   }
 
-  const event = await (prisma as any).event.findUnique({ where: { id: eventId }, include });
+  const event = await prisma.event.findUnique({ where: { id: eventId }, include });
   if (!event) throw new ApiError(404, 'Event not found');
   if (event.isHidden && String(viewerRole).toUpperCase() !== 'ADMIN') {
     throw new ApiError(404, 'Event not found');
@@ -116,7 +120,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
 
     const dbType = type === 'all' ? null : dbEventTypeFromParam(type);
-    const where: any = {
+    const where: Prisma.EventWhereInput = {
       ...(String(req.user?.role).toUpperCase() === 'ADMIN' ? {} : { isHidden: false }),
       ...(dbType ? { type: dbType } : {}),
       ...(q
@@ -131,13 +135,13 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         : {}),
     };
 
-    const include: any = { _count: { select: { registrations: true } } };
+    const include: Prisma.EventInclude = { _count: { select: { registrations: true } } };
     if (req.user?.id) {
       include.registrations = { where: { userId: req.user.id }, select: { id: true } };
       include.saves = { where: { userId: req.user.id }, select: { id: true } };
     }
 
-    const events = await (prisma as any).event.findMany({
+    const events = await prisma.event.findMany({
       where,
       include,
       orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { date: 'asc' }],
@@ -169,7 +173,7 @@ router.post('/:id/register', authenticate, async (req: AuthRequest, res, next) =
     // Ensure event exists
     await getEventView(req.params.id, undefined, req.user?.role);
 
-    await (prisma as any).eventRegistration.upsert({
+    await prisma.eventRegistration.upsert({
       where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
       update: {},
       create: { eventId: req.params.id, userId: req.user!.id },
@@ -190,7 +194,7 @@ router.delete('/:id/register', authenticate, async (req: AuthRequest, res, next)
     await getEventView(req.params.id, undefined, req.user?.role);
 
     try {
-      await (prisma as any).eventRegistration.delete({
+      await prisma.eventRegistration.delete({
         where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
       });
     } catch (err: any) {
@@ -211,7 +215,7 @@ router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
     // Ensure event exists
     await getEventView(req.params.id, undefined, req.user?.role);
 
-    await (prisma as any).eventSave.upsert({
+    await prisma.eventSave.upsert({
       where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
       update: {},
       create: { eventId: req.params.id, userId: req.user!.id },
@@ -232,7 +236,7 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
     await getEventView(req.params.id, undefined, req.user?.role);
 
     try {
-      await (prisma as any).eventSave.delete({
+      await prisma.eventSave.delete({
         where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
       });
     } catch (err: any) {
@@ -311,7 +315,7 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
     const hostName =
       host?.displayName?.trim() || [host?.firstName, host?.lastName].filter(Boolean).join(' ').trim() || 'ATHENA member';
 
-    const created = await (prisma as any).event.create({
+    const created = await prisma.event.create({
       data: {
         title,
         description,

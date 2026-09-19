@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
-import { UserRole, JobStatus, SubscriptionTier, SubscriptionStatus } from '@prisma/client';
+import { UserRole, JobStatus, SubscriptionTier, SubscriptionStatus, EventType, EventFormat } from '@prisma/client';
 import { z } from 'zod';
 import { ApiError } from '../middleware/errorHandler';
 import { ModerationAction, processReportById } from '../services/content-report.service';
@@ -1689,7 +1689,12 @@ function normalizeGroupRole(input: any): 'ADMIN' | 'MODERATOR' | 'MEMBER' | null
   return null;
 }
 
-function normalizeEventType(input: any): string | null {
+// Returns the Prisma enum rather than a bare string, which is what lets
+// prisma.event.create and .update type-check against the schema instead of
+// going through an `as any` client. The uppercase switch arms that used to sit
+// at the bottom of this function were unreachable — the value is lowercased on
+// the line above, so 'WEBINAR' already arrives at the 'webinar' arm.
+function normalizeEventType(input: any): EventType | null {
   const v = String(input ?? '').toLowerCase();
   switch (v) {
     case 'webinar':
@@ -1702,18 +1707,12 @@ function normalizeEventType(input: any): string | null {
       return 'CONFERENCE';
     case 'meetup':
       return 'MEETUP';
-    case 'WEBINAR':
-    case 'WORKSHOP':
-    case 'NETWORKING':
-    case 'CONFERENCE':
-    case 'MEETUP':
-      return v.toUpperCase();
     default:
       return null;
   }
 }
 
-function normalizeEventFormat(input: any): string | null {
+function normalizeEventFormat(input: any): EventFormat | null {
   const v = String(input ?? '').toLowerCase();
   if (v === 'virtual' || v === 'VIRTUAL') return 'VIRTUAL';
   if (v === 'in-person' || v === 'in_person' || v === 'IN_PERSON') return 'IN_PERSON';
@@ -1759,7 +1758,7 @@ router.get('/groups', async (req: AuthRequest, res: Response, next: NextFunction
     if (hidden !== undefined) where.isHidden = String(hidden) === 'true';
 
     const [groups, total] = await Promise.all([
-      (prisma as any).group.findMany({
+      prisma.group.findMany({
         where,
         skip,
         take: limitNum,
@@ -1778,7 +1777,7 @@ router.get('/groups', async (req: AuthRequest, res: Response, next: NextFunction
           _count: { select: { members: true, posts: true } },
         },
       }),
-      (prisma as any).group.count({ where }),
+      prisma.group.count({ where }),
     ]);
 
     res.json({
@@ -1808,7 +1807,7 @@ router.post('/groups', async (req: AuthRequest, res: Response, next: NextFunctio
     if (!name || name.length < 3) return res.status(400).json({ error: 'Group name is required' });
     if (!description) return res.status(400).json({ error: 'Group description is required' });
 
-    const { group } = await (prisma as any).$transaction(async (tx: any) => {
+    const { group } = await prisma.$transaction(async (tx) => {
       const group = await tx.group.create({
         data: {
           name,
@@ -1857,7 +1856,7 @@ router.post('/groups', async (req: AuthRequest, res: Response, next: NextFunctio
 router.patch('/groups/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const existing = await (prisma as any).group.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.group.findUnique({ where: { id }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: 'Group not found' });
 
     const data: any = {};
@@ -1872,7 +1871,7 @@ router.patch('/groups/:id', async (req: AuthRequest, res: Response, next: NextFu
     if (req.body?.isPinned !== undefined) data.isPinned = !!req.body.isPinned;
     if (req.body?.isHidden !== undefined) data.isHidden = !!req.body.isHidden;
 
-    const group = await (prisma as any).group.update({ where: { id }, data });
+    const group = await prisma.group.update({ where: { id }, data });
 
     await logAudit({
       action: 'ADMIN_GROUP_UPDATE',
@@ -1894,7 +1893,7 @@ router.patch('/groups/:id', async (req: AuthRequest, res: Response, next: NextFu
 router.delete('/groups/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    await (prisma as any).group.delete({ where: { id } });
+    await prisma.group.delete({ where: { id } });
 
     await logAudit({
       action: 'ADMIN_GROUP_DELETE',
@@ -1920,17 +1919,17 @@ router.patch('/groups/:id/members/:userId', async (req: AuthRequest, res: Respon
     const role = normalizeGroupRole(req.body?.role);
     if (!role) return res.status(400).json({ error: 'Invalid role' });
 
-    const existing = await (prisma as any).groupMember.findUnique({
+    const existing = await prisma.groupMember.findUnique({
       where: { groupId_userId: { groupId, userId } },
       select: { role: true },
     });
 
     if (existing?.role === 'ADMIN' && role !== 'ADMIN') {
-      const adminCount = await (prisma as any).groupMember.count({ where: { groupId, role: 'ADMIN' } });
+      const adminCount = await prisma.groupMember.count({ where: { groupId, role: 'ADMIN' } });
       if (adminCount <= 1) return res.status(400).json({ error: 'Group must have at least one admin' });
     }
 
-    const member = await (prisma as any).groupMember.upsert({
+    const member = await prisma.groupMember.upsert({
       where: { groupId_userId: { groupId, userId } },
       update: { role },
       create: { groupId, userId, role },
@@ -1957,9 +1956,9 @@ router.patch('/groups/:id/members/:userId', async (req: AuthRequest, res: Respon
 router.delete('/groups/:id/posts/:postId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id: groupId, postId } = req.params;
-    const post = await (prisma as any).groupPost.findUnique({ where: { id: postId }, select: { id: true, groupId: true } });
+    const post = await prisma.groupPost.findUnique({ where: { id: postId }, select: { id: true, groupId: true } });
     if (!post || post.groupId !== groupId) return res.status(404).json({ error: 'Post not found' });
-    await (prisma as any).groupPost.delete({ where: { id: postId } });
+    await prisma.groupPost.delete({ where: { id: postId } });
 
     await logAudit({
       action: 'ADMIN_GROUP_POST_DELETE',
@@ -2022,13 +2021,13 @@ router.get('/events', async (req: AuthRequest, res: Response, next: NextFunction
     if (hidden !== undefined) where.isHidden = String(hidden) === 'true';
 
     const [events, total] = await Promise.all([
-      (prisma as any).event.findMany({
+      prisma.event.findMany({
         where,
         skip,
         take: limitNum,
         orderBy: { [sortBy as string]: sortOrder },
       }),
-      (prisma as any).event.count({ where }),
+      prisma.event.count({ where }),
     ]);
 
     res.json({
@@ -2075,7 +2074,7 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
 
     const tags = Array.isArray(req.body?.tags) ? req.body.tags.filter((t: any) => typeof t === 'string') : [];
 
-    const event = await (prisma as any).event.create({
+    const event = await prisma.event.create({
       data: {
         title,
         description,
@@ -2127,7 +2126,7 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
 router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const existing = await (prisma as any).event.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.event.findUnique({ where: { id }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: 'Event not found' });
 
     const data: any = {};
@@ -2173,7 +2172,7 @@ router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFu
     if (req.body?.isPinned !== undefined) data.isPinned = !!req.body.isPinned;
     if (req.body?.isHidden !== undefined) data.isHidden = !!req.body.isHidden;
 
-    const event = await (prisma as any).event.update({ where: { id }, data });
+    const event = await prisma.event.update({ where: { id }, data });
 
     await logAudit({
       action: 'ADMIN_EVENT_UPDATE',
@@ -2195,7 +2194,7 @@ router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFu
 router.delete('/events/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    await (prisma as any).event.delete({ where: { id } });
+    await prisma.event.delete({ where: { id } });
 
     await logAudit({
       action: 'ADMIN_EVENT_DELETE',

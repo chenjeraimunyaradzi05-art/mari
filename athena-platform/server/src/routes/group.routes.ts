@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { decoratePosts } from '../services/post-decoration.service';
 import { assertContentAllowed } from '../services/moderation.service';
@@ -43,7 +44,7 @@ function notifyQuietly(data: Parameters<typeof sendNotification>[0]): void {
 
 /** Everyone who can act on a join request: the group's admins and moderators. */
 async function notifyGroupStaff(groupId: string, data: Omit<Parameters<typeof sendNotification>[0], 'userId'>): Promise<void> {
-  const staff = await (prisma as any).groupMember.findMany({
+  const staff = await prisma.groupMember.findMany({
     where: { groupId, role: { in: ['ADMIN', 'MODERATOR'] }, ...ACTIVE_MEMBER },
     select: { userId: true },
   });
@@ -86,7 +87,7 @@ function isDbModeratorOrAdmin(role: any): boolean {
  * mean "is she a member" go through getMembershipRole instead.
  */
 async function getMembership(groupId: string, userId: string): Promise<{ role: DbGroupRole; isBanned: boolean } | null> {
-  const membership = await (prisma as any).groupMember.findUnique({
+  const membership = await prisma.groupMember.findUnique({
     where: { groupId_userId: { groupId, userId } },
     select: { role: true, isBanned: true },
   });
@@ -102,7 +103,7 @@ async function getMembershipRole(groupId: string, userId: string): Promise<DbGro
 }
 
 async function getJoinRequestForUser(groupId: string, userId: string) {
-  return await (prisma as any).groupJoinRequest.findUnique({
+  return await prisma.groupJoinRequest.findUnique({
     where: { groupId_userId: { groupId, userId } },
   });
 }
@@ -120,6 +121,27 @@ function apiJoinRequestStatus(status: unknown): JoinRequestStatus | null {
   }
 }
 
+/** Every view of a group counts the people actually in it, so banned rows are left out. */
+const ACTIVE_MEMBER_COUNT = { _count: { select: { members: { where: ACTIVE_MEMBER } } } } satisfies Prisma.GroupInclude;
+
+/**
+ * A group row as this file queries it: every Group column, the active-member
+ * count, and — for a signed-in viewer only — her own membership row and join
+ * request, cut down to the columns the queries actually select.
+ *
+ * The viewer's two relations are written out here rather than inferred, because
+ * the shape they are read through has to match the query. They used to hang off
+ * an include local annotated `: Prisma.GroupInclude`, and that annotation made
+ * Prisma widen every includable relation to the whole row: `members[0].userId`,
+ * and even `group.posts` and `group.createdBy`, all type-checked while being
+ * `undefined` at runtime. That was worse than the `(prisma as any)` cast it
+ * replaced, which at least admitted the types were off.
+ */
+type GroupRowForViewer = Prisma.GroupGetPayload<{ include: typeof ACTIVE_MEMBER_COUNT }> & {
+  members?: Array<{ role: DbGroupRole; isBanned: boolean }>;
+  joinRequests?: Array<{ status: string }>;
+};
+
 /**
  * What the viewer is told about a group. `joinRequestStatus` is only set for
  * a non-member, so the page and the list cards can say "Requested" rather
@@ -127,24 +149,18 @@ function apiJoinRequestStatus(status: unknown): JoinRequestStatus | null {
  * whether she is the last one before she leaves.
  */
 async function getGroupView(groupId: string, userId?: string) {
-  const include: any = {
-    _count: { select: { members: { where: ACTIVE_MEMBER } } },
-  };
-  if (userId) {
-    include.members = {
-      where: { userId },
-      select: { role: true, isBanned: true },
-    };
-    include.joinRequests = {
-      where: { userId },
-      select: { status: true },
-    };
-  }
-
-  const group = await (prisma as any).group.findUnique({
-    where: { id: groupId },
-    include,
-  });
+  // Two literal includes rather than one object the code mutates: Prisma only
+  // works out which columns came back when the include is a literal here.
+  const group: GroupRowForViewer | null = userId
+    ? await prisma.group.findUnique({
+        where: { id: groupId },
+        include: {
+          ...ACTIVE_MEMBER_COUNT,
+          members: { where: { userId }, select: { role: true, isBanned: true } },
+          joinRequests: { where: { userId }, select: { status: true } },
+        },
+      })
+    : await prisma.group.findUnique({ where: { id: groupId }, include: ACTIVE_MEMBER_COUNT });
 
   if (!group) throw new ApiError(404, 'Group not found');
 
@@ -154,7 +170,7 @@ async function getGroupView(groupId: string, userId?: string) {
 
   let adminCount: number | undefined;
   if (membershipRole && isDbAdmin(membershipRole)) {
-    adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
+    adminCount = await prisma.groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
   }
 
   return {
@@ -174,7 +190,7 @@ async function getGroupView(groupId: string, userId?: string) {
 }
 
 async function ensureGroup(groupId: string) {
-  const group = await (prisma as any).group.findUnique({ where: { id: groupId } });
+  const group = await prisma.group.findUnique({ where: { id: groupId } });
   if (!group) throw new ApiError(404, 'Group not found');
   return group;
 }
@@ -194,7 +210,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
 
-    const where: any = {
+    const where: Prisma.GroupWhereInput = {
       ...(req.user ? {} : { privacy: 'PUBLIC' }),
       ...(String(req.user?.role).toUpperCase() === 'ADMIN' ? {} : { isHidden: false }),
       ...(q
@@ -207,22 +223,29 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         : {}),
     };
 
-    const include: any = { _count: { select: { members: { where: ACTIVE_MEMBER } } } };
-    if (req.user?.id) {
-      include.members = { where: { userId: req.user.id }, select: { role: true, isBanned: true } };
-      // So a card can say "Requested" instead of offering Join a second time.
-      include.joinRequests = { where: { userId: req.user.id }, select: { status: true } };
-    }
-
-    const groups = await (prisma as any).group.findMany({
+    const listArgs = {
       where,
-      include,
       orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
       take: 50,
-    });
+    } satisfies Prisma.GroupFindManyArgs;
 
-    const visible = (groups || []).map((g: any) => {
-      const membership = req.user?.id ? g.members?.[0] : null;
+    // Two literal includes, for the same reason as getGroupView: an include
+    // built up in a variable comes back typed as whole rows it never selected.
+    const viewerId = req.user?.id;
+    const groups: GroupRowForViewer[] = viewerId
+      ? await prisma.group.findMany({
+          ...listArgs,
+          include: {
+            ...ACTIVE_MEMBER_COUNT,
+            members: { where: { userId: viewerId }, select: { role: true, isBanned: true } },
+            // So a card can say "Requested" instead of offering Join a second time.
+            joinRequests: { where: { userId: viewerId }, select: { status: true } },
+          },
+        })
+      : await prisma.group.findMany({ ...listArgs, include: ACTIVE_MEMBER_COUNT });
+
+    const visible = (groups || []).map((g) => {
+      const membership = viewerId ? g.members?.[0] : null;
       const membershipRole = membership && !membership.isBanned ? membership.role : null;
       return {
         id: g.id,
@@ -234,7 +257,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         memberCount: g._count?.members ?? 0,
         isMember: !!membershipRole,
         role: membershipRole ? apiRoleFromDb(membershipRole) : null,
-        joinRequestStatus: !membershipRole && req.user?.id ? apiJoinRequestStatus(g.joinRequests?.[0]?.status) : null,
+        joinRequestStatus: !membershipRole && viewerId ? apiJoinRequestStatus(g.joinRequests?.[0]?.status) : null,
       };
     });
 
@@ -256,7 +279,7 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
     if (!name || name.length < 3) throw new ApiError(400, 'Group name is required');
     if (!description) throw new ApiError(400, 'Group description is required');
 
-    const group = await (prisma as any).group.create({
+    const group = await prisma.group.create({
       data: {
         name,
         description,
@@ -266,7 +289,7 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
     });
 
     // Creator becomes admin
-    await (prisma as any).groupMember.create({
+    await prisma.groupMember.create({
       data: {
         groupId: group.id,
         userId: req.user!.id,
@@ -322,7 +345,7 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
     }
     if (Object.keys(data).length === 0) throw new ApiError(400, 'Nothing to change');
 
-    await (prisma as any).group.update({ where: { id: group.id }, data });
+    await prisma.group.update({ where: { id: group.id }, data });
     logger.info('Group updated by its admin', { groupId: group.id, actorId: req.user!.id, fields: Object.keys(data) });
 
     res.json({ success: true, data: await getGroupView(group.id, req.user!.id) });
@@ -343,9 +366,9 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
     const actorRole = await getMembershipRole(group.id, req.user!.id);
     if (!isDbAdmin(actorRole)) throw new ApiError(403, 'Only group admins can close the group');
 
-    await (prisma as any).group.delete({ where: { id: group.id } });
+    await prisma.group.delete({ where: { id: group.id } });
     try {
-      await (prisma as any).conversation.deleteMany({ where: { id: group.id } });
+      await prisma.conversation.deleteMany({ where: { id: group.id } });
     } catch (error) {
       // The group is already gone; an orphaned chat row is not worth failing over.
       logger.warn('Group chat conversation was not removed with its group', {
@@ -392,7 +415,7 @@ router.post('/:id/join', authenticate, async (req: AuthRequest, res, next) => {
         }
       }
 
-      const request = await (prisma as any).groupJoinRequest.upsert({
+      const request = await prisma.groupJoinRequest.upsert({
         where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
         update: { status: 'PENDING', reviewedAt: null, reviewedById: null },
         create: { groupId: group.id, userId: req.user!.id, status: 'PENDING' },
@@ -421,7 +444,7 @@ router.post('/:id/join', authenticate, async (req: AuthRequest, res, next) => {
       });
     }
 
-    await (prisma as any).groupMember.upsert({
+    await prisma.groupMember.upsert({
       where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
       update: {},
       create: { groupId: group.id, userId: req.user!.id, role: 'MEMBER' },
@@ -483,7 +506,7 @@ router.delete('/:id/join-request', authenticate, async (req: AuthRequest, res, n
       throw new ApiError(400, 'Only pending join requests can be cancelled');
     }
 
-    await (prisma as any).groupJoinRequest.delete({ where: { id: reqRow.id } });
+    await prisma.groupJoinRequest.delete({ where: { id: reqRow.id } });
     res.json({ success: true, data: { status: 'cancelled' } });
   } catch (err) {
     next(err);
@@ -501,7 +524,7 @@ router.get('/:id/join-requests', authenticate, async (req: AuthRequest, res, nex
     if (!isDbModeratorOrAdmin(actorRole)) throw new ApiError(403, 'Insufficient permissions');
 
     // The inbox shows who is asking, not a bare id.
-    const requests = await (prisma as any).groupJoinRequest.findMany({
+    const requests = await prisma.groupJoinRequest.findMany({
       where: { groupId: group.id, status: 'PENDING' },
       orderBy: { createdAt: 'asc' },
       take: 100,
@@ -528,7 +551,7 @@ async function updateJoinRequestStatus(opts: {
   status: 'APPROVED' | 'DENIED';
 }) {
   const { groupId, requestId, reviewerId, status } = opts;
-  return await (prisma as any).$transaction(async (tx: any) => {
+  return await prisma.$transaction(async (tx) => {
     const reqRow = await tx.groupJoinRequest.findUnique({ where: { id: requestId } });
     if (!reqRow || reqRow.groupId !== groupId) throw new ApiError(404, 'Join request not found');
 
@@ -634,17 +657,17 @@ router.post('/:id/leave', authenticate, async (req: AuthRequest, res, next) => {
     }
 
     if (isDbAdmin(membership.role)) {
-      const others = await (prisma as any).groupMember.count({
+      const others = await prisma.groupMember.count({
         where: { groupId: group.id, userId: { not: req.user!.id }, ...ACTIVE_MEMBER },
       });
       if (others > 0) {
-        const adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
+        const adminCount = await prisma.groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
         if (adminCount <= 1) throw new ApiError(400, 'Make someone else an admin before you leave');
       }
     }
 
     try {
-      await (prisma as any).groupMember.delete({
+      await prisma.groupMember.delete({
         where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
       });
     } catch (err: any) {
@@ -701,7 +724,7 @@ router.get('/:id/posts', optionalAuth, async (req: AuthRequest, res, next) => {
 router.post('/:id/posts', authenticate, postLimiter, async (req: AuthRequest, res, next) => {
   try {
     const group = await ensureVisibleGroup(req.params.id, req.user?.role);
-    const member = await (prisma as any).groupMember.findUnique({
+    const member = await prisma.groupMember.findUnique({
       where: { groupId_userId: { groupId: group.id, userId: req.user!.id } },
       select: { id: true, isBanned: true, isMuted: true, mutedUntil: true },
     });
@@ -793,7 +816,7 @@ router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res
     const actorRole = await getMembershipRole(group.id, req.user!.id);
     if (!isDbModeratorOrAdmin(actorRole)) throw new ApiError(403, 'Insufficient permissions');
 
-    const targetMembership = await (prisma as any).groupMember.findUnique({
+    const targetMembership = await prisma.groupMember.findUnique({
       where: { groupId_userId: { groupId: group.id, userId: req.params.userId } },
       select: { role: true },
     });
@@ -804,12 +827,12 @@ router.delete('/:id/members/:userId', authenticate, async (req: AuthRequest, res
     }
 
     if (isDbAdmin(targetMembership.role)) {
-      const adminCount = await (prisma as any).groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
+      const adminCount = await prisma.groupMember.count({ where: { groupId: group.id, role: 'ADMIN', ...ACTIVE_MEMBER } });
       if (adminCount <= 1) throw new ApiError(400, 'Group must have at least one admin');
     }
 
     try {
-      await (prisma as any).groupMember.delete({
+      await prisma.groupMember.delete({
         where: { groupId_userId: { groupId: group.id, userId: req.params.userId } },
       });
     } catch (err: any) {
