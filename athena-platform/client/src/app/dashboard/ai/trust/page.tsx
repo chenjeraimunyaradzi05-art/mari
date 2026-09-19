@@ -1,79 +1,121 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { Shield, Loader2, BadgeCheck, AlertTriangle, Flag, Award, Star } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { AlertTriangle, ArrowRight, CheckCircle2, Flag, Shield } from 'lucide-react';
 import { aiAlgorithmsApi } from '@/lib/api';
+import { trustApi } from '@/lib/algorithm-api';
 
-type TrustScore = {
-  id: string;
-  userId: string;
-  trustScore: number;
-  identityVerified: boolean;
-  identityScore: number;
-  accountAge: number;
-  accountAgeScore: number;
-  communityFeedback: number;
-  engagementScore: number;
-  professionalScore: number;
-  badges: string[];
-  warningsCount: number;
-  suspensionsCount: number;
-  reportsAgainst: number;
-  reportsSubmitted: number;
-  reportAccuracy?: number;
+/**
+ * Trust score.
+ *
+ * This page used to show userTrustScore.trustScore from
+ * /api/ai-algorithms/trust-score: a row that starts at 50 with no badges and
+ * only ever moves when someone is reported or blocked. It could tell a member
+ * a number and nothing about why.
+ *
+ * It now reads /api/trust-score, which computes the score from things she can
+ * act on (email verified, LinkedIn, website, verification badges, completed
+ * referrals, contributions, suspension) and returns each factor with its
+ * points. Every factor she has not earned yet is shown with the page that earns
+ * it. The report form still posts to /ai-algorithms/report.
+ *
+ * Two stores still exist server-side: trust.service calculateTrustScore writes
+ * user.trustScore, while reports and blocks move userTrustScore.trustScore
+ * through applyTrustDelta. They need reconciling in a later server pass; this
+ * page shows the computed one because it is the one with reasons.
+ */
+
+type Guide = {
+  label: string;
+  /** What she can do about it, in one line. */
+  todo: string;
+  action: { label: string; href: string };
 };
 
-const badgeInfo: Record<string, { label: string; icon: typeof BadgeCheck; color: string }> = {
-  VERIFIED_IDENTITY: { label: 'Verified Identity', icon: BadgeCheck, color: 'text-blue-600 bg-blue-100' },
-  EMPLOYER_VERIFIED: { label: 'Employer Verified', icon: Award, color: 'text-purple-600 bg-purple-100' },
-  EDUCATOR_VERIFIED: { label: 'Educator Verified', icon: Award, color: 'text-indigo-600 bg-indigo-100' },
-  MENTOR_CERTIFIED: { label: 'Certified Mentor', icon: Star, color: 'text-amber-600 bg-amber-100' },
-  CREATOR_VERIFIED: { label: 'Verified Creator', icon: Star, color: 'text-pink-600 bg-pink-100' },
+/** The positive factors calculateTrustScore can award, and where each is earned. */
+const FACTOR_GUIDE: Guide[] = [
+  {
+    label: 'Email verified',
+    todo: 'Confirm the address on your account.',
+    action: { label: 'Send a fresh link', href: '/verify-email' },
+  },
+  {
+    label: 'LinkedIn connected',
+    todo: 'Add your LinkedIn profile so people can see your work history.',
+    action: { label: 'Edit profile', href: '/dashboard/settings/profile' },
+  },
+  {
+    label: 'Website connected',
+    todo: 'Add a website or portfolio to your profile.',
+    action: { label: 'Edit profile', href: '/dashboard/settings/profile' },
+  },
+  {
+    label: 'Content contributions',
+    todo: 'Share something with the community; three posts earn the first point.',
+    action: { label: 'Go to the feed', href: '/feed' },
+  },
+  {
+    label: 'Referrals',
+    todo: 'Invite someone who goes on to join.',
+    action: { label: 'Your referral link', href: '/dashboard/referrals' },
+  },
+  {
+    label: 'Verification badges',
+    todo: 'Earn a verification badge for your identity, employer or mentoring.',
+    action: { label: 'Verification', href: '/dashboard/settings/verification' },
+  },
+];
+
+const SUSPENSION_LABEL = 'Account suspension';
+
+const fieldClass =
+  'focusable w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500';
+const labelClass = 'mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300';
+
+function levelOf(score: number) {
+  if (score >= 80) return 'Strong';
+  if (score >= 60) return 'Good';
+  if (score >= 40) return 'Growing';
+  return 'Just started';
+}
+
+const EMPTY_REPORT = {
+  contentType: 'PROFILE',
+  contentId: '',
+  reportedUserId: '',
+  reason: '',
+  description: '',
 };
 
 export default function TrustScorePage() {
-  const [trustScore, setTrustScore] = useState<TrustScore | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Report form
-  const [showReport, setShowReport] = useState(false);
-  const [reporting, setReporting] = useState(false);
-  const [reportForm, setReportForm] = useState({
-    contentType: 'PROFILE',
-    contentId: '',
-    reportedUserId: '',
-    reason: '',
-    description: '',
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['trust-score'],
+    queryFn: trustApi.mine,
+    select: (response) => response.data.data,
   });
 
-  const loadTrustScore = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await aiAlgorithmsApi.getMyTrustScore();
-      setTrustScore(response.data?.data);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error?.response?.data?.error || 'Failed to load trust score');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [showReport, setShowReport] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [reportForm, setReportForm] = useState(EMPTY_REPORT);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSent, setReportSent] = useState(false);
 
-  useEffect(() => {
-    loadTrustScore();
-  }, []);
+  const earned = data?.factors ?? [];
+  const earnedLabels = new Set(earned.map((factor) => factor.label));
+  const positive = earned.filter((factor) => factor.points > 0);
+  const suspended = earned.some((factor) => factor.label === SUSPENSION_LABEL);
+  const toEarn = FACTOR_GUIDE.filter((guide) => !earnedLabels.has(guide.label));
 
   const handleReport = async () => {
     if (!reportForm.contentId || !reportForm.reportedUserId || !reportForm.reason) {
-      setError('Please fill in all required fields');
+      setReportError('The content ID, the user ID and a reason are needed before this can be sent.');
       return;
     }
 
     setReporting(true);
-    setError(null);
+    setReportError(null);
     try {
       await aiAlgorithmsApi.reportContent({
         contentType: reportForm.contentType,
@@ -82,294 +124,263 @@ export default function TrustScorePage() {
         reason: reportForm.reason,
         description: reportForm.description,
       });
-
       setShowReport(false);
-      setReportForm({
-        contentType: 'PROFILE',
-        contentId: '',
-        reportedUserId: '',
-        reason: '',
-        description: '',
-      });
-      // Refresh trust score to show updated reports submitted
-      loadTrustScore();
+      setReportForm(EMPTY_REPORT);
+      setReportSent(true);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error?.response?.data?.error || 'Failed to submit report');
+      const error = err as { response?: { data?: { error?: string; message?: string } } };
+      setReportError(
+        error?.response?.data?.error ||
+          error?.response?.data?.message ||
+          'That did not send. Please try again in a moment.'
+      );
     } finally {
       setReporting(false);
     }
   };
 
-  const getTrustLevel = (score: number) => {
-    if (score >= 80) return { label: 'Excellent', color: 'text-emerald-600' };
-    if (score >= 60) return { label: 'Good', color: 'text-blue-600' };
-    if (score >= 40) return { label: 'Fair', color: 'text-amber-600' };
-    return { label: 'Building', color: 'text-slate-600' };
-  };
-
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8">
-      {/* Header */}
+    <div className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
-        <div className="flex items-center gap-2 text-amber-600">
-          <Shield className="w-5 h-5" />
-          <span className="text-sm font-semibold uppercase tracking-wider">SafetyScore</span>
+        <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+          <Shield className="h-5 w-5" />
+          <span className="text-sm font-semibold uppercase tracking-wider">Trust</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
-          Trust & Safety Profile
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white md:text-3xl">
+          Your trust score, and what is behind it
         </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Build credibility, verify your identity, and stay protected
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+          Every point comes from something you did on ATHENA. Nothing here is guessed, and each
+          thing you have not done yet comes with the page that does it.
         </p>
       </div>
 
-      {error && (
-        <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">{error}</div>
+      {isLoading && (
+        <div className="h-40 animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800" aria-busy="true" />
       )}
 
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
+      {isError && (
+        <div className="surface p-6">
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+            We could not work out your score just now. Nothing has changed on your account; please
+            try again shortly.
+          </p>
         </div>
-      ) : trustScore ? (
+      )}
+
+      {data && (
         <>
-          {/* Main Trust Score */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8">
-            <div className="flex flex-col md:flex-row items-center gap-8">
-              {/* Score Circle */}
-              <div className="relative w-40 h-40">
-                <svg className="w-full h-full transform -rotate-90">
+          <section className="surface p-6">
+            <div className="flex flex-col items-center gap-6 md:flex-row md:items-start">
+              <div className="relative h-32 w-32 shrink-0" role="img" aria-label={`Trust score ${data.score} out of 100`}>
+                <svg className="h-full w-full -rotate-90" viewBox="0 0 128 128" aria-hidden="true">
+                  <circle cx="64" cy="64" r="56" stroke="currentColor" strokeWidth="10" fill="none" className="text-slate-100 dark:text-slate-800" />
                   <circle
-                    cx="80"
-                    cy="80"
-                    r="70"
+                    cx="64"
+                    cy="64"
+                    r="56"
                     stroke="currentColor"
-                    strokeWidth="12"
+                    strokeWidth="10"
                     fill="none"
-                    className="text-slate-100 dark:text-slate-800"
-                  />
-                  <circle
-                    cx="80"
-                    cy="80"
-                    r="70"
-                    stroke="currentColor"
-                    strokeWidth="12"
-                    fill="none"
-                    strokeDasharray={440}
-                    strokeDashoffset={440 - (440 * trustScore.trustScore) / 100}
+                    strokeDasharray={352}
+                    strokeDashoffset={352 - (352 * Math.max(0, Math.min(100, data.score))) / 100}
                     strokeLinecap="round"
-                    className="text-amber-500"
+                    className="text-rose-500"
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-4xl font-bold text-slate-900 dark:text-white">{trustScore.trustScore}</span>
-                  <span className={`text-sm font-medium ${getTrustLevel(trustScore.trustScore).color}`}>
-                    {getTrustLevel(trustScore.trustScore).label}
-                  </span>
+                  <span className="text-3xl font-semibold text-slate-900 dark:text-white">{data.score}</span>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{levelOf(data.score)}</span>
                 </div>
               </div>
 
-              {/* Score Breakdown */}
-              <div className="flex-1 space-y-3">
-                <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Score Components</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-400">Identity Verification</span>
-                    <span className="font-medium text-slate-900 dark:text-white">+{trustScore.identityScore}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-400">Account Age ({trustScore.accountAge} days)</span>
-                    <span className="font-medium text-slate-900 dark:text-white">+{trustScore.accountAgeScore}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-400">Community Feedback</span>
-                    <span className="font-medium text-slate-900 dark:text-white">{trustScore.communityFeedback}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-400">Engagement Authenticity</span>
-                    <span className="font-medium text-slate-900 dark:text-white">{trustScore.engagementScore}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-400">Professional Verification</span>
-                    <span className="font-medium text-slate-900 dark:text-white">+{trustScore.professionalScore}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Badges */}
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Your Badges</h2>
-            {trustScore.badges.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center">
-                <Award className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500">No badges earned yet</p>
-                <p className="text-sm text-slate-400 mt-1">Complete verifications to earn trust badges</p>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                {trustScore.badges.map((badge) => {
-                  const info = badgeInfo[badge];
-                  if (!info) return null;
-                  const Icon = info.icon;
-                  return (
-                    <div
-                      key={badge}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-full ${info.color}`}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span className="font-medium text-sm">{info.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Available Badges */}
-          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-6">
-            <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Earn More Badges</h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              {Object.entries(badgeInfo).map(([key, info]) => {
-                const hasBadge = trustScore.badges.includes(key);
-                const Icon = info.icon;
-                return (
-                  <div
-                    key={key}
-                    className={`flex items-center gap-3 p-3 rounded-lg border ${
-                      hasBadge
-                        ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
-                        : 'bg-white/50 dark:bg-slate-900/50 border-dashed border-slate-300 dark:border-slate-700'
-                    }`}
-                  >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${hasBadge ? info.color : 'bg-slate-100 text-slate-400'}`}>
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className={`font-medium text-sm ${hasBadge ? 'text-slate-900 dark:text-white' : 'text-slate-500'}`}>
-                        {info.label}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {hasBadge ? '✓ Earned' : 'Not yet earned'}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Moderation History */}
-          {(trustScore.warningsCount > 0 || trustScore.reportsAgainst > 0) && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
-              <h3 className="font-semibold text-red-800 dark:text-red-200 mb-4 flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5" />
-                Account Notices
-              </h3>
-              <div className="space-y-2 text-sm">
-                {trustScore.warningsCount > 0 && (
-                  <p className="text-red-700 dark:text-red-300">
-                    {trustScore.warningsCount} warning(s) on your account
+              <div className="w-full flex-1">
+                <h2 className="rail-title">What is counting for you</h2>
+                {positive.length === 0 ? (
+                  <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                    Everyone starts at 50. The steps below are how it grows from here.
                   </p>
-                )}
-                {trustScore.reportsAgainst > 0 && (
-                  <p className="text-red-700 dark:text-red-300">
-                    {trustScore.reportsAgainst} report(s) filed against you
-                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {positive.map((factor) => (
+                      <li key={factor.label} className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                          {factor.label}
+                        </span>
+                        <span className="font-medium text-slate-900 dark:text-white">+{factor.points}</span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
+            </div>
+          </section>
+
+          {suspended && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-500/30 dark:bg-amber-500/10">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-200">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                Your account is suspended
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-amber-800/90 dark:text-amber-100/90">
+                A suspension takes 40 points off until it is lifted. If you think this is a
+                mistake, our team will look at it.{' '}
+                <Link href="/dashboard/settings/help" className="font-semibold underline">
+                  Get in touch
+                </Link>
+              </p>
             </div>
           )}
 
-          {/* Report Section */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-4">
+          {toEarn.length > 0 && (
+            <section className="surface p-5">
+              <h2 className="rail-title">Ways to build it</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                Each of these adds points once it is done.
+              </p>
+              <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+                {toEarn.map((guide) => (
+                  <li key={guide.label} className="tile-soft p-4">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{guide.label}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{guide.todo}</p>
+                    <Link
+                      href={guide.action.href}
+                      className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 hover:underline dark:text-rose-400"
+                    >
+                      {guide.action.label} <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
+      )}
+
+      <section className="surface p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="rail-title">Report something</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Help keep ATHENA safe for everyone.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowReport((open) => !open)}
+            aria-expanded={showReport}
+            className="focusable inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            <Flag className="h-4 w-4" aria-hidden="true" />
+            {showReport ? 'Close' : 'Report'}
+          </button>
+        </div>
+
+        {reportSent && !showReport && (
+          <p className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-400">
+            Thank you. The report is with our safety team.
+          </p>
+        )}
+
+        {showReport && (
+          <div className="mt-4 space-y-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <h3 className="font-semibold text-slate-900 dark:text-white">Report Content</h3>
-                <p className="text-sm text-slate-500">Help keep ATHENA safe for everyone</p>
+                <label className={labelClass} htmlFor="report-type">
+                  What kind of content
+                </label>
+                <select
+                  id="report-type"
+                  value={reportForm.contentType}
+                  onChange={(e) => setReportForm((prev) => ({ ...prev, contentType: e.target.value }))}
+                  className={fieldClass}
+                >
+                  <option value="PROFILE">Profile</option>
+                  <option value="MESSAGE">Message</option>
+                  <option value="VIDEO">Video</option>
+                  <option value="COMMENT">Comment</option>
+                  <option value="STATUS">Status</option>
+                </select>
               </div>
-              <button
-                onClick={() => setShowReport(!showReport)}
-                className="px-4 py-2 bg-red-100 text-red-600 rounded-lg text-sm font-medium hover:bg-red-200"
-              >
-                <Flag className="w-4 h-4 inline mr-1" />
-                Report
-              </button>
+              <div>
+                <label className={labelClass} htmlFor="report-reason">
+                  Reason
+                </label>
+                <select
+                  id="report-reason"
+                  value={reportForm.reason}
+                  onChange={(e) => setReportForm((prev) => ({ ...prev, reason: e.target.value }))}
+                  className={fieldClass}
+                  required
+                >
+                  <option value="">Choose a reason</option>
+                  <option value="HARASSMENT">Harassment</option>
+                  <option value="HATE_SPEECH">Hate speech</option>
+                  <option value="SPAM">Spam</option>
+                  <option value="MISINFORMATION">Misinformation</option>
+                  <option value="INAPPROPRIATE">Inappropriate content</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="report-content-id">
+                  Content ID
+                </label>
+                <input
+                  id="report-content-id"
+                  type="text"
+                  value={reportForm.contentId}
+                  onChange={(e) => setReportForm((prev) => ({ ...prev, contentId: e.target.value }))}
+                  className={fieldClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="report-user-id">
+                  User ID
+                </label>
+                <input
+                  id="report-user-id"
+                  type="text"
+                  value={reportForm.reportedUserId}
+                  onChange={(e) => setReportForm((prev) => ({ ...prev, reportedUserId: e.target.value }))}
+                  className={fieldClass}
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="report-details">
+                Anything else (optional)
+              </label>
+              <textarea
+                id="report-details"
+                value={reportForm.description}
+                onChange={(e) => setReportForm((prev) => ({ ...prev, description: e.target.value }))}
+                rows={3}
+                className={fieldClass}
+              />
             </div>
 
-            {showReport && (
-              <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                <div className="grid md:grid-cols-2 gap-4">
-                  <select
-                    value={reportForm.contentType}
-                    onChange={(e) => setReportForm(prev => ({ ...prev, contentType: e.target.value }))}
-                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
-                  >
-                    <option value="PROFILE">Profile</option>
-                    <option value="MESSAGE">Message</option>
-                    <option value="VIDEO">Video</option>
-                    <option value="COMMENT">Comment</option>
-                    <option value="STATUS">Status</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={reportForm.contentId}
-                    onChange={(e) => setReportForm(prev => ({ ...prev, contentId: e.target.value }))}
-                    placeholder="Content ID *"
-                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={reportForm.reportedUserId}
-                    onChange={(e) => setReportForm(prev => ({ ...prev, reportedUserId: e.target.value }))}
-                    placeholder="User ID *"
-                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
-                  />
-                  <select
-                    value={reportForm.reason}
-                    onChange={(e) => setReportForm(prev => ({ ...prev, reason: e.target.value }))}
-                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
-                  >
-                    <option value="">Select reason *</option>
-                    <option value="HARASSMENT">Harassment</option>
-                    <option value="HATE_SPEECH">Hate Speech</option>
-                    <option value="SPAM">Spam</option>
-                    <option value="MISINFORMATION">Misinformation</option>
-                    <option value="INAPPROPRIATE">Inappropriate Content</option>
-                    <option value="OTHER">Other</option>
-                  </select>
-                </div>
-                <textarea
-                  value={reportForm.description}
-                  onChange={(e) => setReportForm(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="Additional details (optional)"
-                  rows={3}
-                  className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-transparent"
-                />
-                <button
-                  onClick={handleReport}
-                  disabled={reporting}
-                  className="px-6 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
-                >
-                  {reporting ? 'Submitting...' : 'Submit Report'}
-                </button>
-              </div>
+            {reportError && (
+              <p className="text-sm leading-6 text-rose-600 dark:text-rose-400">{reportError}</p>
             )}
 
-            {trustScore.reportsSubmitted > 0 && (
-              <p className="text-sm text-slate-500 mt-4">
-                You&apos;ve submitted {trustScore.reportsSubmitted} report(s)
-                {trustScore.reportAccuracy && ` • ${Math.round(trustScore.reportAccuracy * 100)}% accuracy`}
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={handleReport}
+              disabled={reporting}
+              className="focusable rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reporting ? 'Sending' : 'Send report'}
+            </button>
           </div>
-        </>
-      ) : null}
+        )}
+      </section>
 
       <div className="text-center">
-        <Link href="/dashboard/ai" className="text-sm text-primary-600 hover:underline">
+        <Link href="/dashboard/ai" className="text-sm text-rose-600 hover:underline dark:text-rose-400">
           ← Back to AI Tools
         </Link>
       </div>

@@ -1,297 +1,242 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import Link from 'next/link';
-import { Compass, Loader2, TrendingUp, BookOpen, AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
-import { aiAlgorithmsApi } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowRight, BookOpen, Briefcase, Compass, Sparkles } from 'lucide-react';
+import { algorithmApi } from '@/lib/algorithm-api';
 
-type CareerPrediction = {
-  id: string;
-  predictedRoles: Array<{
-    role: string;
-    probability: number;
-    expectedSalary: string;
-    timeline: string;
-    skillsGap: string[];
-  }>;
-  prioritySkills: Array<{
-    skill: string;
-    salaryLift: number;
-    learningTime: number;
-    difficulty: number;
-  }>;
-  riskFactors?: {
-    attritionRisk: number;
-    burnoutIndicators: number;
-    wageGapExposure: number;
-  };
-  confidenceScore: number;
-  modelVersion: string;
-  generatedAt: string;
-  expiresAt: string;
-};
+/**
+ * Career Compass.
+ *
+ * This page used to read /api/ai-algorithms/career-compass, a table that only
+ * a development placeholder ever wrote: in production the generate call throws
+ * 503, and elsewhere it stored 'Senior Software Engineer', '$150,000 -
+ * $180,000' and a 75% probability for everyone. A member saw an error or a
+ * forecast nobody had made.
+ *
+ * It now reads /api/algorithms/career-compass, which compares the skills that
+ * active roles carrying her title ask for against the skills on her profile,
+ * finds courses on ATHENA that teach the missing ones, and lists those roles.
+ * A comparison against real listings, not a prediction: there is no
+ * probability, salary or risk here, and when nothing is missing it says so
+ * rather than inventing a forecast.
+ */
+
+const fieldClass =
+  'focusable w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500';
+
+function locationOf(job: { city: string | null; state: string | null; country: string | null }) {
+  return [job.city, job.state, job.country].filter(Boolean).join(', ');
+}
 
 export default function CareerCompassPage() {
-  const [prediction, setPrediction] = useState<CareerPrediction | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  // Empty means "the title on her profile"; the server fills that in.
+  const [role, setRole] = useState('');
 
-  const loadPrediction = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await aiAlgorithmsApi.getCareerPrediction();
-      setPrediction(response.data?.data);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error?.response?.data?.error || 'Failed to load prediction');
-    } finally {
-      setLoading(false);
-    }
+  const { data, isLoading, isError, isFetching } = useQuery({
+    queryKey: ['career-compass', role],
+    queryFn: () => algorithmApi.careerCompass(role || undefined),
+    select: (response) => response.data.data,
+  });
+
+  const lookUp = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRole(draft.trim());
   };
 
-  const generatePrediction = async () => {
-    setGenerating(true);
-    setError(null);
-    try {
-      const response = await aiAlgorithmsApi.generateCareerPrediction();
-      setPrediction(response.data?.data);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error?.response?.data?.error || 'Failed to generate prediction');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  useEffect(() => {
-    loadPrediction();
-  }, []);
-
-  const getDifficultyLabel = (difficulty: number) => {
-    if (difficulty <= 3) return 'Easy';
-    if (difficulty <= 6) return 'Medium';
-    return 'Hard';
-  };
-
-  const getDifficultyColor = (difficulty: number) => {
-    if (difficulty <= 3) return 'text-green-600 bg-green-100 dark:bg-green-900/30';
-    if (difficulty <= 6) return 'text-amber-600 bg-amber-100 dark:bg-amber-900/30';
-    return 'text-red-600 bg-red-100 dark:bg-red-900/30';
-  };
+  const roles = data?.suggestedJobs ?? [];
+  const gaps = data?.skillGaps ?? [];
+  const courses = data?.recommendedCourses ?? [];
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8">
-      {/* Header */}
+    <div className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
-        <div className="flex items-center gap-2 text-purple-600">
-          <Compass className="w-5 h-5" />
-          <span className="text-sm font-semibold uppercase tracking-wider">CareerCompass</span>
+        <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+          <Compass className="h-5 w-5" />
+          <span className="text-sm font-semibold uppercase tracking-wider">Career Compass</span>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
-          Your Career Trajectory
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white md:text-3xl">
+          What the roles you want are asking for
         </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          AI-powered predictions for your optimal career moves over the next 3-5 years
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+          We read the active roles on ATHENA whose title matches yours and compare what they ask
+          for with the skills on your profile. A comparison, not a forecast.
         </p>
       </div>
 
-      {error && (
-        <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">{error}</div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
-        </div>
-      ) : !prediction ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center">
-          <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Sparkles className="w-8 h-8 text-purple-600" />
-          </div>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-            Generate Your Career Prediction
-          </h3>
-          <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
-            Our AI analyzes your profile, skills, and career history to predict 
-            your optimal next moves and highlight skills to prioritize.
-          </p>
+      <form onSubmit={lookUp} className="surface p-5">
+        <label htmlFor="compass-role" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+          Role title to look at
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="compass-role"
+            className={fieldClass}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={data?.targetRole || 'Product designer'}
+          />
           <button
-            onClick={generatePrediction}
-            disabled={generating}
-            className="px-6 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            type="submit"
+            disabled={isFetching}
+            className="focusable rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {generating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Analyzing your profile...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Generate Prediction
-              </>
-            )}
+            {isFetching ? 'Looking' : 'Look up'}
           </button>
         </div>
-      ) : (
+        {data && (
+          <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-500">
+            Looking at roles titled {data.targetRole}. Leave the box empty to use the title on your
+            profile.
+          </p>
+        )}
+      </form>
+
+      {isLoading && (
+        <div className="space-y-3" aria-busy="true">
+          <div className="h-28 animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800" />
+          <div className="h-28 animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800" />
+        </div>
+      )}
+
+      {isError && (
+        <div className="surface p-6">
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+            We could not read the roles just now. Nothing about your profile has changed; please try
+            again shortly.
+          </p>
+        </div>
+      )}
+
+      {data && roles.length === 0 && (
+        <div className="surface px-6 py-12 text-center">
+          <Briefcase className="mx-auto mb-4 h-10 w-10 text-slate-300 dark:text-slate-600" />
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+            No active roles titled &ldquo;{data.targetRole}&rdquo; right now
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600 dark:text-slate-400">
+            There is nothing to compare against yet, so we will not guess. Try a broader title, or
+            browse every role on ATHENA.
+          </p>
+          <Link
+            href="/dashboard/jobs"
+            className="focusable mt-5 inline-flex rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+          >
+            Browse roles
+          </Link>
+        </div>
+      )}
+
+      {data && roles.length > 0 && (
         <>
-          {/* Confidence & Refresh */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="text-sm text-slate-500">
-                Confidence: <span className="font-semibold text-purple-600">{Math.round(prediction.confidenceScore * 100)}%</span>
-              </div>
-              <span className="text-slate-300">•</span>
-              <div className="text-sm text-slate-500">
-                Generated {new Date(prediction.generatedAt).toLocaleDateString()}
-              </div>
+          <section className="surface p-5">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-rose-500" />
+              <h2 className="rail-title">Skills these roles ask for that you have not listed</h2>
             </div>
-            <button
-              onClick={generatePrediction}
-              disabled={generating}
-              className="text-sm text-purple-600 hover:text-purple-700 flex items-center gap-1"
-            >
-              <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
-
-          {/* Predicted Roles */}
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-purple-600" />
-              Predicted Next Roles
-            </h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              {prediction.predictedRoles.map((role, idx) => (
-                <div
-                  key={idx}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
+            {gaps.length > 0 ? (
+              <ul className="mt-4 flex flex-wrap gap-2" aria-label="Skills to consider">
+                {gaps.map((skill) => (
+                  <li
+                    key={skill}
+                    className="rounded-full bg-rose-50 px-3 py-1 text-sm capitalize text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                  >
+                    {skill}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                Every skill these roles list is already on your profile. Keep it current and this
+                stays true.{' '}
+                <Link
+                  href="/dashboard/settings/profile"
+                  className="font-semibold text-rose-600 hover:underline dark:text-rose-400"
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <h3 className="font-semibold text-slate-900 dark:text-white">{role.role}</h3>
-                    <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-600 text-xs font-semibold rounded">
-                      {role.probability}% likely
-                    </span>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Expected Salary</span>
-                      <span className="font-medium text-slate-900 dark:text-white">{role.expectedSalary}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Timeline</span>
-                      <span className="font-medium text-slate-900 dark:text-white">{role.timeline}</span>
-                    </div>
-                  </div>
-                  {role.skillsGap.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                      <p className="text-xs text-slate-500 mb-2">Skills to develop:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {role.skillsGap.map((skill, sIdx) => (
-                          <span key={sIdx} className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs rounded">
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+                  Review your skills
+                </Link>
+              </p>
+            )}
+            <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-500">
+              Taken from the skills employers wrote on {roles.length}{' '}
+              {roles.length === 1 ? 'active listing' : 'active listings'}. A gap here is a gap in the
+              listing&apos;s words, not a verdict on you.
+            </p>
+          </section>
 
-          {/* Priority Skills */}
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-blue-600" />
-              Priority Skills to Learn
-            </h2>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-slate-50 dark:bg-slate-800/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Skill</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Salary Lift</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Learning Time</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Difficulty</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {prediction.prioritySkills.map((skill, idx) => (
-                    <tr key={idx}>
-                      <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{skill.skill}</td>
-                      <td className="px-4 py-3 text-emerald-600 font-medium">+${skill.salaryLift.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{skill.learningTime} hours</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${getDifficultyColor(skill.difficulty)}`}>
-                          {getDifficultyLabel(skill.difficulty)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Risk Factors */}
-          {prediction.riskFactors && (
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-600" />
-                Risk Factors to Monitor
-              </h2>
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-                  <p className="text-sm text-slate-500 mb-1">Attrition Risk</p>
-                  <div className="flex items-end gap-2">
-                    <span className="text-2xl font-bold text-slate-900 dark:text-white">{prediction.riskFactors.attritionRisk}%</span>
-                    <span className="text-xs text-slate-500 mb-1">likelihood of leaving current role</span>
-                  </div>
-                  <div className="mt-2 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 rounded-full"
-                      style={{ width: `${prediction.riskFactors.attritionRisk}%` }}
-                    />
-                  </div>
+          {gaps.length > 0 && (
+            <section className="surface p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="h-4 w-4 text-rose-500" />
+                  <h2 className="rail-title">Courses that teach them</h2>
                 </div>
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-                  <p className="text-sm text-slate-500 mb-1">Burnout Indicators</p>
-                  <div className="flex items-end gap-2">
-                    <span className="text-2xl font-bold text-slate-900 dark:text-white">{prediction.riskFactors.burnoutIndicators}%</span>
-                    <span className="text-xs text-slate-500 mb-1">based on engagement patterns</span>
-                  </div>
-                  <div className="mt-2 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-red-500 rounded-full"
-                      style={{ width: `${prediction.riskFactors.burnoutIndicators}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-                  <p className="text-sm text-slate-500 mb-1">Wage Gap Exposure</p>
-                  <div className="flex items-end gap-2">
-                    <span className="text-2xl font-bold text-slate-900 dark:text-white">{prediction.riskFactors.wageGapExposure}%</span>
-                    <span className="text-xs text-slate-500 mb-1">gender pay gap in target roles</span>
-                  </div>
-                  <div className="mt-2 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-purple-500 rounded-full"
-                      style={{ width: `${prediction.riskFactors.wageGapExposure}%` }}
-                    />
-                  </div>
-                </div>
+                <Link
+                  href="/dashboard/learn"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 dark:text-rose-400"
+                >
+                  All courses <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
               </div>
-            </div>
+              {courses.length > 0 ? (
+                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {courses.map((course) => (
+                    <li key={course.id}>
+                      <Link href={`/dashboard/learn/${course.id}`} className="tile-soft block p-4">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {course.title}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          {[course.providerName, course.type].filter(Boolean).join(' · ') ||
+                            'On ATHENA'}
+                        </p>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                  No course on ATHENA covers these yet. The catalogue grows; it is worth a look
+                  next month.
+                </p>
+              )}
+            </section>
           )}
+
+          <section className="surface p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4 text-rose-500" />
+                <h2 className="rail-title">Roles to look at</h2>
+              </div>
+              <Link
+                href="/dashboard/jobs"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 dark:text-rose-400"
+              >
+                All roles <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+              {roles.map((job) => (
+                <li key={job.id}>
+                  <Link href={`/dashboard/jobs/${job.id}`} className="tile-soft block p-4">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{job.title}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {[job.organizationName, locationOf(job)].filter(Boolean).join(' · ') ||
+                        'Details on the listing'}
+                    </p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
         </>
       )}
 
       <div className="text-center">
-        <Link href="/dashboard/ai" className="text-sm text-primary-600 hover:underline">
+        <Link href="/dashboard/ai" className="text-sm text-rose-600 hover:underline dark:text-rose-400">
           ← Back to AI Tools
         </Link>
       </div>

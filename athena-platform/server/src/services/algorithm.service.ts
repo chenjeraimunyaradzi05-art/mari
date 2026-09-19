@@ -103,6 +103,15 @@ export interface RecommendationEngineResult {
 const normalizeSkill = (value: string) => value.trim().toLowerCase();
 const uniq = (values: string[]) => Array.from(new Set(values));
 
+/**
+ * Fewer advertised ranges than this and getSalaryEquity reports no median.
+ * /salary-insights quotes the figure beside member-reported pay, and a
+ * "median" of one or two listings is one employer's number wearing a
+ * statistic's name. The same instinct as the five-contributor floor in
+ * salary-equity.service.ts: an empty answer beats a confident thin one.
+ */
+const MIN_LISTINGS_FOR_ADVERTISED_MEDIAN = 3;
+
 const median = (values: number[]): number | null => {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -260,7 +269,10 @@ export async function getSalaryEquity(userId: string, targetRole?: string): Prom
     })
     .filter((value): value is number => value !== null);
 
-  const marketMedian = median(salaryValues);
+  // sampleSize still reports how many listings published a range, so the
+  // client can say "two listings" rather than nothing at all.
+  const marketMedian =
+    salaryValues.length >= MIN_LISTINGS_FOR_ADVERTISED_MEDIAN ? median(salaryValues) : null;
   const userMin = user?.profile?.salaryMin ?? null;
   const userMax = user?.profile?.salaryMax ?? null;
   const userTargetMid = userMin && userMax ? (userMin + userMax) / 2 : userMin || userMax || null;

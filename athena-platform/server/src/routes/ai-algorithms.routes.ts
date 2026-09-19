@@ -1,3 +1,31 @@
+/**
+ * AI algorithm routes (/api/ai-algorithms/*)
+ *
+ * ## Three of these tables are placeholder-only
+ *
+ * `careerPrediction`, `mentorMatchScore` and `opportunityMatch` were built for
+ * an ML service that was never connected. Nothing on the server writes
+ * mentorMatchScore or opportunityMatch, so GET /mentor-match and
+ * GET /opportunity-scan here are always empty. The only writer of
+ * careerPrediction is POST /career-compass/generate below, which throws 503
+ * in production unless AI_ALGORITHMS_ALLOW_PLACEHOLDER=true and otherwise
+ * stores invented roles, salaries and probabilities ('Senior Software
+ * Engineer', '$150,000 - $180,000', 75).
+ *
+ * The web app no longer reads any of the three. /dashboard/ai/career-compass,
+ * /dashboard/ai/mentors and /dashboard/ai/opportunities read
+ * /api/algorithms/career-compass, /mentor-match and /opportunity-scan, which
+ * are real queries (see algorithm.routes.ts). /dashboard/ai/trust reads
+ * /api/trust-score, which returns the factors behind the score. The
+ * userTrustScore row that GET /trust-score here returns starts at 50 and only
+ * moves on a report or a block (trust.service applyTrustDelta), so it and
+ * user.trustScore are two stores that still need reconciling server-side.
+ *
+ * Do not build a screen against the placeholder tables. The salary routes
+ * (/salary-equity/*), POST /report, creator analytics and feed preferences
+ * below read and write real rows and stay in use.
+ */
+
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -17,6 +45,8 @@ router.use(authenticate);
 // =============================================
 // CAREER COMPASS - Career Trajectory Prediction
 // =============================================
+// Placeholder-only: careerPrediction is written by nothing but the gated
+// generate route below. The web app reads /api/algorithms/career-compass.
 
 // Get user's career predictions
 router.get('/career-compass', async (req: Request, res: Response, next: NextFunction) => {
@@ -90,6 +120,8 @@ router.post('/career-compass/generate', async (req: Request, res: Response, next
 // =============================================
 // OPPORTUNITY SCAN - Real-Time Opportunity Surfacing
 // =============================================
+// Placeholder-only: no code writes opportunityMatch, so this list is always
+// empty. The web app reads /api/algorithms/opportunity-scan.
 
 // Get matched opportunities
 router.get('/opportunity-scan', async (req: Request, res: Response, next: NextFunction) => {
@@ -342,6 +374,8 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response, nex
 // =============================================
 // MENTOR MATCH - AI-Powered Mentor Pairing
 // =============================================
+// Placeholder-only: no code writes mentorMatchScore, so this list is always
+// empty. The web app reads /api/algorithms/mentor-match.
 
 // Get mentor recommendations
 router.get('/mentor-match', async (req: Request, res: Response, next: NextFunction) => {
@@ -417,6 +451,9 @@ router.get('/mentor-match/:mentorId', async (req: Request, res: Response, next: 
 // =============================================
 // SAFETY SCORE - Trust & Verification
 // =============================================
+// The row here starts at 50 with no badges and only moves on a report or a
+// block. The web app reads /api/trust-score for the factor breakdown; POST
+// /report below is still the report path.
 
 // Get user's trust score
 router.get('/trust-score', async (req: Request, res: Response, next: NextFunction) => {

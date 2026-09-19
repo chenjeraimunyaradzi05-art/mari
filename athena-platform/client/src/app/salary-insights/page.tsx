@@ -2,15 +2,32 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { BarChart3, Briefcase, History, Lock, Scale, Search, Send } from 'lucide-react';
+import {
+  BarChart3,
+  Briefcase,
+  Building2,
+  History,
+  Lock,
+  MessageSquare,
+  Scale,
+  Search,
+  Send,
+} from 'lucide-react';
 import { aiAlgorithmsApi } from '@/lib/api';
+import {
+  algorithmApi,
+  salaryApi,
+  type NegotiationScenario,
+  type NegotiationScript,
+  type SalaryEquityResult,
+} from '@/lib/algorithm-api';
 import { useAuthStore } from '@/lib/store';
 import { EmptyState, PageHero, PageShell, Section } from '@/components/layout/PageShell';
 
 /**
  * Salary insights.
  *
- * Everything here comes from pay that people on ATHENA have actually shared
+ * The benchmark comes from pay that people on ATHENA have actually shared
  * (`SalaryDataPoint`), read back through `/api/ai-algorithms/salary-equity/*`.
  * No seeded figures, no modelled ranges, no illustrative pay gaps: the server
  * refuses to return a benchmark until at least five people have shared pay for
@@ -18,9 +35,22 @@ import { EmptyState, PageHero, PageShell, Section } from '@/components/layout/Pa
  * are in that sample. Where there is not enough, we say so and ask the reader to
  * add the first data point rather than showing a number we invented.
  *
- * Note for future work: the older `/api/salary/*` routes read from a hardcoded
- * in-memory table the service itself labels "simulated". They are deliberately
- * not used here.
+ * Two more sources sit beside it, each labelled as what it is:
+ *   - `/api/algorithms/salary-equity` is the median of the ranges employers
+ *     advertise on active listings with that title, quoted only from three
+ *     listings up. It is the employer's own figure, not member-reported pay,
+ *     and the page says which is which. Its canned `tips` are not shown.
+ *   - `POST /api/salary/negotiation-script` is a coaching template per
+ *     scenario, filled in only with what the member typed. It is presented as
+ *     a template to adapt, never as advice about what she is owed.
+ *
+ * On `/api/salary/*` generally: the simulated in-memory table an earlier note
+ * here warned about was deleted (see the header of server salary.routes.ts).
+ * `salary-equity.service.ts` now reads `SalaryDataPoint` with the same five
+ * and three-per-gender floors, and the company transparency route measures
+ * only the share of an employer's roles that publish a range. Its benchmark
+ * routes still overlap with `/api/ai-algorithms/salary-equity/*`, which is why
+ * the lookup above keeps using the latter until the two are merged.
  */
 
 type SalaryBands = {
@@ -44,6 +74,15 @@ type SalaryAnalysis = {
 };
 
 type BenchmarkState = 'idle' | 'loading' | 'ready' | 'thin' | 'error';
+
+type AdvertisedState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; data: SalaryEquityResult }
+  | { status: 'error' };
+
+/** Three listings with a published range is the floor the server holds too. */
+const MIN_ADVERTISED_LISTINGS = 3;
 
 const GENDER_OPTIONS = [
   { value: '', label: 'Prefer not to say' },
@@ -156,6 +195,297 @@ function BenchmarkResult({ analysis }: { analysis: SalaryAnalysis }) {
   );
 }
 
+/* ------------------------------------------------ what employers advertise */
+
+function AdvertisedRange({ state }: { state: AdvertisedState }) {
+  if (state.status === 'idle') return null;
+
+  const ready = state.status === 'ready' ? state.data : null;
+  const median =
+    ready && ready.marketMedian !== null && ready.sampleSize >= MIN_ADVERTISED_LISTINGS
+      ? money(ready.marketMedian)
+      : null;
+
+  return (
+    <div className="tile-soft mt-4 p-4">
+      <div className="flex items-center gap-2">
+        <Building2 className="h-4 w-4 text-rose-500" />
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+          What employers here advertise
+        </h3>
+      </div>
+      {state.status === 'loading' && (
+        <div className="mt-2 h-10 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+      )}
+      {state.status === 'error' && (
+        <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+          We could not read the listings just now. The benchmark above does not depend on them.
+        </p>
+      )}
+      {ready && median && (
+        <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+          Employers on ATHENA advertise a median of{' '}
+          <span className="font-semibold text-slate-900 dark:text-white">{median}</span> across{' '}
+          {ready.sampleSize} active listings titled {ready.targetRole}. That is the employers&apos;
+          own figure, a different source from the pay members report.
+        </p>
+      )}
+      {ready && !median && (
+        <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+          Fewer than three active listings titled {ready.targetRole} publish a range, so there is
+          no advertised median we would quote.{' '}
+          <Link href="/jobs" className="font-semibold text-rose-600 hover:underline dark:text-rose-400">
+            See the roles that do list pay
+          </Link>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------ prepare the conversation */
+
+const SCENARIOS: { value: NegotiationScenario; label: string }[] = [
+  { value: 'new_job', label: 'A new job offer' },
+  { value: 'raise', label: 'A raise where I am' },
+  { value: 'promotion', label: 'A promotion' },
+  { value: 'counter_offer', label: 'A counter offer' },
+];
+
+/** 'budget_constraints' -> 'budget constraints' */
+const humanise = (key: string) => key.replace(/_/g, ' ');
+
+/**
+ * The script is a coaching template with her figures dropped in. Its `tips`
+ * are generic lines (one quotes an unsourced percentage), so they stay off the
+ * page; the opening, points, counters and close are what she can adapt.
+ */
+function NegotiationPrep({ role }: { role: string }) {
+  const [form, setForm] = useState({
+    scenario: 'new_job' as NegotiationScenario,
+    role,
+    targetSalary: '',
+    currentSalary: '',
+    yearsAtCompany: '',
+    achievements: '',
+  });
+  const [building, setBuilding] = useState(false);
+  const [error, setError] = useState('');
+  const [script, setScript] = useState<NegotiationScript | null>(null);
+
+  const needsCurrent = form.scenario === 'counter_offer';
+
+  const prepare = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const targetSalary = Number(form.targetSalary);
+    const currentSalary = form.currentSalary ? Number(form.currentSalary) : undefined;
+    const yearsAtCompany = form.yearsAtCompany ? Number(form.yearsAtCompany) : undefined;
+    const achievements = form.achievements
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!form.role.trim() || !Number.isFinite(targetSalary) || targetSalary <= 0) {
+      setError('A role and the figure you are asking for are needed first.');
+      return;
+    }
+    if (needsCurrent && (!currentSalary || !Number.isFinite(currentSalary) || currentSalary <= 0)) {
+      setError('A counter offer is measured against what you earn now, so that figure is needed too.');
+      return;
+    }
+
+    setBuilding(true);
+    setError('');
+    try {
+      const response = await salaryApi.negotiationScript({
+        scenario: form.scenario,
+        role: form.role.trim(),
+        targetSalary,
+        ...(currentSalary && currentSalary > 0 ? { currentSalary } : {}),
+        ...(yearsAtCompany && yearsAtCompany > 0 ? { yearsAtCompany } : {}),
+        ...(achievements.length ? { achievements } : {}),
+      });
+      setScript(response.data);
+    } catch (err) {
+      setError(errorMessage(err, 'We could not build the template just now.'));
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <form onSubmit={prepare} className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className={labelClass} htmlFor="neg-scenario">
+            The conversation
+          </label>
+          <select
+            id="neg-scenario"
+            className={fieldClass}
+            value={form.scenario}
+            onChange={(event) =>
+              setForm({ ...form, scenario: event.target.value as NegotiationScenario })
+            }
+          >
+            {SCENARIOS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="neg-role">
+            Role
+          </label>
+          <input
+            id="neg-role"
+            className={fieldClass}
+            value={form.role}
+            onChange={(event) => setForm({ ...form, role: event.target.value })}
+            required
+          />
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="neg-target">
+            What you are asking for (AUD a year)
+          </label>
+          <input
+            id="neg-target"
+            className={fieldClass}
+            type="number"
+            min={0}
+            step={1000}
+            inputMode="numeric"
+            value={form.targetSalary}
+            onChange={(event) => setForm({ ...form, targetSalary: event.target.value })}
+            required
+          />
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="neg-current">
+            What you earn now {needsCurrent ? '' : '(optional)'}
+          </label>
+          <input
+            id="neg-current"
+            className={fieldClass}
+            type="number"
+            min={0}
+            step={1000}
+            inputMode="numeric"
+            value={form.currentSalary}
+            onChange={(event) => setForm({ ...form, currentSalary: event.target.value })}
+            required={needsCurrent}
+          />
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="neg-years">
+            Years with this employer (optional)
+          </label>
+          <input
+            id="neg-years"
+            className={fieldClass}
+            type="number"
+            min={0}
+            max={60}
+            inputMode="numeric"
+            value={form.yearsAtCompany}
+            onChange={(event) => setForm({ ...form, yearsAtCompany: event.target.value })}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass} htmlFor="neg-achievements">
+            Things you have delivered, one per line (optional)
+          </label>
+          <textarea
+            id="neg-achievements"
+            className={fieldClass}
+            rows={3}
+            value={form.achievements}
+            onChange={(event) => setForm({ ...form, achievements: event.target.value })}
+            placeholder={'Cut onboarding time from six weeks to two\nBrought in the Brisbane City Council account'}
+          />
+        </div>
+
+        {error && (
+          <p className="text-sm leading-6 text-rose-600 dark:text-rose-400 sm:col-span-2">{error}</p>
+        )}
+
+        <div className="sm:col-span-2">
+          <button
+            type="submit"
+            disabled={building}
+            className="focusable rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {building ? 'Building' : 'Build my template'}
+          </button>
+        </div>
+      </form>
+
+      {script && (
+        <div className="tile-soft space-y-4 p-5">
+          <div>
+            <p className="kicker">A template to adapt, not a script to read out</p>
+            <h3 className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
+              {script.situation}
+            </h3>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Open with
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">
+              {script.openingStatement}
+            </p>
+          </div>
+          {script.keyPoints.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Make these points
+              </p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-700 dark:text-slate-300">
+                {script.keyPoints.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {Object.keys(script.counterResponses).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                If they say
+              </p>
+              <dl className="mt-1 space-y-2">
+                {Object.entries(script.counterResponses).map(([key, reply]) => (
+                  <div key={key}>
+                    <dt className="text-sm font-medium capitalize text-slate-900 dark:text-white">
+                      {humanise(key)}
+                    </dt>
+                    <dd className="text-sm leading-6 text-slate-700 dark:text-slate-300">{reply}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Close with
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">
+              {script.closingStatement}
+            </p>
+          </div>
+          <p className="text-xs leading-5 text-slate-500 dark:text-slate-500">
+            The figures in it are the ones you typed. Anything in square brackets is for you to fill
+            in, and the benchmark above is the number to stand behind.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- the page */
 
 export default function SalaryInsightsPage() {
@@ -168,6 +498,10 @@ export default function SalaryInsightsPage() {
   const [analysis, setAnalysis] = useState<SalaryAnalysis | null>(null);
   const [benchmarkError, setBenchmarkError] = useState('');
   const [askedFor, setAskedFor] = useState('');
+  // The title as it was looked up, so the template below follows the lookup
+  // rather than whatever is in the box now.
+  const [lookedUpRole, setLookedUpRole] = useState('');
+  const [advertised, setAdvertised] = useState<AdvertisedState>({ status: 'idle' });
 
   const [form, setForm] = useState({
     jobTitle: '',
@@ -221,6 +555,15 @@ export default function SalaryInsightsPage() {
     setBenchmarkError('');
     setAnalysis(null);
     setAskedFor(trimmedLocation ? `${trimmedRole} in ${trimmedLocation}` : trimmedRole);
+    setLookedUpRole(trimmedRole);
+
+    // The advertised median is a separate source and a separate call; a
+    // failure here must not take the member benchmark down with it.
+    setAdvertised({ status: 'loading' });
+    algorithmApi
+      .salaryEquity(trimmedRole)
+      .then((response) => setAdvertised({ status: 'ready', data: response.data.data }))
+      .catch(() => setAdvertised({ status: 'error' }));
 
     try {
       const response = await aiAlgorithmsApi.analyzeSalary({
@@ -398,8 +741,22 @@ export default function SalaryInsightsPage() {
                 secondaryAction={{ label: 'See roles with pay listed', href: '/jobs' }}
               />
             )}
+
+            {(benchmarkState === 'ready' || benchmarkState === 'thin') && (
+              <AdvertisedRange state={advertised} />
+            )}
           </div>
         </Section>
+
+        {isAuthenticated && (benchmarkState === 'ready' || benchmarkState === 'thin') && (
+          <Section
+            icon={MessageSquare}
+            title="Prepare the conversation"
+            description="A coaching template for the conversation itself, built from what you type here. It is not a benchmark; the figures in it are yours."
+          >
+            <NegotiationPrep key={lookedUpRole} role={lookedUpRole} />
+          </Section>
+        )}
 
         <div id="share" className="scroll-mt-24" />
 

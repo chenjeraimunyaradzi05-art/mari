@@ -1,368 +1,154 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { Users, Loader2, Star, MessageCircle, Calendar, MapPin, Briefcase, Filter } from 'lucide-react';
-import { aiAlgorithmsApi } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowRight, Sparkles, Users } from 'lucide-react';
+import { algorithmApi } from '@/lib/algorithm-api';
+import { useMySkills } from '@/lib/hooks';
+import { Avatar } from '@/components/ui/avatar';
 
-type MentorMatch = {
-  id: string;
-  mentorId: string;
-  mentor: {
-    id: string;
-    name: string;
-    title?: string;
-    company?: string;
-    location?: string;
-    bio?: string;
-    avatarUrl?: string;
-    industry?: string[];
-    yearsExperience?: number;
-    rating?: number;
-    menteeCount?: number;
-  };
-  compatibilityScore: number;
-  careerPathSimilarity: number;
-  experienceGapScore: number;
-  communicationStyleFit: number;
-  availabilityMatch: number;
-  industryOverlap: number;
-  skillsToLearn: string[];
-  matchReason: string;
-  status: string;
-};
+/**
+ * Mentor Match.
+ *
+ * This page used to read /api/ai-algorithms/mentor-match, whose
+ * mentorMatchScore table nothing on the server ever wrote, so every member saw
+ * "no matches" behind a filter bar. It now reads /api/algorithms/mentor-match:
+ * the mentors taking new mentees, ranked by the skills they share with her
+ * profile, their rating and their years of experience, each with the reasons
+ * spelled out.
+ *
+ * The ranking is a heuristic, not a percentage, so the number stays off the
+ * page; the reasons are the honest part and they are what she sees. Shared
+ * skills drive the order, so a profile with no skills is nudged to add some.
+ */
 
-const skillsAreas = [
-  'Technology', 'Leadership', 'Finance', 'Marketing', 'Design',
-  'Sales', 'Operations', 'Product', 'Data Science', 'Entrepreneurship'
-];
+function initialsOf(name: string) {
+  const parts = name.split(' ').filter(Boolean).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() ?? '').join('') || 'M';
+}
 
 export default function MentorMatchPage() {
-  const [matches, setMatches] = useState<MentorMatch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Filters
-  const [skillFilter, setSkillFilter] = useState<string>('');
-  const [industryFilter, setIndustryFilter] = useState<string>('');
-  const [minScore, setMinScore] = useState<number>(0);
-  const [showFilters, setShowFilters] = useState(false);
-
-  const loadMatches = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await aiAlgorithmsApi.getMentorMatches({
-        skill: skillFilter || undefined,
-        industry: industryFilter || undefined,
-        minScore: minScore > 0 ? minScore : undefined,
-      });
-      setMatches(response.data?.data || []);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error?.response?.data?.error || 'Failed to load mentor matches');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadMatches();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleApplyFilters = () => {
-    loadMatches();
-    setShowFilters(false);
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-emerald-600 bg-emerald-50';
-    if (score >= 60) return 'text-blue-600 bg-blue-50';
-    if (score >= 40) return 'text-amber-600 bg-amber-50';
-    return 'text-slate-600 bg-slate-50';
-  };
+  const { data: mentors, isLoading, isError } = useQuery({
+    queryKey: ['mentor-match'],
+    queryFn: algorithmApi.mentorMatch,
+    select: (response) => response.data.data.mentors,
+  });
+  const { data: mySkills } = useMySkills();
+  const hasNoSkills = Array.isArray(mySkills) && mySkills.length === 0;
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-purple-600">
-            <Users className="w-5 h-5" />
-            <span className="text-sm font-semibold uppercase tracking-wider">MentorMatch</span>
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
-            AI Mentor Recommendations
-          </h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">
-            Mentors matched to your career goals and learning style
-          </p>
+    <div className="mx-auto max-w-4xl space-y-6 p-6">
+      <div>
+        <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+          <Users className="h-5 w-5" />
+          <span className="text-sm font-semibold uppercase tracking-wider">Mentor Match</span>
         </div>
-
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className="flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"
-        >
-          <Filter className="w-4 h-4" />
-          Filters
-        </button>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white md:text-3xl">
+          Mentors who could be a good fit
+        </h1>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+          The mentors taking new mentees right now, with the ones who share your skills first.
+          Each card says why she is here.
+        </p>
       </div>
 
-      {/* Filters */}
-      {showFilters && (
-        <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-6 space-y-4">
-          <div className="grid md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Skill Area
-              </label>
-              <select
-                value={skillFilter}
-                onChange={(e) => setSkillFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900"
-              >
-                <option value="">All skills</option>
-                {skillsAreas.map(skill => (
-                  <option key={skill} value={skill}>{skill}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Industry
-              </label>
-              <input
-                type="text"
-                value={industryFilter}
-                onChange={(e) => setIndustryFilter(e.target.value)}
-                placeholder="e.g. Technology, Healthcare"
-                className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Minimum Match Score
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={minScore}
-                onChange={(e) => setMinScore(Number(e.target.value))}
-                className="w-full"
-              />
-              <span className="text-sm text-slate-500">{minScore}%</span>
-            </div>
+      {hasNoSkills && (
+        <div className="tile-soft flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="flex items-start gap-3">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
+            <p className="max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+              Add a few skills to your profile and these matches get sharper. Shared skills are
+              what puts a mentor at the top of this list.
+            </p>
           </div>
-          <button
-            onClick={handleApplyFilters}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700"
+          <Link
+            href="/dashboard/settings/profile"
+            className="focusable rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
           >
-            Apply Filters
-          </button>
+            Add skills
+          </Link>
         </div>
       )}
 
-      {error && (
-        <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">{error}</div>
+      {isLoading && (
+        <ul className="grid gap-3 sm:grid-cols-2" aria-busy="true">
+          {[0, 1, 2, 3].map((i) => (
+            <li
+              key={i}
+              className="h-36 animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800"
+            />
+          ))}
+        </ul>
       )}
 
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+      {isError && (
+        <div className="surface p-6">
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+            We could not load the mentors just now. Please try again shortly, or browse them
+            directly.{' '}
+            <Link href="/dashboard/mentors" className="font-semibold text-rose-600 hover:underline dark:text-rose-400">
+              All mentors
+            </Link>
+          </p>
         </div>
-      ) : matches.length === 0 ? (
-        <div className="text-center py-20">
-          <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-slate-900 dark:text-white">No mentor matches found</h3>
-          <p className="text-slate-500 mt-1">Complete your profile to get AI-powered mentor recommendations</p>
+      )}
+
+      {mentors && mentors.length === 0 && (
+        <div className="surface px-6 py-12 text-center">
+          <Users className="mx-auto mb-4 h-10 w-10 text-slate-300 dark:text-slate-600" />
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+            No mentors are taking new mentees right now
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600 dark:text-slate-400">
+            Availability changes week to week. Have a look at the full list, or come back soon.
+          </p>
+          <Link
+            href="/dashboard/mentors"
+            className="focusable mt-5 inline-flex rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+          >
+            See all mentors
+          </Link>
         </div>
-      ) : (
-        <div className="space-y-6">
-          {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <p className="text-2xl font-bold text-slate-900 dark:text-white">{matches.length}</p>
-              <p className="text-sm text-slate-500">Matched Mentors</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                {Math.round(matches.reduce((acc, m) => acc + m.compatibilityScore, 0) / matches.length)}%
-              </p>
-              <p className="text-sm text-slate-500">Avg. Compatibility</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                {matches.filter(m => m.compatibilityScore >= 80).length}
-              </p>
-              <p className="text-sm text-slate-500">High Match (80%+)</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                {Array.from(new Set(matches.flatMap(m => m.skillsToLearn))).length}
-              </p>
-              <p className="text-sm text-slate-500">Skills to Learn</p>
-            </div>
-          </div>
+      )}
 
-          {/* Mentor Cards */}
-          <div className="space-y-4">
-            {matches.map((match) => (
-              <div
-                key={match.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6"
-              >
-                <div className="flex flex-col md:flex-row gap-6">
-                  {/* Mentor Info */}
-                  <div className="flex items-start gap-4 flex-1">
-                    <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0 relative overflow-hidden">
-                      {match.mentor.avatarUrl ? (
-                        <Image
-                          src={match.mentor.avatarUrl}
-                          alt={match.mentor.name || 'Mentor'}
-                          fill
-                          className="object-cover"
-                        />
-                      ) : (
-                        <span className="text-2xl font-bold text-purple-600">
-                          {match.mentor.name?.charAt(0)}
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                        {match.mentor.name}
-                      </h3>
-                      {match.mentor.title && (
-                        <p className="text-slate-600 dark:text-slate-400">
-                          {match.mentor.title}
-                          {match.mentor.company && ` at ${match.mentor.company}`}
-                        </p>
-                      )}
-                      <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-slate-500">
-                        {match.mentor.location && (
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />
-                            {match.mentor.location}
-                          </span>
-                        )}
-                        {match.mentor.yearsExperience && (
-                          <span className="flex items-center gap-1">
-                            <Briefcase className="w-3 h-3" />
-                            {match.mentor.yearsExperience} years experience
-                          </span>
-                        )}
-                        {match.mentor.rating && (
-                          <span className="flex items-center gap-1">
-                            <Star className="w-3 h-3 text-amber-500" />
-                            {match.mentor.rating.toFixed(1)}
-                          </span>
-                        )}
-                        {match.mentor.menteeCount != null && (
-                          <span className="flex items-center gap-1">
-                            <Users className="w-3 h-3" />
-                            {match.mentor.menteeCount} mentees
-                          </span>
-                        )}
-                      </div>
-                      {match.matchReason && (
-                        <p className="text-sm text-purple-600 mt-2">
-                          💡 {match.matchReason}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Match Score */}
-                  <div className="flex flex-col items-center justify-center">
-                    <div className={`w-20 h-20 rounded-full flex flex-col items-center justify-center ${getScoreColor(match.compatibilityScore)}`}>
-                      <span className="text-2xl font-bold">{Math.round(match.compatibilityScore)}%</span>
-                      <span className="text-xs">Match</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Score Breakdown */}
-                <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
-                  <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-3">Compatibility Breakdown</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-slate-900 dark:text-white">
-                        {Math.round(match.careerPathSimilarity)}%
-                      </div>
-                      <div className="text-xs text-slate-500">Career Path</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-slate-900 dark:text-white">
-                        {Math.round(match.experienceGapScore)}%
-                      </div>
-                      <div className="text-xs text-slate-500">Experience Gap</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-slate-900 dark:text-white">
-                        {Math.round(match.communicationStyleFit)}%
-                      </div>
-                      <div className="text-xs text-slate-500">Communication</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-slate-900 dark:text-white">
-                        {Math.round(match.availabilityMatch)}%
-                      </div>
-                      <div className="text-xs text-slate-500">Availability</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-bold text-slate-900 dark:text-white">
-                        {Math.round(match.industryOverlap)}%
-                      </div>
-                      <div className="text-xs text-slate-500">Industry</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Skills to Learn */}
-                {match.skillsToLearn.length > 0 && (
-                  <div className="mt-4">
-                    <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-2">Skills You&apos;ll Learn</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {match.skillsToLearn.map((skill) => (
-                        <span
-                          key={skill}
-                          className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-sm"
-                        >
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex gap-3 mt-6">
-                  <Link
-                    href={`/dashboard/messages?user=${match.mentor.id}`}
-                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    Connect
-                  </Link>
-                  <Link
-                    href={`/dashboard/mentors/${match.mentorId}`}
-                    className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg font-medium hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center gap-2"
-                  >
-                    <Calendar className="w-4 h-4" />
-                    Schedule
-                  </Link>
+      {mentors && mentors.length > 0 && (
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {mentors.map((mentor) => (
+            <li key={mentor.id} className="surface p-5">
+              <div className="flex items-start gap-3">
+                <Avatar src={mentor.avatar} alt={mentor.name} fallback={initialsOf(mentor.name)} size="lg" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-semibold text-slate-900 dark:text-white">{mentor.name}</h2>
+                  {mentor.headline && (
+                    <p className="text-sm text-slate-600 dark:text-slate-400">{mentor.headline}</p>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+              <ul className="mt-3 flex flex-wrap gap-1.5" aria-label={`Why ${mentor.name} is suggested`}>
+                {(mentor.matchReasons.length > 0 ? mentor.matchReasons : ['Taking new mentees']).map(
+                  (reason) => (
+                    <li
+                      key={reason}
+                      className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                    >
+                      {reason}
+                    </li>
+                  )
+                )}
+              </ul>
+              <Link
+                href={`/dashboard/mentors/${mentor.id}`}
+                className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 hover:underline dark:text-rose-400"
+              >
+                See profile <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
 
       <div className="text-center">
-        <Link href="/dashboard/ai" className="text-sm text-primary-600 hover:underline">
+        <Link href="/dashboard/ai" className="text-sm text-rose-600 hover:underline dark:text-rose-400">
           ← Back to AI Tools
         </Link>
       </div>
