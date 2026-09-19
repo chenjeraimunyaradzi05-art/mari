@@ -5,8 +5,11 @@
  */
 
 import PDFDocument from 'pdfkit';
+import type Stripe from 'stripe';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { ApiError } from '../middleware/errorHandler';
 import fs from 'fs';
 import path from 'path';
 
@@ -479,159 +482,265 @@ function formatDate(date: Date): string {
 // ==========================================
 
 /**
- * Generate and store invoice for a payment
+ * What an issue call hands back. `created` is false when the invoice already
+ * existed and the same one is being returned: every issuer here is idempotent,
+ * because the Stripe webhook is retried and the admin button can be pressed
+ * twice, and a second invoice number for one charge is a bookkeeping error.
+ */
+export interface IssuedInvoice {
+  invoiceId: string;
+  invoiceNumber: string;
+  created: boolean;
+  pdf: Buffer;
+}
+
+/**
+ * What Stripe says was paid for a membership period. Subscription.amount and
+ * .interval are never written by checkout or the webhook, so a membership
+ * invoice carries Stripe's figures rather than reading the row.
+ */
+export interface PaidSubscriptionCharge {
+  /** Major units in the invoice currency (29.00, not 2900). */
+  amount: number;
+  /** ISO code, upper case. */
+  currency: string;
+  /** When Stripe recorded the payment; also the idempotency key per invoice. */
+  paidAt: Date;
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
+}
+
+/**
+ * The paid figures from a Stripe invoice, or null when nothing was paid (a
+ * trial period, a 100% coupon): a tax invoice records money received, and a
+ * $0 line is not that.
+ */
+export function paidChargeFromStripeInvoice(invoice: Stripe.Invoice): PaidSubscriptionCharge | null {
+  if (typeof invoice.amount_paid !== 'number' || invoice.amount_paid <= 0) return null;
+  const paidAtSeconds = invoice.status_transitions?.paid_at ?? invoice.created;
+  const period = invoice.lines?.data?.[0]?.period;
+  const toDate = (seconds: number | null | undefined) => (typeof seconds === 'number' ? new Date(seconds * 1000) : null);
+  return {
+    amount: Math.round(invoice.amount_paid) / 100,
+    currency: String(invoice.currency || 'aud').toUpperCase(),
+    paidAt: new Date(paidAtSeconds * 1000),
+    periodStart: toDate(period?.start ?? invoice.period_start),
+    periodEnd: toDate(period?.end ?? invoice.period_end),
+  };
+}
+
+/**
+ * Writes the row, minting a fresh number if two issuers raced for the same
+ * one: the sequence is a count, so two webhooks landing together can both
+ * compute the next number and the second create trips the unique index.
+ */
+async function createInvoiceRow(data: Omit<Prisma.InvoiceUncheckedCreateInput, 'invoiceNumber' | 'pdfUrl'>) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const invoiceNumber = await generateInvoiceNumber();
+    try {
+      return await prisma.invoice.create({
+        data: { ...data, invoiceNumber, pdfUrl: `invoices/${invoiceNumber}.pdf` },
+      });
+    } catch (err: any) {
+      if (err?.code !== 'P2002') throw err;
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Issue an invoice for a Payment row, once. A second call for the same
+ * paymentId returns the invoice already filed.
+ *
+ * No flow writes Payment rows yet (mentor sessions and the formation fee keep
+ * their state on their own models), so today this is reached by the admin
+ * re-issue route and by the webhook hook that fires when a Payment carrying
+ * the succeeded intent exists.
  */
 export async function createInvoiceForPayment(
   paymentId: string,
   options?: { sendEmail?: boolean }
-): Promise<{ invoiceId: string; pdf: Buffer }> {
+): Promise<IssuedInvoice> {
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
     include: {
       user: true,
     },
   });
-  
+
   if (!payment) {
-    throw new Error('Payment not found');
+    throw new ApiError(404, 'Payment not found');
   }
-  
-  // Generate invoice number
-  const invoiceNumber = await generateInvoiceNumber();
-  
+
+  const existing = await prisma.invoice.findFirst({ where: { paymentId: payment.id } });
+
   // Build invoice data
   const invoiceData: InvoiceData = {
-    invoiceNumber,
+    invoiceNumber: existing?.invoiceNumber ?? '',
     invoiceDate: payment.createdAt,
     dueDate: payment.createdAt, // Immediate for completed payments
     status: payment.status === 'COMPLETED' ? 'PAID' : 'SENT',
-    
+
     seller: ATHENA_INFO,
-    
+
     buyer: {
       name: payment.user?.displayName || 'Customer',
       email: payment.user?.email || '',
-      address: payment.user?.city 
+      address: payment.user?.city
         ? [payment.user.city, payment.user.state, payment.user.country].filter(Boolean) as string[]
         : undefined,
     },
-    
+
     items: [{
       description: getPaymentDescription(payment),
       quantity: 1,
       unitPrice: payment.amount.toNumber(),
       amount: payment.amount.toNumber(),
     }],
-    
+
     subtotal: payment.amount.toNumber(),
-    taxTotal: 0, // Add tax calculation if needed
+    taxTotal: 0, // No GST is computed yet; see the note in invoice.routes.ts
     total: payment.amount.toNumber(),
     currency: payment.currency,
-    
+
     paymentMethod: payment.method || undefined,
     paymentDate: payment.status === 'COMPLETED' ? payment.updatedAt : undefined,
     transactionId: payment.stripePaymentIntentId || undefined,
   };
-  
-  // Generate PDF
-  const pdf = await generateInvoicePDF(invoiceData);
-  
+
+  if (existing) {
+    return {
+      invoiceId: existing.id,
+      invoiceNumber: existing.invoiceNumber,
+      created: false,
+      pdf: await generateInvoicePDF({ ...invoiceData, status: existing.status as InvoiceData['status'] }),
+    };
+  }
+
   // Store invoice in database
-  const invoice = await prisma.invoice.create({
-    data: {
-      invoiceNumber,
-      userId: payment.userId,
-      paymentId: payment.id,
-      amount: payment.amount,
-      currency: payment.currency,
-      status: invoiceData.status,
-      pdfUrl: `invoices/${invoiceNumber}.pdf`, // Would upload to S3 in production
-      issuedAt: invoiceData.invoiceDate,
-      dueAt: invoiceData.dueDate,
-      paidAt: invoiceData.paymentDate,
-    },
+  const invoice = await createInvoiceRow({
+    userId: payment.userId,
+    paymentId: payment.id,
+    amount: payment.amount,
+    currency: payment.currency,
+    status: invoiceData.status,
+    issuedAt: invoiceData.invoiceDate,
+    dueAt: invoiceData.dueDate,
+    paidAt: invoiceData.paymentDate,
   });
-  
-  logger.info(`Generated invoice ${invoiceNumber} for payment ${paymentId}`);
-  
+
+  logger.info(`Generated invoice ${invoice.invoiceNumber} for payment ${paymentId}`);
+
   // Optionally send email
   if (options?.sendEmail && payment.user?.email) {
     // Email sending would be triggered here
     logger.info(`Invoice email queued for ${payment.user.email}`);
   }
-  
+
   return {
     invoiceId: invoice.id,
-    pdf,
+    invoiceNumber: invoice.invoiceNumber,
+    created: true,
+    pdf: await generateInvoicePDF({ ...invoiceData, invoiceNumber: invoice.invoiceNumber }),
   };
 }
 
+function tierLabel(tier: string): string {
+  return tier
+    .toLowerCase()
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 /**
- * Generate invoice for subscription
+ * Issue an invoice for a paid membership period, once. Called by the Stripe
+ * webhook on invoice.paid and by the admin re-issue; both pass what Stripe
+ * says was paid. Idempotent per Stripe invoice: the paid-at instant Stripe
+ * recorded is stored as paidAt, and an invoice already filed against this
+ * subscription for that instant is returned instead of a second one.
  */
 export async function createInvoiceForSubscription(
-  subscriptionId: string
-): Promise<{ invoiceId: string; pdf: Buffer }> {
+  subscriptionId: string,
+  paid: PaidSubscriptionCharge
+): Promise<IssuedInvoice> {
   const subscription = await prisma.subscription.findUnique({
     where: { id: subscriptionId },
     include: {
       user: true,
     },
   });
-  
+
   if (!subscription) {
-    throw new Error('Subscription not found');
+    throw new ApiError(404, 'Subscription not found');
   }
-  
-  const invoiceNumber = await generateInvoiceNumber();
-  
+
+  const existing = await prisma.invoice.findFirst({
+    where: { subscriptionId: subscription.id, paidAt: paid.paidAt },
+  });
+
+  const period =
+    paid.periodStart && paid.periodEnd
+      ? ` (${formatDate(paid.periodStart)} to ${formatDate(paid.periodEnd)})`
+      : '';
+
   const invoiceData: InvoiceData = {
-    invoiceNumber,
-    invoiceDate: new Date(),
-    dueDate: subscription.currentPeriodEnd || new Date(),
-    status: 'SENT',
-    
+    invoiceNumber: existing?.invoiceNumber ?? '',
+    invoiceDate: paid.paidAt,
+    dueDate: paid.paidAt,
+    status: 'PAID',
+
     seller: ATHENA_INFO,
-    
+
     buyer: {
       name: subscription.user?.displayName || 'Customer',
       email: subscription.user?.email || '',
     },
-    
+
     items: [{
-      description: `Athena ${subscription.tier} Subscription (${subscription.interval || 'month'})`,
+      description: `ATHENA ${tierLabel(subscription.tier)} membership${period}`,
       quantity: 1,
-      unitPrice: subscription.amount?.toNumber() || 0,
-      amount: subscription.amount?.toNumber() || 0,
+      unitPrice: paid.amount,
+      amount: paid.amount,
     }],
-    
-    subtotal: subscription.amount?.toNumber() || 0,
-    taxTotal: 0,
-    total: subscription.amount?.toNumber() || 0,
-    currency: subscription.currency || 'AUD',
+
+    subtotal: paid.amount,
+    taxTotal: 0, // No GST is computed yet; see the note in invoice.routes.ts
+    total: paid.amount,
+    currency: paid.currency,
+    paymentMethod: 'card',
+    paymentDate: paid.paidAt,
   };
-  
-  const pdf = await generateInvoicePDF(invoiceData);
-  
-  const invoice = await prisma.invoice.create({
-    data: {
-      invoiceNumber,
-      userId: subscription.userId,
-      subscriptionId: subscription.id,
-      amount: subscription.amount ?? 0,
-      currency: subscription.currency ?? 'AUD',
-      status: 'SENT',
-      pdfUrl: `invoices/${invoiceNumber}.pdf`,
-      issuedAt: new Date(),
-      dueAt: subscription.currentPeriodEnd,
-    },
+
+  if (existing) {
+    return {
+      invoiceId: existing.id,
+      invoiceNumber: existing.invoiceNumber,
+      created: false,
+      pdf: await generateInvoicePDF(invoiceData),
+    };
+  }
+
+  const invoice = await createInvoiceRow({
+    userId: subscription.userId,
+    subscriptionId: subscription.id,
+    amount: paid.amount,
+    currency: paid.currency,
+    status: 'PAID',
+    issuedAt: paid.paidAt,
+    dueAt: paid.paidAt,
+    paidAt: paid.paidAt,
   });
-  
-  logger.info(`Generated subscription invoice ${invoiceNumber}`);
-  
+
+  logger.info(`Generated subscription invoice ${invoice.invoiceNumber}`, { subscriptionId: subscription.id });
+
   return {
     invoiceId: invoice.id,
-    pdf,
+    invoiceNumber: invoice.invoiceNumber,
+    created: true,
+    pdf: await generateInvoicePDF({ ...invoiceData, invoiceNumber: invoice.invoiceNumber }),
   };
 }
 
@@ -706,6 +815,7 @@ export const invoiceService = {
   generateInvoicePDF,
   createInvoiceForPayment,
   createInvoiceForSubscription,
+  paidChargeFromStripeInvoice,
   getInvoice,
   getUserInvoices,
 };

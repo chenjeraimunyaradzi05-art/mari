@@ -15,6 +15,12 @@ import {
   confirmAcceleratorEnrollmentPayment,
   recordAcceleratorPaymentFailure,
 } from '../services/payments-orchestration.service';
+// Tax invoices: see the header of routes/invoice.routes.ts for who issues them.
+import {
+  createInvoiceForPayment,
+  createInvoiceForSubscription,
+  paidChargeFromStripeInvoice,
+} from '../services/invoice.service';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 
@@ -50,6 +56,35 @@ function mapStripeSubscriptionStatus(status: string): 'ACTIVE' | 'CANCELED' | 'P
       return 'PAST_DUE';
     default:
       return 'CANCELED';
+  }
+}
+
+/**
+ * Invoice hook for one-off payments. A Payment row that carries this intent
+ * is marked COMPLETED and gets an ATHENA invoice, once (the service is
+ * idempotent on paymentId). No flow writes Payment rows yet, so today this
+ * finds nothing; it is the hook mentor sessions and the formation fee will
+ * use when they do. Best effort on purpose: the payment itself has already
+ * been applied by the handler above, and a failed filing can be re-issued
+ * from the admin subscriptions page, so an error here is logged rather than
+ * handed back to Stripe as a retry that would re-run the whole event.
+ */
+async function issueInvoiceForPaymentIntent(paymentIntent: Stripe.PaymentIntent): Promise<void> {
+  try {
+    const payment = await prisma.payment.findUnique({
+      where: { stripePaymentIntentId: paymentIntent.id },
+      select: { id: true, status: true },
+    });
+    if (!payment) return;
+    if (payment.status !== 'COMPLETED') {
+      await prisma.payment.update({ where: { id: payment.id }, data: { status: 'COMPLETED' } });
+    }
+    await createInvoiceForPayment(payment.id);
+  } catch (err: any) {
+    logger.error('Invoice for a succeeded payment intent could not be filed', {
+      paymentIntentId: paymentIntent.id,
+      message: err?.message,
+    });
   }
 }
 
@@ -168,6 +203,10 @@ router.post(
             if (type === ACCELERATOR_PAYMENT_TYPE) {
               await confirmAcceleratorEnrollmentPayment(paymentIntent);
             }
+
+            // Tax invoice for a Payment row carrying this intent (best effort,
+            // idempotent; see the helper above).
+            await issueInvoiceForPaymentIntent(paymentIntent);
             break;
           }
 
@@ -403,6 +442,40 @@ router.post(
                 html: `<p>A cardholder has disputed a charge.</p><ul><li>Dispute: ${dispute.id}</li><li>Amount: ${(dispute.amount / 100).toFixed(2)} ${dispute.currency.toUpperCase()}</li><li>Reason: ${dispute.reason}</li><li>Payment intent: ${paymentIntentId ?? 'unknown'}</li><li>Evidence due: ${respondBy}</li></ul><p>Respond in the Stripe dashboard.</p>`,
               });
             }
+            break;
+          }
+
+          // A paid membership period becomes an ATHENA tax invoice, filed
+          // once per Stripe invoice (the service is idempotent on the paid-at
+          // instant Stripe recorded). Only subscription invoices: one-off
+          // charges are payment intents and handled above. The subscription
+          // row is matched by Stripe subscription id, then customer, then the
+          // userId checkout put in the subscription's metadata; when none
+          // matches yet (invoice.paid can land before checkout.session
+          // .completed writes the row) the error is thrown so Stripe retries
+          // once the row exists, rather than the invoice being lost.
+          case 'invoice.paid': {
+            const stripeInvoice = event.data.object as Stripe.Invoice;
+            const stripeSubscriptionId = paymentIntentIdOf(stripeInvoice.subscription as any);
+            if (!stripeSubscriptionId) break;
+            const charge = paidChargeFromStripeInvoice(stripeInvoice);
+            if (!charge) break;
+            const customerId = paymentIntentIdOf(stripeInvoice.customer as any);
+            const metadataUserId = (stripeInvoice.subscription_details?.metadata as any)?.userId;
+            const dbSubscription = await prisma.subscription.findFirst({
+              where: {
+                OR: [
+                  { stripeSubscriptionId },
+                  customerId ? { stripeCustomerId: customerId } : undefined,
+                  typeof metadataUserId === 'string' && metadataUserId ? { userId: metadataUserId } : undefined,
+                ].filter(Boolean) as any[],
+              },
+              select: { id: true },
+            });
+            if (!dbSubscription) {
+              throw new Error(`No ATHENA subscription yet for Stripe subscription ${stripeSubscriptionId}; retry`);
+            }
+            await createInvoiceForSubscription(dbSubscription.id, charge);
             break;
           }
 

@@ -263,6 +263,57 @@ function validateOwnedUploadKey(key: string, userId: string) {
   return { normalizedKey, folder };
 }
 
+/**
+ * Who may read a private upload. The owner always. A résumé travels with a
+ * job application, so a team member of the organisation that received the
+ * application may read that one file too: the key is matched against
+ * JobApplication.resumeUrl for the organisations the caller belongs to.
+ * Anyone else is told the file does not exist rather than whose it is.
+ *
+ * Deleting stays owner-only (validateOwnedUploadKey); this is for reads.
+ */
+async function resolveReadableUploadKey(
+  key: string,
+  userId: string
+): Promise<{ normalizedKey: string; folder: string }> {
+  const normalizedKey = normalizeUploadKey(key);
+  const keyParts = normalizedKey.split('/');
+
+  if (keyParts.length < 3 || !keyParts[2]) {
+    throw new ApiError(400, 'Invalid file key format');
+  }
+
+  const [folder, ownerId] = keyParts;
+
+  if (!VALID_UPLOAD_FOLDERS.has(folder)) {
+    throw new ApiError(400, 'Invalid file path');
+  }
+
+  if (ownerId === userId) {
+    return { normalizedKey, folder };
+  }
+
+  if (folder === FILE_CONFIGS.resume.folder) {
+    const received = await prisma.jobApplication.findFirst({
+      where: {
+        resumeUrl: { endsWith: `/${normalizedKey}` },
+        job: { organization: { members: { some: { userId } } } },
+      },
+      select: { id: true },
+    });
+    if (received) {
+      return { normalizedKey, folder };
+    }
+  }
+
+  logger.warn('Private file requested by someone it does not belong to', {
+    userId,
+    attemptedKey: normalizedKey,
+    keyUserId: ownerId,
+  });
+  throw new ApiError(404, 'File not found');
+}
+
 function hasLocalFile(key: string): boolean {
   try {
     return fs.existsSync(resolveLocalFilePath(key));
@@ -540,22 +591,28 @@ router.delete('/delete', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 // GET SIGNED DOWNLOAD URL (for private files)
 // ===========================================
+// The owner of the file, or a team member of the organisation whose job the
+// file was attached to as a résumé (resolveReadableUploadKey). A local file's
+// URL points back at GET /local/*, which needs the session header, so the
+// web client fetches it through the API rather than as a plain link.
 router.post('/download-url', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { key } = req.body;
 
-    if (!key) {
+    if (!key || typeof key !== 'string' || key.length > 512) {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = validateOwnedUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!.id);
     const visibility = PRIVATE_UPLOAD_FOLDERS.has(folder) ? 'private' : 'public';
+    const fileName = path.basename(normalizedKey);
 
     if (hasLocalFile(normalizedKey)) {
       return res.json({
         success: true,
         data: {
           downloadUrl: buildLocalFileUrl(normalizedKey, visibility),
+          fileName,
           expiresIn: 3600,
         },
       });
@@ -576,6 +633,7 @@ router.post('/download-url', authenticate, async (req: AuthRequest, res, next) =
       success: true,
       data: {
         downloadUrl: signedUrl,
+        fileName,
         expiresIn: 3600,
       },
     });
@@ -592,7 +650,7 @@ router.get('/local/*', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'File key is required');
     }
 
-    const { normalizedKey, folder } = validateOwnedUploadKey(key, req.user!.id);
+    const { normalizedKey, folder } = await resolveReadableUploadKey(key, req.user!.id);
 
     if (!PRIVATE_UPLOAD_FOLDERS.has(folder)) {
       throw new ApiError(404, 'File not found');

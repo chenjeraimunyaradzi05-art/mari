@@ -3,17 +3,24 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
+import toast from 'react-hot-toast';
+import {
+  ChevronLeft,
+  ChevronRight,
   CreditCard,
   Gift,
   Plus,
+  Receipt,
   Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { adminInvoiceApi } from '@/lib/admin-invoice-api';
+
+const errorMessage = (e: unknown) =>
+  (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message ??
+  (e as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.error;
 
 interface Subscription {
   id: string;
@@ -86,6 +93,47 @@ export default function AdminSubscriptionsPage() {
       setGrantEmail('');
     },
   });
+
+  // Tax invoices are filed by the Stripe webhook as memberships are paid.
+  // These re-issue one when that did not happen: the routes are idempotent,
+  // so pressing twice returns the same invoice number.
+  const [paymentIdToInvoice, setPaymentIdToInvoice] = useState('');
+  const [issuingFor, setIssuingFor] = useState<string | null>(null);
+
+  const reportIssued = (label: string, issued: { invoiceNumber: string; alreadyIssued: boolean }) => {
+    if (issued.alreadyIssued) {
+      toast.success(`${label} already has invoice ${issued.invoiceNumber}.`);
+    } else {
+      toast.success(`Invoice ${issued.invoiceNumber} issued for ${label}.`);
+    }
+  };
+
+  const issueSubscriptionInvoice = async (sub: Subscription) => {
+    setIssuingFor(sub.id);
+    try {
+      const res = await adminInvoiceApi.issueForSubscription(sub.id);
+      reportIssued(sub.user.email, res.data.data);
+    } catch (error) {
+      toast.error(errorMessage(error) || 'The invoice could not be issued.');
+    } finally {
+      setIssuingFor(null);
+    }
+  };
+
+  const issuePaymentInvoice = async () => {
+    const paymentId = paymentIdToInvoice.trim();
+    if (!paymentId) return;
+    setIssuingFor(`payment:${paymentId}`);
+    try {
+      const res = await adminInvoiceApi.issueForPayment(paymentId);
+      reportIssued(`payment ${paymentId}`, res.data.data);
+      setPaymentIdToInvoice('');
+    } catch (error) {
+      toast.error(errorMessage(error) || 'The invoice could not be issued.');
+    } finally {
+      setIssuingFor(null);
+    }
+  };
 
   const tiers = ['FREE', 'PRO', 'BUSINESS'];
   const statuses = ['ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELED', 'EXPIRED'];
@@ -244,27 +292,70 @@ export default function AdminSubscriptionsPage() {
                       <div>{new Date(sub.periodEnd).toLocaleDateString()}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const newEnd = new Date(sub.periodEnd);
-                          newEnd.setDate(newEnd.getDate() + 30);
-                          updateSubscriptionMutation.mutate({
-                            subId: sub.id,
-                            updates: { periodEnd: newEnd.toISOString() }
-                          });
-                        }}
-                      >
-                        <Plus className="h-4 w-4 mr-1" />
-                        +30 days
-                      </Button>
+                      <div className="inline-flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={issuingFor === sub.id}
+                          title={sub.stripeSubscriptionId ? 'Issue the invoice for the latest paid period' : 'Granted by staff; nothing was paid, so there is no invoice to issue'}
+                          onClick={() => issueSubscriptionInvoice(sub)}
+                        >
+                          <Receipt className="h-4 w-4 mr-1" />
+                          {issuingFor === sub.id ? 'Issuing…' : 'Issue invoice'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const newEnd = new Date(sub.periodEnd);
+                            newEnd.setDate(newEnd.getDate() + 30);
+                            updateSubscriptionMutation.mutate({
+                              subId: sub.id,
+                              updates: { periodEnd: newEnd.toISOString() }
+                            });
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          +30 days
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+
+          {/* Re-issue for a one-off payment. Membership invoices come from the
+              Stripe webhook; a Payment row (a session, a fee) is invoiced here
+              by its id when the webhook missed it. */}
+          <form
+            className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 flex flex-wrap items-end gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              issuePaymentInvoice();
+            }}
+          >
+            <div className="flex-1 min-w-[16rem]">
+              <label htmlFor="invoice-payment-id" className="block text-xs font-medium text-slate-500 mb-1">
+                Issue an invoice for a payment
+              </label>
+              <Input
+                id="invoice-payment-id"
+                value={paymentIdToInvoice}
+                onChange={(e) => setPaymentIdToInvoice(e.target.value)}
+                placeholder="Payment id"
+                aria-describedby="invoice-payment-help"
+              />
+            </div>
+            <Button type="submit" variant="outline" size="sm" disabled={!paymentIdToInvoice.trim() || issuingFor?.startsWith('payment:') === true}>
+              <Receipt className="h-4 w-4 mr-1" />
+              {issuingFor?.startsWith('payment:') ? 'Issuing…' : 'Issue invoice'}
+            </Button>
+            <p id="invoice-payment-help" className="w-full text-xs text-slate-500">
+              Memberships paid through Stripe are invoiced by the webhook as each period is paid; a second press returns the invoice already filed.
+            </p>
+          </form>
 
           {/* Pagination */}
           {data && data.pagination.totalPages > 1 && (

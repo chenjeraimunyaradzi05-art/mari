@@ -17,10 +17,10 @@ import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, Briefcase, Download, Eye, FileText, LayoutGrid, List, Mail, Search, Star, User, UserCheck, X } from 'lucide-react';
+import { ArrowLeft, Briefcase, Download, Eye, FileText, LayoutGrid, List, Loader2, Mail, Search, Star, User, UserCheck, X } from 'lucide-react';
 import { api, referenceApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { safeHref } from '@/lib/safe-href';
+import { downloadPrivateUpload } from '@/lib/private-files';
 
 type Stage = 'PENDING' | 'REVIEWED' | 'SHORTLISTED' | 'INTERVIEW' | 'OFFERED' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN';
 
@@ -360,6 +360,23 @@ function CandidatePanel({ app, onClose, onMove, moving }: { app: Application; on
   const name = fullName(app);
   const stage = STAGES[app.status] ?? STAGES.PENDING;
   const closed = CLOSED.includes(app.status);
+  const [fetchingResume, setFetchingResume] = useState(false);
+
+  // The résumé is a private upload: a plain link to it never carried the
+  // session, so it 401'd for every employer. Access is minted for a team
+  // member of the organisation the application went to, then the file is
+  // handed over.
+  const openResume = async () => {
+    if (!app.resumeUrl) return;
+    setFetchingResume(true);
+    try {
+      await downloadPrivateUpload(app.resumeUrl, `${name.replace(/\s+/g, '-')}-resume`);
+    } catch (error) {
+      toast.error(errorMessage(error) || 'The résumé could not be fetched. It may have been removed.');
+    } finally {
+      setFetchingResume(false);
+    }
+  };
 
   const references = useQuery({
     queryKey: ['application-references', app.id],
@@ -403,9 +420,9 @@ function CandidatePanel({ app, onClose, onMove, moving }: { app: Application; on
           <Mail className="h-4 w-4" />
         </a>
         {app.resumeUrl && (
-          <a href={safeHref(app.resumeUrl)} target="_blank" rel="noopener noreferrer" className="btn-outline inline-flex items-center justify-center gap-1 px-3 py-2 text-sm" aria-label={`Open ${name}'s resume`}>
-            <Download className="h-4 w-4" /> Resume
-          </a>
+          <button type="button" onClick={openResume} disabled={fetchingResume} className="btn-outline inline-flex items-center justify-center gap-1 px-3 py-2 text-sm" aria-label={`Download ${name}'s résumé`}>
+            {fetchingResume ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Résumé
+          </button>
         )}
       </div>
 
