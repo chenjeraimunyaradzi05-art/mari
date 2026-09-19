@@ -67,7 +67,7 @@ curl https://athena-empress.netlify.app/api/health
 
 ### Cookies not being set (login works but refresh fails)
 - Auth routes (`/api/auth/*`) must go through Next.js API route handlers, NOT the middleware edge rewrite
-- Check `client/src/middleware.ts` — auth paths should be excluded from rewrite
+- Check `client/src/proxy.ts` — auth paths should be excluded from rewrite
 - Check `client/src/app/api/auth/*/route.ts` — these must forward `Set-Cookie` headers
 
 ### Deploy / shutdown issues

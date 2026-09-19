@@ -1,7 +1,21 @@
+# Clickjacking is decided by `frame-ancestors`, not by X-Frame-Options. CSP
+# Level 2 requires a browser to ignore X-Frame-Options on any response that
+# also carries a frame-ancestors directive, and every layer that sends a policy
+# here sends one. So while these two lines said `frame-ancestors 'self'` and
+# `X-Frame-Options: SAMEORIGIN`, and netlify.toml said `X-Frame-Options: DENY`,
+# what every current browser actually enforced was 'self' from all of them —
+# same-origin framing allowed. Settling that disagreement by flipping only the
+# X-Frame-Options strings to DENY would have left that unchanged.
+#
+# 'none' is the honest value. Nothing frames an ATHENA page: every <iframe>
+# under src/ embeds a third party (YouTube and Vimeo in the classroom page,
+# Stripe in the payment form), which is `frame-src`'s business, and both
+# markdown sanitisers strip iframes out of member content. X-Frame-Options
+# still says DENY for browsers too old to understand frame-ancestors.
 /*
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'
   Cross-Origin-Opener-Policy: same-origin-allow-popups
-  X-Frame-Options: SAMEORIGIN
+  X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()

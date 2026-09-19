@@ -56,13 +56,25 @@
 # ===========================================
 # SECURITY HEADERS
 # ===========================================
+# X-Frame-Options here said DENY while next.config.js and public/_headers said
+# SAMEORIGIN, and that disagreement was treated as the bug. It was not the one
+# that mattered: this block also sends a Content-Security-Policy, and CSP Level
+# 2 requires a browser to ignore X-Frame-Options on any response carrying a
+# frame-ancestors directive. `frame-ancestors 'self'` is what all three layers
+# sent, so DENY here was already dead text and every current browser allowed
+# ATHENA to frame itself.
+#
+# All four layers — this file, public/_headers, src/proxy.ts and the headers()
+# block in next.config.js — now say 'none'/DENY, so the browser enforces what
+# the files claim. Nothing frames an ATHENA page; the iframes in the client
+# embed third parties, which `frame-src` governs.
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; manifest-src 'self'"
     Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     X-XSS-Protection = "1; mode=block"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()"

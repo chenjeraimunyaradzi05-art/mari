@@ -47,7 +47,15 @@ function buildContentSecurityPolicy(nonce: string): string {
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
-    "frame-ancestors 'self'",
+    // 'none', not 'self'. This directive is the one a browser actually
+    // enforces against clickjacking: CSP Level 2 requires X-Frame-Options to be
+    // ignored on any response that also carries frame-ancestors, and every HTML
+    // response carries this policy. While it said 'self', the DENY in
+    // client/netlify.toml was doing nothing and ATHENA could frame itself.
+    // Nothing needs that: every iframe in the client embeds a third party,
+    // which is frame-src's business below, and both markdown sanitisers strip
+    // iframes out of member content.
+    "frame-ancestors 'none'",
     "form-action 'self'",
     `script-src ${scriptSrc}`,
     "style-src 'self' 'unsafe-inline'",
@@ -64,7 +72,19 @@ function buildContentSecurityPolicy(nonce: string): string {
     .join('; ');
 }
 
-export function middleware(request: NextRequest) {
+// Next 16 renamed this root file convention from middleware.ts to proxy.ts,
+// and the export has to be renamed with it. The generated entry picks the
+// handler as `(isProxy ? mod.proxy : mod.middleware) || mod.default`
+// (next/dist/build/templates/middleware.js), so a file named proxy.ts still
+// exporting `middleware` supplies nothing for it to call.
+//
+// That failure is loud, not silent — an earlier version of this comment
+// claimed the build would say nothing, which is not true. `next build` throws
+// E903 from validateMiddlewareProxyExports in
+// next/dist/build/analysis/get-page-static-info.js, and its message names the
+// middleware-to-proxy migration by name; the generated entry then throws E394
+// at module evaluation. Only `next dev` downgrades both to a logged error.
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // A fresh nonce for this response. It travels on the request too, so the
@@ -81,8 +101,30 @@ export function middleware(request: NextRequest) {
 
   // ── API Proxy ────────────────────────────────────────────────────
   // Rewrite /api/* and /uploads/* to the API host at NEXT_PUBLIC_API_URL.
-  // Running in middleware (Edge Function on Netlify) ensures this
-  // executes before any redirect rules or serverless functions.
+  // Doing it here rather than in a route handler is what puts it ahead of the
+  // redirect rules and the handlers for a matched path.
+  //
+  // On Netlify this file is still deployed as an Edge Function, even though
+  // Next builds it for the Node.js runtime. Those are two different questions
+  // and an earlier version of this comment ran them together, "correcting" the
+  // original "Edge Function on Netlify" wording as false. It was not false.
+  //
+  // Next's compile target did move with the rename: runDependingOnPageType in
+  // next/dist/build/entries.js sends isProxyFile straight to the Node server
+  // compiler, whereas middleware.ts with no `runtime` set went to the edge
+  // compiler, and declaring a runtime here is now error E1031, "Proxy always
+  // runs on Node.js runtime". What Next does with that is record
+  // `/_middleware` with runtime "nodejs" in functions-config-manifest.json
+  // (next/dist/build/index.js).
+  //
+  // Netlify then picks that entry up and wraps it as a Deno edge function
+  // regardless: createEdgeHandlers in @netlify/plugin-nextjs (5.15.11 per
+  // package-lock.json) routes a "nodejs" definition through
+  // copyHandlerDependenciesForNodeMiddleware, which emits the handler into
+  // .netlify/edge-functions/ on top of edge-runtime/shim/node.js — a shim that
+  // polyfills process and Buffer and stubs Deno.cwd. So "Edge Function on
+  // Netlify" describes the deployment surface correctly; only a claim about
+  // Next's own compile target would be wrong.
   //
   // EXCEPTION: /api/auth/* routes are NOT rewritten here.
   // Auth routes set HttpOnly cookies (refreshToken) and

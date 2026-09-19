@@ -1,0 +1,43 @@
+# Line endings in the working tree are CRLF on every machine that builds this
+# repository. .gitattributes stores text as LF and deliberately leaves the
+# checkout to core.autocrlf, which means nothing but the editor decides what
+# actually lands on disk. An editor defaulting to LF rewrote every line of a
+# file on save, so a one-line edit arrived as a whole-file diff and the real
+# change was impossible to review.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown makes a hard line break out of two trailing spaces, and the docs
+# under athena-platform/docs rely on that. Trimming them here would silently
+# reflow published documentation the next time someone opened it.
+[*.md]
+trim_trailing_whitespace = false
+
+# A shell script with CRLF does not run on Unix: the trailing \r becomes part
+# of the interpreter path in the shebang. There are none in the tree today, so
+# this only protects the first one somebody adds.
+[*.sh]
+end_of_line = lf
+
+# Indentation is syntax in Python, not decoration, so the `indent_size = 2`
+# above was not merely a style mismatch for athena-platform/ml — an editor
+# obeying it would have reindented a block and changed which statements sit
+# inside it. Measured across the 24 tracked .py files: every one of the 15
+# that indents at all steps by 4 (415 nested blocks at 4, versus a single
+# 18-column continuation alignment), which is also what PEP 8 requires.
+#
+# No section for the other types in this tree, because their real indentation
+# already matches the 2 above: yml, yaml, json, md, prisma and toml were all
+# measured at 2. .sql is the one genuine split — 23 Prisma-generated
+# migrations indent at 4 and 15 hand-written ones at 2 — so there is no
+# convention there to encode, and picking either number would fight the other
+# half of the directory.
+[*.py]
+indent_size = 4

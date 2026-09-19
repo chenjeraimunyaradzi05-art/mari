@@ -36,3 +36,49 @@
 #   /uploads/*    app/uploads/[...path] (user media)
 #
 # See athena-platform/client/public/_redirects for the same note.
+
+# No [[headers]] blocks here on purpose either.
+#
+# Response headers are already declared in three places that ship with the
+# client: athena-platform/client/netlify.toml, athena-platform/client/public/
+# _headers, and the headers() block in next.config.js. A fourth copy here
+# would not deduplicate anything, it would add one more value to reconcile.
+# A branch that did add one is how X-Frame-Options came to disagree between
+# those files, DENY in one and SAMEORIGIN in the others.
+#
+# That disagreement is now resolved, and the two previous attempts to record it
+# here were both wrong, in opposite directions. The first claimed all three
+# layers send `frame-ancestors 'self'` so X-Frame-Options did not matter. The
+# second corrected that to "frame-ancestors does reach the browser, but from
+# the proxy", on the grounds that next.config.js sends no CSP. Only the
+# next.config.js half of that is true. Three of the four layers declare a full
+# Content-Security-Policy, not one:
+#
+#   athena-platform/client/netlify.toml         [[headers]] for = "/*"
+#   athena-platform/client/public/_headers      the /* block
+#   athena-platform/client/src/proxy.ts         minted per request, with a nonce
+#
+# The last two ship on every deploy: _headers is copied out of public/ into the
+# published directory by @netlify/plugin-nextjs, and the proxy runs on every
+# path its matcher does not skip. Whether the [[headers]] block in
+# athena-platform/client/netlify.toml is served at all depends on which
+# netlify.toml Netlify resolves for the build, which is why all of them have to
+# agree rather than one of them being treated as authoritative.
+#
+# What matters is which directive a browser obeys, not which string sits in
+# which file. CSP Level 2 requires X-Frame-Options to be ignored on any
+# response that also carries a frame-ancestors directive. Every CSP layer said
+# `frame-ancestors 'self'`, so that is what every current browser enforced —
+# same-origin framing allowed — and the DENY in
+# athena-platform/client/netlify.toml never took effect anywhere. "DENY is the
+# value all three should settle on" was the right intent, but flipping the
+# X-Frame-Options strings alone would not have achieved it.
+#
+# So the frame-ancestors directive was tightened to 'none' in all three CSP
+# layers, and X-Frame-Options set to DENY in all of them for the browsers too
+# old to understand frame-ancestors. Nothing frames ATHENA: every <iframe>
+# under client/src embeds a third party — YouTube and Vimeo in the classroom
+# page, Stripe in the payment form — which is `frame-src`'s business, and both
+# markdown sanitisers strip iframes out of member content.
+#
+# Still no [[headers]] here: a fourth copy would not deduplicate anything.

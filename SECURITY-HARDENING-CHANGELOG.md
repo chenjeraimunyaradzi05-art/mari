@@ -43,7 +43,7 @@ those require your explicit action (see "Still requires your action").
   all client headers to the backend. It now strips `x-user-id`,
   `x-internal-service-token`, and `x-forwarded-host` before forwarding, so a
   client can't spoof identity/trust headers to the backend.
-- **`athena-platform/client/src/middleware.ts`** — stopped trusting a client-writable
+- **`athena-platform/client/src/proxy.ts`** — stopped trusting a client-writable
   JSON `session` cookie as proof of authentication (a forged
   `{"userId":…}` cookie previously passed the auth gate); the httpOnly
   `auth_token` cookie is used as the coarse gate instead. Security headers

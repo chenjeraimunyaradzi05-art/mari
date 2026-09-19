@@ -13,14 +13,14 @@ shipped one class of bug.
 | | Local dev | Netlify (production) |
 |---|---|---|
 | `/api/auth/*` | `app/api/auth/*` route handlers | `app/api/auth/*` route handlers |
-| `/api/*` | `src/middleware.ts` rewrite → backend | `app/api/[...path]` catch-all → backend |
+| `/api/*` | `src/proxy.ts` rewrite → backend | `app/api/[...path]` catch-all → backend |
 | `/uploads/*` | `next.config.js` rewrite → backend | `app/uploads/[...path]` → backend |
 
-Locally, `middleware.ts` rewrites everything under `/api` **except**
+Locally, `proxy.ts` rewrites everything under `/api` **except**
 `/api/auth/*` straight to `NEXT_PUBLIC_API_URL`. The route handlers are never
 reached.
 
-On Netlify, both `middleware.ts` and `next.config.js` deliberately skip their
+On Netlify, both `proxy.ts` and `next.config.js` deliberately skip their
 rewrites (`if (process.env.NETLIFY) return []`). Nothing in `netlify.toml` or
 `public/_redirects` proxies `/api/*` either — a rule in those files cannot read
 an environment variable, so proxying from there would mean hardcoding the

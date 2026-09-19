@@ -348,7 +348,20 @@ npm test 2>&1 | grep -A5 "auth"
 1. **Referral code exhaustion** — generation loop now throws `ApiError(500)` after 10 failed attempts instead of silently continuing with a duplicate code (would cause P2002 → 500)
 2. **Email blocking** — `forgot-password` and `verify-email` email sends are now fire-and-forget (were blocking the response)
 3. **Error handler debug exposure** — debug info (raw message + stack) is now conditional (dev + 500s only)
-4. **X-Frame-Options conflict** — aligned `netlify.toml` (was DENY) with `next.config.js` (SAMEORIGIN)
+4. **X-Frame-Options conflict** — superseded. This line used to record the
+   opposite decision ("aligned `netlify.toml` (was DENY) with `next.config.js`
+   (SAMEORIGIN)"), which was never applied: `client/netlify.toml` still said
+   DENY while `next.config.js` and `public/_headers` said SAMEORIGIN. It was
+   also aiming at the wrong header. Per CSP Level 2 a browser ignores
+   X-Frame-Options on any response that also carries `frame-ancestors`, and
+   three layers send a full CSP — `client/netlify.toml`, `client/public/_headers`
+   and `client/src/proxy.ts` — all of which said `frame-ancestors 'self'`. That
+   `'self'`, not either X-Frame-Options value, is what browsers were enforcing.
+   The resolution on record is now the stricter one: `frame-ancestors 'none'` in
+   all three CSP layers plus `X-Frame-Options: DENY` everywhere for browsers
+   that predate `frame-ancestors`. Nothing frames an ATHENA page — the client's
+   iframes embed YouTube, Vimeo and Stripe, which `frame-src` governs. The
+   reasoning is kept in the comment block in the repo-root `netlify.toml`.
 5. **Auth cookie forwarding** — `/api/auth/*` routes excluded from middleware proxy rewrite so Next.js API route handlers forward `Set-Cookie` headers reliably
 6. **Session cleanup** — periodic cleanup runs every 6 hours + once at startup
 

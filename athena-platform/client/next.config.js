@@ -1,9 +1,14 @@
 /** @type {import('next').NextConfig} */
 const { withSentryConfig } = require('@sentry/nextjs');
 
-// The Content-Security-Policy is set per request in src/middleware.ts, where
-// a nonce can be minted for it; a static header here could only allow every
+// The Content-Security-Policy is set per request in src/proxy.ts, where a
+// nonce can be minted for it; a static header here could only allow every
 // inline script, which is no policy at all.
+//
+// This comment said src/middleware.ts after Next 16's rename had already moved
+// the file to src/proxy.ts. Nothing caught it: check-doc-references.js only
+// reads tracked .md files, so a path cited in a JavaScript comment can rot
+// without CI noticing.
 const nextConfig = {
   // Enable standalone output for Docker deployments only.
   // Netlify's @netlify/plugin-nextjs manages output automatically.
@@ -19,7 +24,20 @@ const nextConfig = {
         headers: [
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          // DENY, to match `frame-ancestors 'none'` in src/proxy.ts,
+          // public/_headers and the sibling netlify.toml.
+          //
+          // This header is not what stops a modern browser framing the page.
+          // CSP Level 2 requires a browser to ignore X-Frame-Options entirely
+          // on any response that also carries a frame-ancestors directive, and
+          // every HTML response goes through src/proxy.ts, which always sends
+          // one. So the value here was never the thing being enforced, and an
+          // earlier attempt to settle the SAMEORIGIN/DENY disagreement by
+          // editing only this line and public/_headers would have changed
+          // nothing a browser does. It is kept in step anyway, for browsers too
+          // old to understand frame-ancestors and for the paths the proxy's
+          // matcher skips.
+          { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           // The old auditor is gone from current browsers and its blocking mode
           // leaked page content where it survived; 0 is what OWASP advises.
