@@ -9,6 +9,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { parsePagination } from '../utils/pagination';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -91,9 +92,14 @@ router.get('/:slug', async (req: Request, res: Response, next: NextFunction) => 
     if (!article) throw new ApiError(404, 'No such article');
 
     // The read is counted without holding the response for it. A fetch made
-    // only to build a link preview says so and is not a read.
+    // only to build a link preview says so and is not a read. The increment is
+    // still not awaited — what changed is that it used to end in
+    // `.catch(() => undefined)`, so every view count on the blog could stop
+    // moving and the only sign would be the numbers themselves, months later.
+    // The thunk form is used because the update can throw before it returns a
+    // promise at all.
     if (req.get('x-athena-purpose') !== 'metadata') {
-      prisma.article.update({ where: { id: article.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
+      void bestEffort('blog.article-view-count', () => prisma.article.update({ where: { id: article.id }, data: { viewCount: { increment: 1 } } }));
     }
 
     res.json({ success: true, data: article });

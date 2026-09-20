@@ -10,6 +10,7 @@
 
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { fetchPublic, isFetchableHost } from '../utils/outbound-url';
 
 export interface LinkPreview {
@@ -128,7 +129,13 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
       chunks.push(value);
       total += value.length;
     }
-    reader.cancel().catch(() => {});
+    // Hanging up on the rest of the body is best effort — the card is already
+    // read either way — but `.catch(() => {})` meant a cancel that failed took
+    // the socket with it in silence, and a link preview runs on every post with
+    // a link in it, so a host that reliably refuses the cancel leaks a
+    // connection per post with nothing anywhere to point at it. Still not
+    // awaited, exactly as before: this function is finished with the response.
+    void bestEffort('link-preview.cancel-response-body', () => reader.cancel());
     const html = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
     return parseOpenGraph(html, response.url || parsed.toString());
   } catch (error) {

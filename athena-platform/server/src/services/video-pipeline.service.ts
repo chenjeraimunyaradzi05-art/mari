@@ -31,6 +31,7 @@ import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { localPathForUrl, storeFile } from '../utils/media-storage';
 import { fetchPublic } from '../utils/outbound-url';
 import { emitToUserRoom } from './socket.service';
@@ -194,7 +195,18 @@ async function downloadToTemp(url: string, dir: string): Promise<string> {
 
     const declared = Number(response.headers.get('content-length') ?? 0);
     if (declared > MAX_SOURCE_BYTES) {
-      response.body?.cancel().catch(() => {});
+      // Cancelling the body is what hands the socket back for a response we
+      // have just decided not to read; without it the connection sits open
+      // until something else times it out, and a host that keeps offering
+      // oversized sources leaks one every time. That made the old
+      // `.catch(() => {})` the wrong shape twice over: it is the very failure
+      // that would explain a slow drip of stuck sockets on this host, and it
+      // was the one thing nobody could see. Started but not awaited, exactly as
+      // before, so the ceiling below still refuses the upload immediately
+      // rather than waiting on a stream we no longer care about. A thunk rather
+      // than the promise, so that a body which refuses to be cancelled at all
+      // is caught here too instead of escaping as a synchronous throw.
+      void bestEffort('video-pipeline.cancel-oversized-source-body', () => response.body?.cancel());
       throw new Error(`The source is larger than the ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)} MB a reel may be`);
     }
     if (!response.body) throw new Error('The source returned no content');

@@ -275,3 +275,20 @@ export async function bestEffort<T, F>(
     return fallback;
   }
 }
+
+/**
+ * A record's `kind` as a segment of a bestEffort label: CAR_SERVICE_DUE
+ * becomes car-service-due, so `notification.car-service-due` reads as one
+ * dotted name rather than shouting in the middle of a log line.
+ *
+ * `kind` is typed unknown because it is usually read back out of a JSON
+ * column, where nothing guarantees it is a string at all. When it is not, the
+ * caller's `fallback` says so rather than the label becoming "undefined" and
+ * every unlabelled failure collapsing into one bucket.
+ *
+ * It lives here because three copies of it were written in a single pass
+ * across two route files and a service, which is two more than the rule
+ * deserves.
+ */
+export const labelSegment = (kind: unknown, fallback = 'unknown'): string =>
+  typeof kind === 'string' && kind ? kind.toLowerCase().replace(/_/g, '-') : fallback;

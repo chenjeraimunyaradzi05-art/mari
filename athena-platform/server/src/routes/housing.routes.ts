@@ -5,6 +5,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { bestEffort, labelSegment } from '../utils/best-effort';
 
 /**
  * Housing: listings, inquiries, and the safety rules around them.
@@ -162,7 +163,12 @@ function readPrivate(notes: string | null | undefined, fallbackAt?: Date | strin
       };
     }
   } catch {
-    // Free text from before the thread lived here: the asker's own note.
+    // Free text from before the thread lived here: the asker's own note. The
+    // parse failing is the answer to the question this function asks, not a
+    // swallowed failure, so it is deliberately not logged as best-effort work:
+    // every legacy inquiry read would produce a warning saying nothing except
+    // that the row predates the thread format, and that noise would bury the
+    // failures worth reading.
   }
   const at = fallbackAt ? new Date(fallbackAt).toISOString() : new Date().toISOString();
   return { thread: [{ from: 'ASKER', text: notes, at }], contactSharedAt: null };
@@ -212,13 +218,27 @@ function presentForAsker<T extends InquiryRow>(inq: T) {
 
 async function note(userId: string | null | undefined, title: string, message: string, link: string, data?: Record<string, unknown>): Promise<void> {
   if (!userId) return;
-  await prisma.notification
-    .create({ data: { userId, type: 'SYSTEM', title, message, link, ...(data ? { data: data as Prisma.InputJsonValue } : {}) } })
-    .catch(() => null);
+  // Telling someone must never fail the housing request that caused it — an
+  // inquiry that is saved is saved whether or not the lister's bell rang. This
+  // used to end in `.catch(() => null)`, so a notification table that had
+  // started rejecting writes would leave listers and askers waiting on answers
+  // nobody could see had gone missing. The behaviour is unchanged; the failure
+  // is in the log now, labelled with the kind of note so that "no one was told
+  // about inquiries" can be told apart from "no one was told about safety
+  // checks".
+  const rawKind = data?.kind;
+  const kind = labelSegment(rawKind, 'housing-unspecified');
+  await bestEffort(`notification.${kind}`, () => prisma.notification
+    .create({ data: { userId, type: 'SYSTEM', title, message, link, ...(data ? { data: data as Prisma.InputJsonValue } : {}) } }), null);
 }
 
 async function noteAdmins(title: string, message: string, link: string, data: Record<string, unknown>): Promise<void> {
-  const admins = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }).catch(() => []);
+  // No admins found means no admins are told, exactly as before — and a DV-safe
+  // listing is held at PENDING either way, so the risk this carries is a
+  // listing waiting longer than it should, never one going live unchecked. The
+  // `.catch(() => [])` that used to be here made that indistinguishable from a
+  // site with no admins at all.
+  const admins = await bestEffort('housing.admin-notification-recipients', () => prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }), [] as Array<{ id: string }>);
   await Promise.all(admins.map((a) => note(a.id, title, message, link, data)));
 }
 

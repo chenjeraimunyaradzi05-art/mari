@@ -21,6 +21,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { notifyAdmins } from '../services/admin-notify.service';
 import { awardAchievement, getUserAchievements } from '../services/engagement.service';
 import { encryptJson, decryptJson } from '../services/wellness/health-crypto';
@@ -155,9 +156,16 @@ async function medicationsFor(userId: string, activeOnly = true) {
 async function checkinStreakAward(userId: string, today: string) {
   const rows = await prisma.healthEntry.findMany({ where: { userId, kind: 'CHECKIN', day: { gte: dayDate(addDays(today, -60)) } }, select: { day: true } });
   const streak = streakFrom(rows.map((r) => isoDay(r.day)), today);
-  await awardAchievement(userId, 'FIRST_CHECKIN').catch(() => false);
-  if (streak.current >= 7) await awardAchievement(userId, 'CHECKIN_STREAK_7').catch(() => false);
-  if (streak.current >= 30) await awardAchievement(userId, 'CHECKIN_STREAK_30').catch(() => false);
+  // A badge she could not be given must not cost her the check-in she has just
+  // written, so the failure is absorbed and the caller still sees `false` —
+  // "nothing new was earned" — exactly as before. What is new is that it is
+  // written down: these three used to swallow the reason, so a badge row that
+  // was never created looked no different from a badge she had already earned,
+  // and a member asking where her streak badge went left nothing in the log to
+  // look at.
+  await bestEffort('wellness.badge-first-checkin', () => awardAchievement(userId, 'FIRST_CHECKIN'), false);
+  if (streak.current >= 7) await bestEffort('wellness.badge-checkin-streak-7', () => awardAchievement(userId, 'CHECKIN_STREAK_7'), false);
+  if (streak.current >= 30) await bestEffort('wellness.badge-checkin-streak-30', () => awardAchievement(userId, 'CHECKIN_STREAK_30'), false);
   return streak;
 }
 
@@ -177,7 +185,14 @@ router.get('/reference', async (_req: AuthRequest, res: Response, next: NextFunc
 
 router.get('/library', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const articles = await prisma.article.findMany({ where: { status: 'PUBLISHED', tags: { has: 'wellness' } }, orderBy: { publishedAt: 'desc' }, take: 6, select: { slug: true, title: true, excerpt: true, coverImage: true, publishedAt: true } }).catch(() => []);
+    // The substance of this page — the topics, the coping strategies, the
+    // crisis lines — comes from the library module rather than the database, so
+    // an article lookup that fails should still leave the page standing with an
+    // empty list, and it still does. The empty list was all anyone got though:
+    // a database the query could not reach and a wellness tag with nothing
+    // published under it came back identical, so the page quietly lost its
+    // reading list with nothing recorded anywhere.
+    const articles = await bestEffort('wellness.library-articles', () => prisma.article.findMany({ where: { status: 'PUBLISHED', tags: { has: 'wellness' } }, orderBy: { publishedAt: 'desc' }, take: 6, select: { slug: true, title: true, excerpt: true, coverImage: true, publishedAt: true } }), []);
     ok(res, { asAt: LIBRARY_AS_AT, topics: LIBRARY, strategies: COPING_STRATEGIES, crisisLines: CRISIS_LINES, articles });
   } catch (error) { next(error); }
 });
@@ -769,7 +784,13 @@ router.post('/forum-posts/:id/replies', authenticate, async (req: AuthRequest, r
     const reply = await prisma.wellnessReply.create({ data: { postId: post.id, authorId: req.user!.id, isAnonymous: moderator ? false : (data.isAnonymous ?? settings.anonymousByDefault), isFromModerator: moderator, body: data.body.trim() }, include: { author: { select: AUTHOR_SELECT } } });
     await prisma.wellnessPost.update({ where: { id: post.id }, data: { replyCount: { increment: 1 }, lastReplyAt: new Date() } });
     if (post.authorId !== req.user!.id) {
-      await prisma.notification.create({ data: { userId: post.authorId, type: 'SYSTEM', title: 'Someone replied in the wellness forum', message: `A reply on "${post.title.slice(0, 60)}".`, link: `/dashboard/wellness/forums/${post.forum.slug}/${post.id}`, data: { kind: 'WELLNESS_REPLY', postId: post.id } } }).catch(() => null);
+      // Her reply is already written and the thread already shows it, so
+      // telling the post's author is an extra that must not turn a saved reply
+      // into an error on her screen. Dropping the reason was the bug: the
+      // author who was never notified and the author who simply had not opened
+      // the app looked the same from here, and a notification table that had
+      // stopped accepting writes could go unnoticed for weeks.
+      await bestEffort('notification.wellness-forum-reply', () => prisma.notification.create({ data: { userId: post.authorId, type: 'SYSTEM', title: 'Someone replied in the wellness forum', message: `A reply on "${post.title.slice(0, 60)}".`, link: `/dashboard/wellness/forums/${post.forum.slug}/${post.id}`, data: { kind: 'WELLNESS_REPLY', postId: post.id } } }), null);
     }
     ok(res, { reply: { id: reply.id, body: reply.body, isHidden: reply.isHidden, isFromModerator: reply.isFromModerator, createdAt: reply.createdAt, author: presentAuthor(reply.author, reply.isAnonymous, req.user!.id, reply.isFromModerator), canEdit: true }, crisis: crisis.flagged ? { flagged: true, lines: CRISIS_LINES.slice(0, 5) } : { flagged: false } }, 201);
   } catch (error) { next(error); }
@@ -831,7 +852,18 @@ router.delete('/forum-posts/:id', authenticate, async (req: AuthRequest, res: Re
     if (!post) throw new ApiError(404, 'Post not found');
     if (post.authorId !== req.user!.id && !isModeratorRole(req.user!.role)) throw new ApiError(403, 'Only the author or a moderator can remove a post');
     await prisma.wellnessPost.delete({ where: { id: post.id } });
-    await prisma.wellnessForum.update({ where: { id: post.forumId }, data: { postCount: { decrement: 1 } } }).catch(() => null);
+    // The post is already deleted, so a counter that could not be decremented
+    // must not hand her a failure for something that did happen. Nothing
+    // repairs the stored postCount — it is only incremented on create and
+    // decremented here — so a failure leaves the column permanently one post
+    // high. That drift is invisible rather than visible: GET /forums does not
+    // serve this column, it overwrites it with a live groupBy over
+    // wellnessPost, and that listing is the only place a forum post count is
+    // rendered. So the column is written twice and read nowhere, and until now
+    // a failed decrement left no trace at all. This log line is the only thing
+    // that will ever show it — which is the argument for logging, not against.
+    // The column itself is a candidate for removal on the next schema pass.
+    await bestEffort('wellness.forum-post-count-decrement', () => prisma.wellnessForum.update({ where: { id: post.forumId }, data: { postCount: { decrement: 1 } } }), null);
     res.status(204).send();
   } catch (error) { next(error); }
 });
@@ -857,7 +889,11 @@ router.delete('/forum-replies/:id', authenticate, async (req: AuthRequest, res: 
     if (!reply) throw new ApiError(404, 'Reply not found');
     if (reply.authorId !== req.user!.id && !isModeratorRole(req.user!.role)) throw new ApiError(403, 'Only the author or a moderator can remove a reply');
     await prisma.wellnessReply.delete({ where: { id: reply.id } });
-    await prisma.wellnessPost.update({ where: { id: reply.postId }, data: { replyCount: { decrement: 1 } } }).catch(() => null);
+    // Same decision as deleting a post, for the same reason: the reply is gone
+    // regardless, so a stale replyCount is preferred to failing the delete.
+    // Logging it is the change — a thread that claimed more replies than it
+    // could show used to be the only evidence this update had failed at all.
+    await bestEffort('wellness.forum-reply-count-decrement', () => prisma.wellnessPost.update({ where: { id: reply.postId }, data: { replyCount: { decrement: 1 } } }), null);
     res.status(204).send();
   } catch (error) { next(error); }
 });
@@ -954,8 +990,14 @@ router.post('/circles/:id/join', authenticate, async (req: AuthRequest, res: Res
     const joined = await prisma.wellnessCircleMember.count({ where: { userId: req.user!.id, leftAt: null, circle: { status: { in: ['OPEN', 'RUNNING'] } } } });
     if (joined >= 3) throw new ApiError(400, 'Three circles at once is plenty');
     await prisma.wellnessCircleMember.upsert({ where: { circleId_userId: { circleId: circle.id, userId: req.user!.id } }, create: { circleId: circle.id, userId: req.user!.id }, update: { leftAt: null, joinedAt: new Date() } });
-    await awardAchievement(req.user!.id, 'CIRCLE_JOINED').catch(() => false);
-    if (circle.facilitatorId !== req.user!.id) await prisma.notification.create({ data: { userId: circle.facilitatorId, type: 'SYSTEM', title: 'Someone joined your circle', message: `${circle.name} has a new member.`, link: `/dashboard/wellness/circles/${circle.id}`, data: { kind: 'WELLNESS_CIRCLE_JOIN', circleId: circle.id } } }).catch(() => null);
+    // She is in the circle: the membership row is written. The badge and the
+    // facilitator's notification are both extras and neither may undo that, so
+    // both still absorb their failure and return what they returned before.
+    // Both also used to absorb the reason, which is how a facilitator who was
+    // never told her circle had filled up and one who had not checked it came
+    // to look identical.
+    await bestEffort('wellness.badge-circle-joined', () => awardAchievement(req.user!.id, 'CIRCLE_JOINED'), false);
+    if (circle.facilitatorId !== req.user!.id) await bestEffort('notification.wellness-circle-join', () => prisma.notification.create({ data: { userId: circle.facilitatorId, type: 'SYSTEM', title: 'Someone joined your circle', message: `${circle.name} has a new member.`, link: `/dashboard/wellness/circles/${circle.id}`, data: { kind: 'WELLNESS_CIRCLE_JOIN', circleId: circle.id } } }), null);
     const fresh = await prisma.wellnessCircle.findUnique({ where: { id: circle.id }, include: circleInclude });
     ok(res, presentCircle(fresh!, req.user!.id, await memberDay(req)));
   } catch (error) { next(error); }
@@ -1146,7 +1188,13 @@ router.post('/practitioners/:id/bookings', authenticate, async (req: AuthRequest
         await prisma.healthBooking.update({ where: { id: booking.id }, data: { shareId: share.id } });
       }
     }
-    if (p.ownerUserId) await prisma.notification.create({ data: { userId: p.ownerUserId, type: 'SYSTEM', title: 'A new booking request', message: `${mode === 'TELEHEALTH' ? 'Telehealth' : 'In person'}, ${start.toISOString().slice(0, 16).replace('T', ' ')} UTC. Confirm it from your practice page.`, link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING', bookingId: booking.id } } }).catch(() => null);
+    // The booking and its share link are already written, and the member is
+    // told her request is in, so a notification that will not send must not
+    // take the whole booking down with it. The cost of losing it is the highest
+    // here of any notification in this file: a practitioner who is never told
+    // leaves the request sitting at REQUESTED until the slot passes, and until
+    // now the log said nothing at all about why she was never told.
+    if (p.ownerUserId) await bestEffort('notification.wellness-booking-requested', () => prisma.notification.create({ data: { userId: p.ownerUserId!, type: 'SYSTEM', title: 'A new booking request', message: `${mode === 'TELEHEALTH' ? 'Telehealth' : 'In person'}, ${start.toISOString().slice(0, 16).replace('T', ' ')} UTC. Confirm it from your practice page.`, link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING', bookingId: booking.id } } }), null);
     ok(res, { booking: presentBooking({ ...booking, shareId: share?.id ?? null }), share }, 201);
   } catch (error) { next(error); }
 });
@@ -1159,7 +1207,12 @@ router.patch('/practitioners/:id/verify', authenticate, requireRole('ADMIN'), as
   try {
     const { isVerified, isActive } = parse(z.object({ isVerified: z.boolean(), isActive: z.boolean().optional() }), req.body);
     const p = await prisma.healthPractitioner.update({ where: { id: req.params.id }, data: { isVerified, ...(isActive === undefined ? {} : { isActive }) } });
-    if (p.ownerUserId) await prisma.notification.create({ data: { userId: p.ownerUserId, type: 'SYSTEM', title: isVerified ? 'Your practice profile is live' : 'Your practice profile is hidden', message: isVerified ? 'Members can now find and book you in the wellness directory.' : 'An admin has taken your profile out of the directory. Check the practice page for what to fix.', link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_VERIFY' } } }).catch(() => null);
+    // The admin's decision is already saved on the profile, so failing to tell
+    // the owner must not make the decision look like it failed. It does leave
+    // her guessing — a profile taken out of the directory with no message is
+    // exactly the case someone will have to explain later — and until now the
+    // reason the message never arrived was thrown away.
+    if (p.ownerUserId) await bestEffort('notification.wellness-practitioner-verification', () => prisma.notification.create({ data: { userId: p.ownerUserId!, type: 'SYSTEM', title: isVerified ? 'Your practice profile is live' : 'Your practice profile is hidden', message: isVerified ? 'Members can now find and book you in the wellness directory.' : 'An admin has taken your profile out of the directory. Check the practice page for what to fix.', link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_VERIFY' } } }), null);
     ok(res, practitionerCard(p));
   } catch (error) { next(error); }
 });
@@ -1225,7 +1278,14 @@ router.patch('/practice/bookings/:id', authenticate, async (req: AuthRequest, re
     const updated = await prisma.healthBooking.update({ where: { id: booking.id }, data, include: bookingInclude });
     if (data.status && data.status !== booking.status) {
       const words: Record<string, string> = { CONFIRMED: 'confirmed', DECLINED: 'declined', COMPLETED: 'marked as done', NO_SHOW: 'marked as missed' };
-      await prisma.notification.create({ data: { userId: booking.userId, type: 'SYSTEM', title: `Your appointment was ${words[data.status]}`, message: `${p.name}, ${booking.scheduledAt.toISOString().slice(0, 10)}.${data.status === 'DECLINED' ? ' You can pick another time or another practitioner.' : ''}`, link: '/dashboard/wellness/bookings', data: { kind: 'WELLNESS_BOOKING_STATUS', bookingId: booking.id } } }).catch(() => null);
+      // The status change is already committed and the practitioner has her
+      // answer, so the member's notification stays best-effort rather than
+      // rolling a confirmed appointment back. The cost of it failing is real
+      // — a member who is never told her appointment was declined will turn up
+      // to it — and that is precisely what used to happen with nothing written
+      // down. `data.status` is non-null inside this branch, but the narrowing
+      // does not reach into the thunk, hence the assertion.
+      await bestEffort('notification.wellness-booking-status', () => prisma.notification.create({ data: { userId: booking.userId, type: 'SYSTEM', title: `Your appointment was ${words[data.status!]}`, message: `${p.name}, ${booking.scheduledAt.toISOString().slice(0, 10)}.${data.status === 'DECLINED' ? ' You can pick another time or another practitioner.' : ''}`, link: '/dashboard/wellness/bookings', data: { kind: 'WELLNESS_BOOKING_STATUS', bookingId: booking.id } } }), null);
     }
     ok(res, presentBooking(updated, true));
   } catch (error) { next(error); }
@@ -1252,7 +1312,12 @@ router.patch('/bookings/:id', authenticate, async (req: AuthRequest, res: Respon
     if (!['REQUESTED', 'CONFIRMED'].includes(booking.status)) throw new ApiError(400, 'This booking is already over');
     if (booking.status === 'CONFIRMED' && !canCancel(booking.scheduledAt)) throw new ApiError(400, 'Confirmed bookings can be cancelled up to twenty-four hours before. Please contact the practitioner directly.');
     const updated = await prisma.healthBooking.update({ where: { id: booking.id }, data: { status: 'CANCELLED' }, include: bookingInclude });
-    if (booking.practitioner.ownerUserId) await prisma.notification.create({ data: { userId: booking.practitioner.ownerUserId, type: 'SYSTEM', title: 'A booking was cancelled', message: `${booking.scheduledAt.toISOString().slice(0, 16).replace('T', ' ')} UTC is free again.`, link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING_CANCEL', bookingId: booking.id } } }).catch(() => null);
+    // She has cancelled and the booking row says so, so the practitioner's
+    // notice is best-effort as before. It is the one that frees the slot in the
+    // practitioner's head rather than in the database, so losing it silently
+    // meant an hour held open for nobody with no trace of the cancellation
+    // message that never went.
+    if (booking.practitioner.ownerUserId) await bestEffort('notification.wellness-booking-cancelled', () => prisma.notification.create({ data: { userId: booking.practitioner.ownerUserId!, type: 'SYSTEM', title: 'A booking was cancelled', message: `${booking.scheduledAt.toISOString().slice(0, 16).replace('T', ' ')} UTC is free again.`, link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING_CANCEL', bookingId: booking.id } } }), null);
     ok(res, presentBooking(updated));
   } catch (error) { next(error); }
 });
@@ -1325,7 +1390,11 @@ router.post('/bookings/:id/follow-up', authenticate, async (req: AuthRequest, re
     const booked = await prisma.healthBooking.findMany({ where: { practitionerId: p.id, status: { in: ['REQUESTED', 'CONFIRMED'] }, scheduledAt: { gte: dayDate(addDays(day, -1)), lte: dayDate(addDays(day, 2)) } }, select: { scheduledAt: true, durationMinutes: true } });
     if (!availableSlots({ availability: p.availability as Availability | null, slotMinutes: p.slotMinutes, timezone: tz, day, booked }).some((s) => s.start === start.toISOString())) throw new ApiError(400, 'That time is not free. Pick one of the offered slots.');
     const booking = await prisma.healthBooking.create({ data: { practitionerId: p.id, userId: req.user!.id, scheduledAt: start, durationMinutes: p.slotMinutes, mode: data.mode ?? original.mode, reason: encryptJson({ text: 'Follow-up' }), followUpOfId: original.id }, include: bookingInclude });
-    if (p.ownerUserId) await prisma.notification.create({ data: { userId: p.ownerUserId, type: 'SYSTEM', title: 'A follow-up booking request', message: 'Confirm it from your practice page.', link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING', bookingId: booking.id } } }).catch(() => null);
+    // The follow-up is booked whether or not the practitioner is told, so this
+    // keeps absorbing its failure exactly as the booking route above does — and
+    // for the same reason it now says so in the log, because a follow-up nobody
+    // confirmed is indistinguishable from a follow-up nobody was told about.
+    if (p.ownerUserId) await bestEffort('notification.wellness-booking-follow-up', () => prisma.notification.create({ data: { userId: p.ownerUserId!, type: 'SYSTEM', title: 'A follow-up booking request', message: 'Confirm it from your practice page.', link: '/dashboard/wellness/practice', data: { kind: 'WELLNESS_BOOKING', bookingId: booking.id } } }), null);
     ok(res, presentBooking(booking), 201);
   } catch (error) { next(error); }
 });
@@ -1419,7 +1488,12 @@ router.post('/habits/:id/log', authenticate, async (req: AuthRequest, res: Respo
     const streak = streakFrom(days, today);
     const milestone = log.done ? milestoneReached(prev.current, streak.current) : null;
     const ach = milestone ? achievementForStreak(streak.current) : null;
-    if (ach) await awardAchievement(req.user!.id, ach).catch(() => false);
+    // The log entry and the streak it produced are already saved, so a badge
+    // that could not be written still must not fail the request — she keeps
+    // the streak either way. The old catch discarded the reason, so a
+    // celebration shown on screen with no badge behind it left nothing to
+    // trace.
+    if (ach) await bestEffort('wellness.badge-habit-streak', () => awardAchievement(req.user!.id, ach), false);
     ok(res, { log: { ...log, day: isoDay(log.day) }, streak, week: weekProgress(days, today, habit.targetPerWeek), milestone, celebration: log.done ? celebrate(streak.current, habit.name) : null }, 201);
   } catch (error) { next(error); }
 });
@@ -1556,7 +1630,11 @@ router.post('/goals/:id/review', authenticate, async (req: AuthRequest, res: Res
     if (!data.decision || data.decision === 'suggest') return ok(res, { goal: current, suggestion });
     const target = data.target ?? (data.decision === 'raise' || data.decision === 'ease' ? suggestion.suggestedTarget : current.target);
     await prisma.wellnessGoal.update({ where: { id: current.id }, data: { target, status: data.decision === 'achieved' ? 'ACHIEVED' : 'ACTIVE', nextReviewOn: dayDate(addDays(today, current.reviewEveryWeeks * 7)), weeksMet: current.progress.weeksMet, bestStreakWeeks: Math.max(current.progress.bestStreakWeeks, 0) } });
-    if (current.progress.currentStreakWeeks >= 4) await awardAchievement(req.user!.id, 'GOAL_MONTH').catch(() => false);
+    // The review is written and the goal has its new target, so the month-long
+    // badge stays optional and still resolves to `false` when it cannot be
+    // given. Only the silence has gone: a member who kept a goal for four
+    // weeks and never got the badge used to leave no record of why.
+    if (current.progress.currentStreakWeeks >= 4) await bestEffort('wellness.badge-goal-month', () => awardAchievement(req.user!.id, 'GOAL_MONTH'), false);
     ok(res, { goal: (await goalsWithProgress(req.user!.id, today)).find((x) => x.id === current.id), suggestion });
   } catch (error) { next(error); }
 });

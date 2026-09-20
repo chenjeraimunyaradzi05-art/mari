@@ -10,19 +10,46 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
+import { bestEffort, labelSegment } from '../../utils/best-effort';
 import { captureEscrowPayment } from '../stripe-connect.service';
 import { markSent, shouldSend, vehicleReminders } from './garage.service';
 import { runExclusively } from '../../utils/redis';
 
 const DAY = 86400000;
 
+/** The kind a caller passed — CAR_SERVICE_DUE — as the words a log line wants: car-service-due. */
+
 async function notify(userId: string, title: string, message: string, link: string, data: Record<string, unknown>): Promise<void> {
-  await prisma.notification.create({ data: { userId, type: 'SYSTEM', title, message, link, data: data as Prisma.InputJsonValue } }).catch(() => null);
+  // One reminder failing is no reason to abandon the sweep half-way through
+  // the garage, which is why this never rethrows. It used to go further than
+  // that: `.catch(() => null)` threw the reason away as well, so a member who
+  // was never told her rego was due left no trace anywhere, while the sweep's
+  // own tally counted the reminder as sent. That tally is deliberately left as
+  // it was — what is new is that the failure behind it now reaches the log.
+  // Every caller puts a `kind` in `data`, so the label says which reminder
+  // went missing rather than just "a notification".
+  await bestEffort(`notification.${labelSegment(data.kind)}`, () => prisma.notification.create({ data: { userId, type: 'SYSTEM', title, message, link, data: data as Prisma.InputJsonValue } }), null);
 }
 
 async function alreadyNotified(userId: string, kind: string, id: string): Promise<boolean> {
-  const existing = await prisma.notification.findFirst({ where: { userId, data: { path: ['kind'], equals: kind }, AND: [{ data: { path: ['id'], equals: id } }] }, select: { id: true } }).catch(() => null);
-  return Boolean(existing);
+  // Fails CLOSED, on purpose: a lookup that breaks answers "yes, she has
+  // already been told", so the nudge is skipped this round instead of sent.
+  // That is a deliberate change. It used to fail OPEN by accident —
+  // `.catch(() => null)` fed `Boolean(null)`, so every sweep that could not
+  // read the notification table concluded she had never been told and sent the
+  // nudge again, turning one database wobble into the same "two days left on
+  // your inspection period" arriving every six hours until it cleared.
+  //
+  // Skipping is the safer side here because of the margins, not because the
+  // reminders are unimportant — one of them is the last warning before her
+  // money goes to the seller. Both callers re-check a window far wider than
+  // the sweep interval: the inspection-period nudge is due for the whole two
+  // days before the window closes and the pre-approval nudge for the whole
+  // seven days before it lapses, against a sweep that runs every six hours. A
+  // skipped round is retried about eight times over in the tightest case, with
+  // the better part of two days still on the clock to raise a dispute. And
+  // unlike before, the failure is now in the log rather than invisible.
+  return bestEffort(`notification.duplicate-check.${labelSegment(kind)}`, async () => Boolean(await prisma.notification.findFirst({ where: { userId, data: { path: ['kind'], equals: kind }, AND: [{ data: { path: ['id'], equals: id } }] }, select: { id: true } })), true);
 }
 
 export async function sweepGarage(now = new Date()): Promise<{ due: number; sent: number }> {
@@ -44,7 +71,13 @@ export async function sweepGarage(now = new Date()): Promise<{ due: number; sent
       changed = true;
       sent += 1;
     }
-    if (changed) await prisma.vehicle.update({ where: { id: v.id }, data: { lastReminderKeys: keys as Prisma.InputJsonValue } }).catch(() => null);
+    // The keys are the only record that these reminders have gone out, so a
+    // write that fails means the same service or rego reminder is sent again on
+    // the next sweep. Losing it quietly, as `.catch(() => null)` did, made that
+    // duplicate look like a bug in the reminder rules rather than a failed
+    // write; the sweep still moves on to the next car, because one car's
+    // bookkeeping is not worth the rest of the garage.
+    if (changed) await bestEffort('automotive.garage-reminder-keys', () => prisma.vehicle.update({ where: { id: v.id }, data: { lastReminderKeys: keys as Prisma.InputJsonValue } }), null);
   }
   return { due, sent };
 }
@@ -61,7 +94,14 @@ export async function sweepPurchases(now = new Date()): Promise<{ released: numb
           await captureEscrowPayment(p.escrow.paymentIntentId, { id: p.buyerId });
         }
         await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: 'RELEASED', releasedAt: now } });
-        if (p.listing.status !== 'SOLD') await prisma.vehicleListing.update({ where: { id: p.listing.id }, data: { status: 'SOLD', soldAt: now } }).catch(() => null);
+        // Kept out of the try's own failure path deliberately: by this line the
+        // escrow has been captured and the purchase already says RELEASED, so
+        // letting a failed listing update fall into the catch below would log
+        // the release as "could not be released" and skip the two notifications
+        // that follow, for a listing flag. What it must not do is disappear —
+        // `.catch(() => null)` left a sold car sitting on the marketplace as
+        // though it were still for sale with nothing to say why.
+        if (p.listing.status !== 'SOLD') await bestEffort('automotive.listing-marked-sold', () => prisma.vehicleListing.update({ where: { id: p.listing.id }, data: { status: 'SOLD', soldAt: now } }), null);
         await notify(p.sellerId, 'The payment has been released to you', `The inspection period on "${p.listing.title}" ended without a dispute. The money is on its way to your payout account.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_RELEASED', id: p.id });
         await notify(p.buyerId, 'Your purchase is complete', `The inspection period on "${p.listing.title}" has ended and the seller has been paid. Enjoy the car, and leave a word for the next buyer.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_COMPLETE', id: p.id });
         released += 1;

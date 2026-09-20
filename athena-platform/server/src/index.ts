@@ -128,6 +128,7 @@ import { localeMiddleware } from './middleware/locale';
 // import { createOpenSearchMiddleware } from './middleware/opensearch-sync'; // Disabled - needs OpenSearch
 import { createRateLimiter } from './middleware/rateLimiter';
 import { logger } from './utils/logger';
+import { bestEffort } from './utils/best-effort';
 import { register } from './utils/metrics';
 import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
 import { getMaintenanceState } from './services/feature-flags.service';
@@ -757,11 +758,15 @@ export async function startServer() {
   logger.info('Starting server process', startupContext);
 
   // Startup sequence: load secrets, validate env, init Sentry, ensure DB
-  try {
-    await loadSecretsIfConfigured();
-  } catch (err) {
-    logger.warn('Failed loading external secrets, continuing with process.env');
-  }
+  //
+  // Continuing on process.env is right — a secrets manager being unreachable
+  // should not stop a server whose environment may already hold everything it
+  // needs. What was wrong is that the catch bound the error and threw it away,
+  // so the line said loading had failed and never said why: a bad role, an
+  // unreachable endpoint and a malformed secret payload all read identically,
+  // at the one moment in the process where the answer decides whether the
+  // server is about to come up half-configured.
+  await bestEffort('startup.load-external-secrets', () => loadSecretsIfConfigured());
 
   validateEnvironmentOrExit();
 
@@ -791,12 +796,27 @@ export async function startServer() {
     // Periodic session cleanup — remove expired sessions every 6 hours
     const SIX_HOURS = 6 * 60 * 60 * 1000;
     setInterval(() => {
-      sessionService.cleanupExpiredSessions().catch((err) => {
-        logger.error('Session cleanup failed', { error: err });
-      });
+      void bestEffort('session-cleanup.scheduled', () => sessionService.cleanupExpiredSessions());
     }, SIX_HOURS);
-    // Run once at startup too
-    sessionService.cleanupExpiredSessions().catch(() => {});
+    // Run once at startup too, because the interval above does not fire for
+    // another six hours and this is the only sweep until then.
+    //
+    // It is the very same call as the one in the interval, and the two used to
+    // disagree about whether anyone should hear when it failed: the interval
+    // logged through logger.error, this one was `.catch(() => {})`. So the run
+    // most likely to fail — at boot, while the connection pool is still coming
+    // up — was the one run that failed in complete silence, and the expired
+    // session rows it exists to delete just stayed in the table with nothing
+    // anywhere saying why. That inconsistency between two copies of one call is
+    // the whole argument for this helper, so both go through it now rather than
+    // only this one. That moves the scheduled run from error to warn: a sweep
+    // that retries in six hours is not worth waking anyone for, and having the
+    // two copies agree is worth more than the level they used to disagree on.
+    //
+    // Deliberately not awaited: the listen callback is not async and the server
+    // is already accepting requests, so the sweep finishes in its own time.
+    // Nothing is left to catch, because bestEffort resolves rather than rejects.
+    void bestEffort('session-cleanup.startup', () => sessionService.cleanupExpiredSessions());
 
     // Disappearing messages: delete what has expired, once a minute.
     // Without Redis the rate limits, the locks and the caches are per process,

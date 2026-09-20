@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { createJournalEntry } from './accounting.service';
 
 const BASIQ_BASE = 'https://au-api.basiq.io';
@@ -106,7 +107,15 @@ async function basiqToken(scope: 'SERVER_ACCESS' | 'CLIENT_ACCESS', basiqUserId?
     headers: { Authorization: `Basic ${process.env.BASIQ_API_KEY}`, 'basiq-version': '3.0', 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
   });
-  const json: any = await response.json().catch(() => null);
+  // A token response is JSON or it is nothing, so a body that will not parse is
+  // the provider having a bad day, not a shape to support: null still means "no
+  // token" three lines down and the request still fails the same way. What
+  // `.catch(() => null)` threw away was the only explanation — the warning below
+  // carries the status and nothing else — so a 200 carrying something that is
+  // not JSON, an error page from whatever sits in front of Basiq, was reported
+  // as a token request that failed on status 200, which reads as nonsense and
+  // sends whoever is on call looking at our credentials instead of the body.
+  const json: any = await bestEffort('open-banking.basiq-token-response-body', () => response.json(), null);
   if (!response.ok || !json?.access_token) {
     logger.warn('Basiq token request failed', { status: response.status });
     throw new ApiError(502, 'The bank feed provider refused the server credentials');
@@ -132,7 +141,15 @@ async function basiq(path: string, init: { method?: string; body?: unknown } = {
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   if (response.status === 204) return null;
-  const json: any = await response.json().catch(() => null);
+  // The empty-body case has already returned above, so anything that fails to
+  // parse here had a body we could not read. On a failed response that only
+  // costs the detail in the error message; on a successful one the old
+  // `.catch(() => null)` was worse than quiet, because every caller reads this
+  // as `(...)?.data ?? []` — a 200 whose body we could not parse became zero
+  // connections, zero accounts, zero transactions, and syncBasiq went on to
+  // report a clean sync that had imported nothing at all. The path is in the
+  // label because it is the only thing that says which call it was.
+  const json: any = await bestEffort(`open-banking.basiq-response-body ${path}`, () => response.json(), null);
   if (!response.ok) {
     logger.warn('Basiq request failed', { path, status: response.status });
     throw new ApiError(502, json?.data?.[0]?.detail || json?.data?.[0]?.title || `The bank feed provider answered with status ${response.status}`);
@@ -214,12 +231,16 @@ export async function syncBasiq(userId: string) {
   const institutionNames = new Map<string, string>();
   const institutionName = async (id: string) => {
     if (!institutionNames.has(id)) {
-      try {
-        const institution = await basiq(`/institutions/${encodeURIComponent(id)}`);
-        institutionNames.set(id, institution?.shortName || institution?.name || id);
-      } catch {
-        institutionNames.set(id, id);
-      }
+      // The bank's display name is decoration and this lookup is allowed to
+      // fail: null falls through the same `|| id` the answer already had, so a
+      // connection whose name we could not fetch is listed under the raw
+      // institution id rather than taking the whole sync down with it. The
+      // `catch { institutionNames.set(id, id) }` it replaces kept that going but
+      // lost the cause, and a connection listed under an institution id instead
+      // of a bank name reads as bad data coming out of Basiq, not as a second
+      // call this server made and never got an answer to.
+      const institution = await bestEffort(`open-banking.basiq-institution-name ${id}`, () => basiq(`/institutions/${encodeURIComponent(id)}`), null);
+      institutionNames.set(id, institution?.shortName || institution?.name || id);
     }
     return institutionNames.get(id)!;
   };

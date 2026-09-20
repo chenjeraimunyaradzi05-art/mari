@@ -30,6 +30,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import { logger } from '../utils/logger';
+import { bestEffort, labelSegment } from '../utils/best-effort';
 import { cancelEscrowPayment, captureEscrowPayment, createEscrowPayment, getEscrowClientSecret } from '../services/stripe-connect.service';
 import { availableSlots, canCancel, nextAvailableDays, normaliseAvailability, slugify, type Availability } from '../services/wellness/practitioners.service';
 import { buildBookingIcs } from '../services/wellness/wellness-calendar';
@@ -93,12 +94,26 @@ async function memberTimezone(userId: string | null | undefined): Promise<string
   return u?.timezone || 'Australia/Brisbane';
 }
 
+/** The kind a caller passed — CAR_INSPECTION_DONE — as the words a log line wants: car-inspection-done. */
+
 async function note(userId: string, title: string, message: string, link: string, data: Record<string, unknown>): Promise<void> {
-  await prisma.notification.create({ data: { userId, type: 'SYSTEM', title, message, link, data: data as Prisma.InputJsonValue } }).catch(() => null);
+  // The bell is never worth failing a request over: the offer has been made,
+  // the booking is in the diary, the inspection is paid for, so the route
+  // answers 200 either way. `.catch(() => null)` threw away the reason as well,
+  // though, and then the only evidence of a notification that was never created
+  // was a member saying she had not heard anything. Every caller puts a `kind`
+  // in `data`, so the label names the notification that went missing instead of
+  // merely saying one did.
+  await bestEffort(`notification.${labelSegment(data.kind)}`, () => prisma.notification.create({ data: { userId, type: 'SYSTEM', title, message, link, data: data as Prisma.InputJsonValue } }), null);
 }
 
 async function noteAdmins(title: string, message: string, link: string, data: Record<string, unknown>): Promise<void> {
-  const admins = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }).catch(() => []);
+  // An empty list on failure is kept as it was: the member's request carries on
+  // regardless of whether anyone could be told. But an empty list is also
+  // exactly what a healthy lookup returns, so when this failed the admin queue
+  // simply never heard about a flagged listing and looked, from every side,
+  // like a platform with nothing to review.
+  const admins: { id: string }[] = await bestEffort('notification.admin-recipients', () => prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }), []);
   await Promise.all(admins.map((a) => note(a.id, title, message, link, data)));
 }
 
@@ -488,7 +503,14 @@ const valuationSchema = z.object({ year: z.coerce.number().int().min(1980).max(n
 /** The catalogue's list price for a make and model, when it has one, so a valuation starts from a real number. */
 async function catalogueNewPrice(make: string | null | undefined, model: string | null | undefined): Promise<{ price: number; bodyType: BodyKey; fuelType: FuelKey } | null> {
   if (!make || !model) return null;
-  const c = await prisma.carModel.findFirst({ where: { make: { equals: make, mode: 'insensitive' }, model: { contains: model, mode: 'insensitive' }, isActive: true }, orderBy: { priceFrom: 'asc' }, select: { priceFrom: true, bodyType: true, fuelType: true } }).catch(() => null);
+  // null stays the answer when the query fails, because a valuation is better
+  // served by estimateValue's own assumed list price — the response says so
+  // with newPriceFromCatalogue: false — than by a 500. The reason it could not
+  // stay a bare `.catch(() => null)` is that null already means something else
+  // here, "this car is not in the catalogue", which is ordinary and silent. A
+  // broken query wearing that same answer meant every valuation on the site
+  // could quietly fall back to guesswork with nothing in the log to say so.
+  const c = await bestEffort('automotive.catalogue-new-price', () => prisma.carModel.findFirst({ where: { make: { equals: make, mode: 'insensitive' }, model: { contains: model, mode: 'insensitive' }, isActive: true }, orderBy: { priceFrom: 'asc' }, select: { priceFrom: true, bodyType: true, fuelType: true } }), null);
   return c ? { price: c.priceFrom, bodyType: c.bodyType as BodyKey, fuelType: c.fuelType as FuelKey } : null;
 }
 
@@ -803,7 +825,13 @@ router.get('/listings/:id', optionalAuth, async (req: AuthRequest, res: Response
     const viewer = req.user?.id ?? null;
     const owner = viewer === l.sellerId || isAdmin(req);
     if (!owner && !['ACTIVE', 'UNDER_OFFER', 'SOLD'].includes(l.status)) throw new ApiError(404, 'Listing not found');
-    if (!owner) await prisma.vehicleListing.update({ where: { id: l.id }, data: { viewCount: { increment: 1 } } }).catch(() => null);
+    // A view counter must never be the reason a buyer cannot open a listing, so
+    // the failure is still absorbed and she is still shown the car. What it
+    // cannot do is vanish: with `.catch(() => null)` a counter that had stopped
+    // moving — a lock, a deleted row, the write replica gone — read to a seller
+    // as "nobody is looking at my car", which is advice about her price rather
+    // than a fault, and there was nothing in the log to correct her.
+    if (!owner) await bestEffort('automotive.listing-view-count', () => prisma.vehicleListing.update({ where: { id: l.id }, data: { viewCount: { increment: 1 } } }), null);
     const [saved, myPurchase, sellerListings] = await Promise.all([
       viewer ? prisma.vehicleListingSave.findUnique({ where: { listingId_userId: { listingId: l.id, userId: viewer } } }) : null,
       viewer && !owner ? prisma.vehiclePurchase.findFirst({ where: { listingId: l.id, buyerId: viewer, status: { notIn: ['DECLINED', 'CANCELLED', 'REFUNDED'] } }, orderBy: { createdAt: 'desc' } }) : null,

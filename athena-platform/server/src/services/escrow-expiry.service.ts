@@ -20,6 +20,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { runExclusively } from '../utils/redis';
 import { recordCondition, recordFailure, recordSuccess } from '../utils/ops-metrics';
+import { bestEffort } from '../utils/best-effort';
 import * as stripeConnect from './stripe-connect.service';
 
 /** How long a card authorisation is assumed to last. */
@@ -41,25 +42,60 @@ export interface EscrowExpirySweep {
   alreadyLapsed: number;
 }
 
+/**
+ * Tells the admins that holds need a human. Nothing in here may take the sweep
+ * down with it: by the time this runs the sweep has already counted and logged
+ * everything it found, and losing those counts to a failed notification would
+ * throw away the one useful thing the run produced.
+ *
+ * Neither failure below is recorded through ops-metrics, and that is a choice
+ * rather than an oversight. recordFailure writes into a twenty-deep ring that
+ * also decides whether /health/detailed reads degraded, and a database that
+ * cannot write notifications fails the lookup plus up to five rows on every
+ * sweep — which would evict exactly the escrow_expiry.capture failures an
+ * operator opened that endpoint to read. Both facts this message carries are
+ * already in the snapshot without it: the lapsed holds as the
+ * escrow_expiry.lapsed gauge and the failed captures as escrow_expiry.capture,
+ * both written above whether or not the notification lands. So the log is the
+ * right home for these two, and the health endpoint loses nothing.
+ */
 async function noteAdmins(title: string, message: string, data: Record<string, unknown>): Promise<void> {
-  const admins = await prisma.user
-    .findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 })
-    .catch(() => []);
+  // An empty list on failure, exactly as the `.catch(() => [])` this replaces:
+  // there is nobody to notify if we cannot find out who the admins are, and the
+  // sweep still has to return. The bug was that the two situations looked
+  // identical from outside — a lookup that failed and a platform with no admins
+  // both produced silence — so a sweep could find lapsed holds, tell nobody,
+  // and leave nothing behind saying it had tried.
+  const admins = await bestEffort(
+    'escrow-expiry.admin-lookup',
+    () => prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true }, take: 5 }),
+    []
+  );
 
+  // Wrapped per admin rather than around the Promise.all, which is what the old
+  // per-row `.catch(() => null)` did too: one admin's row failing must not stop
+  // the other four being written. The null fallback is kept as it was and
+  // nothing reads it. This was the worst of the swallowed catches here, because
+  // this notification is how a person first learns that money is about to stop
+  // being collectable, and when it failed there was no record anywhere that it
+  // had even been attempted.
   await Promise.all(
     admins.map(a =>
-      prisma.notification
-        .create({
-          data: {
-            userId: a.id,
-            type: 'SYSTEM',
-            title,
-            message,
-            link: '/admin',
-            data: data as Prisma.InputJsonValue,
-          },
-        })
-        .catch(() => null)
+      bestEffort(
+        'notification.escrow-expiry-admins',
+        () =>
+          prisma.notification.create({
+            data: {
+              userId: a.id,
+              type: 'SYSTEM',
+              title,
+              message,
+              link: '/admin',
+              data: data as Prisma.InputJsonValue,
+            },
+          }),
+        null
+      )
     )
   );
 }

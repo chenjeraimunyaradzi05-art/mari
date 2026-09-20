@@ -13,6 +13,7 @@ import {
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { assertSoundExists, attachSounds, recordSoundUse } from '../services/sound.service';
 import { enqueueVideoProcessing } from '../services/video-pipeline.service';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -169,17 +170,25 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 
     // "See fewer from this creator" applies to reels as it does to posts. The
     // preference is best-effort: a failed lookup must not take the feed down.
+    //
+    // This deliberately fails OPEN. If the preferences row cannot be read the
+    // feed is served with nobody hidden, because the alternative — refusing the
+    // feed, or hiding everyone — is worse for a member than one pass of it
+    // showing a creator she had asked to see less of. That is a choice with a
+    // cost, which is exactly why it has to be visible: the catch here was
+    // empty, so a preferences table that had stopped answering looked
+    // identical to a member who had muted no one. Note that muting is a
+    // preference, not a safety control; a safety block belongs behind a rule
+    // that fails closed, not this one.
     if (req.user) {
-      let blocked: string[] = [];
-      try {
-        const prefs = await prisma.userFeedPreferences.findUnique({
-          where: { userId: req.user.id },
+      const viewerId = req.user.id;
+      const prefs = await bestEffort('video.feed-blocked-creators', () =>
+        prisma.userFeedPreferences.findUnique({
+          where: { userId: viewerId },
           select: { blockedCreators: true },
-        });
-        blocked = prefs?.blockedCreators ?? [];
-      } catch {
-        // Fall through with nothing hidden.
-      }
+        })
+      );
+      const blocked = prefs?.blockedCreators ?? [];
       if (blocked.length > 0) {
         where.authorId = { ...(where.authorId ?? {}), notIn: blocked };
       }

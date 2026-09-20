@@ -24,6 +24,7 @@ import { LiveStreamStatus, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { GIFT_TYPES, getCreatorTier } from './creator.service';
 import { emitToLiveRoom, emitToUserRoom, liveRoomSize, sendNotification } from './socket.service';
 
@@ -442,13 +443,25 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
   };
   emitToLiveRoom(streamId, 'live:gift', payload);
 
-  sendNotification({
-    userId: stream.hostId,
-    type: 'GIFT_RECEIVED',
-    title: `You received a ${gift.name}!`,
-    message: `${sender.displayName || 'Someone'} sent ${gift.icon} ${gift.name} during your live stream`,
-    link: `/live/${streamId}`,
-  }).catch(() => {});
+  // Not awaited, and that part was always right: the gift transaction has
+  // committed, the sender's balance is already down and the room has already
+  // seen the animation, so a notification that will not send must not turn a
+  // successful gift into a 500. It was `.catch(() => {})` that was wrong. This
+  // call is how the host learns she earned something, and when it failed she
+  // was simply never told and no line anywhere recorded that anyone had tried,
+  // which is unanswerable when she asks why a gift she can see in the
+  // leaderboard never reached her notifications. startStream above already logs
+  // its own fire-and-forget notification failure; these two now agree. No
+  // fallback, because nothing reads the result.
+  void bestEffort('notification.livestream-gift-received', () =>
+    sendNotification({
+      userId: stream.hostId,
+      type: 'GIFT_RECEIVED',
+      title: `You received a ${gift.name}!`,
+      message: `${sender.displayName || 'Someone'} sent ${gift.icon} ${gift.name} during your live stream`,
+      link: `/live/${streamId}`,
+    })
+  );
 
   return { transaction, totalGiftPoints: updatedStream.totalGiftPoints, balance: sender.giftBalance - gift.value };
 }

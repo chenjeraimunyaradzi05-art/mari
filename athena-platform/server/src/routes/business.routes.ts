@@ -6,6 +6,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
+import { bestEffort } from '../utils/best-effort';
 import { createAcceleratorEnrollmentPayment } from '../services/payments-orchestration.service';
 import { notifyAdmins } from '../services/admin-notify.service';
 
@@ -1497,10 +1498,19 @@ router.patch(
       const updated = await prisma.vendor.update({ where: { id }, data });
 
       if (vendor.ownerId) {
-        await prisma.notification
+        // The decision is already saved, so the admin's request must not fail
+        // because the owner's notification row did. It used to end in
+        // `.catch(() => null)` instead: an owner could be left never knowing
+        // her listing had been hidden, and nothing anywhere recorded that the
+        // note had been lost. The fallback stays null and the request behaves
+        // exactly as before; only the log entry is new. The assertion on
+        // ownerId is this `if`: TypeScript does not carry a property's
+        // narrowing into the thunk, and the thunk is what catches a create
+        // that throws before it returns a promise.
+        await bestEffort('notification.vendor-verification-decision', () => prisma.notification
           .create({
             data: {
-              userId: vendor.ownerId,
+              userId: vendor.ownerId!,
               type: 'SYSTEM',
               title: isVerified ? 'Your business is listed' : 'Your listing has been hidden',
               message: isVerified
@@ -1509,8 +1519,7 @@ router.patch(
               link: '/dashboard/vendors',
               data: { kind: 'VENDOR_VERIFY', vendorId: vendor.id, isVerified },
             },
-          })
-          .catch(() => null);
+          }), null);
       }
 
       logger.info(`Admin ${req.user!.id} set vendor ${id} verified=${isVerified}`);

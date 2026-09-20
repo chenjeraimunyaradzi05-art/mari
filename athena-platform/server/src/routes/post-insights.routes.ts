@@ -18,6 +18,7 @@ import { createHash } from 'crypto';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -58,7 +59,14 @@ function rate(engagements: number, impressions: number): number {
 export const REACH_MILESTONES = [100, 1000, 10000, 100000];
 
 export async function announceMilestones(postIds: string[]): Promise<void> {
-  try {
+  // A missed milestone note is still not worth a failed request: the caller
+  // fires this off after the response has already gone out. What it is worth is
+  // a line in the log. This was a bare `catch {}`, so if the notification table
+  // started rejecting writes every author would simply stop being told her post
+  // had carried, and the only evidence would be notifications that never
+  // arrived. A failure part-way through still abandons the rest of the batch,
+  // exactly as the catch around the loop always did.
+  await bestEffort('post-insights.reach-milestone-notification', async () => {
     const crossed = await prisma.post.findMany({
       where: { id: { in: postIds }, impressionCount: { in: REACH_MILESTONES }, isHidden: false },
       select: { id: true, authorId: true, impressionCount: true, content: true, groupId: true },
@@ -78,9 +86,7 @@ export async function announceMilestones(postIds: string[]): Promise<void> {
         },
       });
     }
-  } catch {
-    // A missed milestone note is not worth a failed request.
-  }
+  });
 }
 
 router.post('/impressions', optionalAuth, async (req: AuthRequest, res, next) => {

@@ -30,6 +30,7 @@ import { staffTwoFactorRequired } from '../middleware/roles';
 import { getMaintenanceState } from '../services/feature-flags.service';
 import { ingestConfig } from '../services/livestream.service';
 import { decodeToken, generateAccessToken, generateRefreshToken } from '../utils/jwt';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 const adminOnly: RequestHandler[] = [authenticate, requireRole('ADMIN')];
@@ -85,17 +86,33 @@ export function describeRateLimit(): { enabled: boolean; windowMs: number; max: 
  * The lifetime a token really gets, measured by signing a throwaway one and
  * reading its claims back, so the answer cannot drift from utils/jwt.ts. The
  * token is discarded; nothing stores or returns it.
+ *
+ * Null when the probe fails, because a guessed lifetime on a page whose whole
+ * point is to stop printing constants nobody checked would be the old bug
+ * again. What the catch used to carry was a comment saying the failure is
+ * "only possible when JWT_SECRET is missing in production" — and that is not
+ * the only way in. generateAccessToken passes JWT_EXPIRES_IN (and the refresh
+ * one JWT_REFRESH_EXPIRES_IN) straight to jwt.sign, which throws on a timespan
+ * it cannot parse, in every environment, whatever the secret is. So a typo in
+ * one environment variable turned both lifetimes on the admin console into a
+ * silent blank that the comment explained away as a missing secret. The null
+ * is kept; bestEffort logs which of the two it actually was. The work is a
+ * thunk rather than a promise because sign() throws synchronously — there is
+ * no promise to reject.
  */
-function measureTokenSeconds(sign: (payload: { userId: string; email: string; role: string; persona: string }) => string): number | null {
-  try {
-    const decoded = decodeToken(sign({ userId: 'config-probe', email: 'probe@invalid', role: 'USER', persona: 'NONE' }));
-    if (!decoded?.exp || !decoded?.iat) return null;
-    return decoded.exp - decoded.iat;
-  } catch {
-    // Only possible when JWT_SECRET is missing in production, where no token
-    // can be issued at all; say so rather than guess.
-    return null;
-  }
+async function measureTokenSeconds(
+  label: string,
+  sign: (payload: { userId: string; email: string; role: string; persona: string }) => string
+): Promise<number | null> {
+  return bestEffort(
+    label,
+    () => {
+      const decoded = decodeToken(sign({ userId: 'config-probe', email: 'probe@invalid', role: 'USER', persona: 'NONE' }));
+      if (!decoded?.exp || !decoded?.iat) return null;
+      return decoded.exp - decoded.iat;
+    },
+    null
+  );
 }
 
 const env = (name: string): string | null => process.env[name]?.trim() || null;
@@ -125,8 +142,8 @@ router.get('/ops/config', ...adminOnly, async (_req: AuthRequest, res: Response,
       maintenance,
       rateLimit: describeRateLimit(),
       tokens: {
-        accessSeconds: measureTokenSeconds(generateAccessToken),
-        refreshSeconds: measureTokenSeconds(generateRefreshToken),
+        accessSeconds: await measureTokenSeconds('admin-config.access-token-lifetime-probe', generateAccessToken),
+        refreshSeconds: await measureTokenSeconds('admin-config.refresh-token-lifetime-probe', generateRefreshToken),
       },
       security: {
         // Production always insists on a second factor for staff; elsewhere
