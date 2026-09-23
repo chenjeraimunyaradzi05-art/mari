@@ -17,6 +17,10 @@ jest.mock('../../utils/prisma', () => ({
     payment: {
       findUnique: jest.fn(),
       update: jest.fn(),
+      // Every succeeded intent that names its buyer now writes a Payment row,
+      // which is what gives the invoice pipeline something to find.
+      upsert: jest.fn(),
+      updateMany: jest.fn(async () => ({ count: 0 })),
     },
     invoice: {
       findFirst: jest.fn(),
@@ -109,6 +113,9 @@ describe('Stripe webhooks', () => {
       id: 'pi_123',
       status: 'succeeded',
       amount: 500,
+      // A real PaymentIntent always carries one, and the Payment row the
+      // webhook now writes records it, so the fixture has to as well.
+      currency: 'aud',
       metadata: {
         userId: 'user-123',
         type: 'gift_balance_purchase',

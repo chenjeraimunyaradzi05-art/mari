@@ -10,7 +10,8 @@ import { ApiError } from '../middleware/errorHandler';
 import { BusinessType, BusinessStatus, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
-import { transition } from './formation-state-machine.service';
+import { FormationState, canTransition, transition } from './formation-state-machine.service';
+import { notifyAdmins } from './admin-notify.service';
 
 // Stripe comes from the one shared client in utils/stripe, so this module cannot
 // drift onto a different API version from the rest of the server. Whether a key
@@ -38,6 +39,9 @@ const FORMATION_FEE_CURRENCY = 'aud';
 // The discriminator the Stripe webhook switches on for formation payments.
 export const FORMATION_PAYMENT_TYPE = 'business_formation';
 
+const formatAud = (cents: number) =>
+  new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(cents / 100);
+
 function asRecord(value: unknown): Record<string, any> {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
   return {};
@@ -60,16 +64,26 @@ function hasNonEmptyObject(data: Record<string, any>, keys: string[]): boolean {
   });
 }
 
-function validateRegistrationForSubmission(registration: {
+/**
+ * The statuses in which an applicant may still change her answers. DRAFT is
+ * the obvious one; ADDITIONAL_INFO_REQUIRED is where a reviewer sends her
+ * when something is missing, and she cannot answer the question if the form
+ * is frozen. NEEDS_INFO is a BusinessStatus the state machine has no edge to
+ * and nothing sets, kept here only so any row that already holds it is not
+ * stranded.
+ */
+const EDITABLE_STATUSES: BusinessStatus[] = ['DRAFT', 'NEEDS_INFO', 'ADDITIONAL_INFO_REQUIRED'];
+
+/**
+ * Everything a registration must carry before a human looks at it, with no
+ * opinion about status. Submission and answering a reviewer's question both
+ * need this; only submission also needs the registration to be unpaid.
+ */
+function validateRegistrationCompleteness(registration: {
   type: BusinessType;
-  status: BusinessStatus;
   businessName: string | null;
   data: Prisma.JsonValue | null;
 }) {
-  if (registration.status !== 'DRAFT' && registration.status !== 'NEEDS_INFO') {
-    throw new ApiError(400, 'Cannot submit registration in this status');
-  }
-
   const data = asRecord(registration.data);
   const businessName =
     nonEmptyString(registration.businessName) || nonEmptyString(data.businessName) || null;
@@ -114,6 +128,23 @@ function validateRegistrationForSubmission(registration: {
   }
 }
 
+function validateRegistrationForSubmission(registration: {
+  type: BusinessType;
+  status: BusinessStatus;
+  businessName: string | null;
+  data: Prisma.JsonValue | null;
+}) {
+  // Deliberately narrower than EDITABLE_STATUSES. A registration in
+  // ADDITIONAL_INFO_REQUIRED has already paid its fee; sending it back
+  // through submit would mint a second payment intent and charge her twice
+  // for the same registration. Her way back is provideAdditionalInfo.
+  if (registration.status !== 'DRAFT' && registration.status !== 'NEEDS_INFO') {
+    throw new ApiError(400, 'Cannot submit registration in this status');
+  }
+
+  validateRegistrationCompleteness(registration);
+}
+
 export async function createRegistration(
   userId: string,
   type: BusinessType,
@@ -147,7 +178,7 @@ export async function updateRegistration(
     throw new ApiError(403, 'Not authorized');
   }
 
-  if (registration.status !== 'DRAFT' && registration.status !== 'NEEDS_INFO') {
+  if (!EDITABLE_STATUSES.includes(registration.status)) {
     throw new ApiError(400, 'Cannot update registration in this status');
   }
 
@@ -379,6 +410,7 @@ async function markFormationPaid(
     id: string;
     type: BusinessType;
     status: BusinessStatus;
+    businessName: string | null;
     data: Prisma.JsonValue | null;
   },
   payment: { paymentIntentId: string; amountCents: number; currency: string }
@@ -439,6 +471,16 @@ async function markFormationPaid(
     logger.warn('Paid registration could not be moved to SUBMITTED', {
       registrationId: registration.id,
       errors: submitResult.errors,
+    });
+  } else {
+    // Somebody has to know a woman has paid up to A$699 and is now waiting.
+    // Until this call the queue filled up and nobody was ever told, which is
+    // how registrations sat at SUBMITTED indefinitely.
+    await notifyAdmins({
+      title: 'A business registration is waiting for review',
+      message: `${registration.businessName || 'An untitled registration'} (${registration.type.replace(/_/g, ' ').toLowerCase()}) has paid its ${formatAud(payment.amountCents)} fee.`,
+      link: '/admin/formation',
+      data: { kind: 'FORMATION_REVIEW', id: registration.id },
     });
   }
 
@@ -631,20 +673,384 @@ export async function getRegistration(userId: string, registrationId: string) {
   return registration;
 }
 
-// Admin function
-export async function adminUpdateStatus(
+/**
+ * Answer a reviewer's question and go back into the queue.
+ *
+ * The way out of ADDITIONAL_INFO_REQUIRED, and the reason that status is
+ * editable. It does not go through submitRegistration, because the fee has
+ * already been paid and submitting would mint a second payment intent.
+ */
+export async function provideAdditionalInfo(userId: string, registrationId: string) {
+  const registration = await prisma.businessRegistration.findUnique({
+    where: { id: registrationId },
+  });
+
+  if (!registration) {
+    throw new ApiError(404, 'Registration not found');
+  }
+
+  if (registration.userId !== userId) {
+    throw new ApiError(403, 'Not authorized');
+  }
+
+  if (registration.status !== 'ADDITIONAL_INFO_REQUIRED') {
+    throw new ApiError(400, 'This registration is not waiting on more information');
+  }
+
+  validateRegistrationCompleteness(registration);
+
+  const result = await transition(registrationId, 'PROVIDE_INFO', {
+    infoProvidedAt: new Date().toISOString(),
+  });
+
+  if (!result.success) {
+    throw new ApiError(400, result.errors?.join('; ') || 'That information could not be accepted');
+  }
+
+  await notifyAdmins({
+    title: 'A registration has answered its review question',
+    message: `${registration.businessName || 'An untitled registration'} is back in the queue with the information you asked for.`,
+    link: '/admin/formation',
+    data: { kind: 'FORMATION_REVIEW', id: registration.id },
+  });
+
+  return prisma.businessRegistration.findUnique({ where: { id: registrationId } });
+}
+
+// ==========================================
+// FULFILMENT AND REFUNDS
+// ==========================================
+
+/**
+ * The statuses a registration can be sitting in while it waits on staff. A
+ * paid registration reaches SUBMITTED by itself; everything past that needs a
+ * person, and until adminAdvanceRegistration existed there was no code path
+ * of any kind that could move one - the fee bought a place in a queue nobody
+ * could work.
+ *
+ * APPROVED belongs here too. It is not the end: the registration is approved
+ * and still waiting for its certificate to be filed, which is what moves it
+ * to COMPLETED, so leaving it out would strand every approval one step short.
+ */
+export const FORMATION_QUEUE_STATUSES: BusinessStatus[] = [
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'ADDITIONAL_INFO_REQUIRED',
+  'APPROVED',
+];
+
+export type FormationDecision = 'MARK_UNDER_REVIEW' | 'REQUEST_INFO' | 'APPROVE' | 'REJECT' | 'COMPLETE';
+
+export interface FormationDecisionInput {
+  registrationId: string;
+  decision: FormationDecision;
+  /** The staff member who made the call, recorded in the state history. */
+  reviewerId: string;
+  /** REQUEST_INFO: what is missing. REJECT: why. */
+  note?: string;
+  /** APPROVE: the ASIC or ABR number the registration came back with. */
+  registrationNumber?: string;
+  abn?: string;
+  acn?: string;
+  /** COMPLETE: where the certificate lives. */
+  certificateUrl?: string;
+}
+
+export type FormationRefund =
+  | { status: 'refunded'; refundId: string; amountCents: number }
+  | { status: 'already_refunded'; refundId: string | null }
+  | { status: 'nothing_to_refund' }
+  | { status: 'unavailable'; reason: string };
+
+/**
+ * Give the fee back.
+ *
+ * Idempotent twice over: the recorded refund on the registration short
+ * circuits a second attempt, and the idempotency key means even a racing
+ * call cannot make Stripe issue two. A simulated intent never took money, so
+ * there is nothing to return; a deployment with no Stripe key cannot return
+ * it and says so rather than recording a refund that did not happen.
+ */
+export async function refundFormationFee(
   registrationId: string,
-  status: BusinessStatus,
-  abn?: string,
-  acn?: string
-) {
-  return prisma.businessRegistration.update({
+  reason: string
+): Promise<FormationRefund> {
+  const registration = await prisma.businessRegistration.findUnique({
+    where: { id: registrationId },
+  });
+
+  if (!registration) {
+    throw new ApiError(404, 'Registration not found');
+  }
+
+  const data = asRecord(registration.data);
+  const existing = asRecord(data.refund);
+  if (nonEmptyString(existing.refundId) || existing.status === 'refunded') {
+    return { status: 'already_refunded', refundId: nonEmptyString(existing.refundId) };
+  }
+
+  // `paymentId` is written only by the PAYMENT_SUCCESS transition, so its
+  // absence means the fee was never taken.
+  const paidIntentId = nonEmptyString(data.paymentId);
+  if (!paidIntentId || isSimulatedIntent(paidIntentId)) {
+    return { status: 'nothing_to_refund' };
+  }
+
+  if (!isStripeConfigured()) {
+    logger.error('A formation fee needs refunding and Stripe is not configured', { registrationId });
+    return { status: 'unavailable', reason: 'Card payments are not configured on this deployment' };
+  }
+
+  let refund: Stripe.Refund;
+  try {
+    refund = await getStripe().refunds.create(
+      {
+        payment_intent: paidIntentId,
+        reason: 'requested_by_customer',
+        metadata: { registrationId, athenaReason: reason.slice(0, 400) },
+      },
+      { idempotencyKey: `formation-refund-${registrationId}` }
+    );
+  } catch (error) {
+    logger.error('Formation fee refund failed at Stripe', {
+      registrationId,
+      paymentIntentId: paidIntentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      status: 'unavailable',
+      reason: error instanceof Error ? error.message : 'Stripe refused the refund',
+    };
+  }
+
+  await recordRefundOnRegistration(registrationId, {
+    refundId: refund.id,
+    paymentIntentId: paidIntentId,
+    amountCents: refund.amount,
+    reason,
+    status: 'refunded',
+  });
+
+  logger.info('Formation fee refunded', { registrationId, refundId: refund.id, amountCents: refund.amount });
+
+  return { status: 'refunded', refundId: refund.id, amountCents: refund.amount };
+}
+
+async function recordRefundOnRegistration(
+  registrationId: string,
+  refund: Record<string, unknown>
+): Promise<void> {
+  const current = await prisma.businessRegistration.findUnique({
+    where: { id: registrationId },
+    select: { data: true },
+  });
+
+  await prisma.businessRegistration.update({
     where: { id: registrationId },
     data: {
-      status,
-      abn,
-      acn,
-      approvedAt: status === 'APPROVED' ? new Date() : undefined,
+      data: {
+        ...asRecord(current?.data),
+        refund: { ...refund, at: new Date().toISOString() },
+      },
     },
   });
+}
+
+/**
+ * Reconcile a refund somebody issued by hand in the Stripe dashboard.
+ *
+ * Called from the charge.refunded webhook. It does not move the registration
+ * itself: the state machine's only route out of review is REJECT from
+ * UNDER_REVIEW, and forcing a status from a webhook would skip the reviewer's
+ * reason and her notification. It records the money and tells the admins, so
+ * a person closes it out with the reason attached.
+ */
+export async function reconcileFormationRefund(
+  paymentIntentId: string,
+  amountRefundedCents: number
+): Promise<void> {
+  const registration = await prisma.businessRegistration.findFirst({
+    where: { data: { path: ['paymentId'], equals: paymentIntentId } },
+    select: { id: true, businessName: true, status: true, data: true },
+  });
+
+  if (!registration) return;
+
+  const existing = asRecord(asRecord(registration.data).refund);
+  if (nonEmptyString(existing.refundId) || existing.status === 'refunded') return;
+
+  await recordRefundOnRegistration(registration.id, {
+    paymentIntentId,
+    amountCents: amountRefundedCents,
+    reason: 'Refunded in the Stripe dashboard',
+    status: 'refunded',
+  });
+
+  await notifyAdmins({
+    title: 'A formation fee was refunded outside ATHENA',
+    message: `${registration.businessName || 'An untitled registration'} was refunded ${formatAud(amountRefundedCents)} in Stripe and is still at ${registration.status.replace(/_/g, ' ').toLowerCase()}. Close it out with a reason.`,
+    link: '/admin/formation',
+    data: { kind: 'FORMATION_REFUND', id: registration.id },
+  });
+
+  logger.warn('Formation fee refunded outside ATHENA', {
+    registrationId: registration.id,
+    paymentIntentId,
+    amountRefundedCents,
+  });
+}
+
+/** What a registration in the review queue looks like to staff. */
+export async function listFormationQueue(options?: { statuses?: BusinessStatus[]; take?: number }) {
+  const statuses = options?.statuses?.length ? options.statuses : FORMATION_QUEUE_STATUSES;
+
+  return prisma.businessRegistration.findMany({
+    where: { status: { in: statuses } },
+    orderBy: [{ submittedAt: 'asc' }, { createdAt: 'asc' }],
+    take: Math.min(Math.max(options?.take ?? 100, 1), 200),
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      businessName: true,
+      abn: true,
+      acn: true,
+      data: true,
+      submittedAt: true,
+      approvedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      user: { select: { id: true, displayName: true, email: true } },
+    },
+  });
+}
+
+/**
+ * Move a paid registration through review, and pay it back when it is
+ * refused.
+ *
+ * Everything runs through the state machine's transition(), never a direct
+ * status write: that is what records the state history and fires the
+ * applicant's notification. The function this replaced, adminUpdateStatus,
+ * set the column by hand - it had no callers, and whoever wired it up first
+ * would have shipped a silent approval with no history and no email.
+ */
+export async function adminAdvanceRegistration(input: FormationDecisionInput) {
+  const registration = await prisma.businessRegistration.findUnique({
+    where: { id: input.registrationId },
+  });
+
+  if (!registration) {
+    throw new ApiError(404, 'Registration not found');
+  }
+
+  const note = nonEmptyString(input.note);
+  const eventData: Record<string, unknown> = {
+    reviewedBy: input.reviewerId,
+    reviewedAt: new Date().toISOString(),
+  };
+
+  let abn: string | null = null;
+  let acn: string | null = null;
+  let refund: FormationRefund | null = null;
+
+  switch (input.decision) {
+    case 'MARK_UNDER_REVIEW':
+      break;
+
+    case 'REQUEST_INFO':
+      if (!note) throw new ApiError(400, 'Say what is missing, so she knows what to send');
+      eventData.infoRequested = note;
+      break;
+
+    case 'APPROVE': {
+      // STATE_REQUIREMENTS demands registrationNumber before APPROVED, and
+      // nothing wrote it, so an approval would have failed validation even
+      // once it was reachable.
+      const registrationNumber = nonEmptyString(input.registrationNumber);
+      if (!registrationNumber) {
+        throw new ApiError(400, 'The ASIC or ABR registration number is required to approve');
+      }
+      eventData.registrationNumber = registrationNumber;
+      if (note) eventData.approvalNote = note;
+
+      abn = input.abn ? digitsOnly(input.abn) : null;
+      if (abn && !isValidAbn(abn)) throw new ApiError(400, 'That ABN does not pass its checksum');
+      acn = input.acn ? digitsOnly(input.acn) : null;
+      if (acn && !isValidAcn(acn)) throw new ApiError(400, 'That ACN does not pass its checksum');
+      if (registration.type === 'COMPANY' && !acn && !registration.acn) {
+        throw new ApiError(400, 'A company registration needs its ACN before it can be approved');
+      }
+      break;
+    }
+
+    case 'REJECT':
+      if (!note) throw new ApiError(400, 'A rejection needs a reason; she paid for this');
+      eventData.rejectionReason = note;
+      break;
+
+    case 'COMPLETE': {
+      const certificateUrl = nonEmptyString(input.certificateUrl);
+      if (!certificateUrl) {
+        throw new ApiError(400, 'The certificate link is required to complete a registration');
+      }
+      eventData.certificateUrl = certificateUrl;
+      break;
+    }
+  }
+
+  // Whether this decision is even legal from where the registration stands,
+  // asked before any money moves. The refund below deliberately runs ahead of
+  // the transition, which is right when the transition is going to be
+  // attempted — but it meant rejecting an already-completed or already-rejected
+  // registration refunded the fee first and only then discovered the decision
+  // could not be recorded, leaving her registered and refunded.
+  if (!canTransition(registration.status as FormationState, input.decision)) {
+    throw new ApiError(
+      400,
+      `A registration that is ${registration.status.toLowerCase().replace(/_/g, ' ')} cannot be ${input.decision.toLowerCase()}ed`
+    );
+  }
+
+  // The refund goes first on a rejection. If Stripe refuses, she is not moved
+  // into a terminal state that nobody looks at again with her money still
+  // here; the reviewer sees the failure and can try again.
+  if (input.decision === 'REJECT') {
+    refund = await refundFormationFee(input.registrationId, note ?? 'Registration rejected');
+    if (refund.status === 'unavailable') {
+      throw new ApiError(502, `The fee could not be refunded, so the rejection was not recorded: ${refund.reason}`);
+    }
+    eventData.refundOutcome = refund.status;
+  }
+
+  const result = await transition(input.registrationId, input.decision, eventData);
+
+  if (!result.success) {
+    throw new ApiError(400, result.errors?.join('; ') || 'That decision could not be recorded');
+  }
+
+  // abn, acn and approvedAt are columns rather than JSON, so the state
+  // machine cannot write them.
+  if (input.decision === 'APPROVE') {
+    await prisma.businessRegistration.update({
+      where: { id: input.registrationId },
+      data: {
+        approvedAt: new Date(),
+        ...(abn ? { abn } : {}),
+        ...(acn ? { acn } : {}),
+      },
+    });
+  }
+
+  const updated = await prisma.businessRegistration.findUnique({ where: { id: input.registrationId } });
+
+  logger.info('Formation registration advanced by staff', {
+    registrationId: input.registrationId,
+    decision: input.decision,
+    reviewerId: input.reviewerId,
+    from: result.previousState,
+    to: result.currentState,
+  });
+
+  return { registration: updated, previousState: result.previousState, currentState: result.currentState, refund };
 }

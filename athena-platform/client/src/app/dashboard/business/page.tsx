@@ -13,7 +13,13 @@ import { cn } from '@/lib/utils';
 
 const steps = [
   { title: 'Decide the structure', description: 'Sole trader, partnership, company or trust, compared on this year’s profit and what you care about.', href: '/dashboard/business/strategy#structure', icon: Compass, highlight: true },
-  { title: 'Register it', description: 'ABN, business name and, for a company, ASIC, through the formation studio.', href: '/dashboard/formation', icon: Building2, highlight: true },
+  // Named for what the studio actually does end to end: she fills in the
+  // details, pays the fee, a person at ATHENA reviews it and records the ABN
+  // or ACN, and a registration that is refused is refunded. The old line
+  // ("ABN, business name and, for a company, ASIC") read as though the
+  // lodgement happened by itself, at a time when nothing in the platform
+  // could move a paid registration past "submitted" at all.
+  { title: 'Register it', description: 'Your details, the paperwork and the fee in one place. A person reviews it and records the ABN or ACN; if it is refused, the fee comes back.', href: '/dashboard/formation', icon: Building2, highlight: true },
   { title: 'Set up tax from day one', description: 'What to put aside each quarter, GST, and the BAS worked out from the ledger.', href: '/dashboard/finance/tax/plan#set-aside', icon: Receipt },
   { title: 'Find the grants that fit', description: 'Every listed grant scored against your stage, industry, state and the amount you need.', href: '/dashboard/business/strategy#grants', icon: BadgeCheck },
   { title: 'Know what it is worth', description: 'A valuation range, what a raise costs you in ownership, and how long the cash lasts.', href: '/dashboard/business/strategy#valuation', icon: Landmark },

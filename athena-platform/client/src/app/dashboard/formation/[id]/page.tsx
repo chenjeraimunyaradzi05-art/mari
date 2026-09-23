@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import toast from 'react-hot-toast';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFormation, useSubmitFormation, useUpdateFormation } from '@/lib/hooks';
+import { api } from '@/lib/api';
+import { apiMessage } from '@/lib/strategy-api';
 import { formatRelativeTime } from '@/lib/utils';
 import { FormationDocuments } from '@/components/strategy/FormationDocuments';
 import { RegisterCheck } from '@/components/business/RegisterCheck';
@@ -16,6 +20,54 @@ function asRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
+/**
+ * What the fee actually buys, said in the order it happens.
+ *
+ * The page used to show a status word and nothing else, on a registration
+ * that had taken up to A$699 and could not be moved past "submitted" by any
+ * code in the platform. Now that staff can review, approve, complete and
+ * refund one, this is where the applicant is told which of those she is
+ * waiting for, and what she is owed if it goes the other way.
+ */
+const NEXT_STEP: Record<string, { heading: string; body: string }> = {
+  DRAFT: {
+    heading: 'Not sent yet',
+    body: 'Fill in the fields below and press Submit. The fee is taken at that point, and nothing happens to your registration until it is paid.',
+  },
+  PAYMENT_PENDING: {
+    heading: 'Waiting on the fee',
+    body: 'Your details are in. The registration goes into the review queue the moment the card is authorised.',
+  },
+  PAYMENT_COMPLETE: {
+    heading: 'Fee received',
+    body: 'We have your payment and your registration is moving into the review queue.',
+  },
+  SUBMITTED: {
+    heading: 'In the queue',
+    body: 'A person at ATHENA has been notified and will pick this up for review. You will hear from us here and by email when they do.',
+  },
+  UNDER_REVIEW: {
+    heading: 'Being reviewed',
+    body: 'Someone is going through your details now. If anything is missing we will ask you here rather than guess.',
+  },
+  ADDITIONAL_INFO_REQUIRED: {
+    heading: 'We need something from you',
+    body: 'Update the fields below with what was asked for, save, then send it back. Your fee stands; there is nothing more to pay.',
+  },
+  APPROVED: {
+    heading: 'Approved',
+    body: 'Your registration has been approved and its ABN or ACN is recorded above. The certificate follows when it comes through.',
+  },
+  REJECTED: {
+    heading: 'Not approved',
+    body: 'This registration was refused and the fee has been refunded to the card you paid with. Refunds usually land within five to ten business days.',
+  },
+  COMPLETED: {
+    heading: 'Done',
+    body: 'Your business is registered and the certificate is on file.',
+  },
+};
+
 export default function FormationDetailPage() {
   const params = useParams();
   const id = (params?.id as string) || '';
@@ -23,7 +75,20 @@ export default function FormationDetailPage() {
   const { data: formation, isLoading } = useFormation(id);
   const submitMutation = useSubmitFormation();
   const updateMutation = useUpdateFormation();
+  const queryClient = useQueryClient();
   const [payment, setPayment] = useState<FormationPayment | null>(null);
+
+  // Answering a reviewer's question is not a re-submission: the fee is
+  // already paid, and going back through Submit would mint a second payment
+  // intent and charge for the same registration twice.
+  const provideInfo = useMutation({
+    mutationFn: () => api.post(`/formation/${id}/provide-info`),
+    onSuccess: () => {
+      toast.success('Sent back for review.');
+      queryClient.invalidateQueries({ queryKey: ['formation', id] });
+    },
+    onError: (error) => toast.error(apiMessage(error, 'That could not be sent back just now.')),
+  });
 
   const initialBusinessName = useMemo(() => {
     return formation?.businessName || formation?.data?.businessName || '';
@@ -129,8 +194,25 @@ export default function FormationDetailPage() {
     setTrusteesText(initialTrustFields.trusteesText);
   }, [initialTrustFields]);
 
-  const canEdit = formation?.status === 'DRAFT' || formation?.status === 'NEEDS_INFO';
-  const canSubmit = canEdit;
+  const status = String(formation?.status ?? '');
+  const answeringReview = status === 'ADDITIONAL_INFO_REQUIRED';
+  const canEdit = status === 'DRAFT' || status === 'NEEDS_INFO' || answeringReview;
+  // Submitting is what takes the fee, so a registration that has already paid
+  // answers the reviewer instead.
+  const canSubmit = canEdit && !answeringReview;
+  const nextStep = NEXT_STEP[status];
+  const registrationNumber = (() => {
+    const value = asRecord(formation?.data).registrationNumber;
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+  })();
+  const infoRequested = (() => {
+    const value = asRecord(formation?.data).infoRequested;
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+  })();
+  const rejectionReason = (() => {
+    const value = asRecord(formation?.data).rejectionReason;
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+  })();
 
   const observations = useMemo(() => {
     const isCompany = formation?.type === 'COMPANY';
@@ -319,6 +401,64 @@ export default function FormationDetailPage() {
         <span className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground">{formation.status}</span>
       </div>
 
+      {nextStep && (
+        <div className="border rounded-lg p-6 space-y-3">
+          <h2 className="text-lg font-semibold">{nextStep.heading}</h2>
+          <p className="text-sm text-muted-foreground">{nextStep.body}</p>
+
+          {infoRequested && answeringReview && (
+            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">
+              <span className="font-medium">What we asked for: </span>
+              {infoRequested}
+            </p>
+          )}
+
+          {rejectionReason && (
+            <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <span className="font-medium">Reason: </span>
+              {rejectionReason}
+            </p>
+          )}
+
+          {(formation.abn || formation.acn || registrationNumber) && (
+            <dl className="grid gap-1 text-sm">
+              {formation.abn && (
+                <div className="flex gap-2">
+                  <dt className="font-medium">ABN</dt>
+                  <dd className="tabular-nums">{formation.abn}</dd>
+                </div>
+              )}
+              {formation.acn && (
+                <div className="flex gap-2">
+                  <dt className="font-medium">ACN</dt>
+                  <dd className="tabular-nums">{formation.acn}</dd>
+                </div>
+              )}
+              {registrationNumber && (
+                <div className="flex gap-2">
+                  <dt className="font-medium">Registration number</dt>
+                  <dd className="tabular-nums">{registrationNumber}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+
+          {answeringReview && (
+            <button
+              type="button"
+              onClick={async () => {
+                await handleSave();
+                provideInfo.mutate();
+              }}
+              disabled={provideInfo.isPending || updateMutation.isPending}
+              className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50"
+            >
+              {provideInfo.isPending ? 'Sending…' : 'Send back for review'}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="border rounded-lg p-6 space-y-4">
         <h2 className="text-lg font-semibold">Business name</h2>
         <div className="space-y-2">
@@ -352,9 +492,15 @@ export default function FormationDetailPage() {
           </button>
         </div>
 
-        {!canSubmit && (
+        {!canSubmit && !answeringReview && (
           <p className="text-xs text-muted-foreground">
             This registration can’t be submitted in its current status.
+          </p>
+        )}
+
+        {answeringReview && (
+          <p className="text-xs text-muted-foreground">
+            Save your changes here, then use “Send back for review” above. There is nothing more to pay.
           </p>
         )}
       </div>

@@ -1,9 +1,19 @@
 'use client';
 
 /**
- * The tax invoices ATHENA has issued to this member: subscriptions, the
- * formation fee, a cohort place. Each one downloads as a PDF for the
- * records the record-keeping guide asks her to keep for five years.
+ * The documents ATHENA has issued to this member: membership periods, the
+ * formation fee, a cohort place, a gift balance top-up, and a receipt for
+ * anything ATHENA only collected on someone else's behalf. Each one
+ * downloads as a PDF for the records the record-keeping guide asks her to
+ * keep for five years.
+ *
+ * The page does not call them tax invoices. Whether a document is one is
+ * decided on the server, per document, from whether ATHENA held an ABN and a
+ * GST registration on the day it was issued and whether the sale was ATHENA's
+ * own; the PDF titles itself accordingly and says in a sentence where the GST
+ * stands. This page used to promise "a tax invoice you can claim" over a
+ * pipeline that issued nothing but membership documents and printed a tax
+ * line of zero on those.
  */
 
 import { useState } from 'react';
@@ -68,7 +78,7 @@ export default function InvoicesPage() {
             <span className="text-sm font-semibold uppercase tracking-wider">Invoices</span>
           </div>
           <h1 className="mt-2 text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">What ATHENA has charged you</h1>
-          <p className="mt-1 text-slate-500 dark:text-slate-400">Membership, a formation fee, a cohort place. Each is a tax invoice you can claim if the spend was for work.</p>
+          <p className="mt-1 text-slate-500 dark:text-slate-400">Membership, a formation fee, a cohort place, a gift top-up. Each PDF says what it is, and what GST was or was not charged on it, so your accountant can tell at a glance.</p>
         </div>
         <Link href="/dashboard/finance" className="btn-secondary">Finance hub</Link>
       </div>
@@ -83,7 +93,7 @@ export default function InvoicesPage() {
         <div className="rounded-2xl border border-slate-200 p-8 text-center dark:border-slate-800">
           <FileText className="mx-auto h-10 w-10 text-slate-300 dark:text-slate-600" />
           <p className="mt-3 font-semibold text-slate-900 dark:text-white">No invoices yet</p>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">One appears here when you take out a membership or pay a fee.</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">One appears here the moment a payment goes through — a membership, a formation fee, a cohort place or a mentoring session.</p>
           <Link href="/pricing" className="mt-4 inline-block text-sm font-semibold text-rose-600 hover:underline dark:text-rose-400">See what membership costs</Link>
         </div>
       ) : (

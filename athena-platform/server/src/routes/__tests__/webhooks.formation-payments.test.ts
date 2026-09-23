@@ -17,9 +17,15 @@ jest.mock('../../utils/prisma', () => ({
       findUnique: jest.fn(),
       update: jest.fn(),
     },
-    user: { findUnique: jest.fn() },
+    user: { findUnique: jest.fn(), findMany: jest.fn(async () => []) },
     mentorSession: { update: jest.fn() },
     subscription: { upsert: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    // Every succeeded intent now writes the money onto the Payment table,
+    // which is what the invoice pipeline reads. findUnique answering null
+    // keeps the invoice hook a no-op for this suite, which is about the
+    // registration's state, not its document.
+    payment: { upsert: jest.fn(), findUnique: jest.fn(async () => null), update: jest.fn() },
+    notification: { createMany: jest.fn() },
   },
 }));
 

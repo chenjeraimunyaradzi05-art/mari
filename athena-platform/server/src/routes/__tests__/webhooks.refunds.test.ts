@@ -7,6 +7,10 @@ jest.mock('../../utils/prisma', () => ({
     stripeWebhookEvent: { create: jest.fn() },
     mentorSession: { findFirst: jest.fn(), update: jest.fn() },
     escrowPayment: { updateMany: jest.fn(async () => ({ count: 0 })) },
+    // A refund now follows the money onto the Payment row and back to a
+    // formation registration paid with that intent.
+    payment: { updateMany: jest.fn(async () => ({ count: 0 })) },
+    businessRegistration: { findFirst: jest.fn(async () => null), update: jest.fn() },
     subscription: { findFirst: jest.fn(), update: jest.fn(), upsert: jest.fn() },
   },
 }));

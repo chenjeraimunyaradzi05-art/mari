@@ -52,6 +52,7 @@ import adminConfigRoutes from './routes/admin-config.routes';
 import adminImpactRoutes from './routes/admin-impact.routes';
 import adminCatalogueRoutes from './routes/admin-catalogue.routes';
 import adminGrantsRoutes from './routes/admin-grants.routes';
+import adminFormationRoutes from './routes/admin-formation.routes';
 import adminMarketingRoutes from './routes/admin-marketing.routes';
 import marketingRoutes from './routes/marketing.routes';
 import blogRoutes from './routes/blog.routes';
@@ -90,7 +91,6 @@ import safetyRoutes from './routes/safety.routes';
 import conciergeRoutes from './routes/concierge.routes';
 import salaryRoutes from './routes/salary.routes';
 import paymentsRoutes from './routes/payments.routes';
-import mentorSchedulingRoutes from './routes/mentor-scheduling.routes';
 import dvSafeRoutes from './routes/dv-safe.routes';
 import accountingRoutes from './routes/accounting.routes';
 import taxRoutes from './routes/tax.routes';
@@ -614,6 +614,10 @@ app.use('/api/admin', adminCatalogueRoutes);
 // Grant programmes (the directory's only write path) guard each route themselves
 // too; the application reviews under /admin/grants/applications stay in adminRoutes.
 app.use('/api/admin', adminGrantsRoutes);
+// Business formation decisions and refunds. Same arrangement as the routers
+// above: it guards each route itself, so it can sit in front of adminRoutes
+// without re-authenticating every /api/admin request it does not handle.
+app.use('/api/admin', adminFormationRoutes);
 // The marketing hub guards its own routes, like the operations router.
 app.use('/api/admin/marketing', adminMarketingRoutes);
 app.use('/api/admin', adminRoutes);
@@ -648,7 +652,6 @@ app.use('/api/safety', safetyRoutes);
 app.use('/api/concierge', conciergeRoutes);
 app.use('/api/salary', salaryRoutes);
 app.use('/api/payments', paymentsRoutes);
-app.use('/api/mentoring', mentorSchedulingRoutes);
 app.use('/api/safety/dv', dvSafeRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/tax', taxRoutes);

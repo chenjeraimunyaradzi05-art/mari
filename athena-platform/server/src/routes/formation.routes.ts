@@ -162,6 +162,19 @@ router.post('/:id/submit', async (req: AuthRequest, res: Response, next: NextFun
   }
 });
 
+// Answer a reviewer's question. The way out of ADDITIONAL_INFO_REQUIRED: the
+// applicant edits with PATCH as usual, then sends it back with this. It is
+// not /submit, because the fee is already paid and submitting would mint a
+// second payment intent.
+router.post('/:id/provide-info', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const registration = await FormationService.provideAdditionalInfo(req.user!.id, req.params.id);
+    res.json(registration);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Fetch the payment details for a registration that is awaiting payment.
 // Submitting already returns these, but an applicant who abandoned checkout
 // needs a way back to the same intent without re-submitting.

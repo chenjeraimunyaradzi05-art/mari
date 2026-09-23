@@ -10,17 +10,20 @@ import {
   FORMATION_PAYMENT_TYPE,
   confirmFormationPaymentFromWebhook,
   recordFormationPaymentFailure,
+  reconcileFormationRefund,
 } from '../services/formation.service';
 import {
   ACCELERATOR_PAYMENT_TYPE,
   confirmAcceleratorEnrollmentPayment,
   recordAcceleratorPaymentFailure,
 } from '../services/payments-orchestration.service';
+import { syncConnectedAccountFromStripe } from '../services/stripe-connect.service';
 // Tax invoices: see the header of routes/invoice.routes.ts for who issues them.
 import {
   createInvoiceForPayment,
   createInvoiceForSubscription,
   paidChargeFromStripeInvoice,
+  type PaymentKind,
 } from '../services/invoice.service';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
@@ -46,6 +49,17 @@ function paymentIntentIdOf(value: string | { id: string } | null | undefined): s
 // key, so refusing the request for a missing key would reject events this
 // endpoint can read perfectly well. A handler that does go on to call Stripe
 // gets the 503 from the client itself.
+
+// What creator.service.ts stamps on the transfer it creates for a payout, and
+// the only way to tell one of those apart from the transfer every destination
+// charge produces.
+const CREATOR_PAYOUT_TRANSFER_TYPE = 'creator_payout';
+
+// A gift point is worth a cent. CreatorPayout.amount is in dollars while
+// CreatorProfile.pendingPayout counts points, so a reversal has to convert
+// back before it can restore her balance. creator.service.ts holds the same
+// relationship privately, as GIFT_POINT_VALUE.
+const AUD_PER_GIFT_POINT = 0.01;
 
 const PRICE_IDS = {
   PREMIUM_CAREER: process.env.STRIPE_PRICE_CAREER || 'price_career',
@@ -86,14 +100,114 @@ function mapStripeSubscriptionStatus(status: string): 'ACTIVE' | 'CANCELED' | 'P
 }
 
 /**
- * Invoice hook for one-off payments. A Payment row that carries this intent
- * is marked COMPLETED and gets an ATHENA invoice, once (the service is
- * idempotent on paymentId). No flow writes Payment rows yet, so today this
- * finds nothing; it is the hook mentor sessions and the formation fee will
- * use when they do. Best effort on purpose: the payment itself has already
- * been applied by the handler above, and a failed filing can be re-issued
- * from the admin subscriptions page, so an error here is logged rather than
- * handed back to Stripe as a retry that would re-run the whole event.
+ * Who paid, what for, and which of our rows it belongs to.
+ *
+ * Every one-off charge already carries its identifiers in the intent's
+ * metadata, because each flow needs them to find its own record on the way
+ * back. Reading them in one place is what makes a single Payment row possible
+ * for every sale, which is what the invoice pipeline needs: until this
+ * existed, nothing anywhere called prisma.payment.create, so the Payment
+ * table was permanently empty, every invoice hook found nothing, and the
+ * admin re-issue route could only answer "Payment not found".
+ *
+ * Mentor sessions are the trap: their metadata names the buyer `menteeId`,
+ * not `userId`, and taking `userId` from them would have written the payment
+ * against nobody.
+ */
+type PaymentAttribution = { userId: string; type: PaymentKind; referenceId: string | null };
+
+function metadataString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function attributionFor(paymentIntent: Stripe.PaymentIntent): PaymentAttribution | null {
+  const metadata = (paymentIntent.metadata ?? {}) as Record<string, unknown>;
+  const userId = metadataString(metadata.userId);
+
+  switch (metadataString(metadata.type)) {
+    case 'gift_balance_purchase':
+      return userId ? { userId, type: 'GIFT_BALANCE', referenceId: null } : null;
+    case 'mentor_session': {
+      const menteeId = metadataString(metadata.menteeId);
+      return menteeId ? { userId: menteeId, type: 'MENTOR_SESSION', referenceId: metadataString(metadata.sessionId) } : null;
+    }
+    case FORMATION_PAYMENT_TYPE:
+      return userId ? { userId, type: 'FORMATION', referenceId: metadataString(metadata.registrationId) } : null;
+    case ACCELERATOR_PAYMENT_TYPE:
+      return userId ? { userId, type: 'ACCELERATOR', referenceId: metadataString(metadata.enrollmentId) } : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Record the money. One upsert keyed on the intent id, so a Stripe retry or a
+ * late browser confirmation lands on the same row rather than a second one.
+ *
+ * Marketplace escrow is deliberately absent: those intents carry buyerId and
+ * sellerId rather than a `type`, the funds are the provider's with ATHENA
+ * keeping a fee, and a Payment row for the whole amount would say ATHENA sold
+ * something it did not. They stay on EscrowPayment, which is the record of
+ * what actually happened.
+ */
+async function recordPaymentForIntent(paymentIntent: Stripe.PaymentIntent): Promise<void> {
+  const attribution = attributionFor(paymentIntent);
+  if (!attribution) return;
+
+  const amount = (paymentIntent.amount_received || paymentIntent.amount) / 100;
+  const currency = paymentIntent.currency.toUpperCase();
+  const method = paymentIntent.payment_method_types?.[0] ?? null;
+  const stripeChargeId = paymentIntentIdOf(paymentIntent.latest_charge as any);
+
+  try {
+    await prisma.payment.upsert({
+      where: { stripePaymentIntentId: paymentIntent.id },
+      create: {
+        userId: attribution.userId,
+        amount,
+        currency,
+        status: 'COMPLETED',
+        method,
+        type: attribution.type,
+        referenceId: attribution.referenceId,
+        stripePaymentIntentId: paymentIntent.id,
+        stripeChargeId,
+      },
+      update: {
+        status: 'COMPLETED',
+        amount,
+        currency,
+        stripeChargeId: stripeChargeId ?? undefined,
+      },
+    });
+  } catch (err: any) {
+    // A missing user is the one failure a retry cannot mend - she has been
+    // erased since she paid - and throwing would make Stripe redeliver this
+    // event for days. Counted and logged so it is visible on /health/detailed
+    // instead of disappearing; everything else is thrown, because a Payment
+    // row is the record of money received and losing one quietly is worse
+    // than a retry.
+    if (err?.code === 'P2003' || err?.code === 'P2025') {
+      recordFailure('stripe_webhook.payment_row_orphaned', err);
+      logger.error('A succeeded payment belongs to a user who no longer exists', {
+        paymentIntentId: paymentIntent.id,
+        userId: attribution.userId,
+        type: attribution.type,
+      });
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Invoice hook for one-off payments. The Payment row written just above is
+ * marked COMPLETED and gets an ATHENA document, once (the service is
+ * idempotent on paymentId). Best effort on purpose: the payment itself has
+ * already been applied by the handler above, and a failed filing can be
+ * re-issued from the admin subscriptions page, so an error here is logged
+ * rather than handed back to Stripe as a retry that would re-run the whole
+ * event.
  */
 async function issueInvoiceForPaymentIntent(paymentIntent: Stripe.PaymentIntent): Promise<void> {
   try {
@@ -265,8 +379,9 @@ router.post(
               await confirmAcceleratorEnrollmentPayment(paymentIntent);
             }
 
-            // Tax invoice for a Payment row carrying this intent (best effort,
-            // idempotent; see the helper above).
+            // The money itself, on the Payment table, after each flow has
+            // applied what the member bought. Then her document.
+            await recordPaymentForIntent(paymentIntent);
             await issueInvoiceForPaymentIntent(paymentIntent);
             break;
           }
@@ -508,8 +623,151 @@ router.post(
                 where: { paymentIntentId },
                 data: { status: 'REFUNDED', canceledAt: new Date() },
               });
+              // The money row follows the money. Without this a refunded sale
+              // still read COMPLETED on the Payment table and on the invoice
+              // filed against it.
+              await prisma.payment.updateMany({
+                where: { stripePaymentIntentId: paymentIntentId },
+                data: { status: 'REFUNDED' },
+              });
+              // A formation fee refunded by hand in the Stripe dashboard has
+              // to reach the registration too, or the applicant keeps a place
+              // in the review queue that she has been paid back for.
+              await reconcileFormationRefund(paymentIntentId, charge.amount_refunded);
             }
             logger.info('Stripe charge refunded', { chargeId: charge.id, paymentIntentId, amountRefunded: charge.amount_refunded });
+            break;
+          }
+
+          // A creator payout settling, or coming back.
+          //
+          // creator.service.ts creates the transfer and files a CreatorPayout
+          // row at status PENDING; nothing ever moved it on, so every payout
+          // ever made is still PENDING, completedAt is still null, and the
+          // "paid to your bank" line of the earnings statement is permanently
+          // zero. These three cases are what close that loop.
+          //
+          // The audit that found this asked for transfer.paid and
+          // transfer.failed. Neither exists any more: they were legacy-payout
+          // events, and the current API sends transfer.created, .updated and
+          // .reversed. For a transfer to a connected account, creation is the
+          // movement of the funds, so transfer.created is the settlement.
+          // payout.paid and payout.failed are a different object entirely -
+          // the creator's own bank payout out of her Stripe balance, on her
+          // connected account - and its id would never match a stripeTransferId
+          // of ours.
+          case 'transfer.created':
+          case 'transfer.reversed': {
+            const transfer = event.data.object as Stripe.Transfer;
+            const ours = metadataString((transfer.metadata as any)?.type) === CREATOR_PAYOUT_TRANSFER_TYPE;
+
+            const payout = await prisma.creatorPayout.findFirst({
+              where: { stripeTransferId: transfer.id },
+              select: { id: true, status: true, amount: true, creatorProfileId: true, reversedAmount: true },
+            });
+
+            if (!payout) {
+              if (!ours) {
+                // Every destination charge creates a transfer too. Not ours to
+                // reconcile, and nothing went wrong.
+                outcome = 'ignored';
+                break;
+              }
+              // It is a creator payout, and the row that records it has not
+              // been written yet: the transfer is created before its id can be
+              // stored. Thrown so Stripe redelivers once the row exists, the
+              // same way invoice.paid waits for the subscription row.
+              throw new Error(`Creator payout transfer ${transfer.id} has no CreatorPayout row yet; retry`);
+            }
+
+            if (event.type === 'transfer.created') {
+              if (payout.status !== 'COMPLETED') {
+                await prisma.creatorPayout.update({
+                  where: { id: payout.id },
+                  data: { status: 'COMPLETED', completedAt: new Date(event.created * 1000) },
+                });
+              }
+              break;
+            }
+
+            // Reversed. Give her back exactly the share that came back, in
+            // gift points, because pendingPayout counts points and the payout
+            // row records dollars.
+            //
+            // `amount_reversed` is cumulative, so this is the total that should
+            // have been restored by now, not the amount this event represents.
+            // Crediting the event's own fraction each time meant a payout
+            // reversed in two parts put back more than was ever taken.
+            const reversedFraction =
+              transfer.amount > 0 ? Math.min(1, (transfer.amount_reversed || 0) / transfer.amount) : 1;
+            const owedBack = payout.amount * reversedFraction;
+            const alreadyRestored = payout.reversedAmount ?? 0;
+            const delta = owedBack - alreadyRestored;
+            const fully = reversedFraction >= 1;
+
+            // A redelivery, or an event that arrived out of order behind a
+            // larger one, owes nothing further. The row is still moved to its
+            // terminal state so a late full reversal is not lost.
+            if (delta <= 0) {
+              if (fully && payout.status !== 'FAILED') {
+                await prisma.creatorPayout.update({
+                  where: { id: payout.id },
+                  data: { status: 'FAILED', completedAt: new Date(event.created * 1000) },
+                });
+              }
+              logger.info('Transfer reversal carried nothing new to restore', {
+                payoutId: payout.id,
+                transferId: transfer.id,
+                alreadyRestored,
+                owedBack,
+              });
+              break;
+            }
+
+            const pointsToRestore = Math.round(delta / AUD_PER_GIFT_POINT);
+
+            await prisma.$transaction([
+              prisma.creatorPayout.update({
+                where: { id: payout.id },
+                data: {
+                  status: fully ? 'FAILED' : payout.status,
+                  reversedAmount: owedBack,
+                  completedAt: new Date(event.created * 1000),
+                },
+              }),
+              prisma.creatorProfile.update({
+                where: { id: payout.creatorProfileId },
+                data: { pendingPayout: { increment: pointsToRestore } },
+              }),
+            ]);
+
+            logger.warn('A creator payout was reversed and her balance restored', {
+              payoutId: payout.id,
+              transferId: transfer.id,
+              pointsRestored: pointsToRestore,
+              alreadyRestored,
+              owedBack,
+              fully,
+            });
+            break;
+          }
+
+          // Stripe decides asynchronously whether a connected account may take
+          // charges and receive payouts, and this is the only thing that tells
+          // ATHENA the answer. Without it `stripeConnectStatus` stayed at
+          // PENDING forever: escrow refuses a seller who is not ACTIVE, so a
+          // mentor or creator who had completed Stripe's checks still could not
+          // be paid, and nothing anywhere would have said why. Three comments
+          // elsewhere in the codebase claimed this handler already existed.
+          case 'account.updated': {
+            const account = event.data.object as Stripe.Account;
+            const matched = await syncConnectedAccountFromStripe(account);
+            logger.info('Connected account state refreshed from Stripe', {
+              accountId: account.id,
+              chargesEnabled: account.charges_enabled,
+              payoutsEnabled: account.payouts_enabled,
+              matchedAMember: matched,
+            });
             break;
           }
 

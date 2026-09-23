@@ -400,91 +400,40 @@ async function processUPIPayment(request: PaymentRequest): Promise<PaymentResult
 }
 
 /**
- * Process creator payout
+ * Creator payouts do not happen here, and this says so rather than trying.
+ *
+ * This was a second way out of the platform's Stripe balance, and it was the
+ * dangerous one. It took the amount straight from the request body with no
+ * reference to what the creator had actually earned, moved the money with a
+ * bare transfers.create, and wrote no CreatorPayout row at all - so anything
+ * paid out this way was invisible to her payout history and to the earnings
+ * statement, and nothing stopped the same amount being asked for twice. It
+ * only ever failed in practice because the destination lookup behind it was a
+ * stub that returned null for every creator, which is the sort of accident
+ * that stops being an accident the moment somebody finishes the stub.
+ *
+ * A creator payout is a claim against a balance. creator.service's
+ * requestPayout is the one path that can make that claim: it decrements
+ * pendingPayout, files the CreatorPayout row the Stripe webhook later moves
+ * to COMPLETED, and pays out what she is owed rather than what was typed.
+ * Two doors disagreeing about whether a payout is recorded is worse than one
+ * door, so this one is shut and named.
  */
 export async function processCreatorPayout(
   request: PayoutRequest
 ): Promise<PaymentResult> {
-  const region = CURRENCY_REGION[request.currency] || 'AU';
-  
-  logger.info('Processing creator payout', {
+  logger.warn('A creator payout was requested through the orchestration route', {
     userId: request.userId,
     amount: request.amount,
     currency: request.currency,
   });
 
-  try {
-    // Use Stripe Connect for most regions
-    if (['AU', 'NZ', 'US', 'UK', 'EU', 'SG'].includes(region)) {
-      return await processStripeConnectPayout(request);
-    }
-
-    // Use Wise for international transfers
-    return await processWisePayout(request);
-  } catch (error: any) {
-    logger.error('Payout failed', { error: error.message });
-    return {
-      success: false,
-      provider: 'stripe',
-      status: 'failed',
-      error: error.message,
-    };
-  }
-}
-
-/**
- * Process Stripe Connect payout
- */
-async function processStripeConnectPayout(request: PayoutRequest): Promise<PaymentResult> {
-  if (!isStripeConfigured()) {
-    assertProviderConfigured('stripe');
-    return {
-      success: false,
-      provider: 'stripe',
-      status: 'failed',
-      error: 'Stripe is not configured in this environment',
-    };
-  }
-
-  // Get connected account ID
-  const connectedAccountId = await getStripeConnectAccountId(request.userId);
-  
-  if (!connectedAccountId) {
-    return {
-      success: false,
-      provider: 'stripe',
-      status: 'failed',
-      error: 'Creator payout account not set up',
-    };
-  }
-
-  const transfer = await getStripe().transfers.create({
-    amount: Math.round(request.amount * 100),
-    currency: request.currency.toLowerCase(),
-    destination: connectedAccountId,
-  });
-
   return {
-    success: true,
-    transactionId: transfer.id,
+    success: false,
     provider: 'stripe',
-    status: 'completed',
-  };
-}
-
-/**
- * Process Wise payout (simulated)
- */
-async function processWisePayout(request: PayoutRequest): Promise<PaymentResult> {
-  assertProviderConfigured('wise');
-  logger.info('Processing Wise payout', { amount: request.amount, currency: request.currency });
-  
-  // In production, integrate with Wise API
-  return {
-    success: true,
-    transactionId: `wise_${Date.now()}`,
-    provider: 'wise',
-    status: 'pending',
+    status: 'failed',
+    error:
+      'Creator payouts are made against your earned balance, from Creator tools; this route cannot pay an arbitrary amount.',
   };
 }
 

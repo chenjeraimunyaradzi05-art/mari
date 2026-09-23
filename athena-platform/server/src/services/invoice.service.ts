@@ -10,6 +10,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
+import { digitsOnly, formatAbn, isValidAbn } from './abr.service';
 import fs from 'fs';
 import path from 'path';
 
@@ -31,17 +32,29 @@ export interface InvoiceData {
   invoiceDate: Date;
   dueDate: Date;
   status: 'DRAFT' | 'SENT' | 'PAID' | 'OVERDUE' | 'CANCELLED';
-  
+
+  /**
+   * What the document calls itself on the page: "Tax invoice", "Invoice" or
+   * "Payment receipt". It is not decoration — under Australian law the words
+   * "Tax invoice" are a representation about GST, so the title is decided by
+   * taxTreatmentFor() from what is actually known, never chosen by a caller.
+   */
+  documentTitle: string;
+
+  /** The GST position in one sentence, printed under the totals. */
+  taxNote?: string;
+
   // Seller info
   seller: {
     name: string;
     address: string[];
     email: string;
     phone?: string;
-    taxId?: string;
+    /** The ABN, spaced the way the ABR prints it, when one is configured. */
+    abn?: string;
     logo?: string;
   };
-  
+
   // Buyer info
   buyer: {
     name: string;
@@ -74,16 +87,167 @@ export interface InvoiceData {
 // CONSTANTS
 // ==========================================
 
-const ATHENA_INFO = {
-  name: 'ATHENA Platform Pty Ltd',
-  address: [
-    'Australia',
-    'Final billing address to be published before production invoicing is enabled',
-  ],
-  email: 'billing@athena.app',
-  phone: undefined,
-  taxId: undefined,
-};
+/**
+ * Who the supplier is, and what it may truthfully say about GST.
+ *
+ * ATHENA sells in Australia and the invoices page calls what it issues a tax
+ * invoice. The ATO is specific about that phrase: a tax invoice must carry
+ * the words "Tax invoice", the supplier's identity and ABN, the issue date, a
+ * description with quantity and price, and either the GST amount or a
+ * statement that the total includes GST; from A$1,000 up, the buyer's
+ * identity as well. Until this code, every document said "INVOICE", carried
+ * no ABN, and printed the literal `taxTotal: 0` — a tax position the data did
+ * not support, on documents a member may hand to her accountant.
+ *
+ * So nothing here invents an ABN or a registration. Three environment values
+ * decide what the document can claim, and when they are absent it claims
+ * less:
+ *
+ *   ATHENA_ABN                  the supplier's ABN, kept only if it passes
+ *                               its checksum
+ *   ATHENA_GST_REGISTERED_FROM  the date the ATO registration took effect
+ *   ATHENA_BILLING_ADDRESS      the registered address, lines separated by |
+ *
+ * The registration is a date rather than a flag on purpose. A GST
+ * registration starts on a day, and an invoice issued before that day was
+ * correctly issued without GST; storing a boolean would have made every old
+ * invoice sprout a GST line the moment the company registered, because a PDF
+ * is re-rendered from the row each time it is downloaded and the Invoice
+ * table has nowhere to keep the figure.
+ */
+const GST_RATE = 0.1;
+const GST_CURRENCY = 'AUD';
+
+const PLACEHOLDER_ADDRESS = [
+  'Australia',
+  'Final billing address to be published before production invoicing is enabled',
+];
+
+export interface SupplierDetails {
+  name: string;
+  address: string[];
+  email: string;
+  phone?: string;
+  abn?: string;
+}
+
+/** The registered ABN, spaced as the ABR prints it, or null if none is set. */
+function configuredAbn(): string | null {
+  const abn = digitsOnly(process.env.ATHENA_ABN);
+  if (!abn || !isValidAbn(abn)) return null;
+  return formatAbn(abn);
+}
+
+/**
+ * The day the GST registration took effect, or null. An unparseable value is
+ * treated as absent: guessing a date here would put GST on documents at the
+ * wrong time in both directions.
+ */
+function gstRegisteredFrom(): Date | null {
+  const raw = process.env.ATHENA_GST_REGISTERED_FROM;
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    logger.warn('ATHENA_GST_REGISTERED_FROM is not a date; invoices will not charge GST', { value: raw });
+    return null;
+  }
+  return date;
+}
+
+export function athenaSupplier(): SupplierDetails {
+  const address = (process.env.ATHENA_BILLING_ADDRESS || '')
+    .split(/[|\n]/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    name: process.env.ATHENA_LEGAL_NAME || 'ATHENA Platform Pty Ltd',
+    address: address.length > 0 ? address : PLACEHOLDER_ADDRESS,
+    email: process.env.ATHENA_BILLING_EMAIL || 'billing@athena.app',
+    abn: configuredAbn() ?? undefined,
+  };
+}
+
+export interface TaxTreatment {
+  /** "Tax invoice", "Invoice" or "Payment receipt". */
+  title: string;
+  isTaxInvoice: boolean;
+  /** Major units, with any GST taken out. */
+  subtotal: number;
+  /** Major units. Zero whenever the document is not a tax invoice. */
+  taxTotal: number;
+  /** One plain sentence saying where the GST stands, printed on the page. */
+  note: string;
+}
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/**
+ * Decide what a document may claim about GST, from the money and the date.
+ *
+ * Displayed prices in Australia include GST, so a taxable sale's GST is one
+ * eleventh of what was charged rather than ten per cent on top of it.
+ */
+export function taxTreatmentFor(params: {
+  /** What was actually charged, in major units, GST included if any. */
+  total: number;
+  currency: string;
+  issuedAt: Date;
+  /**
+   * False when ATHENA only collected the money on someone else's behalf — a
+   * mentor's hour, a marketplace provider's job. The supply is theirs, so the
+   * GST on it is theirs to invoice and ATHENA must not claim it.
+   */
+  platformIsSupplier: boolean;
+}): TaxTreatment {
+  const supplier = athenaSupplier();
+  const total = round2(params.total);
+
+  if (!params.platformIsSupplier) {
+    return {
+      title: 'Payment receipt',
+      isTaxInvoice: false,
+      subtotal: total,
+      taxTotal: 0,
+      note: `${supplier.name} collected this payment for the provider who supplied the service. Any GST on it is theirs to invoice, so none is shown here.`,
+    };
+  }
+
+  const registeredFrom = gstRegisteredFrom();
+  const registered = Boolean(supplier.abn) && registeredFrom !== null && params.issuedAt >= registeredFrom;
+
+  if (!registered) {
+    return {
+      title: 'Invoice',
+      isTaxInvoice: false,
+      subtotal: total,
+      taxTotal: 0,
+      note: `${supplier.name} is not registered for GST, so no GST has been charged on this sale.`,
+    };
+  }
+
+  if (params.currency.toUpperCase() !== GST_CURRENCY) {
+    // A sale settled in another currency is not one this code can place for
+    // GST: whether it is a GST-free supply to a non-resident turns on facts
+    // about the buyer that are not on the row. It says what it knows.
+    return {
+      title: 'Invoice',
+      isTaxInvoice: false,
+      subtotal: total,
+      taxTotal: 0,
+      note: `Charged in ${params.currency.toUpperCase()}. No GST is included in this amount.`,
+    };
+  }
+
+  const taxTotal = round2(total - total / (1 + GST_RATE));
+  return {
+    title: 'Tax invoice',
+    isTaxInvoice: true,
+    subtotal: round2(total - taxTotal),
+    taxTotal,
+    note: `The total shown includes GST of ${formatMoney(taxTotal, GST_CURRENCY)}.`,
+  };
+}
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$',
@@ -99,6 +263,79 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   EGP: 'E£',
   MXN: 'MX$',
 };
+
+const formatMoney = (amount: number, currency: string) =>
+  `${CURRENCY_SYMBOLS[currency.toUpperCase()] || `${currency.toUpperCase()} `}${amount.toFixed(2)}`;
+
+/**
+ * The kinds of sale that end up on a Payment row. The Stripe metadata that
+ * carries them is lower case and flow-specific (`business_formation`,
+ * `mentor_session`); this is the canonical form written to Payment.type, and
+ * the webhook maps onto it so that one description and one GST rule serve
+ * every issuer.
+ */
+export const PAYMENT_KINDS = [
+  'SUBSCRIPTION',
+  'MENTOR_SESSION',
+  'FORMATION',
+  'ACCELERATOR',
+  'GIFT_BALANCE',
+  'COURSE',
+  'JOB_BOOST',
+  'SERVICE_ORDER',
+] as const;
+
+export type PaymentKind = (typeof PAYMENT_KINDS)[number];
+
+export function isPaymentKind(value: unknown): value is PaymentKind {
+  return typeof value === 'string' && (PAYMENT_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * What the platform sold itself, as against money that ran through its Stripe
+ * account on the way to somebody else. A mentor's hour is the mentor's supply
+ * and a marketplace order is the provider's: ATHENA keeps a fee out of it and
+ * passes the rest on, so an ATHENA tax invoice for the whole amount would
+ * claim a sale ATHENA never made.
+ */
+const PLATFORM_SUPPLIES: Record<PaymentKind, boolean> = {
+  SUBSCRIPTION: true,
+  FORMATION: true,
+  ACCELERATOR: true,
+  GIFT_BALANCE: true,
+  COURSE: true,
+  JOB_BOOST: true,
+  MENTOR_SESSION: false,
+  SERVICE_ORDER: false,
+};
+
+/** Whether ATHENA is the supplier for this kind of sale. Unknown kinds are not assumed to be. */
+export function isPlatformSupply(type: string | null | undefined): boolean {
+  return isPaymentKind(type) ? PLATFORM_SUPPLIES[type] : false;
+}
+
+const PAYMENT_DESCRIPTIONS: Record<PaymentKind, string> = {
+  SUBSCRIPTION: 'ATHENA membership',
+  MENTOR_SESSION: 'Mentoring session',
+  FORMATION: 'Business formation service',
+  ACCELERATOR: 'Accelerator cohort place',
+  GIFT_BALANCE: 'Gift balance top-up',
+  COURSE: 'Course purchase',
+  JOB_BOOST: 'Job listing boost',
+  SERVICE_ORDER: 'Skills marketplace order',
+};
+
+/**
+ * The line a member reads on the document. It names only what the Payment row
+ * knows: the row has no description or metadata column, so the switch that
+ * used to read `payment.metadata?.formationType` here fell through to its
+ * default on every call and printed "Business Formation Service - LLC" — a US
+ * company type, on an Australian registration that can only be a sole trader,
+ * partnership, company or trust.
+ */
+export function paymentLineDescription(type: string | null | undefined): string {
+  return isPaymentKind(type) ? PAYMENT_DESCRIPTIONS[type] : 'ATHENA platform service';
+}
 
 // ==========================================
 // PDF GENERATION
@@ -165,11 +402,14 @@ function generateHeader(doc: typeof PDFDocument.prototype, invoice: InvoiceData)
     .fillColor('#4F46E5')
     .text('ATHENA', 50, 50);
   
-  // Invoice title
+  // The document names itself from its tax treatment, never from a caller's
+  // preference: "Tax invoice" is a statement about GST, so it appears only
+  // when taxTreatmentFor() found an ABN, a registration in force on the issue
+  // date, and an AUD sale ATHENA itself made.
   doc
     .fontSize(20)
     .fillColor('#111827')
-    .text('INVOICE', 0, 50, { align: 'right' });
+    .text(invoice.documentTitle.toUpperCase(), 0, 50, { align: 'right' });
   
   // Invoice details
   doc
@@ -237,8 +477,8 @@ function generateBillingInfo(doc: typeof PDFDocument.prototype, invoice: Invoice
     yPos += 13;
   }
   
-  if (invoice.seller.taxId) {
-    doc.text(`Tax ID: ${invoice.seller.taxId}`, 50, yPos);
+  if (invoice.seller.abn) {
+    doc.text(`ABN: ${invoice.seller.abn}`, 50, yPos);
   }
   
   // To (Buyer)
@@ -367,23 +607,24 @@ function generateTotals(doc: typeof PDFDocument.prototype, invoice: InvoiceData)
     currentY += 18;
   }
   
-  // Tax
+  // GST, named. The ATO wants the GST amount or a statement that the total
+  // includes it; a line labelled "Tax" showing 0.00 said neither.
   doc
     .fillColor('#6B7280')
-    .text('Tax:', 360, currentY)
+    .text(invoice.taxTotal > 0 ? `GST (${Math.round(GST_RATE * 100)}%):` : 'GST:', 360, currentY)
     .fillColor('#111827')
     .text(`${currencySymbol}${invoice.taxTotal.toFixed(2)}`, rightCol - 80, currentY, {
       width: 80,
       align: 'right',
     });
-  
+
   currentY += 25;
-  
+
   // Total
   doc
     .rect(350, currentY - 5, 195, 28)
     .fill('#4F46E5');
-  
+
   doc
     .fontSize(11)
     .font('Helvetica-Bold')
@@ -393,8 +634,22 @@ function generateTotals(doc: typeof PDFDocument.prototype, invoice: InvoiceData)
       width: 80,
       align: 'right',
     });
-  
-  (doc as any).totalsEndY = currentY + 40;
+
+  currentY += 40;
+
+  // The sentence that keeps the document honest when there is no GST to show:
+  // a reader who sees a zero needs to know whether that is a GST-free sale, an
+  // unregistered supplier, or money collected for somebody else.
+  if (invoice.taxNote) {
+    doc
+      .fontSize(8)
+      .font('Helvetica')
+      .fillColor('#6B7280')
+      .text(invoice.taxNote, 300, currentY, { width: 245, align: 'right' });
+    currentY += 24;
+  }
+
+  (doc as any).totalsEndY = currentY;
 }
 
 function generatePaymentInfo(doc: typeof PDFDocument.prototype, invoice: InvoiceData): void {
@@ -554,10 +809,8 @@ async function createInvoiceRow(data: Omit<Prisma.InvoiceUncheckedCreateInput, '
  * Issue an invoice for a Payment row, once. A second call for the same
  * paymentId returns the invoice already filed.
  *
- * No flow writes Payment rows yet (mentor sessions and the formation fee keep
- * their state on their own models), so today this is reached by the admin
- * re-issue route and by the webhook hook that fires when a Payment carrying
- * the succeeded intent exists.
+ * Reached from the Stripe webhook, which writes the Payment row as each
+ * intent succeeds, and from the admin re-issue route.
  */
 export async function createInvoiceForPayment(
   paymentId: string,
@@ -576,14 +829,24 @@ export async function createInvoiceForPayment(
 
   const existing = await prisma.invoice.findFirst({ where: { paymentId: payment.id } });
 
+  const total = payment.amount.toNumber();
+  const tax = taxTreatmentFor({
+    total,
+    currency: payment.currency,
+    issuedAt: payment.createdAt,
+    platformIsSupplier: isPlatformSupply(payment.type),
+  });
+
   // Build invoice data
   const invoiceData: InvoiceData = {
     invoiceNumber: existing?.invoiceNumber ?? '',
     invoiceDate: payment.createdAt,
     dueDate: payment.createdAt, // Immediate for completed payments
     status: payment.status === 'COMPLETED' ? 'PAID' : 'SENT',
+    documentTitle: tax.title,
+    taxNote: tax.note,
 
-    seller: ATHENA_INFO,
+    seller: athenaSupplier(),
 
     buyer: {
       name: payment.user?.displayName || 'Customer',
@@ -593,16 +856,20 @@ export async function createInvoiceForPayment(
         : undefined,
     },
 
+    // Lines are GST-exclusive so the page adds up: subtotal, then the GST
+    // line, then the total that was actually charged.
     items: [{
-      description: getPaymentDescription(payment),
+      description: paymentLineDescription(payment.type),
       quantity: 1,
-      unitPrice: payment.amount.toNumber(),
-      amount: payment.amount.toNumber(),
+      unitPrice: tax.subtotal,
+      amount: tax.subtotal,
+      taxAmount: tax.taxTotal || undefined,
+      taxRate: tax.isTaxInvoice ? GST_RATE : undefined,
     }],
 
-    subtotal: payment.amount.toNumber(),
-    taxTotal: 0, // No GST is computed yet; see the note in invoice.routes.ts
-    total: payment.amount.toNumber(),
+    subtotal: tax.subtotal,
+    taxTotal: tax.taxTotal,
+    total,
     currency: payment.currency,
 
     paymentMethod: payment.method || undefined,
@@ -686,13 +953,24 @@ export async function createInvoiceForSubscription(
       ? ` (${formatDate(paid.periodStart)} to ${formatDate(paid.periodEnd)})`
       : '';
 
+  // A membership is ATHENA's own supply, so it carries GST when ATHENA is
+  // registered for it on the day the period was paid.
+  const tax = taxTreatmentFor({
+    total: paid.amount,
+    currency: paid.currency,
+    issuedAt: paid.paidAt,
+    platformIsSupplier: true,
+  });
+
   const invoiceData: InvoiceData = {
     invoiceNumber: existing?.invoiceNumber ?? '',
     invoiceDate: paid.paidAt,
     dueDate: paid.paidAt,
     status: 'PAID',
+    documentTitle: tax.title,
+    taxNote: tax.note,
 
-    seller: ATHENA_INFO,
+    seller: athenaSupplier(),
 
     buyer: {
       name: subscription.user?.displayName || 'Customer',
@@ -702,12 +980,14 @@ export async function createInvoiceForSubscription(
     items: [{
       description: `ATHENA ${tierLabel(subscription.tier)} membership${period}`,
       quantity: 1,
-      unitPrice: paid.amount,
-      amount: paid.amount,
+      unitPrice: tax.subtotal,
+      amount: tax.subtotal,
+      taxAmount: tax.taxTotal || undefined,
+      taxRate: tax.isTaxInvoice ? GST_RATE : undefined,
     }],
 
-    subtotal: paid.amount,
-    taxTotal: 0, // No GST is computed yet; see the note in invoice.routes.ts
+    subtotal: tax.subtotal,
+    taxTotal: tax.taxTotal,
     total: paid.amount,
     currency: paid.currency,
     paymentMethod: 'card',
@@ -766,26 +1046,6 @@ async function generateInvoiceNumber(): Promise<string> {
 }
 
 /**
- * Get payment description for invoice line item
- */
-function getPaymentDescription(payment: any): string {
-  switch (payment.type) {
-    case 'SUBSCRIPTION':
-      return `Athena Subscription - ${payment.metadata?.tier || 'Premium'}`;
-    case 'MENTOR_SESSION':
-      return `Mentorship Session - ${payment.metadata?.mentorName || 'One-on-one'}`;
-    case 'COURSE':
-      return `Course Purchase - ${payment.metadata?.courseTitle || 'Online Course'}`;
-    case 'FORMATION':
-      return `Business Formation Service - ${payment.metadata?.formationType || 'LLC'}`;
-    case 'JOB_BOOST':
-      return `Job Posting Boost - ${payment.metadata?.jobTitle || 'Featured Listing'}`;
-    default:
-      return payment.description || 'Athena Platform Service';
-  }
-}
-
-/**
  * Get invoice by ID
  */
 export async function getInvoice(invoiceId: string): Promise<any> {
@@ -816,6 +1076,10 @@ export const invoiceService = {
   createInvoiceForPayment,
   createInvoiceForSubscription,
   paidChargeFromStripeInvoice,
+  athenaSupplier,
+  taxTreatmentFor,
+  paymentLineDescription,
+  isPlatformSupply,
   getInvoice,
   getUserInvoices,
 };

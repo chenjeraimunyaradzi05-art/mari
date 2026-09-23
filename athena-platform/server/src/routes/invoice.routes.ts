@@ -20,23 +20,25 @@
  *
  * What the PDF is, and is not, as an ATO tax invoice
  * ----------------------------------------------------
- * invoiceService.generateInvoicePDF renders: the seller's name, address lines
- * and email; a "Tax ID" line only when the seller record carries one (it does
- * not yet); the invoice number, issue date and due date; the buyer's name and
- * email; each line's description, quantity, unit price and amount; subtotal,
- * a tax line and the total; the payment date and method when paid.
- *
  * For a sale under A$1,000 the ATO requires: the words "Tax invoice", the
  * seller's identity and ABN, the issue date, a brief description with
  * quantity and price, the GST amount or a statement that the total includes
  * GST, and the extent to which each sale is taxable. From A$1,000 up, the
- * buyer's identity or ABN as well (the buyer name and email are already on
- * the page). So three things are missing before these can be called tax
- * invoices: the title (the PDF says "INVOICE"), the ABN (ATHENA_BILLING and
- * the service's ATHENA_INFO carry no taxId), and the GST figure (taxTotal is
- * hardcoded to 0; no invoicer computes the 1/11th). The ATHENA_BILLING
- * address below is a placeholder for the same reason. None of that is
- * invented here; the PDF says exactly what it knows.
+ * buyer's identity or ABN as well; the buyer's name and email are on the page
+ * already.
+ *
+ * All of that is now decided in one place, invoiceService.taxTreatmentFor,
+ * from three environment values: ATHENA_ABN, ATHENA_GST_REGISTERED_FROM and
+ * ATHENA_BILLING_ADDRESS. When they are set the document titles itself "Tax
+ * invoice", prints the ABN and shows GST at one eleventh of an AUD sale; when
+ * they are not it titles itself "Invoice" and says in a sentence that no GST
+ * was charged. A sale ATHENA only collected for somebody else — a mentor's
+ * hour, a marketplace order — is a "Payment receipt" and shows no GST at all,
+ * because that supply is the provider's to invoice.
+ *
+ * So the document never claims a tax position the data does not support. It
+ * used to: every PDF said "INVOICE", carried no ABN, and printed a tax line
+ * of 0.00 while the member-facing page called the result a tax invoice.
  */
 
 import { Router } from 'express';
@@ -61,29 +63,18 @@ function assertId(value: unknown, label: string): string {
   return value;
 }
 
-const ATHENA_BILLING = {
-  name: 'ATHENA Platform Pty Ltd',
-  address: [
-    'Australia',
-    'Final billing address to be published before production invoicing is enabled',
-  ],
-  email: 'billing@athena.app',
-};
-
-const PAYMENT_DESCRIPTIONS: Record<string, string> = {
-  SUBSCRIPTION: 'Athena Subscription',
-  MENTOR_SESSION: 'Mentorship Session',
-  COURSE: 'Course Purchase',
-  FORMATION: 'Business Formation Service',
-  JOB_BOOST: 'Job Posting Boost',
-};
-
 /**
  * Re-render a stored invoice.
  *
  * A download renders the invoice that was already issued rather than asking the
  * service to issue one: generating afresh would file a second Invoice row, and
  * a second invoice number, every time somebody clicked download.
+ *
+ * The GST position is recomputed from the issue date rather than stored,
+ * because the Invoice table has no tax column. That is safe precisely because
+ * taxTreatmentFor keys off the date the GST registration took effect: an
+ * invoice issued before that day re-renders without GST for as long as it
+ * exists, which is the only answer that stays true.
  */
 async function renderStoredInvoice(invoice: any): Promise<Buffer> {
   const payment = invoice.paymentId
@@ -91,19 +82,31 @@ async function renderStoredInvoice(invoice: any): Promise<Buffer> {
     : null;
 
   const amount = Number(invoice.amount);
-  const issuedAt = invoice.issuedAt ?? invoice.createdAt;
+  const issuedAt: Date = invoice.issuedAt ?? invoice.createdAt;
 
   const description = invoice.subscription
-    ? `Athena ${invoice.subscription.tier} Subscription`
-    : (payment?.type && PAYMENT_DESCRIPTIONS[payment.type]) || 'Athena Platform Service';
+    ? `ATHENA ${invoice.subscription.tier} membership`
+    : invoiceService.paymentLineDescription(payment?.type);
+
+  const tax = invoiceService.taxTreatmentFor({
+    total: amount,
+    currency: invoice.currency,
+    issuedAt: new Date(issuedAt),
+    // A membership is always ATHENA's own supply; anything else follows the
+    // Payment row's type, and an invoice with no payment behind it is not
+    // assumed to be ours to charge GST on.
+    platformIsSupplier: invoice.subscriptionId ? true : invoiceService.isPlatformSupply(payment?.type),
+  });
 
   return invoiceService.generateInvoicePDF({
     invoiceNumber: invoice.invoiceNumber,
     invoiceDate: issuedAt,
     dueDate: invoice.dueAt ?? issuedAt,
     status: invoice.status,
+    documentTitle: tax.title,
+    taxNote: tax.note,
 
-    seller: ATHENA_BILLING,
+    seller: invoiceService.athenaSupplier(),
 
     buyer: {
       name: invoice.user?.displayName || 'Customer',
@@ -114,13 +117,13 @@ async function renderStoredInvoice(invoice: any): Promise<Buffer> {
       {
         description,
         quantity: 1,
-        unitPrice: amount,
-        amount,
+        unitPrice: tax.subtotal,
+        amount: tax.subtotal,
       },
     ],
 
-    subtotal: amount,
-    taxTotal: 0,
+    subtotal: tax.subtotal,
+    taxTotal: tax.taxTotal,
     total: amount,
     currency: invoice.currency,
 
