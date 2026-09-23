@@ -1,9 +1,57 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { assertOrgMembership, memberOrganizationIds } from '../utils/org-scope';
 
 const toDecimal = (value: number) => new Prisma.Decimal(value);
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
+
+/**
+ * Who a row of stock belongs to.
+ *
+ * A sole trader's items and locations carry her userId and no organisation; an
+ * organisation's carry its id and are shared by its members. Nothing is scoped
+ * by the query string: an organizationId narrows the caller's own scope and is
+ * refused unless she is a member. The lists used to pass the parameter straight
+ * to Prisma, where an absent one drops the constraint, so every tenant's SKUs —
+ * with cost and sell price, therefore margins — went to anyone signed in.
+ *
+ * Rows written before the owner column existed carry neither id and so match
+ * nobody. That is the safe direction: invisible rather than world-readable, and
+ * guessing an owner for them would be worse than leaving them to be re-created.
+ */
+interface OwnerScope {
+  organizationId?: string;
+  OR?: Array<{ userId: string } | { organizationId: { in: string[] } }>;
+}
+
+async function ownerScope(params: { userId: string; organizationId?: string }): Promise<OwnerScope> {
+  if (params.organizationId) {
+    await assertOrgMembership(params.organizationId, params.userId);
+    return { organizationId: params.organizationId };
+  }
+  return {
+    OR: [{ userId: params.userId }, { organizationId: { in: await memberOrganizationIds(params.userId) } }],
+  };
+}
+
+/**
+ * Whether one row is the caller's to read or change. Ownership first, then
+ * membership; a row with neither owner belongs to no one and is refused, which
+ * is what an organisationless item used to skip past entirely.
+ */
+async function assertOwned(
+  row: { organizationId: string | null; userId: string | null },
+  userId: string
+): Promise<void> {
+  if (row.userId === userId) {
+    return;
+  }
+  if (!row.organizationId) {
+    throw new ApiError(403, 'Access denied');
+  }
+  await assertOrgMembership(row.organizationId, userId);
+}
 
 /**
  * Verify user has access to an inventory item (through organization membership or ownership)
@@ -11,19 +59,12 @@ const CURRENCY_REGEX = /^[A-Z]{3}$/;
 async function verifyItemAccess(itemId: string, userId: string): Promise<void> {
   const item = await prisma.inventoryItem.findUnique({
     where: { id: itemId },
-    select: { organizationId: true },
+    select: { organizationId: true, userId: true },
   });
   if (!item) {
     throw new ApiError(404, 'Item not found');
   }
-  if (item.organizationId) {
-    const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId: item.organizationId, userId },
-    });
-    if (!membership) {
-      throw new ApiError(403, 'Access denied');
-    }
-  }
+  await assertOwned(item, userId);
 }
 
 /**
@@ -32,19 +73,12 @@ async function verifyItemAccess(itemId: string, userId: string): Promise<void> {
 async function verifyLocationAccess(locationId: string, userId: string): Promise<void> {
   const location = await prisma.inventoryLocation.findUnique({
     where: { id: locationId },
-    select: { organizationId: true },
+    select: { organizationId: true, userId: true },
   });
   if (!location) {
     throw new ApiError(404, 'Location not found');
   }
-  if (location.organizationId) {
-    const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId: location.organizationId, userId },
-    });
-    if (!membership) {
-      throw new ApiError(403, 'Access denied');
-    }
-  }
+  await assertOwned(location, userId);
 }
 
 /**
@@ -53,19 +87,12 @@ async function verifyLocationAccess(locationId: string, userId: string): Promise
 async function verifyTransactionAccess(transactionId: string, userId: string): Promise<void> {
   const transaction = await prisma.inventoryTransaction.findUnique({
     where: { id: transactionId },
-    select: { item: { select: { organizationId: true } } },
+    select: { item: { select: { organizationId: true, userId: true } } },
   });
   if (!transaction) {
     throw new ApiError(404, 'Transaction not found');
   }
-  if (transaction.item.organizationId) {
-    const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId: transaction.item.organizationId, userId },
-    });
-    if (!membership) {
-      throw new ApiError(403, 'Access denied');
-    }
-  }
+  await assertOwned(transaction.item, userId);
 }
 
 function normalizeQuantity(type: 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'TRANSFER' | 'RETURN', quantity: number) {
@@ -76,14 +103,15 @@ function normalizeQuantity(type: 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'TRANSFER'
   return absQty;
 }
 
-export async function listItems(params: { organizationId?: string }) {
+export async function listItems(params: { userId: string; organizationId?: string }) {
   return prisma.inventoryItem.findMany({
-    where: { organizationId: params.organizationId || undefined },
+    where: await ownerScope(params),
     orderBy: { name: 'asc' },
   });
 }
 
 export async function createItem(data: {
+  userId: string;
   organizationId?: string;
   sku: string;
   name: string;
@@ -106,10 +134,16 @@ export async function createItem(data: {
   if (data.price !== undefined && data.price < 0) {
     throw new ApiError(400, 'Price must be non-negative');
   }
+  if (data.organizationId) {
+    await assertOrgMembership(data.organizationId, data.userId);
+  }
 
   return prisma.inventoryItem.create({
     data: {
       organizationId: data.organizationId,
+      // An organisation's stock belongs to the organisation and is shared by
+      // its members; only a sole trader's row carries a personal owner.
+      userId: data.organizationId ? null : data.userId,
       sku: data.sku.trim(),
       name: data.name,
       description: data.description,
@@ -172,14 +206,15 @@ export async function deleteItem(id: string, userId: string) {
   });
 }
 
-export async function listLocations(params: { organizationId?: string }) {
+export async function listLocations(params: { userId: string; organizationId?: string }) {
   return prisma.inventoryLocation.findMany({
-    where: { organizationId: params.organizationId || undefined },
+    where: await ownerScope(params),
     orderBy: { name: 'asc' },
   });
 }
 
 export async function createLocation(data: {
+  userId: string;
   organizationId?: string;
   name: string;
   code: string;
@@ -191,10 +226,14 @@ export async function createLocation(data: {
   if (data.code.trim().length === 0) {
     throw new ApiError(400, 'Location code cannot be empty');
   }
+  if (data.organizationId) {
+    await assertOrgMembership(data.organizationId, data.userId);
+  }
 
   return prisma.inventoryLocation.create({
     data: {
       organizationId: data.organizationId,
+      userId: data.organizationId ? null : data.userId,
       name: data.name,
       code: data.code,
       address: data.address,
@@ -228,21 +267,40 @@ export async function deleteLocation(id: string, userId: string) {
   });
 }
 
-export async function listTransactions(params: { itemId?: string; organizationId?: string }) {
+export async function listTransactions(params: { userId: string; itemId?: string; organizationId?: string }) {
   return prisma.inventoryTransaction.findMany({
     where: {
       itemId: params.itemId || undefined,
-      item: params.organizationId ? { organizationId: params.organizationId } : undefined,
+      // Movements are scoped by the stock they move, so the same rule covers
+      // them: without this the whole table's purchase costs were readable.
+      item: await ownerScope(params),
     },
     include: { item: true, location: true },
     orderBy: { occurredAt: 'desc' },
   });
 }
 
+/**
+ * Stock and the place it sits have to be in the same books. Otherwise a member
+ * of one organisation could park its stock in her own warehouse, and the same
+ * movement would be counted in two sets of stock levels.
+ */
+async function assertSameBooks(itemId: string, locationId: string) {
+  const [item, location] = await Promise.all([
+    prisma.inventoryItem.findUnique({ where: { id: itemId }, select: { organizationId: true, userId: true } }),
+    prisma.inventoryLocation.findUnique({ where: { id: locationId }, select: { organizationId: true, userId: true } }),
+  ]);
+  if (!item) throw new ApiError(404, 'Item not found');
+  if (!location) throw new ApiError(404, 'Location not found');
+  if (item.organizationId !== location.organizationId || item.userId !== location.userId) {
+    throw new ApiError(400, 'That location belongs to a different set of books than the item');
+  }
+}
+
 export async function createTransaction(data: {
   itemId: string;
   locationId?: string;
-  createdByUserId?: string;
+  createdByUserId: string;
   type: 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'TRANSFER' | 'RETURN';
   quantity: number;
   unitCost?: number;
@@ -252,6 +310,15 @@ export async function createTransaction(data: {
 }) {
   if (!data.itemId || !data.type || data.quantity === undefined) {
     throw new ApiError(400, 'Item, type, and quantity are required');
+  }
+
+  // A movement is a write against someone's stock, so it earns the same check
+  // the item's own edit endpoints make. Without it any signed-in account could
+  // post purchases and sales against any item id on the platform.
+  await verifyItemAccess(data.itemId, data.createdByUserId);
+  if (data.locationId) {
+    await verifyLocationAccess(data.locationId, data.createdByUserId);
+    await assertSameBooks(data.itemId, data.locationId);
   }
 
   const quantity = Number(data.quantity);
@@ -298,6 +365,14 @@ export async function updateTransaction(id: string, userId: string, data: {
   occurredAt?: string | Date;
 }) {
   await verifyTransactionAccess(id, userId);
+  if (data.locationId) {
+    await verifyLocationAccess(data.locationId, userId);
+    const existing = await prisma.inventoryTransaction.findUnique({ where: { id }, select: { itemId: true } });
+    if (!existing) {
+      throw new ApiError(404, 'Transaction not found');
+    }
+    await assertSameBooks(existing.itemId, data.locationId);
+  }
   if (data.quantity !== undefined && Number(data.quantity) === 0) {
     throw new ApiError(400, 'Quantity must be non-zero');
   }
@@ -333,11 +408,9 @@ export async function deleteTransaction(id: string, userId: string) {
   });
 }
 
-export async function getStockLevels(params: { organizationId?: string }) {
+export async function getStockLevels(params: { userId: string; organizationId?: string }) {
   const transactions = await prisma.inventoryTransaction.findMany({
-    where: {
-      item: params.organizationId ? { organizationId: params.organizationId } : undefined,
-    },
+    where: { item: await ownerScope(params) },
     include: { item: true, location: true },
   });
 

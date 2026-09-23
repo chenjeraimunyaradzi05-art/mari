@@ -80,11 +80,17 @@ const updateTransactionSchema = z.object({
   occurredAt: z.string().datetime().optional(),
 });
 
+// An organizationId in the query string narrows the stock to that organisation,
+// and the service refuses it unless the caller is a member. Repeat the
+// parameter and Express hands back an array, which has no business reaching a
+// membership lookup, so anything that is not a single string is ignored.
+const orgIdParam = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.length > 0 ? value : undefined;
+
 // Items
 router.get('/items', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId } = req.query;
-    const items = await listItems({ organizationId: organizationId as string | undefined });
+    const items = await listItems({ userId: req.user!.id, organizationId: orgIdParam(req.query.organizationId) });
     res.json({ data: items });
   } catch (error) {
     next(error);
@@ -97,7 +103,7 @@ router.post('/items', authenticate, async (req: AuthRequest, res: Response, next
     if (!parsed.success) {
       return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
     }
-    const item = await createItem(parsed.data);
+    const item = await createItem({ ...parsed.data, userId: req.user!.id });
     res.status(201).json({ data: item });
   } catch (error) {
     next(error);
@@ -129,8 +135,7 @@ router.delete('/items/:id', authenticate, async (req: AuthRequest, res: Response
 // Locations
 router.get('/locations', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId } = req.query;
-    const locations = await listLocations({ organizationId: organizationId as string | undefined });
+    const locations = await listLocations({ userId: req.user!.id, organizationId: orgIdParam(req.query.organizationId) });
     res.json({ data: locations });
   } catch (error) {
     next(error);
@@ -143,7 +148,7 @@ router.post('/locations', authenticate, async (req: AuthRequest, res: Response, 
     if (!parsed.success) {
       return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
     }
-    const location = await createLocation(parsed.data);
+    const location = await createLocation({ ...parsed.data, userId: req.user!.id });
     res.status(201).json({ data: location });
   } catch (error) {
     next(error);
@@ -175,10 +180,10 @@ router.delete('/locations/:id', authenticate, async (req: AuthRequest, res: Resp
 // Transactions
 router.get('/transactions', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId, itemId } = req.query;
     const transactions = await listTransactions({
-      organizationId: organizationId as string | undefined,
-      itemId: itemId as string | undefined,
+      userId: req.user!.id,
+      organizationId: orgIdParam(req.query.organizationId),
+      itemId: typeof req.query.itemId === 'string' ? req.query.itemId : undefined,
     });
     res.json({ data: transactions });
   } catch (error) {
@@ -227,8 +232,7 @@ router.delete('/transactions/:id', authenticate, async (req: AuthRequest, res: R
 // Stock levels
 router.get('/stock-levels', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId } = req.query;
-    const levels = await getStockLevels({ organizationId: organizationId as string | undefined });
+    const levels = await getStockLevels({ userId: req.user!.id, organizationId: orgIdParam(req.query.organizationId) });
     res.json({ data: levels });
   } catch (error) {
     next(error);

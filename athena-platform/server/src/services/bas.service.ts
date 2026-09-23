@@ -16,6 +16,7 @@
 
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { booksScope } from './accounting.service';
 import { createTaxReturn, submitTaxReturn } from './tax.service';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -79,7 +80,11 @@ export function parsePeriod(fromInput: unknown, toInput: unknown): { from: Date;
 }
 
 export async function computeBas(params: { userId: string; organizationId?: string; from: Date; to: Date }): Promise<BasWorksheet> {
-  const scope = params.organizationId ? { organizationId: params.organizationId } : { userId: params.userId, organizationId: null };
+  // The same scope the accounting reports read, resolved by the same helper so
+  // the two cannot drift: an organisation's GST position needs membership of
+  // that organisation. This route used to take the organizationId on trust,
+  // which turned a public organisation id into anyone's quarterly figures.
+  const scope = await booksScope(params);
   const journalLines = await prisma.journalLine.findMany({
     where: { journalEntry: { status: 'POSTED', ...scope, entryDate: { gte: params.from, lte: params.to } } },
     include: { account: { select: { id: true, name: true, code: true, type: true, taxTreatment: true } } },

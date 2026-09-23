@@ -5,11 +5,20 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 
+interface OrganizationOption {
+  id: string;
+  name: string;
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [levels, setLevels] = useState<any[]>([]);
+  // Stock belongs either to her or to an organisation she is a member of, and
+  // the server now refuses any other id. Typing one into a free-text box could
+  // only ever produce a rejection, so she picks from the ones she has.
+  const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -69,6 +78,22 @@ export default function InventoryPage() {
   useEffect(() => {
     let isMounted = true;
 
+    const loadOrganizations = async () => {
+      try {
+        const res = await api.get('/employer/organizations');
+        if (!isMounted) return;
+        const memberships = Array.isArray(res.data?.data) ? res.data.data : [];
+        setOrganizations(
+          memberships
+            .filter((org: any) => org?.id)
+            .map((org: any) => ({ id: String(org.id), name: String(org.name || org.id) }))
+        );
+      } catch {
+        // She may simply not belong to one; personal stock still works.
+        if (isMounted) setOrganizations([]);
+      }
+    };
+
     const load = async () => {
       try {
         const [itemsRes, levelsRes, locationsRes, transactionsRes] = await Promise.all([
@@ -95,6 +120,7 @@ export default function InventoryPage() {
     };
 
     load();
+    loadOrganizations();
     return () => {
       isMounted = false;
     };
@@ -483,12 +509,19 @@ export default function InventoryPage() {
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Item</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
-              <input
+              <label className="text-sm text-slate-600 dark:text-slate-400">Whose stock</label>
+              <select
                 value={itemForm.organizationId}
                 onChange={(e) => setItemForm({ ...itemForm, organizationId: e.target.value })}
                 className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-              />
+              >
+                <option value="">Mine</option>
+                {organizations.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-sm text-slate-600 dark:text-slate-400">SKU</label>
@@ -562,12 +595,19 @@ export default function InventoryPage() {
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Location</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-slate-600 dark:text-slate-400">Organization ID (optional)</label>
-              <input
+              <label className="text-sm text-slate-600 dark:text-slate-400">Whose location</label>
+              <select
                 value={locationForm.organizationId}
                 onChange={(e) => setLocationForm({ ...locationForm, organizationId: e.target.value })}
                 className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-              />
+              >
+                <option value="">Mine</option>
+                {organizations.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-sm text-slate-600 dark:text-slate-400">Name</label>
@@ -620,12 +660,20 @@ export default function InventoryPage() {
           </div>
           <div>
             <label className="text-sm text-slate-600 dark:text-slate-400">Location (optional)</label>
-            <input
+            {/* The item and its location have to be in the same books, which the
+                server checks; a typed id could only get that wrong. */}
+            <select
               value={transactionForm.locationId}
               onChange={(e) => setTransactionForm({ ...transactionForm, locationId: e.target.value })}
               className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-              placeholder="location_id"
-            />
+            >
+              <option value="">No location</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="text-sm text-slate-600 dark:text-slate-400">Type</label>

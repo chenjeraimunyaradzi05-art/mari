@@ -173,11 +173,22 @@ router.delete('/returns/:id', authenticate, async (req: AuthRequest, res: Respon
 });
 
 // GET /api/tax/bas?from=YYYY-MM-DD&to=YYYY-MM-DD[&organizationId=]: the worksheet, counted from the ledger
+//
+// The organisation is checked for membership inside computeBas. Shape is
+// checked here the way the lodgement below does it, so a malformed id comes
+// back as a 400 rather than a Prisma error dressed up as a server fault.
+const basQuerySchema = z.object({ organizationId: z.string().uuid().optional() });
+
 router.get('/bas', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { from, to } = parsePeriod(req.query.from, req.query.to);
-    const organizationId = typeof req.query.organizationId === 'string' && req.query.organizationId ? req.query.organizationId : undefined;
-    const worksheet = await computeBas({ userId: req.user!.id, organizationId, from, to });
+    const parsedQuery = basQuerySchema.safeParse({
+      organizationId: typeof req.query.organizationId === 'string' && req.query.organizationId ? req.query.organizationId : undefined,
+    });
+    if (!parsedQuery.success) {
+      return res.status(400).json({ success: false, message: 'organizationId must be a UUID' });
+    }
+    const worksheet = await computeBas({ userId: req.user!.id, organizationId: parsedQuery.data.organizationId, from, to });
     res.json({ success: true, data: worksheet });
   } catch (error) {
     next(error);

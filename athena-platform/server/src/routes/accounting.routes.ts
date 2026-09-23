@@ -62,12 +62,18 @@ const updateJournalSchema = z.object({
   entryDate: z.string().datetime().optional(),
 });
 
+// An organizationId in the query string narrows the books to that organisation,
+// and the service refuses it unless the caller is a member. Repeat the
+// parameter and Express hands back an array, which has no business reaching a
+// membership lookup, so anything that is not a single string is ignored.
+const orgIdParam = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.length > 0 ? value : undefined;
+
 // Accounts
 router.get('/accounts', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId } = req.query;
     const accounts = await listAccounts({
-      organizationId: organizationId as string | undefined,
+      organizationId: orgIdParam(req.query.organizationId),
       userId: req.user!.id,
     });
     res.json({ data: accounts });
@@ -117,11 +123,11 @@ router.delete('/accounts/:id', authenticate, async (req: AuthRequest, res: Respo
 // Journal Entries
 router.get('/journals', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId, status } = req.query;
+    const { status } = req.query;
     const entries = await listJournalEntries({
-      organizationId: organizationId as string | undefined,
+      organizationId: orgIdParam(req.query.organizationId),
       userId: req.user!.id,
-      status: status as any,
+      status: status === 'DRAFT' || status === 'POSTED' || status === 'VOID' ? status : undefined,
     });
     res.json({ data: entries });
   } catch (error) {
@@ -199,9 +205,9 @@ function dateParam(value: unknown, name: string): Date | undefined {
 
 router.get('/reports/profit-and-loss', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId, from, to } = req.query;
+    const { from, to } = req.query;
     const report = await getProfitAndLoss({
-      organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+      organizationId: orgIdParam(req.query.organizationId),
       userId: req.user!.id,
       from: dateParam(from, 'from'),
       to: dateParam(to, 'to'),
@@ -214,9 +220,9 @@ router.get('/reports/profit-and-loss', authenticate, async (req: AuthRequest, re
 
 router.get('/reports/balance-sheet', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId, asOf } = req.query;
+    const { asOf } = req.query;
     const report = await getBalanceSheet({
-      organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+      organizationId: orgIdParam(req.query.organizationId),
       userId: req.user!.id,
       asOf: dateParam(asOf, 'asOf'),
     });
@@ -228,9 +234,8 @@ router.get('/reports/balance-sheet', authenticate, async (req: AuthRequest, res:
 
 router.get('/reports/trial-balance', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { organizationId } = req.query;
     const report = await getTrialBalance({
-      organizationId: organizationId as string | undefined,
+      organizationId: orgIdParam(req.query.organizationId),
       userId: req.user!.id,
     });
     res.json({ data: report });

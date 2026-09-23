@@ -1,12 +1,34 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { assertOrgMembership } from '../utils/org-scope';
 
 const toDecimal = (value: number) => new Prisma.Decimal(value);
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
 const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'] as const;
 export const TAX_TREATMENTS = ['GST', 'GST_FREE', 'EXPORT', 'INPUT_TAXED', 'BAS_EXCLUDED', 'CAPITAL', 'GST_COLLECTED', 'GST_PAID'] as const;
 export type TaxTreatment = (typeof TAX_TREATMENTS)[number];
+
+/**
+ * Which set of books a caller may work in.
+ *
+ * An organisation's books need membership; personal books are the caller's own
+ * rows with no organisation on them. Every read and write in this file that
+ * accepts an organizationId resolves it through here, so that an id off the
+ * wire can only narrow the caller's scope. Journal entries and accounts used to
+ * take it on trust, which let anyone file into anyone's ledger.
+ */
+export type BooksScope =
+  | { organizationId: string; userId?: undefined }
+  | { organizationId: null; userId: string };
+
+export async function booksScope(params: { organizationId?: string; userId: string }): Promise<BooksScope> {
+  if (params.organizationId) {
+    await assertOrgMembership(params.organizationId, params.userId);
+    return { organizationId: params.organizationId };
+  }
+  return { userId: params.userId, organizationId: null };
+}
 
 /**
  * Verify user has access to an accounting account
@@ -75,7 +97,7 @@ export interface JournalLineInput {
 
 export interface JournalEntryInput {
   organizationId?: string;
-  userId?: string;
+  userId: string;
   description: string;
   reference?: string;
   entryDate?: string | Date;
@@ -85,20 +107,22 @@ export interface JournalEntryInput {
 
 export async function listAccounts(params: {
   organizationId?: string;
-  userId?: string;
+  userId: string;
 }) {
+  // An organisation's chart of accounts is shared by its members, which is why
+  // this lists the scope rather than the caller's own rows within it: the
+  // reports below already read the whole organisation, and a chart that
+  // disagreed with the trial balance was the confusing half of that.
+  const scope = await booksScope(params);
   return prisma.accountingAccount.findMany({
-    where: {
-      organizationId: params.organizationId || undefined,
-      userId: params.userId || undefined,
-    },
+    where: scope,
     orderBy: { name: 'asc' },
   });
 }
 
 export async function createAccount(data: {
   organizationId?: string;
-  userId?: string;
+  userId: string;
   name: string;
   code?: string;
   type: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
@@ -121,10 +145,16 @@ export async function createAccount(data: {
     throw new ApiError(400, 'Invalid tax treatment');
   }
 
+  const scope = await booksScope(data);
+
   return prisma.accountingAccount.create({
     data: {
       organizationId: data.organizationId,
-      userId: data.userId,
+      // An organisation's account belongs to the organisation, not to whoever
+      // typed it in, so only personal books carry an owner. Stamping both would
+      // leave a member who has since left the organisation still able to edit it
+      // through verifyAccountAccess's ownership branch.
+      userId: scope.userId ?? null,
       name: data.name,
       code: data.code,
       type: data.type,
@@ -202,12 +232,39 @@ function validateJournalLines(lines: JournalLineInput[]) {
   }
 }
 
+/**
+ * Every line has to cite an account out of the same set of books the entry is
+ * being filed into. Scoping the entry alone is not enough: a balanced entry
+ * could name any account id it liked and the organisation's trial balance,
+ * which reads posted lines by account, would count it.
+ */
+async function assertLinesInScope(lines: JournalLineInput[], scope: BooksScope) {
+  const accountIds = Array.from(new Set(lines.map((line) => line.accountId)));
+  const accounts = await prisma.accountingAccount.findMany({
+    where: { id: { in: accountIds } },
+    select: { id: true, organizationId: true, userId: true },
+  });
+  if (accounts.length !== accountIds.length) {
+    throw new ApiError(404, 'Account not found');
+  }
+  const belongs = (account: { organizationId: string | null; userId: string | null }) =>
+    scope.organizationId
+      ? account.organizationId === scope.organizationId
+      : account.organizationId === null && account.userId === scope.userId;
+  if (!accounts.every(belongs)) {
+    throw new ApiError(403, 'Every line has to use an account from the same books the entry is filed into');
+  }
+}
+
 export async function createJournalEntry(input: JournalEntryInput) {
   if (!input.description) {
     throw new ApiError(400, 'Journal description is required');
   }
 
   validateJournalLines(input.lines);
+
+  const scope = await booksScope(input);
+  await assertLinesInScope(input.lines, scope);
 
   const entryDate = input.entryDate ? new Date(input.entryDate) : new Date();
   const status = input.status === 'POSTED' ? 'POSTED' : 'DRAFT';
@@ -236,13 +293,17 @@ export async function createJournalEntry(input: JournalEntryInput) {
 
 export async function listJournalEntries(params: {
   organizationId?: string;
-  userId?: string;
+  userId: string;
   status?: 'DRAFT' | 'POSTED' | 'VOID';
 }) {
+  // The organisation's journal, not the caller's slice of it. ANDing the
+  // caller's own id used to hide every entry a member had not written
+  // themselves — including anything filed into the books by someone who was
+  // never a member — while the reports went on counting all of it.
+  const scope = await booksScope(params);
   return prisma.journalEntry.findMany({
     where: {
-      organizationId: params.organizationId || undefined,
-      userId: params.userId || undefined,
+      ...scope,
       status: params.status || undefined,
     },
     include: { lines: true },
@@ -325,22 +386,7 @@ export async function updateJournalEntry(id: string, userId: string, data: {
 // REPORTS
 // ===========================================
 // Every report reads the same way: posted journal lines, inside the books the
-// caller may see. An organisation's books need membership; personal books are
-// the caller's own entries with no organisation on them.
-
-async function reportScope(params: { organizationId?: string; userId: string }) {
-  if (params.organizationId) {
-    const membership = await prisma.organizationMember.findFirst({
-      where: { organizationId: params.organizationId, userId: params.userId },
-      select: { id: true },
-    });
-    if (!membership) {
-      throw new ApiError(403, 'Access denied');
-    }
-    return { organizationId: params.organizationId };
-  }
-  return { userId: params.userId, organizationId: null };
-}
+// caller may see, which is what booksScope above resolves.
 
 export interface AccountTotal {
   accountId: string;
@@ -383,7 +429,7 @@ async function accountTotals(
 }
 
 export async function getTrialBalance(params: { organizationId?: string; userId: string }) {
-  const scope = await reportScope(params);
+  const scope = await booksScope(params);
   return accountTotals(scope, {});
 }
 
@@ -393,7 +439,7 @@ export async function getTrialBalance(params: { organizationId?: string; userId:
  * read as a positive amount.
  */
 export async function getProfitAndLoss(params: { organizationId?: string; userId: string; from?: Date; to?: Date }) {
-  const scope = await reportScope(params);
+  const scope = await booksScope(params);
   const totals = await accountTotals(scope, { from: params.from, to: params.to });
   const revenue = totals.filter((t) => t.type === 'REVENUE').map((t) => ({ ...t, amount: round2(t.credit - t.debit) }));
   const expenses = totals.filter((t) => t.type === 'EXPENSE').map((t) => ({ ...t, amount: round2(t.debit - t.credit) }));
@@ -415,7 +461,7 @@ export async function getProfitAndLoss(params: { organizationId?: string; userId
  * what makes the two sides balance.
  */
 export async function getBalanceSheet(params: { organizationId?: string; userId: string; asOf?: Date }) {
-  const scope = await reportScope(params);
+  const scope = await booksScope(params);
   const totals = await accountTotals(scope, { to: params.asOf });
   const assets = totals.filter((t) => t.type === 'ASSET').map((t) => ({ ...t, amount: round2(t.debit - t.credit) }));
   const liabilities = totals.filter((t) => t.type === 'LIABILITY').map((t) => ({ ...t, amount: round2(t.credit - t.debit) }));
