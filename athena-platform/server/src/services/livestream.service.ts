@@ -25,8 +25,10 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
+import { blockUser, getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
 import { GIFT_TYPES, getCreatorTier } from './creator.service';
-import { emitToLiveRoom, emitToUserRoom, liveRoomSize, sendNotification } from './socket.service';
+import { assertContentAllowed } from './moderation.service';
+import { emitToLiveRoom, emitToUserRoom, liveRoomSize, removeFromLiveRoom, sendNotification } from './socket.service';
 
 export const LIVE_CATEGORIES = ['career', 'learning', 'business', 'wellbeing', 'community', 'q-and-a'] as const;
 export const LIVE_CHAT_MAX_LENGTH = 500;
@@ -48,10 +50,27 @@ export function ingestConfig(): { ingestUrl: string | null; playbackTemplate: st
   return { ingestUrl, playbackTemplate };
 }
 
-export function playbackUrlFor(streamKey: string): string | null {
+/**
+ * The viewer-facing URL for a stream.
+ *
+ * `{streamKey}` is the token the documented nginx-rtmp style template uses,
+ * because those servers publish HLS under the name the encoder pushed — which
+ * is the key. That has a cost worth stating plainly: the key is the credential
+ * that authorises pushing video into this stream, and a URL handed to every
+ * viewer prints it. `publicView` strips `streamKey` and `ingestUrl` from a
+ * non-host response and always did, but it cannot strip `playbackUrl`, because
+ * that is the thing a viewer needs in order to watch.
+ *
+ * So `{streamId}` is accepted too. An ingest server that can publish under a
+ * name of our choosing — the publish hook already hands it the stream id in
+ * the /key/validate response — can be pointed at a template built from the id,
+ * and then nothing the audience receives contains the key at all. Deployments
+ * that cannot remap keep using `{streamKey}` and are no worse off than before.
+ */
+export function playbackUrlFor(stream: { id: string; streamKey: string }): string | null {
   const { playbackTemplate } = ingestConfig();
   if (!playbackTemplate) return null;
-  return playbackTemplate.replace('{streamKey}', streamKey);
+  return playbackTemplate.replace('{streamKey}', stream.streamKey).replace('{streamId}', stream.id);
 }
 
 function newStreamKey(): string {
@@ -111,7 +130,7 @@ export async function createStream(hostId: string, input: StreamInput) {
         description: input.description ?? open.description,
         category: input.category ?? open.category,
         thumbnailUrl: input.thumbnailUrl ?? open.thumbnailUrl,
-        playbackUrl: input.playbackUrl ?? open.playbackUrl ?? playbackUrlFor(open.streamKey),
+        playbackUrl: input.playbackUrl ?? open.playbackUrl ?? playbackUrlFor(open),
         scheduledFor: input.scheduledFor ?? open.scheduledFor,
         ingestUrl,
       },
@@ -121,8 +140,12 @@ export async function createStream(hostId: string, input: StreamInput) {
   }
 
   const streamKey = newStreamKey();
+  // The id is minted here rather than by the database default so the playback
+  // URL can be templated on it in the same statement that creates the row.
+  const id = crypto.randomUUID();
   const created = await prisma.liveStream.create({
     data: {
+      id,
       hostId,
       title: input.title,
       description: input.description ?? null,
@@ -130,7 +153,7 @@ export async function createStream(hostId: string, input: StreamInput) {
       thumbnailUrl: input.thumbnailUrl ?? null,
       streamKey,
       ingestUrl,
-      playbackUrl: input.playbackUrl ?? playbackUrlFor(streamKey),
+      playbackUrl: input.playbackUrl ?? playbackUrlFor({ id, streamKey }),
       scheduledFor: input.scheduledFor ?? null,
     },
     include: { host: { select: HOST_SELECT } },
@@ -314,6 +337,14 @@ export async function myStreams(hostId: string, limit = 20) {
 // Chat
 // ===========================================
 
+/**
+ * Both doors into a host's chat come through here — the REST route and the
+ * socket's `live:chat` — which is why the block check and the moderation gate
+ * live in the service rather than on one of them. Neither existed: a woman
+ * could block someone hard enough that he could not message her, comment on
+ * her posts or repost her, and he could still walk into her live chat and
+ * talk to her in front of her audience.
+ */
 export async function postChatMessage(streamId: string, userId: string, content: string) {
   const stream = await prisma.liveStream.findUnique({
     where: { id: streamId },
@@ -323,6 +354,16 @@ export async function postChatMessage(streamId: string, userId: string, content:
   if (stream.status !== 'LIVE' && stream.hostId !== userId) {
     throw new ApiError(409, 'This stream is not live');
   }
+  // Deliberately says neither who blocked whom nor that a block exists: the
+  // room is public, so 404 would be a transparent lie, but confirming the
+  // block back to him tells him something he is not owed.
+  if (await isBlockedRelationship(userId, stream.hostId)) {
+    throw new ApiError(403, 'You cannot take part in this stream.');
+  }
+  // 'live_chat', not 'message': both are held to the conversational line, but
+  // the kind is what a reviewer reads when something was let through, and a
+  // line said in front of a stream's whole audience is not a direct message.
+  await assertContentAllowed(content, { kind: 'live_chat', userId });
 
   const [message] = await prisma.$transaction([
     prisma.liveStreamMessage.create({
@@ -336,16 +377,122 @@ export async function postChatMessage(streamId: string, userId: string, content:
   return message;
 }
 
-export async function recentMessages(streamId: string, limit = 100) {
+/**
+ * The backlog a viewer sees when she opens the room. Filtered for her: someone
+ * she blocked, or who blocked her, is not in it — including anyone the host
+ * removed after they had already spoken, whose lines the removal deletes but
+ * whose earlier presence would otherwise still be readable to everyone who
+ * reloads.
+ */
+export async function recentMessages(streamId: string, limit = 100, viewerId?: string) {
   const stream = await prisma.liveStream.findUnique({ where: { id: streamId }, select: { hostId: true } });
   if (!stream) throw new ApiError(404, 'Stream not found');
+  const hidden = viewerId ? await getBlockedRelationshipIds(viewerId) : [];
   const rows = await prisma.liveStreamMessage.findMany({
-    where: { streamId },
+    where: { streamId, ...(hidden.length ? { userId: { notIn: hidden } } : {}) },
     include: { user: { select: CHAT_USER_SELECT } },
     orderBy: { createdAt: 'desc' },
     take: Math.min(limit, 200),
   });
   return rows.reverse().map((row) => ({ ...row, isHost: row.userId === stream.hostId }));
+}
+
+// ===========================================
+// Host controls
+// ===========================================
+//
+// A host had none of these. Her only answer to someone abusing her chat was to
+// end the stream, which is the abuser's win. These are modelled on the group
+// moderation in routes/group.routes.ts: the actor is checked first, the target
+// is looked up second, and the room is told what happened so every client
+// agrees on what is in the chat.
+
+/**
+ * Take one message out of the room.
+ *
+ * The row is deleted rather than flagged. Live chat is a transcript of a
+ * moment, not a record anyone can navigate back to, and there is nothing in
+ * the schema to flag it with — so a soft-delete here would mean a message that
+ * is still served to everyone who reloads. What preserves the evidence is the
+ * report, which copies the text out of the chat and into the moderation queue;
+ * that is why the report path must not depend on the row surviving.
+ */
+export async function deleteChatMessage(streamId: string, messageId: string, hostId: string) {
+  const stream = await loadOwnStream(streamId, hostId);
+
+  const message = await prisma.liveStreamMessage.findUnique({
+    where: { id: messageId },
+    select: { id: true, streamId: true, userId: true },
+  });
+  if (!message || message.streamId !== stream.id) throw new ApiError(404, 'Message not found');
+
+  await prisma.$transaction([
+    prisma.liveStreamMessage.delete({ where: { id: message.id } }),
+    // messageCount is what the stream summary reports, so a removed message
+    // must stop counting; the floor keeps a stream whose count drifted from a
+    // failed write from going negative.
+    prisma.liveStream.updateMany({
+      where: { id: stream.id, messageCount: { gt: 0 } },
+      data: { messageCount: { decrement: 1 } },
+    }),
+  ]);
+
+  emitToLiveRoom(streamId, 'live:message_removed', { streamId, messageId: message.id });
+  return { removed: message.id };
+}
+
+/**
+ * Remove someone from the stream and keep them out.
+ *
+ * Removal is a block, not a stream-scoped ban, and that is the point. A ban
+ * that covers one broadcast means she does it again at her next one, to the
+ * same man; the block store this calls is the platform's durable answer, it is
+ * symmetric, every other surface already enforces it, and she can see and undo
+ * it from the Safety Center. Once it is recorded, `postChatMessage`,
+ * `sendStreamGift` and the socket's `live:join` above all refuse him on their
+ * own — so this function does not have to hold any state of its own to make
+ * the removal stick.
+ *
+ * What it does do is make the removal immediate: his lines come out of the
+ * chat, his sockets leave the room, and the room is told, so nobody is still
+ * reading him a minute later.
+ */
+export async function removeViewer(streamId: string, hostId: string, targetUserId: string) {
+  const stream = await loadOwnStream(streamId, hostId);
+  if (targetUserId === hostId) throw new ApiError(400, 'You cannot remove yourself from your own stream');
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, displayName: true },
+  });
+  if (!target) throw new ApiError(404, 'Member not found');
+
+  await blockUser(hostId, target.id);
+
+  const removed = await prisma.liveStreamMessage.findMany({
+    where: { streamId: stream.id, userId: target.id },
+    select: { id: true },
+  });
+  if (removed.length > 0) {
+    await prisma.$transaction([
+      prisma.liveStreamMessage.deleteMany({ where: { id: { in: removed.map((row) => row.id) } } }),
+      prisma.liveStream.updateMany({
+        where: { id: stream.id, messageCount: { gte: removed.length } },
+        data: { messageCount: { decrement: removed.length } },
+      }),
+    ]);
+    for (const row of removed) {
+      emitToLiveRoom(streamId, 'live:message_removed', { streamId, messageId: row.id });
+    }
+  }
+
+  removeFromLiveRoom(stream.id, target.id);
+
+  return {
+    removed: target.id,
+    messagesRemoved: removed.length,
+    blocked: true,
+  };
 }
 
 // ===========================================
@@ -394,11 +541,20 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
   if (!stream) throw new ApiError(404, 'Stream not found');
   if (stream.status !== 'LIVE') throw new ApiError(409, 'This stream is not live');
   if (stream.hostId === senderId) throw new ApiError(400, 'You cannot gift your own stream');
+  if (await isBlockedRelationship(senderId, stream.hostId)) {
+    throw new ApiError(403, 'You cannot take part in this stream.');
+  }
 
   const sender = await prisma.user.findUnique({
     where: { id: senderId },
     select: { id: true, displayName: true, giftBalance: true },
   });
+  // A cheap early exit, and nothing more than that. It used to be the only
+  // check, and it cannot be: gift points are bought with real money, and
+  // between this read and the debit below sits a follower count — a whole
+  // database round trip — during which a second request can read the same
+  // balance and spend it again. Two gifts, one balance, and the creator's
+  // share of both lands in pendingPayout and leaves as a real Stripe transfer.
   if (!sender || sender.giftBalance < gift.value) {
     throw new ApiError(402, 'Not enough gift points. Top up to send this gift.');
   }
@@ -408,8 +564,22 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
   const creatorShare = Math.floor(gift.value * (tier.revShare / 100));
   const platformShare = gift.value - creatorShare;
 
-  const [transaction, updatedStream] = await prisma.$transaction([
-    prisma.giftTransaction.create({
+  // The interactive form, so a refused debit rolls back the sibling writes
+  // instead of recording a gift nobody paid for.
+  const { transaction, updatedStream, balance } = await prisma.$transaction(async (tx) => {
+    // The debit is the guard. A conditional updateMany makes the balance test
+    // and the decrement one atomic statement, so of two racing gifts exactly
+    // one finds points to take and the other gets a clean 402 — where before,
+    // both took them and the balance went negative.
+    const debit = await tx.user.updateMany({
+      where: { id: senderId, giftBalance: { gte: gift.value } },
+      data: { giftBalance: { decrement: gift.value } },
+    });
+    if (debit.count === 0) {
+      throw new ApiError(402, 'Not enough gift points. Top up to send this gift.');
+    }
+
+    const created = await tx.giftTransaction.create({
       data: {
         senderId,
         receiverId: stream.hostId,
@@ -420,18 +590,23 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
         platformShare,
         message: message ?? null,
       },
-    }),
-    prisma.liveStream.update({
+    });
+    const credited = await tx.liveStream.update({
       where: { id: streamId },
       data: { totalGiftPoints: { increment: gift.value } },
       select: { totalGiftPoints: true },
-    }),
-    prisma.user.update({ where: { id: senderId }, data: { giftBalance: { decrement: gift.value } } }),
-    prisma.creatorProfile.updateMany({
+    });
+    await tx.creatorProfile.updateMany({
       where: { userId: stream.hostId },
       data: { totalEarnings: { increment: creatorShare }, pendingPayout: { increment: creatorShare } },
-    }),
-  ]);
+    });
+    // Read back rather than subtracting from the stale figure above, which
+    // reported a balance that was already wrong whenever anything else had
+    // touched the wallet since.
+    const after = await tx.user.findUnique({ where: { id: senderId }, select: { giftBalance: true } });
+
+    return { transaction: created, updatedStream: credited, balance: after?.giftBalance ?? 0 };
+  });
 
   const payload = {
     streamId,
@@ -463,7 +638,7 @@ export async function sendStreamGift(streamId: string, senderId: string, giftTyp
     })
   );
 
-  return { transaction, totalGiftPoints: updatedStream.totalGiftPoints, balance: sender.giftBalance - gift.value };
+  return { transaction, totalGiftPoints: updatedStream.totalGiftPoints, balance };
 }
 
 export async function giftLeaderboard(streamId: string, limit = 10) {

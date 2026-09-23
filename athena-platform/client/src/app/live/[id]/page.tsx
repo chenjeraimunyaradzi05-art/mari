@@ -118,6 +118,14 @@ export default function LiveWatchPage() {
     const onViewers = (payload: { streamId?: string; count?: number }) => {
       if (payload?.streamId === streamId && typeof payload.count === 'number') setViewers(payload.count);
     };
+    // A message the host removed has to leave every viewer's chat, not just
+    // hers — otherwise the abuse she deleted is still on everybody's screen.
+    const onMessageRemoved = (payload: { streamId?: string; messageId?: string }) => {
+      if (payload?.streamId !== streamId || !payload.messageId) return;
+      setRows((current) =>
+        current.filter((row) => !(row.kind === 'chat' && row.message.id === payload.messageId))
+      );
+    };
     const onGift = (payload: {
       streamId?: string;
       gift?: { name: string; icon: string; value: number };
@@ -152,6 +160,7 @@ export default function LiveWatchPage() {
 
     socket.on('live:message', onMessage);
     socket.on('live:viewers', onViewers);
+    socket.on('live:message_removed', onMessageRemoved);
     socket.on('live:gift', onGift);
     socket.on('live:status', onStatus);
     socket.on('live:error', onError);
@@ -160,6 +169,7 @@ export default function LiveWatchPage() {
     return () => {
       socket.off('live:message', onMessage);
       socket.off('live:viewers', onViewers);
+      socket.off('live:message_removed', onMessageRemoved);
       socket.off('live:gift', onGift);
       socket.off('live:status', onStatus);
       socket.off('live:error', onError);
@@ -189,6 +199,40 @@ export default function LiveWatchPage() {
       toast.error(errorMessage(error, 'Message not sent'));
     } finally {
       setSending(false);
+    }
+  };
+
+  // Removing a line she should not have had to read. The row goes immediately
+  // rather than waiting for the socket to echo it back, because the point of
+  // the control is that it is fast; if the call fails the row comes back with
+  // the reason.
+  const removeMessage = async (messageId: string) => {
+    if (!streamId) return;
+    const previous = rows;
+    setRows((current) => current.filter((row) => !(row.kind === 'chat' && row.message.id === messageId)));
+    try {
+      await livestreamApi.removeMessage(streamId, messageId);
+    } catch (error) {
+      setRows(previous);
+      toast.error(errorMessage(error, 'That message could not be removed'));
+    }
+  };
+
+  const removeFromStream = async (userId: string, displayName?: string | null) => {
+    if (!streamId) return;
+    const who = displayName || 'That viewer';
+    // Removal is a block, not a stream-scoped kick — it lasts past this stream,
+    // which is what she almost always wants and is hard to discover from a
+    // one-word button, so it is said plainly before it happens.
+    if (!window.confirm(`Remove ${who} from this stream and block them? Their messages here will be deleted and they will not be able to reach you afterwards.`)) {
+      return;
+    }
+    try {
+      await livestreamApi.removeViewer(streamId, userId);
+      setRows((current) => current.filter((row) => !(row.kind === 'chat' && row.message.user?.id === userId)));
+      toast.success(`${who} has been removed and blocked`);
+    } catch (error) {
+      toast.error(errorMessage(error, 'That viewer could not be removed'));
     }
   };
 
@@ -366,7 +410,7 @@ export default function LiveWatchPage() {
             )}
             {rows.map((row) =>
               row.kind === 'chat' ? (
-                <div key={row.id} className="flex items-start gap-2 text-sm">
+                <div key={row.id} className="group flex items-start gap-2 text-sm">
                   <Avatar
                     src={row.message.user?.avatar ?? undefined}
                     fallback={initials(row.message.user?.displayName)}
@@ -379,6 +423,31 @@ export default function LiveWatchPage() {
                     </span>
                     {renderSocialText(row.message.content)}
                   </p>
+                  {/* The host's answer to someone spoiling her stream. Shown on
+                      hover and focus so the chat stays readable, but reachable
+                      by keyboard rather than hover-only. */}
+                  {stream?.isHost && !row.message.isHost && (
+                    <span className="flex shrink-0 gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => removeMessage(row.message.id)}
+                        className="rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                        title="Delete this message"
+                      >
+                        Delete
+                      </button>
+                      {row.message.user?.id && (
+                        <button
+                          type="button"
+                          onClick={() => removeFromStream(row.message.user!.id!, row.message.user?.displayName)}
+                          className="rounded px-1 text-xs text-slate-500 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                          title="Remove from the stream and block"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                  )}
                 </div>
               ) : row.kind === 'gift' ? (
                 <div key={row.id} className="rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">

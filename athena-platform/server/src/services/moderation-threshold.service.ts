@@ -22,6 +22,27 @@ async function distinctReporters(contentType: ReportableContent, contentId: stri
   return rows.length;
 }
 
+/**
+ * Reports filed without an account are SafetyIncident rows, because a
+ * ContentReport names a member on both sides. They carry no reporter identity,
+ * so counting them one by one would hand a single person the power to hide
+ * anything by reporting it three times signed out. The whole anonymous cohort
+ * therefore counts as one voice: never enough on its own, enough to tip content
+ * that identified members have also reported.
+ */
+async function anonymousVoice(contentType: ReportableContent, contentId: string): Promise<number> {
+  const anonymous = await prisma.safetyIncident.count({
+    where: {
+      type: 'USER_REPORT',
+      contentType: contentType.toUpperCase(),
+      contentId,
+      resolvedAt: null,
+      metadata: { path: ['anonymous'], equals: true },
+    },
+  });
+  return anonymous > 0 ? 1 : 0;
+}
+
 const NOTICE: Record<ReportableContent, string> = {
   post: 'One of your posts was hidden while our team reviews reports about it. It will be restored if it is found to follow the community guidelines.',
   comment: 'One of your comments was hidden while our team reviews reports about it. It will be restored if it is found to follow the community guidelines.',
@@ -34,7 +55,11 @@ const NOTICE: Record<ReportableContent, string> = {
  */
 export async function reviewReportedContent(contentType: ReportableContent, contentId: string): Promise<boolean> {
   try {
-    const reporters = await distinctReporters(contentType, contentId);
+    const [named, anonymous] = await Promise.all([
+      distinctReporters(contentType, contentId),
+      anonymousVoice(contentType, contentId),
+    ]);
+    const reporters = named + anonymous;
     if (reporters < AUTO_HIDE_REPORTERS) return false;
 
     let authorId: string | null = null;

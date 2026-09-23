@@ -10,11 +10,25 @@ jest.mock('../../utils/prisma', () => ({
       deleteMany: jest.fn(async () => ({ count: 1 })),
     },
     follow: { findMany: jest.fn(async () => []) },
-    user: { findUnique: jest.fn() },
+    // Posting a story now passes the women-only floor and the age gate, both of
+    // which read the User row. The default here is an adult member nobody has
+    // refused, so these tests keep testing audience rules rather than the gates;
+    // the gates have their own suite in middleware/__tests__/account-gates.test.ts.
+    user: {
+      findUnique: jest.fn(async () => ({
+        womanVerificationStatus: 'UNVERIFIED',
+        dvSafetyProfile: null,
+        profile: null,
+        dateOfBirth: new Date('1990-01-01'),
+      })),
+    },
     status: { findMany: jest.fn(async () => []), create: jest.fn(), findFirst: jest.fn() },
     statusView: { findMany: jest.fn(async () => []), findUnique: jest.fn(async () => null), create: jest.fn() },
     post: { findMany: jest.fn(async () => []) },
     video: { findMany: jest.fn(async () => []) },
+    // The story feed excludes blocked members in both directions now, and the
+    // block list lives on UserSafetySettings.blockedUsers.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
   },
 }));
@@ -41,7 +55,22 @@ import { prisma as prismaTyped } from '../../utils/prisma';
 import { closeFriendsAudienceWhere } from '../status.routes';
 
 const prisma: any = prismaTyped;
-const person = (id: string, name: string) => ({ id, firstName: name, lastName: 'X', displayName: `${name} X.`, avatar: null, headline: null });
+// The gate fields ride along on every person fixture because prisma.user
+// findUnique now answers two different questions in this file: who a close
+// friend is, and whether the poster is an adult account nobody has refused.
+// An adult, unrefused member keeps these tests about audience rules.
+const person = (id: string, name: string) => ({
+  id,
+  firstName: name,
+  lastName: 'X',
+  displayName: `${name} X.`,
+  avatar: null,
+  headline: null,
+  womanVerificationStatus: 'UNVERIFIED',
+  dvSafetyProfile: null,
+  profile: null,
+  dateOfBirth: new Date('1990-01-01'),
+});
 
 describe('Close friends and story audience', () => {
   beforeEach(() => {

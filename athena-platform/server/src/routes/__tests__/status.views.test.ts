@@ -5,8 +5,27 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     status: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
     statusView: { findMany: jest.fn(async () => []), findUnique: jest.fn(), create: jest.fn() },
+    // Blocks live on UserSafetySettings.blockedUsers; utils/safety-store reads
+    // both directions out of it.
+    userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
+    // Publishing a story passes the women-only floor and the age gate, and both
+    // read the User row. An adult member nobody has refused, so these tests stay
+    // about seen state and captions; the gates are proved in
+    // middleware/__tests__/account-gates.test.ts and refused below.
+    user: {
+      findUnique: jest.fn(async () => ({
+        womanVerificationStatus: 'UNVERIFIED',
+        dvSafetyProfile: null,
+        profile: null,
+        dateOfBirth: new Date('1990-01-01'),
+      })),
+    },
     $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
   },
+}));
+
+jest.mock('../../services/moderation.service', () => ({
+  assertContentAllowed: jest.fn(async () => undefined),
 }));
 
 jest.mock('../../middleware/auth', () => ({
@@ -28,6 +47,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { assertContentAllowed } from '../../services/moderation.service';
 
 const prisma: any = prismaTyped;
 const VIEWER = 'viewer-1';
@@ -49,6 +69,8 @@ const story = (id: string, userId: string, minutesAgo: number, extra: Record<str
 describe('Stories: seen state and views', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.userSafetySettings.findUnique.mockResolvedValue(null);
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
   });
 
   it('orders your own bucket first, then unseen, and marks what you have watched', async () => {
@@ -98,6 +120,85 @@ describe('Stories: seen state and views', () => {
     ]);
     const res = await request(app).get('/api/status/s1/viewers').set(as('u-a')).expect(200);
     expect(res.body.data.viewers[0].displayName).toBe('Sarah D.');
+  });
+
+  it('keeps a blocked pair out of each other’s ring, views and viewer list', async () => {
+    // She blocked him. Blocking is symmetric, so safety-store answers with the
+    // same list whichever of the two is asking.
+    prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: [] });
+    prisma.userSafetySettings.findMany.mockResolvedValue([{ userId: 'her' }]);
+    prisma.status.findMany.mockResolvedValue([]);
+
+    await request(app).get('/api/status/feed').set(as('him')).expect(200);
+    expect(prisma.status.findMany.mock.calls[0][0].where).toMatchObject({ userId: { notIn: ['her'] } });
+
+    // Her story is one he could otherwise watch: the audience clause lets him
+    // through, and only the block turns him away.
+    prisma.status.findFirst.mockResolvedValue({ id: 's1', userId: 'her', expiresAt: new Date(Date.now() + 1000), viewCount: 2 });
+    await request(app).post('/api/status/s1/view').set(as('him')).expect(404);
+    expect(prisma.statusView.create).not.toHaveBeenCalled();
+
+    // And a view he recorded before the block does not survive it: severTies
+    // clears follows and close friends, never StatusView rows. Asked from her
+    // side, the same block is the one she wrote down.
+    prisma.userSafetySettings.findUnique.mockResolvedValue({ blockedUsers: ['him'] });
+    prisma.userSafetySettings.findMany.mockResolvedValue([]);
+    prisma.status.findUnique.mockResolvedValue({ id: 's1', userId: 'her', viewCount: 3 });
+    prisma.statusView.findMany.mockResolvedValue([]);
+    await request(app).get('/api/status/s1/viewers').set(as('her')).expect(200);
+    expect(prisma.statusView.findMany.mock.calls.at(-1)[0].where).toMatchObject({ statusId: 's1', userId: { notIn: ['him'] } });
+  });
+
+  it('puts a story caption through the moderation gate before it is published', async () => {
+    prisma.status.create.mockImplementation(async ({ data }: any) => ({ id: 's8', ...data, viewCount: 0, createdAt: new Date() }));
+
+    await request(app)
+      .post('/api/status')
+      .set(as(VIEWER))
+      .send({ type: 'image', mediaUrl: 'https://cdn.example.com/x.jpg', caption: 'Back on site today' })
+      .expect(201);
+    expect(assertContentAllowed).toHaveBeenCalledWith('Back on site today', { kind: 'comment', userId: VIEWER });
+
+    // Nothing to screen, no call.
+    (assertContentAllowed as jest.Mock).mockClear();
+    await request(app)
+      .post('/api/status')
+      .set(as(VIEWER))
+      .send({ type: 'image', mediaUrl: 'https://cdn.example.com/x.jpg' })
+      .expect(201);
+    expect(assertContentAllowed).not.toHaveBeenCalled();
+  });
+
+  // The gates are only worth anything if they are attached to the route. They
+  // were written once before and applied to nothing, which is how a platform
+  // sold as women-only came to enforce it on exactly one feature.
+  it('refuses to publish a story for an account a reviewer has refused', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({
+      womanVerificationStatus: 'REJECTED',
+      dvSafetyProfile: null,
+      profile: null,
+      dateOfBirth: new Date('1990-01-01'),
+    });
+    const res = await request(app)
+      .post('/api/status')
+      .set(as(VIEWER))
+      .send({ type: 'image', mediaUrl: 'https://cdn.example.com/x.jpg' })
+      .expect(403);
+    expect(res.body.code).toBe('WOMAN_VERIFICATION_REJECTED');
+    expect(prisma.status.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to publish a story for an account that has never given a date of birth', async () => {
+    prisma.user.findUnique
+      .mockResolvedValueOnce({ womanVerificationStatus: 'VERIFIED', dvSafetyProfile: null, profile: null })
+      .mockResolvedValueOnce({ dateOfBirth: null });
+    const res = await request(app)
+      .post('/api/status')
+      .set(as(VIEWER))
+      .send({ type: 'image', mediaUrl: 'https://cdn.example.com/x.jpg' })
+      .expect(403);
+    expect(res.body.code).toBe('DATE_OF_BIRTH_REQUIRED');
+    expect(prisma.status.create).not.toHaveBeenCalled();
   });
 
   it('a story can carry a caption', async () => {

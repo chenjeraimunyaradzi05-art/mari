@@ -12,16 +12,20 @@
  *   POST   /api/livestream/:id/end         host ends it
  *   GET    /api/livestream/:id/messages    recent chat
  *   POST   /api/livestream/:id/messages    say something (REST path; the socket is the live one)
+ *   DELETE /api/livestream/:id/messages/:messageId  host takes a message out of the room
+ *   DELETE /api/livestream/:id/viewers/:userId      host removes someone from her stream
  *   POST   /api/livestream/:id/gift        send a gift
  *   GET    /api/livestream/:id/leaderboard top gifters
  *   POST   /api/livestream/key/validate    RTMP publish hook: may this key push?
  *   POST   /api/livestream/webhooks/rtmp   RTMP publish / publish_done events
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { liveChatLimiter } from '../middleware/socialLimits';
 import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
 import * as live from '../services/livestream.service';
 
@@ -56,14 +60,39 @@ function optionalDate(value: unknown, field: string): Date | null | undefined {
   return date;
 }
 
-// The hook secret is optional so a self-hosted RTMP server on a private
-// network can be used without one; set LIVESTREAM_WEBHOOK_SECRET in
-// production and the hooks refuse anything that does not present it.
+/**
+ * Compares a presented secret without leaking its length or its prefix through
+ * timing. Digests are compared rather than the strings themselves, because
+ * timingSafeEqual requires equal-length buffers and the length of what someone
+ * sent is itself something not worth telling them.
+ */
+function secretMatches(presented: unknown, expected: string): boolean {
+  if (typeof presented !== 'string' || presented.length === 0) return false;
+  return crypto.timingSafeEqual(
+    crypto.createHash('sha256').update(presented).digest(),
+    crypto.createHash('sha256').update(expected).digest()
+  );
+}
+
+/**
+ * The two RTMP hooks below carry no `authenticate`, because the caller is a
+ * media server rather than a person. This is the whole of their authentication.
+ *
+ * It used to return early when LIVESTREAM_WEBHOOK_SECRET was unset, on the
+ * reasoning that a self-hosted ingest server on a private network could then
+ * be used without one. That was a fail-open on an unauthenticated endpoint
+ * that can end a live broadcast, reachable by anyone who can reach the API at
+ * all — and it failed open silently, because nothing validates the variable at
+ * boot and the production template ships it commented out. A private-network
+ * RTMP server can be handed a secret exactly as easily as it is handed a URL,
+ * so the exemption bought nothing it could not have had anyway. Unconfigured
+ * now means the hooks are closed, which is what "not configured" should mean.
+ */
 function requireHookSecret(req: Request) {
   const expected = process.env.LIVESTREAM_WEBHOOK_SECRET?.trim();
-  if (!expected) return;
+  if (!expected) throw new ApiError(503, 'Livestream webhooks are not configured');
   const presented = req.headers['x-livestream-secret'] ?? req.body?.secret;
-  if (presented !== expected) throw new ApiError(401, 'Invalid webhook secret');
+  if (!secretMatches(presented, expected)) throw new ApiError(401, 'Invalid webhook secret');
 }
 
 // ------------------------------------------------------------------
@@ -244,10 +273,13 @@ router.post('/:id/end', authenticate, async (req: AuthRequest, res, next) => {
 // Chat and gifts
 // ------------------------------------------------------------------
 
-router.get('/:id/messages', async (req, res, next) => {
+// optionalAuth so the backlog can be filtered for whoever is reading it: a
+// signed-in viewer does not get the lines of someone she blocked, or of
+// someone who blocked her.
+router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) || 100 : 100;
-    res.json({ success: true, data: await live.recentMessages(req.params.id, limit) });
+    res.json({ success: true, data: await live.recentMessages(req.params.id, limit, req.user?.id) });
   } catch (error) {
     next(error);
   }
@@ -256,6 +288,7 @@ router.get('/:id/messages', async (req, res, next) => {
 router.post(
   '/:id/messages',
   authenticate,
+  liveChatLimiter,
   [body('content').isString().trim().isLength({ min: 1, max: live.LIVE_CHAT_MAX_LENGTH })],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -271,6 +304,32 @@ router.post(
     }
   }
 );
+
+// ------------------------------------------------------------------
+// Host controls
+// ------------------------------------------------------------------
+// Ownership is asserted in the service, which loads the stream and refuses
+// anyone who is not its host, exactly as the group moderation routes assert a
+// role before touching a member.
+
+router.delete('/:id/messages/:messageId', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    res.json({
+      success: true,
+      data: await live.deleteChatMessage(req.params.id, req.params.messageId, req.user!.id),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:id/viewers/:userId', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    res.json({ success: true, data: await live.removeViewer(req.params.id, req.user!.id, req.params.userId) });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.post(
   '/:id/gift',

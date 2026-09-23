@@ -49,6 +49,12 @@ export const SOCIAL_LIMITS = {
   // Direct messages: generous for a real conversation, a wall for a spammer
   // pasting the same line into every thread they can open.
   message: { max: 60, windowMs: 5 * MINUTE },
+  // Live chat moves faster than a thread — a busy room is people reacting in
+  // the same second — so the window is a minute rather than five. Twenty a
+  // minute is more than anyone types by hand and far below what it takes to
+  // bury a host's chat under a flood while she is on camera in front of her
+  // audience, which is the thing this ceiling exists to stop.
+  liveChat: { max: 20, windowMs: MINUTE },
 } as const;
 
 export const postLimiter = limiter('post', SOCIAL_LIMITS.post.max, SOCIAL_LIMITS.post.windowMs);
@@ -59,6 +65,7 @@ export const repostLimiter = limiter('repost', SOCIAL_LIMITS.repost.max, SOCIAL_
 export const reactionLimiter = limiter('reaction', SOCIAL_LIMITS.reaction.max, SOCIAL_LIMITS.reaction.windowMs);
 export const reportLimiter = limiter('report', SOCIAL_LIMITS.report.max, SOCIAL_LIMITS.report.windowMs);
 export const messageLimiter = limiter('message', SOCIAL_LIMITS.message.max, SOCIAL_LIMITS.message.windowMs);
+export const liveChatLimiter = limiter('live-chat', SOCIAL_LIMITS.liveChat.max, SOCIAL_LIMITS.liveChat.windowMs);
 
 /**
  * Public, unauthenticated forms (a referee's reference form) are keyed by the
@@ -104,3 +111,13 @@ export function createMemoryThrottle(max: number, windowMs: number) {
 }
 
 export const socketMessageThrottle = createMemoryThrottle(SOCIAL_LIMITS.message.max, SOCIAL_LIMITS.message.windowMs);
+
+/**
+ * Live chat has the same problem, and had none of the answer. The REST route
+ * POST /api/livestream/:id/messages calls itself "the REST path; the socket is
+ * the live one", and it is right: the page sends `live:chat` over the socket,
+ * so an HTTP limiter mounted on that route never sees the messages that
+ * actually reach a host's room. Until this existed there was no ceiling on
+ * live chat at any speed, by any door.
+ */
+export const liveChatThrottle = createMemoryThrottle(SOCIAL_LIMITS.liveChat.max, SOCIAL_LIMITS.liveChat.windowMs);

@@ -12,7 +12,7 @@ import { reportLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
-type ReportTargetType = 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel' | 'other';
+type ReportTargetType = 'post' | 'comment' | 'video' | 'user' | 'message' | 'channel' | 'event' | 'other';
 
 // ContentReport speaks the moderation queue's vocabulary; the Safety Center
 // speaks the reporter's. Translate on the way out so a reporter still sees
@@ -48,6 +48,14 @@ async function resolveReportedUserId(
     case 'comment': {
       const comment = await prisma.comment.findUnique({ where: { id: targetId }, select: { authorId: true } });
       return comment?.authorId ?? null;
+    }
+    // Member-hosted events carry a host now, which is what makes them
+    // reportable: a listing that can put a woman in a room with someone has to
+    // resolve to the person who published it. Curated rows have no host, so a
+    // report on one routes to no member and is handled as an unrouted report.
+    case 'event': {
+      const event = await prisma.event.findUnique({ where: { id: targetId }, select: { hostUserId: true } });
+      return event?.hostUserId ?? null;
     }
     case 'video': {
       const video = await prisma.video.findUnique({ where: { id: targetId }, select: { authorId: true } });
@@ -123,7 +131,7 @@ router.post(
   authenticate,
   reportLimiter,
   [
-    body('targetType').notEmpty().isIn(['post', 'comment', 'video', 'user', 'message', 'channel', 'other']),
+    body('targetType').notEmpty().isIn(['post', 'comment', 'video', 'user', 'message', 'channel', 'event', 'other']),
     body('reason').notEmpty().isString(),
     body('targetId').optional().isString(),
     body('details').optional().isString(),

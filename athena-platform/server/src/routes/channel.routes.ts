@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { emitToChannel } from '../services/socket.service';
+import { assertContentAllowed } from '../services/moderation.service';
 import {
   CONTENT_LIMITS,
   normalizeMediaUrls,
@@ -105,18 +106,27 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
+      const name = normalizeUserText(req.body.name, {
+        field: 'name',
+        maxLength: CONTENT_LIMITS.channelName,
+      });
+      const description = normalizeOptionalUserText(req.body.description, {
+        field: 'description',
+        maxLength: CONTENT_LIMITS.channelDescription,
+        allowEmpty: true,
+      });
+
+      // A channel's name and blurb are shown to strangers on /discover before
+      // anyone has joined, so they are screened like any other published text.
+      // Both go in one call because they are read together.
+      const channelText = [name, description].filter(Boolean).join('\n');
+      await assertContentAllowed(channelText, { kind: 'profile', userId: req.user!.id });
+
       const created = await prisma.channel.create({
         data: {
-          name: normalizeUserText(req.body.name, {
-            field: 'name',
-            maxLength: CONTENT_LIMITS.channelName,
-          }),
+          name,
           type: req.body.type,
-          description: normalizeOptionalUserText(req.body.description, {
-            field: 'description',
-            maxLength: CONTENT_LIMITS.channelDescription,
-            allowEmpty: true,
-          }),
+          description,
           isPublic: req.body.isPublic ?? true,
           allowReplies: req.body.allowReplies ?? false,
           avatarUrl: req.body.avatarUrl
@@ -340,6 +350,13 @@ router.patch(
       }
       if (req.body.bannerUrl !== undefined) {
         data.bannerUrl = normalizeSafeUrl(req.body.bannerUrl, { field: 'bannerUrl', allowRelativeUploads: true });
+      }
+
+      // Renaming or re-describing a channel republishes it to /discover, so the
+      // new wording is screened the same way the original was.
+      const rewritten = [data.name, data.description].filter(Boolean).join('\n');
+      if (rewritten) {
+        await assertContentAllowed(rewritten, { kind: 'profile', userId: req.user!.id });
       }
 
       const updated = await prisma.channel.update({
@@ -799,6 +816,13 @@ router.post(
         throw new ApiError(403, 'Replies are disabled for this channel');
       }
 
+      // Screened once the sender is known to be allowed in this channel, and
+      // before the row exists, so nothing a provider refuses is stored or
+      // broadcast to the room. A message that is only media has no text.
+      if (content) {
+        await assertContentAllowed(content, { kind: 'channel_message', userId: req.user!.id });
+      }
+
       const message = await prisma.channelMessage.create({
         data: {
           channelId: id,
@@ -864,19 +888,28 @@ router.patch(
       }
 
       const { channelId, messageId } = req.params;
-      const { isAuthor } = await loadChannelMessage(channelId, messageId, req.user!.id);
+      const { message, isAuthor } = await loadChannelMessage(channelId, messageId, req.user!.id);
 
       if (!isAuthor) {
         throw new ApiError(403, 'You can only edit your own messages');
       }
 
+      const content = normalizeUserText(req.body.content, {
+        field: 'content',
+        maxLength: CONTENT_LIMITS.channelMessage,
+      });
+
+      // An edit republishes the message to everyone who can read the channel,
+      // so it is screened like a new one. An edit that changed nothing is not
+      // worth a provider call.
+      if (content !== message.content) {
+        await assertContentAllowed(content, { kind: 'channel_message', userId: req.user!.id });
+      }
+
       const updated = await prisma.channelMessage.update({
         where: { id: messageId },
         data: {
-          content: normalizeUserText(req.body.content, {
-            field: 'content',
-            maxLength: CONTENT_LIMITS.channelMessage,
-          }),
+          content,
           editedAt: new Date(),
         },
       });

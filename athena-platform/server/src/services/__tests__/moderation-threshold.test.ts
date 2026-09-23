@@ -3,6 +3,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     contentReport: { findMany: jest.fn(async () => []), updateMany: jest.fn(async () => ({ count: 0 })) },
+    safetyIncident: { count: jest.fn(async () => 0) },
     post: { findUnique: jest.fn(), update: jest.fn() },
     comment: { findUnique: jest.fn(), update: jest.fn() },
     video: { findUnique: jest.fn(), update: jest.fn() },
@@ -23,6 +24,7 @@ const reporters = (n: number) => Array.from({ length: n }, (_, i) => ({ reporter
 describe('Reports adding up', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.safetyIncident.count.mockResolvedValue(0);
   });
 
   it('does nothing below the threshold', async () => {
@@ -55,6 +57,27 @@ describe('Reports adding up', () => {
     expect(await reviewReportedContent('comment', 'c1')).toBe(false);
     expect(prisma.comment.update).not.toHaveBeenCalled();
     expect(prisma.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('counts every anonymous report as one voice, so nobody can hide content alone', async () => {
+    prisma.contentReport.findMany.mockResolvedValue(reporters(1));
+    prisma.safetyIncident.count.mockResolvedValue(9);
+
+    expect(await reviewReportedContent('post', 'p1')).toBe(false);
+    expect(prisma.post.update).not.toHaveBeenCalled();
+    expect(prisma.safetyIncident.count.mock.calls[0][0]).toMatchObject({
+      where: { type: 'USER_REPORT', contentType: 'POST', contentId: 'p1', resolvedAt: null },
+    });
+  });
+
+  it('lets anonymous reports tip content that named members have also reported', async () => {
+    prisma.contentReport.findMany.mockResolvedValue(reporters(AUTO_HIDE_REPORTERS - 1));
+    prisma.safetyIncident.count.mockResolvedValue(1);
+    prisma.post.findUnique.mockResolvedValue({ authorId: 'author', isHidden: false });
+    prisma.post.update.mockResolvedValue({});
+
+    expect(await reviewReportedContent('post', 'p1')).toBe(true);
+    expect(prisma.post.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { isHidden: true } });
   });
 
   it('works for reels too', async () => {

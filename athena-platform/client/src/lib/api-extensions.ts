@@ -237,6 +237,13 @@ export const livestreamApi = {
   gift: (id: string, giftType: string, message?: string) =>
     api.post(`/livestream/${id}/gift`, message ? { giftType, message } : { giftType }),
   leaderboard: (id: string, params?: { limit?: number }) => api.get(`/livestream/${id}/leaderboard`, { params }),
+
+  // Host controls. The server has had these since live chat shipped and nothing
+  // called them, so a host being harassed in her own stream had one answer
+  // available to her in the product: end the stream.
+  removeMessage: (id: string, messageId: string) =>
+    api.delete(`/livestream/${id}/messages/${messageId}`),
+  removeViewer: (id: string, userId: string) => api.delete(`/livestream/${id}/viewers/${userId}`),
 };
 
 // ============================================

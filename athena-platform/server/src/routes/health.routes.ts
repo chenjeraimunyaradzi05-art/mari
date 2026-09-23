@@ -11,6 +11,7 @@ import { getOpenSearchClient } from '../utils/opensearch';
 import { mlService } from '../services/ml.service';
 // Queue utils are dynamically imported to avoid Redis connection when workers disabled
 // import { getAllQueueStats } from '../utils/queue';
+import { isTextModerationConfigured } from '../services/moderation.service';
 import { logger } from '../utils/logger';
 import { secretMatchesAny } from '../utils/secret-compare';
 import {
@@ -245,6 +246,19 @@ router.get('/detailed', async (req: Request, res: Response) => {
   // those dependencies exist for has been succeeding.
   const ops = opsSnapshot();
   checks.money_paths = checkMoneyPaths(ops);
+
+  // Whether member text is being screened at all. This is reported rather than
+  // enforced on purpose: refusing every post because a key lapsed would take
+  // the platform down to protect it. But a deployment publishing unscreened
+  // text on a women's safety platform should not look identical to a healthy
+  // one, which is exactly what it did — the only signal was a single log line
+  // per process.
+  checks.content_moderation = isTextModerationConfigured()
+    ? { status: 'up', message: 'Member text is screened before it publishes' }
+    : {
+        status: 'degraded',
+        message: 'No text moderation provider is configured: member text publishes unscreened. Set AI_OPENAI_API_KEY.',
+      };
 
   // Determine overall status
   const allChecks = Object.values(checks);

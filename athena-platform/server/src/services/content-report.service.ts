@@ -9,7 +9,7 @@
  * member by GET /api/compliance/online-safety.
  */
 
-import type { ContentReport } from '@prisma/client';
+import type { ContentReport, Prisma, SafetyIncident } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
@@ -518,7 +518,14 @@ async function notifyEscalationQueue(
   });
 }
 
-// Content moderation action functions
+// Content moderation action functions.
+//
+// Every type the report intake accepts has a branch here. It did not: a report
+// about a reel comment, a story, a channel message or a group post reached the
+// queue, a moderator chose "remove", and the only thing that happened was a
+// warning line in the log while the content stayed up. Models that carry an
+// isHidden flag are hidden, because hiding can be undone on appeal; the ones
+// that do not are deleted, which restoreContent is honest about.
 async function removeContent(contentType: string, contentId: string): Promise<void> {
   logger.info(`Removing ${contentType} with ID ${contentId}`);
 
@@ -542,9 +549,39 @@ async function removeContent(contentType: string, contentId: string): Promise<vo
         data: { isHidden: true },
       });
       break;
+    case 'video_comment':
+      await prisma.videoComment.update({
+        where: { id: contentId },
+        data: { isHidden: true },
+      });
+      break;
     case 'message':
       // Messages use soft delete via the conversation
       await prisma.message.delete({ where: { id: contentId } });
+      break;
+    case 'channel_message': {
+      // ChannelMessage has no hidden flag, so removal is a delete. The
+      // channel's counter is corrected with it, or the room shows a message
+      // count that no longer matches what is in it.
+      const channelMessage = await prisma.channelMessage.findUnique({
+        where: { id: contentId },
+        select: { channelId: true },
+      });
+      if (!channelMessage) break;
+      await prisma.channelMessage.delete({ where: { id: contentId } });
+      await prisma.channel.updateMany({
+        where: { id: channelMessage.channelId, messageCount: { gt: 0 } },
+        data: { messageCount: { decrement: 1 } },
+      });
+      break;
+    }
+    case 'group_post':
+      await prisma.groupPost.deleteMany({ where: { id: contentId } });
+      break;
+    case 'status':
+      // A story expires within the day anyway, so there is nothing to hide it
+      // behind; removal takes it down now.
+      await prisma.status.deleteMany({ where: { id: contentId } });
       break;
     case 'job':
       await prisma.job.update({
@@ -552,14 +589,20 @@ async function removeContent(contentType: string, contentId: string): Promise<vo
         data: { status: 'CLOSED' },
       });
       break;
+    case 'profile':
+      // A profile is not content that can be taken down on its own. Saying so
+      // here stops the decision looking as though it was carried out.
+      logger.warn(`A profile cannot be removed; suspend the account instead: ${contentId}`);
+      break;
     default:
       logger.warn(`Unknown content type for removal: ${contentType}`);
   }
 }
 
 /**
- * Put back content that was hidden by a moderator. Deleted messages cannot be
- * restored, so the caller is told nothing came back.
+ * Put back content that was hidden by a moderator. Content that removal deletes
+ * — messages, channel messages, group posts, stories — cannot be restored, so
+ * the caller is told nothing came back rather than being told it worked.
  */
 async function restoreContent(contentType: string, contentId: string): Promise<boolean> {
   switch (contentType.toLowerCase()) {
@@ -571,6 +614,9 @@ async function restoreContent(contentType: string, contentId: string): Promise<b
       return true;
     case 'comment':
       await prisma.comment.updateMany({ where: { id: contentId }, data: { isHidden: false } });
+      return true;
+    case 'video_comment':
+      await prisma.videoComment.updateMany({ where: { id: contentId }, data: { isHidden: false } });
       return true;
     default:
       logger.warn(`Unknown content type for restore: ${contentType}`);
@@ -601,7 +647,12 @@ async function suspendUser(userId: string): Promise<void> {
   });
 }
 
-async function escalateReport(ticketId: string | null, report: ContentReport): Promise<void> {
+// Takes the fields rather than a ContentReport row, because an anonymous report
+// is a SafetyIncident and escalates to exactly the same people.
+async function escalateReport(
+  ticketId: string | null,
+  report: { id: string; contentType: string; contentId: string; reason: string; description: string | null }
+): Promise<void> {
   logger.info(`Escalating report ${ticketId || report.id} to senior moderation`);
 
   // Notify senior moderators (would integrate with internal ticketing system)
@@ -611,6 +662,276 @@ async function escalateReport(ticketId: string | null, report: ContentReport): P
     reason: report.reason.toLowerCase() as ReportReason,
     description: report.description || undefined,
   });
+}
+
+// ============================================
+// Anonymous reports
+// ============================================
+
+/**
+ * A ContentReport row names a member on both sides, so a report filed by
+ * somebody with no account — the case the Online Safety Act 2021 (Cth) cares
+ * most about, because a woman who has just been targeted may have no way to
+ * sign in, and neither Act lets us insist — is filed as a SafetyIncident
+ * instead. Nothing ever read those rows back: no route, no page, no worker. So
+ * every anonymous report since POST /api/compliance/report-content shipped was
+ * written to a table no moderator opens, behind a response promising a review
+ * within 48 hours.
+ *
+ * These are the reader and the decision path. They are deliberately the same
+ * shape as the ContentReport queue so the admin moderation router can show the
+ * two together, and resolving one runs the same enforcement a named report
+ * runs.
+ */
+export type AnonymousReportStatus = 'PENDING' | 'ACTIONED';
+
+export interface AnonymousReportView {
+  id: string;
+  anonymous: true;
+  contentType: string;
+  contentId: string | null;
+  reason: string | null;
+  description: string | null;
+  severity: string;
+  status: ReportStatus;
+  action: string | null;
+  reviewNotes: string | null;
+  reviewerId: string | null;
+  reviewDeadline: string | null;
+  actionTakenAt: Date | null;
+  createdAt: Date;
+  reportedUser: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    displayName: string | null;
+    email: string;
+    isSuspended: boolean;
+  } | null;
+}
+
+// The incident table is shared with the safety-score signals, so an anonymous
+// report is identified by all three of its markers rather than by type alone.
+const ANONYMOUS_REPORT_WHERE: Prisma.SafetyIncidentWhereInput = {
+  type: 'USER_REPORT',
+  metadata: { path: ['anonymous'], equals: true },
+};
+
+function incidentMetadata(value: Prisma.JsonValue | null): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function metadataString(meta: Record<string, unknown>, key: string): string | null {
+  const value = meta[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+export async function listAnonymousReports(filters: {
+  status?: AnonymousReportStatus;
+  contentType?: string;
+  reason?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{
+  reports: AnonymousReportView[];
+  openCount: number;
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}> {
+  const page = Math.max(1, filters.page || 1);
+  const limit = Math.min(100, Math.max(1, filters.limit || 20));
+
+  const where: Prisma.SafetyIncidentWhereInput = { ...ANONYMOUS_REPORT_WHERE };
+  if (filters.status === 'PENDING') where.resolvedAt = null;
+  if (filters.status === 'ACTIONED') where.resolvedAt = { not: null };
+  if (filters.contentType) where.contentType = filters.contentType.toUpperCase();
+  // Reasons arrive both as codes and as free text depending on where the report
+  // was filed, so match loosely, the way the named-report queue does.
+  if (filters.reason) where.reason = { contains: filters.reason, mode: 'insensitive' };
+
+  const [incidents, total, openCount] = await Promise.all([
+    prisma.safetyIncident.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.safetyIncident.count({ where }),
+    prisma.safetyIncident.count({ where: { ...ANONYMOUS_REPORT_WHERE, resolvedAt: null } }),
+  ]);
+
+  // SafetyIncident carries the reported member's id but has no relation to
+  // User, so the page's accounts are fetched in one query rather than one each.
+  const reportedUsers = await prisma.user.findMany({
+    where: { id: { in: Array.from(new Set(incidents.map((incident) => incident.userId))) } },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
+      email: true,
+      isSuspended: true,
+    },
+  });
+  const byId = new Map(reportedUsers.map((user) => [user.id, user]));
+
+  return {
+    reports: incidents.map((incident) =>
+      toAnonymousReportView(incident, byId.get(incident.userId) ?? null)
+    ),
+    openCount,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  };
+}
+
+function toAnonymousReportView(
+  incident: SafetyIncident,
+  reportedUser: AnonymousReportView['reportedUser']
+): AnonymousReportView {
+  const meta = incidentMetadata(incident.metadata);
+  return {
+    id: incident.id,
+    anonymous: true,
+    contentType: incident.contentType || 'OTHER',
+    contentId: incident.contentId,
+    reason: incident.reason,
+    description: metadataString(meta, 'description'),
+    severity: incident.severity,
+    // The incident table has no status column, only resolvedAt, so an actioned
+    // report's outcome is read back from where the decision wrote it.
+    status: (incident.resolvedAt
+      ? metadataString(meta, 'status') || 'RESOLVED'
+      : 'PENDING') as ReportStatus,
+    action: metadataString(meta, 'action'),
+    reviewNotes: metadataString(meta, 'reviewNotes'),
+    reviewerId: incident.resolvedById,
+    reviewDeadline: metadataString(meta, 'reviewDeadline'),
+    actionTakenAt: incident.resolvedAt,
+    createdAt: incident.createdAt,
+    reportedUser,
+  };
+}
+
+export async function getAnonymousReport(id: string): Promise<AnonymousReportView | null> {
+  const incident = await prisma.safetyIncident.findFirst({
+    where: { ...ANONYMOUS_REPORT_WHERE, id },
+  });
+  if (!incident) return null;
+
+  const reportedUser = await prisma.user.findUnique({
+    where: { id: incident.userId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
+      email: true,
+      isSuspended: true,
+    },
+  });
+
+  return toAnonymousReportView(incident, reportedUser);
+}
+
+/**
+ * Decide an anonymous report.
+ *
+ * The enforcement is the same as a named report's — the account the content
+ * belongs to is recorded on the incident, so nothing has to be guessed back out
+ * of the content — and the decision is written to ModerationLog under the
+ * incident id, which is where the transparency figures are counted from. There
+ * is nobody to email an outcome to, which is the one thing an anonymous report
+ * cannot have.
+ */
+export async function resolveAnonymousReport(
+  incidentId: string,
+  action: ModerationAction,
+  moderatorId: string,
+  notes?: string
+): Promise<ModerationOutcome> {
+  const incident = await prisma.safetyIncident.findFirst({
+    where: { ...ANONYMOUS_REPORT_WHERE, id: incidentId },
+  });
+
+  if (!incident) {
+    throw new Error('Report not found');
+  }
+
+  if (incident.resolvedAt) {
+    throw new Error('Report has already been actioned');
+  }
+
+  const contentType = incident.contentType || 'OTHER';
+  const contentId = incident.contentId || '';
+  const status: ReportStatus =
+    action === 'dismiss' ? 'DISMISSED' : action === 'escalate' ? 'REVIEWING' : 'RESOLVED';
+
+  switch (action) {
+    case 'remove':
+      if (contentId) await removeContent(contentType, contentId);
+      break;
+    case 'warn':
+      await warnUser(incident.userId, contentType, contentId);
+      break;
+    case 'suspend':
+    case 'ban':
+      await suspendUser(incident.userId);
+      break;
+    case 'escalate':
+      await escalateReport(null, {
+        id: incident.id,
+        contentType,
+        contentId,
+        reason: incident.reason || 'other',
+        description: metadataString(incidentMetadata(incident.metadata), 'description'),
+      });
+      break;
+  }
+
+  const metadata = {
+    ...incidentMetadata(incident.metadata),
+    status,
+    action: ACTION_OUTCOMES[action],
+    reviewNotes: notes ?? null,
+    moderatorId,
+  } as Prisma.InputJsonObject;
+
+  await prisma.safetyIncident.update({
+    where: { id: incident.id },
+    data: {
+      // An escalated report is still open, so it keeps its place in the queue
+      // until the senior review closes it.
+      resolvedAt: action === 'escalate' ? null : new Date(),
+      resolvedById: moderatorId,
+      // "Verified" on an incident means a moderator looked and agreed, which a
+      // dismissal is precisely not.
+      verified: action !== 'dismiss',
+      metadata,
+    },
+  });
+
+  await prisma.moderationLog.create({
+    data: {
+      ticketId: incident.id,
+      action,
+      moderatorId,
+      notes,
+      timestamp: new Date(),
+    },
+  });
+
+  logger.info('Anonymous report actioned', { incidentId: incident.id, action, status });
+
+  return {
+    reportId: incident.id,
+    ticketId: null,
+    status,
+    action,
+    contentType,
+    contentId,
+    reportedUserId: incident.userId,
+  };
 }
 
 /**
@@ -795,6 +1116,9 @@ export default {
   processContentReport,
   processReportById,
   reverseEnforcement,
+  listAnonymousReports,
+  getAnonymousReport,
+  resolveAnonymousReport,
   listAuthorityEscalations,
   getAuthorityEscalation,
   updateAuthorityEscalationStatus,

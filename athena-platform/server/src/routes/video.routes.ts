@@ -10,6 +10,7 @@ import {
   normalizeStringList,
   normalizeUserText,
 } from '../utils/contentSafety';
+import { assertContentAllowed } from '../services/moderation.service';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { assertSoundExists, attachSounds, recordSoundUse } from '../services/sound.service';
 import { enqueueVideoProcessing } from '../services/video-pipeline.service';
@@ -491,6 +492,15 @@ router.post(
         allowRelativeUploads: true,
       });
 
+      // The caption is published to the public feed as soon as the pipeline
+      // finishes with the file, and it is the part of a reel that carries a
+      // slur or somebody's address. Title and description go in one call
+      // because they are read as one caption.
+      const caption = [title, description].filter(Boolean).join('\n');
+      if (caption) {
+        await assertContentAllowed(caption, { kind: 'caption', userId: req.user!.id });
+      }
+
       const created = await prisma.video.create({
         data: {
           authorId: req.user!.id,
@@ -609,6 +619,14 @@ router.patch(
           maxLength: 120,
           allowEmpty: true,
         }) ?? null;
+      }
+
+      // Recaptioning republishes the reel to everyone who can see it, so the
+      // new wording is screened the way the original was. Clearing a caption
+      // leaves nothing to screen.
+      const recaption = [data.title, data.description].filter(Boolean).join('\n');
+      if (recaption) {
+        await assertContentAllowed(recaption, { kind: 'caption', userId: req.user!.id });
       }
 
       const updated = await prisma.video.update({
@@ -795,14 +813,21 @@ router.post(
 
       const resolvedParentId = parentId ? String(req.body.parentId) : undefined;
 
+      const content = normalizeUserText(req.body.content, {
+        field: 'content',
+        maxLength: CONTENT_LIMITS.comment,
+      });
+
+      // Screened once the reel and the parent comment are known to be real, and
+      // before the row exists, so a comment a provider refuses is never shown
+      // under somebody's reel and never notifies her that it arrived.
+      await assertContentAllowed(content, { kind: 'comment', userId: req.user!.id });
+
       const comment = await prisma.videoComment.create({
         data: {
           videoId: id,
           authorId: req.user!.id,
-          content: normalizeUserText(req.body.content, {
-            field: 'content',
-            maxLength: CONTENT_LIMITS.comment,
-          }),
+          content,
           parentId: resolvedParentId,
         },
         include: COMMENT_AUTHOR_SELECT,

@@ -6,13 +6,22 @@
 import OpenAI from 'openai';
 import { RekognitionClient, DetectModerationLabelsCommand } from "@aws-sdk/client-rekognition";
 import { ApiError } from '../middleware/errorHandler';
+import { recordFailure } from '../utils/ops-metrics';
 import { logger } from '../utils/logger';
 import { cacheGet, cacheSet } from '../utils/cache';
 
-// Initialize OpenAI client (optional - will skip AI moderation if not configured)
-const openai = process.env.OPENAI_API_KEY 
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
+// Initialize OpenAI client (optional - will skip AI moderation if not configured).
+//
+// Every other consumer in the server — ai.service, concierge.service and the
+// readiness check in health.routes — reads AI_OPENAI_API_KEY first and falls
+// back to OPENAI_API_KEY. This file read only the unprefixed name, so a
+// deployment that set the prefixed one (the name the readiness check asks for)
+// got working AI features, a green health check, and no text moderation at all
+// on any surface. Both names are read here so there is no configuration in
+// which the gate is off while the rest of the AI is on.
+const moderationApiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+const openai = moderationApiKey ? new OpenAI({ apiKey: moderationApiKey }) : null;
 
 // Initialize Rekognition client
 const rekognition = new RekognitionClient({
@@ -60,7 +69,7 @@ export interface SafetyScoreResult {
  * Moderate text content using OpenAI Moderation API
  */
 export async function moderateText(content: string): Promise<ModerationResult> {
-  if (!process.env.OPENAI_API_KEY || !openai) {
+  if (!openai) {
     logger.warn('OpenAI API key not configured, skipping moderation');
     return { flagged: false, categories: [], scores: {}, action: 'allow' };
   }
@@ -227,6 +236,63 @@ export async function moderateMessage(content: string): Promise<{
 }
 
 /**
+ * Every write surface the gate guards.
+ *
+ * The surfaces are named individually rather than collapsed onto three words
+ * because the name is what a reviewer reads in the log line when something was
+ * let through, and because the line each surface is held to differs: see
+ * CONVERSATIONAL_SURFACES below. A new surface belongs here rather than
+ * borrowing a name that reads wrong in a log.
+ */
+export type ModeratedSurface =
+  | 'post'
+  | 'comment'
+  | 'caption'
+  | 'status'
+  | 'profile'
+  | 'message'
+  | 'group_message'
+  | 'channel_message'
+  | 'live_chat';
+
+// Text in a conversation reaches the person it is aimed at before anybody can
+// report it, so these surfaces are held to the stricter message standard, which
+// refuses anything the provider flags rather than only what it would block
+// outright. Direct messages have always been held to that line; group chat,
+// channel replies and live chat were simply never put behind the gate at all,
+// which made them the surfaces a harasser would choose.
+const CONVERSATIONAL_SURFACES: ReadonlySet<ModeratedSurface> = new Set([
+  'message',
+  'group_message',
+  'channel_message',
+  'live_chat',
+]);
+
+/**
+ * Whether a text moderation provider is configured.
+ *
+ * The readiness check reads this so a deployment with no moderation is reported
+ * as a state of the service rather than discovered later in the logs.
+ */
+export function isTextModerationConfigured(): boolean {
+  return openai !== null;
+}
+
+// A warning line per message is not a decision and nobody reads it, so the
+// absence of a provider is said once, at error level, where alerting will see
+// it. isTextModerationConfigured carries it from there.
+let missingProviderAnnounced = false;
+
+function announceMissingProvider(kind: ModeratedSurface): void {
+  if (missingProviderAnnounced) return;
+  missingProviderAnnounced = true;
+  logger.error(
+    'No text moderation provider is configured: member text is being published unscreened. Set AI_OPENAI_API_KEY.',
+    { kind }
+  );
+}
+
+/**
  * Gate for user generated text on the write paths.
  *
  * Moderation is optional infrastructure: with no provider configured, or with
@@ -237,16 +303,23 @@ export async function moderateMessage(content: string): Promise<{
  */
 export async function assertContentAllowed(
   content: string,
-  context: { kind: 'post' | 'comment' | 'message'; userId?: string }
+  context: { kind: ModeratedSurface; userId?: string }
 ): Promise<void> {
   if (!openai) {
-    logger.warn('Text moderation provider not configured, allowing content', { kind: context.kind });
+    announceMissingProvider(context.kind);
+    // Counted on every occurrence, not just the first: the log line announces
+    // itself once per process, which is right for a log and useless for
+    // answering "how much went out unscreened". /health/detailed reads this,
+    // so a deployment publishing member text with no screening says so on a
+    // dashboard rather than only in a line nobody re-reads.
+    recordFailure('moderation.unscreened_publish', new Error(`no provider for ${context.kind}`));
     return;
   }
 
   try {
-    const verdict =
-      context.kind === 'message' ? await moderateMessage(content) : await moderatePost(content);
+    const verdict = CONVERSATIONAL_SURFACES.has(context.kind)
+      ? await moderateMessage(content)
+      : await moderatePost(content);
 
     if (!verdict.allowed) {
       throw new ApiError(400, verdict.reason || 'This content violates our community guidelines');
@@ -264,6 +337,7 @@ export async function assertContentAllowed(
       throw error;
     }
 
+    recordFailure('moderation.provider_unavailable', error);
     logger.warn('Text moderation unavailable, allowing content', { kind: context.kind, error });
   }
 }
@@ -282,15 +356,50 @@ function hashContent(content: string): string {
 }
 
 /**
- * Profanity filter (basic word list)
+ * Profanity filter.
+ *
+ * The list this reads was left empty with a note to fill it in, so
+ * containsProfanity could never return true and the SafetyScore endpoint
+ * reported a clean score for text that was nothing but abuse. The terms below
+ * are the ones thrown at women on this platform; a deployment adds to them
+ * through MODERATION_PROFANITY_LIST (comma separated) rather than waiting for a
+ * release, which is also where terms this file should not carry belong.
+ *
+ * This is a signal and not a gate. Several of these words are used warmly
+ * between friends and reclaimed in conversation, so a hit moves a SafetyScore
+ * and never by itself refuses a write — assertContentAllowed does not consult
+ * it. Refusing a member's own words on a word match would fall hardest on the
+ * women this platform exists for.
  */
+const BASE_PROFANITY_TERMS = [
+  'bitch',
+  'bitches',
+  'cunt',
+  'cunts',
+  'slut',
+  'sluts',
+  'whore',
+  'whores',
+  'skank',
+  'tranny',
+  'trannies',
+  'retard',
+  'retarded',
+];
+
 const PROFANITY_LIST: Set<string> = new Set([
-  // Add profanity words here - keeping empty for code sample
+  ...BASE_PROFANITY_TERMS,
+  ...(process.env.MODERATION_PROFANITY_LIST || '')
+    .split(',')
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean),
 ]);
 
 export function containsProfanity(text: string): boolean {
-  const words = text.toLowerCase().split(/\s+/);
-  return words.some(word => PROFANITY_LIST.has(word));
+  // Split on anything that is not a letter or a digit, so "bitch!" and
+  // "you're a bitch," match the same way the bare word does.
+  const words = text.toLowerCase().split(/[^\p{L}\p{N}]+/u);
+  return words.some((word) => word.length > 0 && PROFANITY_LIST.has(word));
 }
 
 /**
