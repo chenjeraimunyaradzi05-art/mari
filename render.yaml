@@ -1,0 +1,206 @@
+# Render blueprint for the ATHENA API.
+#
+# The API had no home. The web app is on Netlify and the database is on Neon,
+# but the Express server was never deployed anywhere, so the live site's
+# /api/health answered 500 with a connection refused to localhost:5000 — every
+# signed-in surface on athena-empress.netlify.app was talking to nothing.
+#
+# This file makes the API deployable without a console session: point Render at
+# this repository ("New", "Blueprint"), and it creates the service, the Key
+# Value instance the BullMQ workers need, and the environment, asking only for
+# the values it cannot know. The alternative host is Fly.io; its equivalent is
+# athena-platform/server/fly.toml. Pick one. DEPLOYMENT_GUIDE.md has the steps
+# and the values.
+#
+# The image is athena-platform/server/Dockerfile, unchanged — the same one that
+# runs locally through docker-compose.yml. Its CMD is `node dist/start.js`,
+# which applies the Prisma migrations and then boots the server.
+
+services:
+  - type: web
+    name: athena-api
+    runtime: docker
+    # Singapore is the closest Render region to Queensland. Neon's
+    # ap-southeast-2 is Sydney, so the database round trip crosses an ocean
+    # either way; keeping the API in the same hemisphere is the part that is in
+    # our gift.
+    region: singapore
+    # 2GB. The process holds Prisma, sharp, ffmpeg and the BullMQ workers in
+    # one container; the 512MB starter plan cannot load it.
+    plan: standard
+    branch: main
+    dockerfilePath: athena-platform/server/Dockerfile
+    dockerContext: athena-platform/server
+    # /livez answers as soon as the process is listening. /readyz is the one
+    # that checks the database, and it returns 503 during a graceful shutdown
+    # drain, which a platform health check would read as a dead instance and
+    # restart mid-drain. Monitor /readyz from outside; let Render watch /livez.
+    healthCheckPath: /livez
+    # A client-only commit should not restart the API.
+    buildFilter:
+      paths:
+        - athena-platform/server/**
+        - athena-platform/shared/**
+        - render.yaml
+    # Deliberately off. Render's own auto-deploy fires on the push, at the same
+    # moment CI starts testing the commit — the same race that used to let a
+    # failing commit migrate production. The "Deploy API to Render" job in
+    # .github/workflows/build-and-deploy.yml calls this service's deploy hook
+    # after CI is green and the migration has succeeded. Set the hook URL as
+    # the RENDER_DEPLOY_HOOK_URL repository secret; without it nothing deploys
+    # automatically and the Render dashboard button still works.
+    autoDeploy: false
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # PORT is injected by Render and read by src/index.ts. It is not set here
+      # on purpose: a literal would override the one Render assigns and the
+      # health check would never connect.
+
+      # Where the browser is. CLIENT_URL builds the links in outbound email,
+      # ALLOWED_ORIGINS is the CORS allowlist, and FRONTEND_URL is the older
+      # name some services still read. Change all three together when the site
+      # moves to its own domain.
+      - key: CLIENT_URL
+        value: https://athena-empress.netlify.app
+      - key: FRONTEND_URL
+        value: https://athena-empress.netlify.app
+      - key: ALLOWED_ORIGINS
+        value: https://athena-empress.netlify.app
+      # Netlify deploy previews get a new hostname each time. Allowing them
+      # would mean any preview build could call the production API with
+      # production cookies.
+      - key: CORS_ALLOW_PREVIEW_ORIGINS
+        value: "false"
+
+      # Neon. DATABASE_URL is the pooled endpoint for runtime queries;
+      # DIRECT_DATABASE_URL is the unpooled one, and start.ts runs the
+      # migrations through it because PgBouncer in transaction mode cannot hold
+      # the advisory locks Prisma migrations take. Putting the pooled URL in
+      # both is the mistake that makes a deploy hang.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+
+      # Sessions, rate-limit counters and the BullMQ queues.
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: athena-redis
+          property: connectionString
+
+      # Generated once by Render and then left alone. Rotating JWT_SECRET signs
+      # every live member out, so it is not something to regenerate casually.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+
+      # The key that encrypts domestic-violence safe-chat messages and the
+      # wellness records. dv-safe.service.ts requires 64 hex characters in
+      # production — `openssl rand -hex 32`. It is entered by hand rather than
+      # generated because it has to be backed up somewhere a lost Render
+      # service cannot take with it: without this exact value the encrypted
+      # rows are unreadable, and those are the rows that matter most.
+      - key: DV_ENCRYPTION_KEY
+        sync: false
+
+      # Bearer tokens for /metrics and the health diagnostics detail. Nothing
+      # outside the platform needs to know them, so Render can invent them.
+      - key: METRICS_TOKEN
+        generateValue: true
+      - key: HEALTH_DIAGNOSTICS_TOKEN
+        generateValue: true
+
+      # Email. Without a real key the platform cannot send a verification or a
+      # password reset, so registration completes and then strands the member.
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: TRUST_SAFETY_EMAIL
+        sync: false
+
+      # Payments. The four price ids are the subscription tiers; the server
+      # refuses to start a checkout for a tier whose price it cannot resolve.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_CAREER
+        sync: false
+      - key: STRIPE_PRICE_PROFESSIONAL
+        sync: false
+      - key: STRIPE_PRICE_ENTREPRENEUR
+        sync: false
+      - key: STRIPE_PRICE_CREATOR
+        sync: false
+      - key: ALLOW_STRIPE_SIMULATION
+        value: "false"
+
+      # Media. With these set, uploads and processed video go to S3; without
+      # them they are written into the container's own uploads directory, which
+      # Render replaces on every deploy. There is no disk mounted below for
+      # exactly that reason: local media storage is not a configuration this
+      # platform should run in, so it should fail the readiness check rather
+      # than quietly lose a member's photographs.
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: ap-southeast-2
+      - key: S3_BUCKET
+        sync: false
+
+      # Text moderation and the AI features read AI_OPENAI_API_KEY first.
+      - key: AI_OPENAI_API_KEY
+        sync: false
+      - key: AI_ALLOW_SIMULATION
+        value: "false"
+
+      # The Python recommendation service in athena-platform/ml.
+      - key: ML_SERVICE_URL
+        sync: false
+
+      # Background jobs. ENABLE_WORKERS=true with simulation off means the
+      # video pipeline needs somewhere real to send work, which is what
+      # VIDEO_PROCESSOR_URL is; scripts/check-env.js enforces that pairing.
+      - key: ENABLE_WORKERS
+        value: "true"
+      - key: WORKER_ALLOW_SIMULATION
+        value: "false"
+      - key: VIDEO_ALLOW_SIMULATION
+        value: "false"
+      - key: VIDEO_PROCESSOR_URL
+        sync: false
+
+      # Scheduled work — retention sweeps, digests — runs on Brisbane time,
+      # which is the day the members are living in. Queensland does not observe
+      # daylight saving, so this offset does not move.
+      - key: SCHEDULER_TIMEZONE
+        value: Australia/Brisbane
+
+      - key: OPENSEARCH_ENABLED
+        value: "false"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+
+      - key: SENTRY_DSN
+        sync: false
+
+  # Redis is not optional: the rate limiters, the login lockout counters and
+  # every BullMQ queue use it. Render calls this service type "Key Value" in
+  # the dashboard; `redis` is the blueprint name for it.
+  - type: redis
+    name: athena-redis
+    region: singapore
+    plan: starter
+    # No public ingress. Only services in this blueprint reach it, over
+    # Render's private network.
+    ipAllowList: []

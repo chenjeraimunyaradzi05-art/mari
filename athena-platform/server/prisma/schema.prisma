@@ -578,6 +578,17 @@ model User {
   womanVerifiedAt         DateTime?
   inviteCodeId            String?
 
+  // Age gate.
+  //
+  // Nullable because the column arrives after the first accounts existed, and a
+  // date of birth is the one field that cannot be backfilled from anything else
+  // we hold. Null therefore means "we have never asked", and every gate reads it
+  // as not-permitted rather than permitted — see requireAdultAccount in
+  // middleware/roles.ts. Registration has collected it since this migration, so
+  // null only ever describes an account created before it.
+  dateOfBirth   DateTime?
+  ageVerifiedAt DateTime?
+
   // Professional Info
   currentJobTitle String?
   currentCompany  String?
@@ -821,6 +832,13 @@ model User {
 
   // Reference requests (as candidate)
   referenceRequests ReferenceRequest[] @relation("CandidateReferences")
+
+  // Events this member published herself (curated rows have no host user)
+  eventsHosted Event[] @relation("EventsHosted")
+
+  // Stock owned personally rather than through an organisation
+  inventoryItems     InventoryItem[]     @relation("InventoryItemsOwned")
+  inventoryLocations InventoryLocation[] @relation("InventoryLocationsOwned")
 
   @@index([email])
   @@index([persona])
@@ -1828,6 +1846,13 @@ model Event {
   hostName      String
   hostTitle     String
   hostAvatar    String
+  // The member who published this event, when a member published it.
+  //
+  // Nullable because the admin-curated rows predate member hosting and have no
+  // member behind them. A null host means "curated by ATHENA"; a set host is who
+  // to hold responsible, who to notify, and who a report resolves to. Without
+  // this an event was unattributable once published.
+  hostUserId    String?
   baseAttendees Int         @default(0)
   maxAttendees  Int?
   // Nullable so "not published by the organiser" is representable. 0 means
@@ -1841,9 +1866,11 @@ model Event {
 
   registrations EventRegistration[]
   saves         EventSave[]
+  hostUser      User?               @relation("EventsHosted", fields: [hostUserId], references: [id], onDelete: SetNull)
 
   @@index([type])
   @@index([date])
+  @@index([hostUserId])
 }
 
 model EventRegistration {
@@ -3368,6 +3395,16 @@ model CreatorPayout {
   stripeTransferId String?
   status           String  @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
 
+  // How much of this payout has already been handed back, in AUD.
+  //
+  // Stripe reports `amount_reversed` cumulatively, so a payout reversed in two
+  // parts arrives as "30% reversed" and then "100% reversed". Restoring the
+  // event's fraction each time credited 130% of the payout back into her
+  // pending balance — real gift points, redeemable for real money. This records
+  // what has been restored so each event only ever credits the difference, and
+  // a redelivered event credits nothing.
+  reversedAmount Float @default(0)
+
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 
@@ -4122,6 +4159,12 @@ model TaxReturn {
 model InventoryItem {
   id             String  @id @default(uuid())
   organizationId String?
+  // A sole trader keeps stock without an Organization, so organizationId alone
+  // cannot say who owns a row. Before this column every list endpoint returned
+  // every tenant's items — SKUs, cost and sell price, so margins — to any
+  // signed-in account. Scope is now derived from the caller: her own rows, plus
+  // the rows of organisations she is a member of.
+  userId         String?
 
   sku             String
   name            String
@@ -4134,6 +4177,7 @@ model InventoryItem {
   isActive        Boolean                  @default(true)
 
   organization Organization?          @relation(fields: [organizationId], references: [id])
+  user         User?                  @relation("InventoryItemsOwned", fields: [userId], references: [id], onDelete: Cascade)
   transactions InventoryTransaction[]
 
   createdAt DateTime @default(now())
@@ -4141,6 +4185,7 @@ model InventoryItem {
 
   @@unique([organizationId, sku])
   @@index([organizationId])
+  @@index([userId])
   @@index([isActive])
   @@index([organizationId, sku])
 }
@@ -4148,12 +4193,16 @@ model InventoryItem {
 model InventoryLocation {
   id             String  @id @default(uuid())
   organizationId String?
+  // Same reason as InventoryItem.userId: a location belonging to a sole trader
+  // has no organisation to scope it by.
+  userId         String?
   name           String
   code           String
   address        String?
   isActive       Boolean @default(true)
 
   organization Organization?          @relation(fields: [organizationId], references: [id])
+  user         User?                  @relation("InventoryLocationsOwned", fields: [userId], references: [id], onDelete: Cascade)
   transactions InventoryTransaction[]
 
   createdAt DateTime @default(now())
@@ -4161,6 +4210,7 @@ model InventoryLocation {
 
   @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([userId])
   @@index([isActive])
   @@index([organizationId, code])
 }
@@ -5661,6 +5711,14 @@ model UserSafetySettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // getBlockedRelationshipIds asks "who has blocked me" with
+  // `blockedUsers: { has: userId }`, and that question is asked on every feed
+  // load, story ring, search and profile view — it is the single hottest read
+  // on the safety path. Against a plain text[] column each of those was a
+  // sequential scan of the whole table, so the cost of blocking working
+  // correctly grew with the size of the platform.
+  @@index([blockedUsers], type: Gin)
 }
 
 // ---------------------------------------------------------------------------

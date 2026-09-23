@@ -1,0 +1,92 @@
+# Fly.io configuration for the ATHENA API.
+#
+# The alternative to render.yaml at the repository root; deploy to one host or
+# the other, not both against the same Neon database. Fly's advantage here is
+# Sydney: `syd` is a real region, so the API sits in the same country as the
+# members and beside Neon's ap-southeast-2.
+#
+# This file lives next to the Dockerfile rather than at the repository root
+# because `fly deploy` builds from the directory it runs in. Deploying is:
+#
+#   cd athena-platform/server
+#   fly launch --no-deploy --copy-config   # first time only, creates the app
+#   fly secrets set DATABASE_URL=... JWT_SECRET=...   # see DEPLOYMENT_GUIDE.md
+#   fly deploy
+#
+# Everything secret is set with `fly secrets set`, which stores it encrypted and
+# restarts the machines. Nothing secret belongs in the [env] block below: this
+# file is in git.
+
+app = "athena-api"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Non-secret configuration only. These are the same values render.yaml sets as
+# literals, and they are readable by anyone with the repository, deliberately.
+[env]
+  NODE_ENV = "production"
+  PORT = "5000"
+  CLIENT_URL = "https://athena-empress.netlify.app"
+  FRONTEND_URL = "https://athena-empress.netlify.app"
+  ALLOWED_ORIGINS = "https://athena-empress.netlify.app"
+  # Netlify deploy previews get a new hostname each time, so allowing them
+  # would let any preview build call the production API with production
+  # cookies.
+  CORS_ALLOW_PREVIEW_ORIGINS = "false"
+  JWT_EXPIRES_IN = "15m"
+  JWT_REFRESH_EXPIRES_IN = "7d"
+  AWS_REGION = "ap-southeast-2"
+  # Retention sweeps and digests run on Brisbane time, which is the day the
+  # members are living in. Queensland does not observe daylight saving, so this
+  # offset does not move.
+  SCHEDULER_TIMEZONE = "Australia/Brisbane"
+  ENABLE_WORKERS = "true"
+  WORKER_ALLOW_SIMULATION = "false"
+  VIDEO_ALLOW_SIMULATION = "false"
+  AI_ALLOW_SIMULATION = "false"
+  ALLOW_STRIPE_SIMULATION = "false"
+  OPENSEARCH_ENABLED = "false"
+  RATE_LIMIT_ENABLED = "true"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  # The machine must not be allowed to stop. This process is not only a web
+  # server: it holds the BullMQ workers and the scheduled jobs (retention
+  # sweeps, digests, the Brisbane-time cron above). A stopped machine wakes on
+  # the next HTTP request, which means the scheduled work simply does not
+  # happen during any quiet hour — and the quiet hours are when the retention
+  # sweep is supposed to run.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  # /livez answers as soon as the process is listening. /readyz is the one that
+  # checks the database, and it returns 503 during the graceful shutdown drain,
+  # which Fly would read as a dead machine and restart mid-drain. Monitor
+  # /readyz from outside; let Fly watch /livez.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    # start.ts runs `prisma migrate deploy` before the server listens, so the
+    # first check has to allow for a migration against Neon, not just for
+    # Node's own start-up.
+    grace_period = "60s"
+    method = "GET"
+    path = "/livez"
+
+# 2GB. The process holds Prisma, sharp, ffmpeg and the BullMQ workers in one
+# container; the 256MB default cannot load it.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
+
+# No [[mounts]] block, on purpose. Media goes to S3 when AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY are set, and into the container's own uploads directory
+# when they are not. Mounting a volume would make the second case survive a
+# restart and therefore look like it works, which is how a deployment ends up
+# running for months with members' photographs on a single machine's disk and
+# no backup. Configure S3; the readiness check asks for it.
