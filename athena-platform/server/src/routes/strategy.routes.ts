@@ -619,15 +619,29 @@ router.post('/business/deck-outline', async (req: AuthRequest, res: Response, ne
 });
 
 // A completion certificate anyone can check, keyed on the enrolment.
+//
+// The length printed here has to be the cohort she actually finished. It used
+// to be `Math.max(completedWeeks, 12)`, which was harmless while every cohort
+// ran the twelve-week default curriculum and a lie the moment staff ran a
+// shorter pilot: a woman who completed a six-week intake had a public page
+// telling an employer she had done twelve. The session count is the cohort's
+// real length — business.routes.ts only marks an enrolment COMPLETED once she
+// has a completed week for every session — and reading it live keeps the
+// certificate honest if staff edit the curriculum after the cohort ends.
+// `completedWeeks` remains the fallback for the older rows seeded before
+// sessions were required.
 router.get('/business/accelerator-certificates/:enrollmentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const enrollment = await prisma.acceleratorEnrollment.findUnique({
       where: { id: req.params.enrollmentId },
-      include: { cohort: { select: { name: true, startDate: true, endDate: true, curriculum: true } }, user: { select: { firstName: true, lastName: true } } },
+      include: {
+        cohort: { select: { name: true, startDate: true, endDate: true, curriculum: true, _count: { select: { sessions: true } } } },
+        user: { select: { firstName: true, lastName: true } },
+      },
     });
     if (!enrollment || enrollment.status !== 'COMPLETED' || !enrollment.completedAt) throw new ApiError(404, 'No certificate for that enrolment');
     const holder = [enrollment.user.firstName, enrollment.user.lastName].filter(Boolean).join(' ') || 'A founder';
-    ok(res, { code: enrollment.id, holder, cohort: { name: enrollment.cohort.name, startDate: enrollment.cohort.startDate, endDate: enrollment.cohort.endDate }, completedAt: enrollment.completedAt, weeks: Math.max(enrollment.completedWeeks, 12) });
+    ok(res, { code: enrollment.id, holder, cohort: { name: enrollment.cohort.name, startDate: enrollment.cohort.startDate, endDate: enrollment.cohort.endDate }, completedAt: enrollment.completedAt, weeks: enrollment.cohort._count?.sessions || enrollment.completedWeeks });
   } catch (error) {
     next(error);
   }

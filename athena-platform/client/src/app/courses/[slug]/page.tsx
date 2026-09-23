@@ -112,6 +112,12 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
   facts.push([Wallet, 'Cost', course.cost == null ? 'On enquiry' : course.cost === 0 ? 'Fee-free' : money(course.cost)]);
   if (funding.length) facts.push([Wallet, 'Funding', funding.join(', ')]);
   if (intakes.length) facts.push([Calendar, 'Intakes', intakes.join(', ')]);
+  // Outcome figures print only when there is one, and the "as the provider
+  // reports" wording is a promise about where the number came from. The demo
+  // seed used to fill these with invented rates and salaries against real
+  // institutions' names — 97% of graduates, $110,000 — and this page repeated
+  // them as the institution's own claim. Nothing may be written here that was
+  // not published by the provider or by QILT/NCVER.
   if (course.employmentRate != null) facts.push([CheckCircle, 'In work after', `${course.employmentRate}% of graduates, as the provider reports`]);
   if (course.avgStartingSalary != null) facts.push([Wallet, 'Starting salary', `${money(course.avgStartingSalary)}, as the provider reports`]);
 

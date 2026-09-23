@@ -41,8 +41,14 @@ type PublicEvent = {
   startTime?: string | null;
   endTime?: string | null;
   location?: string | null;
-  /** The organiser's own listing. Absent for events with nowhere to send you. */
+  /**
+   * Where to go. For an ATHENA-curated listing this is the organiser's public
+   * booking page. For an event a member is hosting, the server withholds it
+   * until you have registered — it is the way into her gathering, not an
+   * advertisement — and sets `linkRequiresRegistration` instead.
+   */
   link?: string | null;
+  linkRequiresRegistration?: boolean;
   host?: {
     name?: string | null;
     title?: string | null;
@@ -195,6 +201,13 @@ function EventCard({ event }: { event: PublicEvent }) {
             <>
               Book on {hostname(href)}
               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </>
+          ) : event.linkRequiresRegistration ? (
+            <>
+              {/* Say why the link is not here, rather than showing a card that
+                  looks like it has nowhere to go. */}
+              Register to get the joining link
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             </>
           ) : (
             <>

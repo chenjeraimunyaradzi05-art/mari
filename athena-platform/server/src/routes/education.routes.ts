@@ -15,6 +15,52 @@ function parseEducationApplicationStatus(value: unknown): EducationApplicationSt
   throw new ApiError(400, 'Invalid education application status');
 }
 
+/**
+ * Deciding an application is not reading a chart. `canViewAnalytics` defaults
+ * to true for every member of an organisation, including a VIEWER, so it can
+ * gate the outcomes dashboard and must not gate an admissions decision. This
+ * mirrors the permission test the employer job routes already use: the
+ * recruiting flag, or a role that owns the organisation outright.
+ */
+const requireOrgApplicationDecisions: RequestHandler<{ organizationId: string }> = async (
+  req,
+  _res: Response,
+  next: NextFunction
+) => {
+  try {
+    const authReq = req as AuthRequest;
+    const organizationId = req.params.organizationId;
+
+    if (!authReq.user?.id) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const membership = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId,
+          userId: authReq.user.id,
+        },
+      },
+      select: {
+        role: true,
+        canPostJobs: true,
+      },
+    });
+
+    if (!membership) {
+      throw new ApiError(403, 'Not authorized');
+    }
+    if (!membership.canPostJobs && membership.role !== 'OWNER' && membership.role !== 'ADMIN') {
+      throw new ApiError(403, 'You do not have permission to decide applications');
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 const requireOrgAnalyticsAccess: RequestHandler<{ organizationId: string }> = async (
   req,
   _res: Response,
@@ -255,17 +301,31 @@ router.post('/applications', authenticate, async (req: AuthRequest, res, next) =
 });
 
 // ===========================================
-// UPDATE MY APPLICATION (STATUS/NOTES)
+// WITHDRAW MY APPLICATION, OR EDIT MY OWN NOTES
 // ===========================================
+//
+// The applicant used to be able to PATCH any status onto her own row, so she
+// could mark herself ACCEPTED and the provider's dashboard would show it as
+// the institution's own decision. Withdrawing is the only status an applicant
+// owns; every other transition belongs to the provider route below. The notes
+// are hers throughout — they are the field the member page lets her keep her
+// own record in.
 router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const { status, notes } = req.body;
     const parsedStatus = parseEducationApplicationStatus(status);
 
+    if (parsedStatus !== undefined && parsedStatus !== EducationApplicationStatus.WITHDRAWN) {
+      throw new ApiError(
+        403,
+        'Only the provider can decide an application. You can withdraw it or update your own notes.'
+      );
+    }
+
     const existing = await prisma.educationApplication.findUnique({
       where: { id },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, status: true },
     });
 
     if (!existing) {
@@ -274,6 +334,12 @@ router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, ne
 
     if (existing.userId !== req.user!.id) {
       throw new ApiError(403, 'Not authorized');
+    }
+
+    // Mirrors the apprenticeship rule: once a place has been offered, walking
+    // away is a conversation with the provider, not a status change here.
+    if (parsedStatus === EducationApplicationStatus.WITHDRAWN && existing.status === 'ACCEPTED') {
+      throw new ApiError(400, 'An accepted application cannot be withdrawn here — contact the provider');
     }
 
     const updated = await prisma.educationApplication.update({
@@ -292,6 +358,69 @@ router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, ne
     next(error);
   }
 });
+
+// ===========================================
+// PROVIDER: DECIDE AN APPLICATION
+// ===========================================
+//
+// The read side has always assumed this existed: the provider dashboard lists
+// applications and the outcomes panel counts them by status, but nothing on
+// the server could move one, so every status shown there was written by the
+// applicant herself. This is the write the dashboard was built against.
+router.patch(
+  '/providers/:organizationId/applications/:applicationId',
+  authenticate,
+  requireOrgApplicationDecisions,
+  async (req: AuthRequest, res, next) => {
+    try {
+      const { organizationId, applicationId } = req.params;
+      const parsedStatus = parseEducationApplicationStatus(req.body?.status);
+
+      const decidable: EducationApplicationStatus[] = [
+        EducationApplicationStatus.IN_REVIEW,
+        EducationApplicationStatus.ACCEPTED,
+        EducationApplicationStatus.REJECTED,
+      ];
+
+      if (!parsedStatus || !decidable.includes(parsedStatus)) {
+        throw new ApiError(400, 'status must be IN_REVIEW, ACCEPTED or REJECTED');
+      }
+
+      const existing = await prisma.educationApplication.findUnique({
+        where: { id: applicationId },
+        select: { id: true, organizationId: true, status: true },
+      });
+
+      if (!existing) {
+        throw new ApiError(404, 'Application not found');
+      }
+
+      // The permission was checked against the organisation in the path, so the
+      // application has to belong to that same organisation — otherwise staff at
+      // one provider could decide another provider's applications.
+      if (existing.organizationId !== organizationId) {
+        throw new ApiError(404, 'Application not found');
+      }
+
+      // A withdrawn application is the applicant's decision and stays hers.
+      if (existing.status === EducationApplicationStatus.WITHDRAWN) {
+        throw new ApiError(400, 'This application has been withdrawn');
+      }
+
+      const updated = await prisma.educationApplication.update({
+        where: { id: applicationId },
+        data: { status: parsedStatus },
+      });
+
+      res.json({
+        success: true,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // ===========================================
 // PROVIDER: LIST APPLICATIONS

@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { Prisma, type EventType as DbEventType, type EventFormat as DbEventFormat } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { normalizeOptionalUserText, normalizeSafeUrl, normalizeUserText } from '../utils/contentSafety';
+import { notifyAdmins } from '../services/admin-notify.service';
 
 const router = Router();
 
@@ -60,10 +61,30 @@ function apiEventFormatFromDb(format: string): EventFormat {
   return 'virtual';
 }
 
-function eventView(dbEvent: any, userId?: string) {
+function isAdminRole(viewerRole?: string): boolean {
+  return String(viewerRole).toUpperCase() === 'ADMIN';
+}
+
+function eventView(dbEvent: any, userId?: string, viewerRole?: string) {
   const isRegistered = userId ? (dbEvent.registrations?.length || 0) > 0 : false;
   const isSaved = userId ? (dbEvent.saves?.length || 0) > 0 : false;
   const regCount = dbEvent._count?.registrations ?? 0;
+
+  // A null hostUserId means ATHENA curated the listing; a set one means a
+  // member published it. The distinction decides who may see the link.
+  const memberHosted = Boolean(dbEvent.hostUserId);
+  const isHost = Boolean(userId && dbEvent.hostUserId && dbEvent.hostUserId === userId);
+  const isAdmin = isAdminRole(viewerRole);
+
+  // A curated listing's link is a public booking page that staff checked before
+  // it went up, so it stays public. A member's link is the way into her
+  // gathering — the dialog asks for "Link to join" and the route refuses a
+  // virtual event without one — and until 2026-09 that address was handed to
+  // every anonymous caller of GET /api/events. Anyone who found the page could
+  // walk into a room full of women without ever telling us they were coming.
+  // Now the RSVP is the price of the address: she registers, we know she is
+  // there, and the host has a list.
+  const showLink = !memberHosted || isRegistered || isHost || isAdmin;
 
   return {
     id: dbEvent.id,
@@ -75,7 +96,10 @@ function eventView(dbEvent: any, userId?: string) {
     startTime: dbEvent.startTime,
     endTime: dbEvent.endTime,
     location: dbEvent.location,
-    link: dbEvent.link,
+    link: showLink ? dbEvent.link ?? null : null,
+    // So the card can say "register to get the joining link" rather than
+    // quietly showing nothing where a button used to be.
+    linkRequiresRegistration: memberHosted && !showLink && Boolean(dbEvent.link),
     image: dbEvent.image,
     host: {
       name: dbEvent.hostName,
@@ -90,6 +114,10 @@ function eventView(dbEvent: any, userId?: string) {
     tags: Array.isArray(dbEvent.tags) ? dbEvent.tags : [],
     isRegistered,
     isSaved,
+    isHost,
+    // Only the host and an admin are told a listing is waiting on review;
+    // to everyone else a held event simply does not exist yet.
+    pendingReview: (isHost || isAdmin) && dbEvent.isHidden === true,
   };
 }
 
@@ -104,10 +132,13 @@ async function getEventView(eventId: string, userId?: string, viewerRole?: strin
 
   const event = await prisma.event.findUnique({ where: { id: eventId }, include });
   if (!event) throw new ApiError(404, 'Event not found');
-  if (event.isHidden && String(viewerRole).toUpperCase() !== 'ADMIN') {
+  // A held listing is invisible to everyone but an admin and the member who
+  // wrote it; she has to be able to open the thing she just submitted.
+  const hostMaySee = Boolean(userId && event.hostUserId === userId);
+  if (event.isHidden && !isAdminRole(viewerRole) && !hostMaySee) {
     throw new ApiError(404, 'Event not found');
   }
-  return eventView(event, userId);
+  return eventView(event, userId, viewerRole);
 }
 
 /**
@@ -120,20 +151,32 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
 
     const dbType = type === 'all' ? null : dbEventTypeFromParam(type);
-    const where: Prisma.EventWhereInput = {
-      ...(String(req.user?.role).toUpperCase() === 'ADMIN' ? {} : { isHidden: false }),
-      ...(dbType ? { type: dbType } : {}),
-      ...(q
-        ? {
-            OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { description: { contains: q, mode: 'insensitive' } },
-              // Best-effort tag match when q equals a tag.
-              { tags: { has: q } },
-            ],
-          }
-        : {}),
-    };
+    // An admin sees everything, including what is waiting on review. A member
+    // sees the published catalogue plus anything she herself submitted, so a
+    // held listing does not just vanish on her after she wrote it.
+    const visibility: Prisma.EventWhereInput = isAdminRole(req.user?.role)
+      ? {}
+      : req.user?.id
+        ? { OR: [{ isHidden: false }, { hostUserId: req.user.id }] }
+        : { isHidden: false };
+
+    // The clauses are AND-ed explicitly rather than spread into one object:
+    // both the visibility rule and the keyword search want the `OR` key, and a
+    // later spread would silently replace an earlier one — which on this route
+    // would mean a search returning held listings to strangers.
+    const filters: Prisma.EventWhereInput[] = [visibility];
+    if (dbType) filters.push({ type: dbType });
+    if (q) {
+      filters.push({
+        OR: [
+          { title: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+          // Best-effort tag match when q equals a tag.
+          { tags: { has: q } },
+        ],
+      });
+    }
+    const where: Prisma.EventWhereInput = { AND: filters };
 
     const include: Prisma.EventInclude = { _count: { select: { registrations: true } } };
     if (req.user?.id) {
@@ -148,7 +191,10 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
       take: 100,
     });
 
-    res.json({ success: true, data: (events || []).map((e: any) => eventView(e, req.user?.id)) });
+    res.json({
+      success: true,
+      data: (events || []).map((e: any) => eventView(e, req.user?.id, req.user?.role)),
+    });
   } catch (err) {
     next(err);
   }
@@ -170,8 +216,9 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
  */
 router.post('/:id/register', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    // Ensure event exists
-    await getEventView(req.params.id, undefined, req.user?.role);
+    // Ensure the event exists and this member may see it. Her own id goes in
+    // because a held listing is visible to its host, and to nobody else.
+    await getEventView(req.params.id, req.user!.id, req.user?.role);
 
     await prisma.eventRegistration.upsert({
       where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
@@ -190,8 +237,9 @@ router.post('/:id/register', authenticate, async (req: AuthRequest, res, next) =
  */
 router.delete('/:id/register', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    // Ensure event exists
-    await getEventView(req.params.id, undefined, req.user?.role);
+    // Ensure the event exists and this member may see it. Her own id goes in
+    // because a held listing is visible to its host, and to nobody else.
+    await getEventView(req.params.id, req.user!.id, req.user?.role);
 
     try {
       await prisma.eventRegistration.delete({
@@ -212,8 +260,9 @@ router.delete('/:id/register', authenticate, async (req: AuthRequest, res, next)
  */
 router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    // Ensure event exists
-    await getEventView(req.params.id, undefined, req.user?.role);
+    // Ensure the event exists and this member may see it. Her own id goes in
+    // because a held listing is visible to its host, and to nobody else.
+    await getEventView(req.params.id, req.user!.id, req.user?.role);
 
     await prisma.eventSave.upsert({
       where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },
@@ -232,8 +281,9 @@ router.post('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
  */
 router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    // Ensure event exists
-    await getEventView(req.params.id, undefined, req.user?.role);
+    // Ensure the event exists and this member may see it. Her own id goes in
+    // because a held listing is visible to its host, and to nobody else.
+    await getEventView(req.params.id, req.user!.id, req.user?.role);
 
     try {
       await prisma.eventSave.delete({
@@ -251,9 +301,16 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
 
 /**
  * POST /api/events
- * Host an event. The host details come from the member's own profile; the
- * event is listed straight away. "Host Event" on the events page had no
- * handler and there was no route for it to call.
+ * Host an event. The host details come from the member's own profile.
+ *
+ * This route was originally added because "Host Event" on the events page had
+ * no handler, and it published straight to the public catalogue: no owner on
+ * the row, no way for a member to report it, and the joining link served to
+ * anonymous callers. On a platform used by women leaving violent relationships
+ * that is an invitation anyone can find and nobody can trace, so a member's
+ * listing is now held for review, carries `hostUserId`, and keeps its link for
+ * the people who have said they are coming. The admin events console at
+ * /admin/events is where a held listing is read and released.
  */
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -330,6 +387,10 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
         hostName,
         hostTitle: host?.headline?.trim() || 'Community host',
         hostAvatar: host?.avatar || '',
+        hostUserId: req.user!.id,
+        // Held until a moderator has read it. hostName is copied from a profile
+        // field the member controls, so it is not attribution; hostUserId is.
+        isHidden: true,
         maxAttendees,
         price,
         tags,
@@ -337,7 +398,18 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
       include: { _count: { select: { registrations: true } } },
     });
 
-    res.status(201).json({ success: true, data: eventView(created, req.user!.id) });
+    // Same shape the wellness and vendor queues use: one in-app notice per
+    // admin, pointing at the queue rather than the row. It never fails the
+    // request — she should see "submitted" even if the admin list cannot be
+    // read, and the console finds her listing either way.
+    await notifyAdmins({
+      title: 'A member has listed an event',
+      message: `${hostName} has listed "${title}" for ${date.toISOString().slice(0, 10)} and it is waiting to be reviewed.`,
+      link: '/admin/events',
+      data: { kind: 'MEMBER_EVENT_REVIEW', eventId: created.id, hostUserId: req.user!.id },
+    });
+
+    res.status(201).json({ success: true, data: eventView(created, req.user!.id, req.user?.role) });
   } catch (err) {
     next(err);
   }

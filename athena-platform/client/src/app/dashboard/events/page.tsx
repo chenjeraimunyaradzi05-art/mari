@@ -14,6 +14,7 @@ import {
   Heart,
   Share2,
   ExternalLink,
+  Flag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, Badge } from '@/components/ui';
@@ -21,6 +22,7 @@ import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useEvents, useRegisterEvent, useSaveEvent, useUnsaveEvent } from '@/lib/hooks';
 import { HostEventDialog } from '@/components/events/HostEventDialog';
+import { ReportEventDialog } from './ReportEventDialog';
 
 // The system share sheet where there is one; a copied link everywhere else.
 async function shareEvent(event: { id: string; title: string; description: string }) {
@@ -51,7 +53,13 @@ interface Event {
   startTime: string;
   endTime: string;
   location?: string;
+  /**
+   * The joining link. A member-hosted event withholds it until you have
+   * registered, so this is absent on the card until then and
+   * `linkRequiresRegistration` explains why.
+   */
   link?: string;
+  linkRequiresRegistration?: boolean;
   image: string;
   host: {
     name: string;
@@ -63,6 +71,10 @@ interface Event {
   price: number;
   isRegistered: boolean;
   isSaved: boolean;
+  /** True on your own listing. Only you and an admin ever see it. */
+  isHost?: boolean;
+  /** Your listing is written but not published until a moderator reads it. */
+  pendingReview?: boolean;
   tags: string[];
 }
 
@@ -82,6 +94,7 @@ export default function EventsPage() {
   const [currentWeekStart, setCurrentWeekStart] = useState<Date | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [hosting, setHosting] = useState(false);
+  const [reporting, setReporting] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     const now = new Date();
@@ -134,6 +147,15 @@ export default function EventsPage() {
       </div>
 
       <HostEventDialog open={hosting} onClose={() => setHosting(false)} />
+
+      {reporting && (
+        <ReportEventDialog
+          open
+          onClose={() => setReporting(null)}
+          eventId={reporting.id}
+          eventTitle={reporting.title}
+        />
+      )}
 
       {/* Calendar Strip */}
       <div className="card">
@@ -290,13 +312,20 @@ export default function EventsPage() {
                     </Badge>
                   )}
                 </div>
-                {event.isRegistered && (
-                  <div className="absolute top-4 right-4">
+                <div className="absolute top-4 right-4 flex items-center space-x-2">
+                  {/* Your own held listing. Nobody else can see it at all, so
+                      saying so here is the only way you would know. */}
+                  {event.pendingReview && (
+                    <Badge variant="default" className="bg-amber-500">
+                      Waiting on review
+                    </Badge>
+                  )}
+                  {event.isRegistered && (
                     <Badge variant="default" className="bg-primary-500">
                       Registered
                     </Badge>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {/* Content */}
@@ -387,6 +416,18 @@ export default function EventsPage() {
                     >
                       <Share2 className="w-5 h-5" />
                     </button>
+                    {/* Nobody needs to report her own listing, and an event she
+                        wrote is the one case where this button is only noise. */}
+                    {!event.isHost && (
+                      <button
+                        type="button"
+                        onClick={() => setReporting({ id: event.id, title: event.title })}
+                        aria-label={`Report ${event.title}`}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
+                      >
+                        <Flag className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                   {event.isRegistered ? (
                     <button
@@ -400,13 +441,20 @@ export default function EventsPage() {
                       <span>Join Event</span>
                     </button>
                   ) : (
-                    <button
-                      className="btn-primary"
-                      onClick={() => registerEvent.mutate(event.id)}
-                      disabled={registerEvent.isPending}
-                    >
-                      {event.price > 0 ? `Register - $${event.price}` : 'Register Free'}
-                    </button>
+                    <div className="flex flex-col items-end">
+                      <button
+                        className="btn-primary"
+                        onClick={() => registerEvent.mutate(event.id)}
+                        disabled={registerEvent.isPending}
+                      >
+                        {event.price > 0 ? `Register - $${event.price}` : 'Register Free'}
+                      </button>
+                      {event.linkRequiresRegistration && (
+                        <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          The joining link appears here once you register
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

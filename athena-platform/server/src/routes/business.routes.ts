@@ -460,44 +460,52 @@ router.get('/accelerators', async (req: AuthRequest, res: Response, next: NextFu
 });
 
 // GET /api/business/accelerators/:id - Get cohort details
-router.get('/accelerators/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
+//
+// Until 2026-09 this route had no `authenticate` and included the full
+// enrollment rows, each one an unfiltered AcceleratorEnrollment: the enrollee's
+// name and avatar next to her paymentStatus, paymentId, submitted deliverables
+// and mentorNotes. Cohort ids are enumerable from the public list route above,
+// which the marketing page calls, so any anonymous caller could walk the whole
+// roster of every woman in the programme. The cohort itself is public
+// information and stays so; who is in it is not. The only thing the response
+// ever derived from enrollments is the spot count, and `_count` already
+// supplies that, so nothing downstream loses anything.
+router.get(
+  '/accelerators/:id',
+  authenticate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
 
-    const cohort = await prisma.acceleratorCohort.findUnique({
-      where: { id },
-      include: {
-        sessions: {
-          orderBy: { weekNumber: 'asc' },
-        },
-        enrollments: {
-          include: {
-            user: {
-              select: { id: true, firstName: true, lastName: true, avatar: true },
-            },
+      const cohort = await prisma.acceleratorCohort.findUnique({
+        where: { id },
+        include: {
+          sessions: {
+            orderBy: { weekNumber: 'asc' },
+          },
+          _count: {
+            select: { enrollments: true },
           },
         },
-        _count: {
-          select: { enrollments: true },
+      });
+
+      if (!cohort) {
+        throw new ApiError(404, 'Accelerator cohort not found');
+      }
+
+      res.json({
+        success: true,
+        data: {
+          ...cohort,
+          enrollmentCount: cohort._count.enrollments,
+          spotsRemaining: cohort.maxParticipants - cohort._count.enrollments,
         },
-      },
-    });
-
-    if (!cohort) {
-      throw new ApiError(404, 'Accelerator cohort not found');
+      });
+    } catch (error) {
+      next(error);
     }
-
-    res.json({
-      success: true,
-      data: {
-        ...cohort,
-        spotsRemaining: cohort.maxParticipants - cohort._count.enrollments,
-      },
-    });
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 // POST /api/business/accelerators/:id/enroll - Enroll in cohort
 router.post(

@@ -199,11 +199,29 @@ describe('The strategy routes', () => {
   });
 
   it('issues an accelerator certificate only for a completed enrolment', async () => {
-    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e1', status: 'ENROLLED', completedAt: null, completedWeeks: 4, cohort: { name: 'Cohort 3', startDate: new Date('2026-02-01'), endDate: new Date('2026-04-26') }, user: { firstName: 'Ana', lastName: 'Silva' } });
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e1', status: 'ENROLLED', completedAt: null, completedWeeks: 4, cohort: { name: 'Cohort 3', startDate: new Date('2026-02-01'), endDate: new Date('2026-04-26'), _count: { sessions: 12 } }, user: { firstName: 'Ana', lastName: 'Silva' } });
     await request(app).get('/api/strategy/business/accelerator-certificates/e1').expect(404);
-    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e1', status: 'COMPLETED', completedAt: new Date('2026-04-26'), completedWeeks: 12, cohort: { name: 'Cohort 3', startDate: new Date('2026-02-01'), endDate: new Date('2026-04-26') }, user: { firstName: 'Ana', lastName: 'Silva' } });
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e1', status: 'COMPLETED', completedAt: new Date('2026-04-26'), completedWeeks: 12, cohort: { name: 'Cohort 3', startDate: new Date('2026-02-01'), endDate: new Date('2026-04-26'), _count: { sessions: 12 } }, user: { firstName: 'Ana', lastName: 'Silva' } });
     const res = await request(app).get('/api/strategy/business/accelerator-certificates/e1').expect(200);
     expect(res.body.data).toMatchObject({ code: 'e1', holder: 'Ana Silva', weeks: 12 });
+  });
+
+  // The certificate used to read `Math.max(completedWeeks, 12)`, so a founder who
+  // finished a six-week cohort was handed a public page telling any investor who
+  // opened it that she had completed twelve weeks. The length now comes from the
+  // cohort's own sessions, which is why a six-session cohort must say six.
+  it('states the cohort\'s real length rather than flooring it at twelve weeks', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e2', status: 'COMPLETED', completedAt: new Date('2026-03-15'), completedWeeks: 6, cohort: { name: 'Cohort 4', startDate: new Date('2026-02-01'), endDate: new Date('2026-03-15'), _count: { sessions: 6 } }, user: { firstName: 'Mei', lastName: 'Lin' } });
+    const res = await request(app).get('/api/strategy/business/accelerator-certificates/e2').expect(200);
+    expect(res.body.data).toMatchObject({ holder: 'Mei Lin', weeks: 6 });
+  });
+
+  // Rows seeded before sessions were required have no sessions to count, and a
+  // certificate that says "0 weeks" would be its own kind of false claim.
+  it('falls back to the recorded weeks when a cohort has no sessions', async () => {
+    prisma.acceleratorEnrollment.findUnique.mockResolvedValue({ id: 'e3', status: 'COMPLETED', completedAt: new Date('2026-03-15'), completedWeeks: 8, cohort: { name: 'Cohort 1', startDate: new Date('2026-01-01'), endDate: new Date('2026-03-01'), _count: { sessions: 0 } }, user: { firstName: 'Ana', lastName: 'Silva' } });
+    const res = await request(app).get('/api/strategy/business/accelerator-certificates/e3').expect(200);
+    expect(res.body.data).toMatchObject({ weeks: 8 });
   });
 
   it('sums what the platform paid the member for a financial year', async () => {

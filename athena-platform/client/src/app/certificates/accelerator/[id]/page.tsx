@@ -3,7 +3,11 @@
 /**
  * An accelerator completion certificate, checkable by anyone with its
  * address: an investor or an employer can see the founder finished the
- * twelve weeks, in which cohort, and when.
+ * programme, in which cohort, how long it ran and when.
+ *
+ * The length is whatever that cohort actually was. The server used to floor it
+ * at twelve, which was true of the default curriculum and a false claim on this
+ * public page the moment staff ran a shorter pilot intake.
  */
 
 import { use } from 'react';
