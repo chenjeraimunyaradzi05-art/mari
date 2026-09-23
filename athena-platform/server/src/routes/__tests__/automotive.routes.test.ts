@@ -572,7 +572,7 @@ describe('The automotive routes', () => {
     expect(page.body.data.ratingCount).toBe(1);
   });
 
-  it('tracks a finance pre-approval from draft to a decision', async () => {
+  it('tracks a finance enquiry from draft to read, and never names a lender', async () => {
     const draft = await request(app).post('/api/automotive/finance/applications').set(as('member')).send({ purpose: 'USED', vehiclePrice: 25000, deposit: 5000, termMonths: 60, incomeAnnual: 78000, expensesMonthly: 2400, employment: 'FULL_TIME', employmentMonths: 30, residency: 'CITIZEN' }).expect(201);
     expect(draft.body.data.status).toBe('DRAFT');
     expect(draft.body.data.amount).toBe(20000);
@@ -582,17 +582,40 @@ describe('The automotive routes', () => {
     expect(submitted.body.data.status).toBe('SUBMITTED');
     expect(submitted.body.data.amount).toBe(19000);
     expect(submitted.body.data.timeline).toHaveLength(2);
+    // Submitting used to set the lender to the literal string "ATHENA finance
+    // desk", which is the whole of what made this read as a pre-approval.
+    // There is no lender, so the field stays empty.
+    expect(submitted.body.data.lender).toBeNull();
     await request(app).patch(`/api/automotive/finance/applications/${draft.body.data.id}`).set(as('member')).send({ deposit: 7000 }).expect(400);
-    const decided = await request(app).patch(`/api/automotive/admin/finance/${draft.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'PRE_APPROVED', lender: 'Panel lender', ratePct: 8.49, expiresInDays: 60 }).expect(200);
-    expect(decided.body.data.status).toBe('PRE_APPROVED');
-    expect(decided.body.data.expiresAt).toBeTruthy();
+    const read = await request(app).patch(`/api/automotive/admin/finance/${draft.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'IN_REVIEW', decisionNote: 'Read it; the figures hold up.' }).expect(200);
+    expect(read.body.data.status).toBe('IN_REVIEW');
+    // No expiry is ever written now, because a validity period is what turns a
+    // number on a page into an offer with a clock on it.
+    expect(read.body.data.expiresAt).toBeFalsy();
+    expect(read.body.data.lender).toBeNull();
     expect(store.notifications.some((n) => n.userId === 'member' && n.data.kind === 'CAR_FINANCE_STATUS')).toBe(true);
-    // The lender's fee is owed once the loan settles; the pre-approval puts it on the ledger as pending.
-    expect(store.referrals).toHaveLength(1);
-    expect(store.referrals[0]).toMatchObject({ kind: 'FINANCE', status: 'PENDING', fee: 190, partner: 'Panel lender', referenceId: draft.body.data.id });
+    // Nothing is owed by anyone: ATHENA introduced her to no lender, so there
+    // is no introduction to be paid a commission for.
+    expect(store.referrals).toHaveLength(0);
     const overview = await request(app).get('/api/automotive/overview').set(as('member')).expect(200);
     expect(overview.body.data.applications).toHaveLength(1);
     expect(overview.body.data.roles.isMechanic).toBe(false);
+  });
+
+  it('refuses to let an admin pre-approve or decline credit, and books no fee for doing so', async () => {
+    const draft = await request(app).post('/api/automotive/finance/applications').set(as('member')).send({ purpose: 'USED', vehiclePrice: 25000, deposit: 5000, termMonths: 60, incomeAnnual: 78000, expensesMonthly: 2400, employment: 'FULL_TIME', employmentMonths: 30, residency: 'CITIZEN', submit: true }).expect(201);
+    const denied = await request(app).patch(`/api/automotive/admin/finance/${draft.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'PRE_APPROVED', lender: 'Panel lender', ratePct: 8.49, expiresInDays: 60 }).expect(400);
+    expect(denied.body.message ?? denied.body.error).toMatch(/Australian Credit Licence/i);
+    await request(app).patch(`/api/automotive/admin/finance/${draft.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'DECLINED', decisionNote: 'No' }).expect(400);
+    // Neither the status nor the commission ledger moved.
+    expect(store.applications.find((a) => a.id === draft.body.data.id)!.status).toBe('SUBMITTED');
+    expect(store.referrals).toHaveLength(0);
+    // Closing it with a note is what is left, and it names no lender and sets no expiry.
+    const closed = await request(app).patch(`/api/automotive/admin/finance/${draft.body.data.id}`).set(as('admin', 'ADMIN')).send({ status: 'WITHDRAWN', decisionNote: 'We have no lender to introduce you to yet.' }).expect(200);
+    expect(closed.body.data.status).toBe('WITHDRAWN');
+    expect(closed.body.data.lender).toBeNull();
+    expect(closed.body.data.expiresAt).toBeFalsy();
+    expect(store.referrals).toHaveLength(0);
   });
 
   it('shows emissions on every car, sorts and filters by them, and lets the mechanic finder cap the labour rate and the job price', async () => {
