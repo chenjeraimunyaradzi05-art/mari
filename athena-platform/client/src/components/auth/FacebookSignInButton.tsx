@@ -97,6 +97,9 @@ type FacebookSignInButtonProps = {
   disabled?: boolean;
   persona?: string;
   womanSelfAttested?: boolean;
+  // Required by the server on a sign-up, for the same reason the attestation is:
+  // an account created without a date of birth can never be age-checked later.
+  dateOfBirth?: string;
   inviteCode?: string;
   onSuccess?: () => void;
   onError?: (message: string) => void;
@@ -107,6 +110,7 @@ export function FacebookSignInButton({
   disabled = false,
   persona,
   womanSelfAttested,
+  dateOfBirth,
   inviteCode,
   onSuccess,
   onError,
@@ -167,6 +171,7 @@ export function FacebookSignInButton({
           mode,
           ...(persona ? { persona } : {}),
           ...(typeof womanSelfAttested === 'boolean' ? { womanSelfAttested } : {}),
+          ...(dateOfBirth ? { dateOfBirth } : {}),
           ...(inviteCode ? { inviteCode } : {}),
         });
         const { user, accessToken: jwt } = response.data.data;
@@ -185,7 +190,7 @@ export function FacebookSignInButton({
         if (mountedRef.current) setIsLoading(false);
       }
     },
-    [facebookMutation, mode, persona, womanSelfAttested, inviteCode, login, queryClient, onSuccess, handleError]
+    [facebookMutation, mode, persona, womanSelfAttested, dateOfBirth, inviteCode, login, queryClient, onSuccess, handleError]
   );
 
   const handleClick = useCallback(() => {

@@ -30,9 +30,26 @@ const facebookEnabled = Boolean(process.env.NEXT_PUBLIC_FACEBOOK_APP_ID);
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email'),
   password: z.string().min(1, 'Password is required'),
+  // Optional because the first request of a sign-in never carries one: the
+  // server answers 401 "Two-factor code required" and the form asks then.
+  // Not a six-digit rule, because verifySecondFactor on the server accepts a
+  // recovery code here too, and the recovery codes are ten characters.
+  twoFactorCode: z.string().optional(),
 });
 
 type LoginForm = z.infer<typeof loginSchema>;
+
+/** The shortest thing the server will accept in the two-factor field. */
+const TWO_FACTOR_MIN_LENGTH = 6;
+
+/**
+ * Whether the server is asking for a second factor rather than refusing the
+ * password. Both answers are 401, and '/auth/login' skips the refresh
+ * interceptor, so the message is all there is to go on — the same sniff the
+ * Expo app has used since its login screen was written.
+ */
+const asksForTwoFactor = (message: string | undefined): boolean =>
+  Boolean(message && message.toLowerCase().includes('two-factor'));
 
 export default function LoginPage() {
   return (
@@ -48,6 +65,9 @@ function LoginContent() {
   const { login, isLoginPending, isAuthenticated, isLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Once the server has asked for a code the field stays on screen, including
+  // after a wrong code, so a retry does not mean typing the password again.
+  const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -72,24 +92,48 @@ function LoginContent() {
 
   const onSubmit = (data: LoginForm) => {
     setServerError(null);
-    login(data, {
-      onSuccess: () => {
-        const redirect = safeRedirect(searchParams?.get('redirect'));
-        if (redirect) {
-          router.push(redirect);
-          return;
-        }
-        router.push('/dashboard');
+
+    const twoFactorCode = data.twoFactorCode?.trim() ?? '';
+    if (requiresTwoFactor && twoFactorCode.length < TWO_FACTOR_MIN_LENGTH) {
+      setServerError(
+        'Enter the code from your authenticator app, or one of the recovery codes you saved.'
+      );
+      return;
+    }
+
+    login(
+      {
+        email: data.email,
+        password: data.password,
+        // Sent only when there is one: an empty string would fail the server's
+        // length rule as a 400 and read as "your code is wrong" rather than
+        // "we have not asked you for one yet".
+        ...(twoFactorCode ? { twoFactorCode } : {}),
       },
-      onError: (error: unknown) => {
-        const responseMessage = (
-          error as { response?: { data?: { message?: string } } }
-        )?.response?.data?.message;
-        setServerError(
-          responseMessage || 'Login failed. Please check your credentials and try again.'
-        );
-      },
-    });
+      {
+        onSuccess: () => {
+          const redirect = safeRedirect(searchParams?.get('redirect'));
+          if (redirect) {
+            router.push(redirect);
+            return;
+          }
+          router.push('/dashboard');
+        },
+        onError: (error: unknown) => {
+          const responseMessage = (
+            error as { response?: { data?: { message?: string } } }
+          )?.response?.data?.message;
+
+          if (asksForTwoFactor(responseMessage)) {
+            setRequiresTwoFactor(true);
+          }
+
+          setServerError(
+            responseMessage || 'Login failed. Please check your credentials and try again.'
+          );
+        },
+      }
+    );
   };
 
   return (
@@ -182,6 +226,31 @@ function LoginContent() {
                 <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
               )}
             </div>
+
+            {requiresTwoFactor && (
+              <div>
+                <label htmlFor="twoFactorCode" className="label">
+                  Two-factor code
+                </label>
+                <input
+                  {...register('twoFactorCode')}
+                  type="text"
+                  id="twoFactorCode"
+                  className="input"
+                  placeholder="123456"
+                  inputMode="text"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  maxLength={32}
+                  spellCheck={false}
+                  aria-describedby="twoFactorCodeHint"
+                />
+                <p id="twoFactorCodeHint" className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  The six-digit code from your authenticator app. If you have lost your
+                  phone, one of the recovery codes you saved works here instead.
+                </p>
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <label className="flex items-center">

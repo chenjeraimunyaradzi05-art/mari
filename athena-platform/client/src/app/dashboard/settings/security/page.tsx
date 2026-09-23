@@ -204,15 +204,27 @@ export default function SecuritySettingsPage() {
   const isTwoFactorEnabled = Boolean(twoFactorStatus?.enabled);
 
   // Recovery codes are single-use; a fresh set replaces whatever is left.
+  //
+  // The server asks for two things before it will issue a set: the account
+  // password and a live second factor. The form only ever collected the
+  // password, so `verifySecondFactor` was handed nothing and every press came
+  // back 400 "Invalid two-factor code" — the one button on this page whose
+  // whole purpose is to be used before you are locked out.
   const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const regenerateRecoveryCodes = useMutation({
-    mutationFn: () => api.post('/auth/2fa/recovery-codes', recoveryPassword ? { currentPassword: recoveryPassword } : {}),
+    mutationFn: () =>
+      api.post('/auth/2fa/recovery-codes', {
+        ...(recoveryPassword ? { currentPassword: recoveryPassword } : {}),
+        code: recoveryCode.trim(),
+      }),
     onSuccess: (response) => {
       const payload = response.data?.data ?? response.data ?? {};
       const codes: string[] = payload.recoveryCodes ?? payload.codes ?? [];
       setRecoveryCodes(codes);
       setRecoveryPassword('');
+      setRecoveryCode('');
       toast.success('New recovery codes issued. The old ones no longer work.');
     },
     onError: (error: unknown) => {
@@ -422,7 +434,23 @@ export default function SecuritySettingsPage() {
                     autoComplete="current-password"
                     aria-label="Current password"
                   />
-                  <button type="button" onClick={() => regenerateRecoveryCodes.mutate()} disabled={regenerateRecoveryCodes.isPending} className="btn-outline px-3 text-sm">
+                  <input
+                    type="text"
+                    value={recoveryCode}
+                    onChange={(event) => setRecoveryCode(event.target.value)}
+                    className="input flex-1 text-sm"
+                    placeholder="Authenticator code"
+                    autoComplete="one-time-code"
+                    aria-label="Authenticator code or an unused recovery code"
+                    maxLength={32}
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => regenerateRecoveryCodes.mutate()}
+                    disabled={regenerateRecoveryCodes.isPending || recoveryCode.trim().length < 6}
+                    className="btn-outline px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  >
                     {regenerateRecoveryCodes.isPending ? 'Issuing…' : 'Issue new codes'}
                   </button>
                 </div>

@@ -1,7 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { useSearchParams } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import {
   User,
   Mail,
@@ -14,9 +17,13 @@ import {
   X,
   Plus,
   Trash2,
+  ShieldCheck,
+  CalendarDays,
 } from 'lucide-react';
-import { useAuth, useUpdateProfile, useMySkills, useAddSkill, useRemoveSkill, useWomanVerificationRequest } from '@/lib/hooks';
+import { useAuth, useUpdateProfile, useMySkills, useAddSkill, useRemoveSkill } from '@/lib/hooks';
 import { getInitials, PERSONA_LABELS } from '@/lib/utils';
+import { DATE_OF_BIRTH_REFUSAL, latestAdultBirthDate, meetsMinimumAge } from '@/lib/age-gate';
+import { fetchIdentityGates, saveDateOfBirth, womanGateApi } from '@/lib/woman-gate';
 
 type ProfileFormData = {
   firstName: string;
@@ -31,10 +38,294 @@ type ProfileFormData = {
   githubUrl: string;
 };
 
+const WOMAN_GATE_STATUS_COPY: Record<string, string> = {
+  UNVERIFIED: 'Not started',
+  PENDING: 'With a reviewer',
+  VERIFIED: 'Verified',
+  REJECTED: 'Not approved',
+};
+
+/**
+ * The two gates on an account: how old ATHENA believes the member is, and
+ * whether her women-only verification has been completed.
+ *
+ * What stood here before was a status chip and a button that posted an empty
+ * body. The request collected nothing, so a reviewer decided a membership from
+ * a name and a subscription tier, and the copy told her that verification was
+ * something paid subscribers could ask for — which was true, and was the
+ * wrong rule. Both are fixed on the server; this is the form that feeds it.
+ */
+function IdentityGatesCard() {
+  const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const [statement, setStatement] = useState('');
+  const [evidenceUrl, setEvidenceUrl] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const completedReturn = useRef(false);
+
+  const { data: gates, isLoading, isError } = useQuery({
+    queryKey: ['identity-gates'],
+    queryFn: fetchIdentityGates,
+  });
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['identity-gates'] });
+    queryClient.invalidateQueries({ queryKey: ['auth'] });
+  };
+
+  const startIdentityCheck = useMutation({
+    mutationFn: () => womanGateApi.request({ method: 'IDENTITY' }),
+    onSuccess: (response) => {
+      const url = response.data?.redirectUrl;
+      if (url) {
+        // Stripe hosts the document and selfie capture; there is nothing to
+        // show here until she comes back to the return_url.
+        window.location.assign(url);
+        return;
+      }
+      refresh();
+      toast.success('Your request has been submitted.');
+    },
+    onError: (error: unknown) => {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message || 'Could not start the document check');
+    },
+  });
+
+  const sendWrittenRequest = useMutation({
+    mutationFn: () =>
+      womanGateApi.request({
+        method: 'MANUAL',
+        statement: statement.trim(),
+        ...(evidenceUrl.trim() ? { evidenceUrl: evidenceUrl.trim() } : {}),
+      }),
+    onSuccess: () => {
+      setStatement('');
+      setEvidenceUrl('');
+      refresh();
+      toast.success('Thank you. A reviewer will look at this shortly.');
+    },
+    onError: (error: unknown) => {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message || 'Could not send your request');
+    },
+  });
+
+  const completeIdentityCheck = useMutation({
+    mutationFn: womanGateApi.complete,
+    onSuccess: (response) => {
+      refresh();
+      if (response.data?.documentCheck === 'verified') {
+        toast.success('Your document check passed. Your request is with a reviewer.');
+      }
+    },
+    // Coming back from Stripe with nothing waiting is an ordinary outcome —
+    // a reload of the return URL, or a webhook that already closed it out —
+    // so it is not worth a red toast.
+    onError: () => refresh(),
+  });
+
+  const saveBirthDate = useMutation({
+    mutationFn: () => saveDateOfBirth(dateOfBirth),
+    onSuccess: () => {
+      setDateOfBirth('');
+      refresh();
+      toast.success('Date of birth saved');
+    },
+    onError: (error: unknown) => {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message || 'Could not save your date of birth');
+    },
+  });
+
+  // Stripe sends her back here with ?woman-verification=done. Asking Stripe
+  // directly means the page can tell her the answer straight away instead of
+  // waiting on a webhook she cannot see.
+  const returnedFromCheck = searchParams?.get('woman-verification') === 'done';
+  const completeMutation = completeIdentityCheck.mutate;
+  useEffect(() => {
+    if (!returnedFromCheck || completedReturn.current) return;
+    completedReturn.current = true;
+    completeMutation();
+  }, [returnedFromCheck, completeMutation]);
+
+  if (isLoading) {
+    return <div className="card h-40 animate-pulse bg-slate-100 dark:bg-slate-800" />;
+  }
+
+  if (isError || !gates) {
+    return (
+      <div className="card border-red-200 text-sm text-red-700 dark:border-red-900/50 dark:text-red-300">
+        Your verification status could not be loaded. Please reload the page.
+      </div>
+    );
+  }
+
+  const woman = gates.womanVerification;
+  const evidence = woman.evidence;
+  const documentPassed = Boolean(evidence?.documentCheckPassedAt);
+  const canAskAgain = woman.status === 'UNVERIFIED' || woman.status === 'REJECTED' || !evidence;
+
+  return (
+    <div className="space-y-6">
+      {!gates.dateOfBirth && (
+        <div className="card border-amber-200 dark:border-amber-900/50">
+          <div className="flex items-start space-x-3">
+            <CalendarDays className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your date of birth</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                ATHENA is an adults-only community, and your account was created before we
+                started asking. Add it once and the rest of the platform opens up. It is never
+                shown on your profile.
+              </p>
+              <div className="mt-4 flex flex-wrap items-start gap-3">
+                <input
+                  type="date"
+                  value={dateOfBirth}
+                  onChange={(event) => setDateOfBirth(event.target.value)}
+                  className="input"
+                  autoComplete="bday"
+                  max={latestAdultBirthDate()}
+                  aria-label="Date of birth"
+                />
+                <button
+                  type="button"
+                  onClick={() => saveBirthDate.mutate()}
+                  disabled={saveBirthDate.isPending || !meetsMinimumAge(dateOfBirth)}
+                  className="btn-primary px-4 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saveBirthDate.isPending ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+              {dateOfBirth && !meetsMinimumAge(dateOfBirth) && (
+                <p className="mt-2 text-sm text-red-600">{DATE_OF_BIRTH_REFUSAL}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="flex items-start space-x-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary-600" />
+          <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Women-only verification
+              </h2>
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+                {WOMAN_GATE_STATUS_COPY[woman.status] ?? woman.status}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              ATHENA is a space for women. Verification is free, and it is what opens the
+              members-only parts of the platform, including the DV-safe housing listings.
+            </p>
+
+            {woman.status === 'VERIFIED' && (
+              <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+                You are verified. Nothing else to do here.
+              </p>
+            )}
+
+            {woman.status === 'PENDING' && (
+              <div className="mt-4 rounded-lg bg-slate-50 p-4 text-sm dark:bg-slate-800/60">
+                <p className="font-medium text-slate-800 dark:text-slate-200">
+                  {documentPassed
+                    ? 'Your document check passed and your request is with a reviewer.'
+                    : evidence
+                    ? 'Your request is with a reviewer.'
+                    : 'You started a document check but have not finished it yet.'}
+                </p>
+                {!documentPassed && evidence?.provider === 'stripe_identity' && (
+                  <button
+                    type="button"
+                    onClick={() => startIdentityCheck.mutate()}
+                    disabled={startIdentityCheck.isPending}
+                    className="btn-outline mt-3 px-4 py-2"
+                  >
+                    {startIdentityCheck.isPending ? 'Opening...' : 'Finish the document check'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {woman.status === 'REJECTED' && (
+              <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+                Your last request was not approved. You can send another with more to go on.
+              </p>
+            )}
+
+            {canAskAgain && woman.status !== 'VERIFIED' && (
+              <div className="mt-4 space-y-4">
+                {woman.identityCheckAvailable && (
+                  <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                      Photo ID and a selfie
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      The quickest way. You photograph an identity document and your face on
+                      our payment provider&apos;s secure page; ATHENA never sees the images,
+                      only the result.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => startIdentityCheck.mutate()}
+                      disabled={startIdentityCheck.isPending}
+                      className="btn-primary mt-3 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {startIdentityCheck.isPending ? 'Opening...' : 'Start the check'}
+                    </button>
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {woman.identityCheckAvailable ? 'Or write to a reviewer' : 'Write to a reviewer'}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    If you would rather not, or cannot, use a document — which is a real
+                    situation for a lot of women here — tell us in a couple of sentences and a
+                    person will read it.
+                  </p>
+                  <textarea
+                    value={statement}
+                    onChange={(event) => setStatement(event.target.value)}
+                    className="input mt-3 min-h-[96px] w-full"
+                    maxLength={1000}
+                    placeholder="A couple of sentences is plenty."
+                    aria-label="Why you are asking to be verified"
+                  />
+                  <input
+                    type="url"
+                    value={evidenceUrl}
+                    onChange={(event) => setEvidenceUrl(event.target.value)}
+                    className="input mt-3 w-full"
+                    placeholder="A supporting link (optional)"
+                    aria-label="A link to supporting evidence, optional"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => sendWrittenRequest.mutate()}
+                    disabled={sendWrittenRequest.isPending || statement.trim().length < 20}
+                    className="btn-outline mt-3 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {sendWrittenRequest.isPending ? 'Sending...' : 'Send for review'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProfileSettingsPage() {
   const { user } = useAuth();
   const updateProfile = useUpdateProfile();
-  const womanVerificationRequest = useWomanVerificationRequest();
   const { data: mySkills } = useMySkills();
   const addSkillMutation = useAddSkill();
   const removeSkillMutation = useRemoveSkill();
@@ -137,42 +428,15 @@ export default function ProfileSettingsPage() {
         )}
       </div>
 
+      {/* Outside the profile form on purpose: it has its own inputs and its own
+          submit, and nesting those inside a form would make Enter save the
+          wrong thing. The boundary is for useSearchParams, which reads the
+          ?woman-verification=done that Stripe returns her with. */}
+      <Suspense fallback={<div className="card h-40 animate-pulse bg-slate-100 dark:bg-slate-800" />}>
+        <IdentityGatesCard />
+      </Suspense>
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        {/* Women-only Verification */}
-        <div className="card">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-            Women-only Verification
-          </h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-            Paid subscribers can request verification to receive a trusted badge.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Status:{' '}
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
-                {user?.womanVerificationStatus || 'UNVERIFIED'}
-              </span>
-            </span>
-            <button
-              type="button"
-              onClick={() => womanVerificationRequest.mutate()}
-              disabled={
-                womanVerificationRequest.isPending ||
-                user?.womanVerificationStatus === 'PENDING' ||
-                user?.womanVerificationStatus === 'VERIFIED'
-              }
-              className="btn-outline px-4 py-2"
-            >
-              {user?.womanVerificationStatus === 'VERIFIED'
-                ? 'Verified'
-                : user?.womanVerificationStatus === 'PENDING'
-                ? 'Pending Review'
-                : womanVerificationRequest.isPending
-                ? 'Submitting...'
-                : 'Request Verification'}
-            </button>
-          </div>
-        </div>
         {/* Avatar Section */}
         <div className="card">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">

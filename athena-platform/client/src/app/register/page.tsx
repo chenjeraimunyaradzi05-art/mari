@@ -23,6 +23,7 @@ import Image from 'next/image';
 import { useAuth } from '@/lib/hooks';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { FacebookSignInButton } from '@/components/auth/FacebookSignInButton';
+import { DATE_OF_BIRTH_REFUSAL, latestAdultBirthDate, meetsMinimumAge } from '@/lib/age-gate';
 
 // Matches the login page: the Facebook chain is complete server-side and only
 // needs an app id, so the placeholder shows only while that is unset.
@@ -57,6 +58,14 @@ const registerSchema = z
     womanSelfAttested: z
       .boolean()
       .refine((value) => value === true, 'You must confirm you are a woman to join'),
+    // Asked for here because it cannot be asked for later: an account created
+    // without a date of birth has no age for the platform to check, and both
+    // the Terms and the Privacy Policy say ATHENA is for adults and verifies
+    // it. The server applies the same rule.
+    dateOfBirth: z
+      .string()
+      .min(1, 'Please enter your date of birth')
+      .refine((value) => meetsMinimumAge(value), DATE_OF_BIRTH_REFUSAL),
     persona: z.string().optional(),
     inviteCode: z
       .string()
@@ -146,6 +155,13 @@ function RegisterContent() {
   const personaValue = watch('persona');
   const inviteCodeValue = watch('inviteCode');
   const womanSelfAttestedValue = watch('womanSelfAttested');
+  const dateOfBirthValue = watch('dateOfBirth');
+  // A Google or Facebook sign-up creates the account in one call, so it has to
+  // carry the date of birth with it; the server refuses to create one without.
+  // Until the value is there the social buttons stay shut rather than sending
+  // a request that can only be refused.
+  const dateOfBirthAccepted = meetsMinimumAge(dateOfBirthValue ?? '');
+  const maxDateOfBirth = latestAdultBirthDate();
   const passwordRequirements = [
     { label: 'At least 12 characters', met: (password?.length || 0) >= 12 },
     { label: 'Contains uppercase letter', met: /[A-Z]/.test(password || '') },
@@ -271,6 +287,28 @@ function RegisterContent() {
               {errors.email && (
                 <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
               )}
+            </div>
+
+            <div>
+              <label htmlFor="dateOfBirth" className="label">
+                Date of birth
+              </label>
+              <input
+                {...register('dateOfBirth')}
+                type="date"
+                id="dateOfBirth"
+                className="input"
+                autoComplete="bday"
+                max={maxDateOfBirth}
+                aria-invalid={errors.dateOfBirth ? 'true' : 'false'}
+                aria-describedby="dateOfBirthHint"
+              />
+              {errors.dateOfBirth && (
+                <p className="mt-1 text-sm text-red-600">{errors.dateOfBirth.message}</p>
+              )}
+              <p id="dateOfBirthHint" className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                ATHENA is an adults-only community. Your date of birth is not shown on your profile.
+              </p>
             </div>
 
             <div>
@@ -479,8 +517,10 @@ function RegisterContent() {
             <div className="mt-6 grid grid-cols-2 gap-4">
               <GoogleSignInButton
                 mode="register"
+                disabled={!dateOfBirthAccepted}
                 persona={personaValue || undefined}
                 womanSelfAttested={womanSelfAttestedValue}
+                dateOfBirth={dateOfBirthValue || undefined}
                 inviteCode={inviteCodeValue?.trim() || undefined}
                 onError={(message) => setServerError(message)}
                 onSuccess={() => {
@@ -495,8 +535,10 @@ function RegisterContent() {
               {facebookEnabled ? (
                 <FacebookSignInButton
                   mode="register"
+                  disabled={!dateOfBirthAccepted}
                   persona={personaValue || undefined}
                   womanSelfAttested={womanSelfAttestedValue}
+                  dateOfBirth={dateOfBirthValue || undefined}
                   inviteCode={inviteCodeValue?.trim() || undefined}
                   onError={(message) => setServerError(message)}
                   onSuccess={() => {
@@ -517,6 +559,11 @@ function RegisterContent() {
                 </button>
               )}
             </div>
+            {!dateOfBirthAccepted && (
+              <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
+                Add your date of birth above to sign up with Google or Facebook.
+              </p>
+            )}
             {!facebookEnabled && (
               <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
                 Google sign-in is live. Facebook sign-in is still being finalized for launch.

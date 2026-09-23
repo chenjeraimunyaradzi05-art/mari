@@ -107,6 +107,10 @@ type GoogleSignInButtonProps = {
   disabled?: boolean;
   persona?: string;
   womanSelfAttested?: boolean;
+  // Required by the server on a sign-up, for the same reason the attestation is:
+  // an account created without a date of birth can never be age-checked later.
+  // Undefined on a sign-in, where the account already carries one.
+  dateOfBirth?: string;
   inviteCode?: string;
   onSuccess?: () => void;
   onError?: (message: string) => void;
@@ -117,6 +121,7 @@ export function GoogleSignInButton({
   disabled = false,
   persona,
   womanSelfAttested,
+  dateOfBirth,
   inviteCode,
   onSuccess,
   onError,
@@ -149,6 +154,7 @@ export function GoogleSignInButton({
           mode,
           ...(persona ? { persona } : {}),
           ...(typeof womanSelfAttested === 'boolean' ? { womanSelfAttested } : {}),
+          ...(dateOfBirth ? { dateOfBirth } : {}),
           ...(inviteCode ? { inviteCode } : {}),
         });
 
@@ -166,7 +172,7 @@ export function GoogleSignInButton({
         handleError(message);
       }
     },
-    [googleMutation, mode, persona, womanSelfAttested, inviteCode, login, queryClient, onSuccess, handleError]
+    [googleMutation, mode, persona, womanSelfAttested, dateOfBirth, inviteCode, login, queryClient, onSuccess, handleError]
   );
 
   useEffect(() => {

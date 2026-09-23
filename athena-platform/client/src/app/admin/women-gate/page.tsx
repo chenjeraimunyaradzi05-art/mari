@@ -8,6 +8,12 @@ import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import {
+  womanGateApi,
+  type WomanGateEvidence,
+  type WomanGateQueue,
+  type WomanGateStatus,
+} from '@/lib/woman-gate';
 
 interface InviteCode {
   id: string;
@@ -36,36 +42,69 @@ interface InviteCodesResponse {
   };
 }
 
-interface VerificationUser {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  womanSelfAttested: boolean;
-  womanVerificationStatus: string;
-  womanVerifiedAt: string | null;
-  createdAt: string;
-  subscription?: {
-    tier: string;
-    status: string;
-  } | null;
-}
-
-interface VerificationResponse {
-  users: VerificationUser[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
-}
-
 interface InviteCodeCreatePayload {
   count: number;
   prefix?: string;
   maxUses?: number;
   expiresAt?: string;
+}
+
+/**
+ * What the member actually sent, so the decision is made against something.
+ * An empty cell is a real and useful answer: it means she has opened a request
+ * and not finished it, and approving on that is exactly what this queue used
+ * to make easy.
+ */
+function SubmissionCell({
+  evidence,
+  ageVerifiedAt,
+}: {
+  evidence: WomanGateEvidence | null;
+  ageVerifiedAt: string | null;
+}) {
+  if (!evidence) {
+    return <span className="text-xs text-slate-500">Nothing submitted yet</span>;
+  }
+
+  if (evidence.provider === 'stripe_identity') {
+    return (
+      <div className="space-y-1">
+        <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
+          {evidence.documentCheckPassedAt ? 'Photo ID and selfie: passed' : 'Photo ID and selfie: started, not finished'}
+        </div>
+        {evidence.documentName && (
+          <div className="text-xs text-slate-500">Name on document: {evidence.documentName}</div>
+        )}
+        {evidence.documentType && (
+          <div className="text-xs text-slate-500">Document: {evidence.documentType}</div>
+        )}
+        {ageVerifiedAt && (
+          <div className="text-xs text-slate-500">
+            Age confirmed from the document on {new Date(ageVerifiedAt).toLocaleDateString()}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="text-xs font-medium text-slate-800 dark:text-slate-200">In her own words</div>
+      {evidence.statement && (
+        <p className="whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300">{evidence.statement}</p>
+      )}
+      {evidence.evidenceUrl && (
+        <a
+          href={evidence.evidenceUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-xs font-medium text-purple-600 hover:text-purple-500"
+        >
+          Supporting link
+        </a>
+      )}
+    </div>
+  );
 }
 
 export default function AdminWomenGatePage() {
@@ -130,27 +169,24 @@ export default function AdminWomenGatePage() {
     },
   });
 
-  const verificationParams = useMemo(() => {
-    const params = new URLSearchParams({
-      page: verificationPage.toString(),
-      limit: '20',
-      status: verificationStatus,
-    });
-    return params.toString();
-  }, [verificationPage, verificationStatus]);
-
-  const { data: verificationData, isLoading: verificationLoading } = useQuery<VerificationResponse>({
+  // The queue reads from the verification router rather than the old admin
+  // endpoint, because that is where the evidence is. Approving used to be a
+  // decision made from a name, an email and a subscription tier —
+  // `womanSelfAttested` is true for every account, since registration rejects
+  // false, so the fourth column on this screen said nothing at all.
+  const { data: verificationData, isLoading: verificationLoading } = useQuery<WomanGateQueue>({
     queryKey: ['admin-woman-verifications', verificationPage, verificationStatus],
-    queryFn: async () => {
-      const response = await api.get(`/admin/woman-verifications?${verificationParams}`);
-      return response.data;
-    },
+    queryFn: () =>
+      womanGateApi.queue({
+        status: verificationStatus as WomanGateStatus,
+        page: verificationPage,
+        limit: 20,
+      }),
   });
 
   const updateVerificationMutation = useMutation({
-    mutationFn: async ({ userId, status }: { userId: string; status: 'VERIFIED' | 'REJECTED' }) => {
-      await api.patch(`/admin/woman-verifications/${userId}`, { status });
-    },
+    mutationFn: ({ userId, status, reason }: { userId: string; status: 'VERIFIED' | 'REJECTED'; reason?: string }) =>
+      womanGateApi.review(userId, { status, ...(reason ? { reason } : {}) }),
     onSuccess: () => {
       toast.success('Verification updated');
       queryClient.invalidateQueries({ queryKey: ['admin-woman-verifications'] });
@@ -314,51 +350,64 @@ export default function AdminWomenGatePage() {
                 <thead className="bg-slate-50 dark:bg-slate-900">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Subscription</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">What she submitted</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                  {verificationData?.users.map((user) => (
-                    <tr key={user.id}>
-                      <td className="px-4 py-3 text-sm text-slate-900 dark:text-white">
-                        <div className="font-medium">{user.firstName} {user.lastName}</div>
-                        <div className="text-xs text-slate-500">{user.email}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
-                        {user.subscription?.tier || 'FREE'} ({user.subscription?.status || 'INACTIVE'})
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                          {user.womanVerificationStatus}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {user.womanVerificationStatus === 'PENDING' ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => updateVerificationMutation.mutate({ userId: user.id, status: 'VERIFIED' })}
-                            >
-                              <UserCheck className="h-4 w-4 mr-1" />
-                              Approve
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => updateVerificationMutation.mutate({ userId: user.id, status: 'REJECTED' })}
-                            >
-                              <UserX className="h-4 w-4 mr-1" />
-                              Reject
-                            </Button>
+                  {verificationData?.users.map((user) => {
+                    const evidence = user.submission?.evidence ?? null;
+                    return (
+                      <tr key={user.id}>
+                        <td className="px-4 py-3 align-top text-sm text-slate-900 dark:text-white">
+                          <div className="font-medium">{user.firstName} {user.lastName}</div>
+                          <div className="text-xs text-slate-500">{user.email}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Joined {new Date(user.createdAt).toLocaleDateString()} ·{' '}
+                            {user.subscription?.tier || 'FREE'}
                           </div>
-                        ) : (
-                          <span className="text-xs text-slate-500">No actions</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3 align-top text-sm text-slate-600 dark:text-slate-300">
+                          <SubmissionCell evidence={evidence} ageVerifiedAt={user.ageVerifiedAt} />
+                        </td>
+                        <td className="px-4 py-3 align-top text-sm">
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+                            {user.womanVerificationStatus}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 align-top text-right">
+                          {user.womanVerificationStatus === 'PENDING' ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                // The server refuses an approval with nothing behind
+                                // it; the button says so rather than letting a
+                                // reviewer press it and read an error.
+                                disabled={!evidence || updateVerificationMutation.isPending}
+                                title={evidence ? undefined : 'Nothing has been submitted on this request yet'}
+                                onClick={() => updateVerificationMutation.mutate({ userId: user.id, status: 'VERIFIED' })}
+                              >
+                                <UserCheck className="h-4 w-4 mr-1" />
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={updateVerificationMutation.isPending}
+                                onClick={() => updateVerificationMutation.mutate({ userId: user.id, status: 'REJECTED' })}
+                              >
+                                <UserX className="h-4 w-4 mr-1" />
+                                Reject
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-500">No actions</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

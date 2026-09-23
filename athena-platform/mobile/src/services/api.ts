@@ -144,6 +144,7 @@ export const authApi = {
     lastName: string;
     persona: string;
     womanSelfAttested: boolean;
+    dateOfBirth: string;
   }) =>
     api.post('/auth/register', data),
   me: () => api.get('/auth/me'),

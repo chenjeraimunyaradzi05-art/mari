@@ -26,6 +26,10 @@ interface RegisterData {
   lastName: string;
   persona?: string;
   womanSelfAttested?: boolean;
+  // Required by the server, and not defaultable the way the attestation below
+  // is: nobody but the member can answer it, and an account created without it
+  // can never be age-checked afterwards.
+  dateOfBirth: string;
   username?: string;
   inviteCode?: string;
   referralCode?: string;

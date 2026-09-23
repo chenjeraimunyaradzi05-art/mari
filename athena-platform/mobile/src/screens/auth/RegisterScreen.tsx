@@ -22,6 +22,28 @@ type RegisterScreenProps = {
   navigation: NativeStackNavigationProp<AuthStackParamList, 'Register'>;
 };
 
+/**
+ * Kept in step with server/src/middleware/account-gates.ts and the web form.
+ * There is no date picker dependency in this app, so the field is typed and
+ * validated against the same rule rather than left to a native control.
+ */
+const PLATFORM_MINIMUM_AGE = 18;
+const MINIMUM_AGE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function isAdult(value: string): boolean {
+  const born = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(born.getTime())) return false;
+
+  const now = new Date();
+  // A birthday that has not come round yet this year does not count, which is
+  // why this subtracts a year rather than dividing elapsed milliseconds.
+  let years = now.getUTCFullYear() - born.getUTCFullYear();
+  const monthDelta = now.getUTCMonth() - born.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < born.getUTCDate())) years -= 1;
+
+  return years >= PLATFORM_MINIMUM_AGE && years < 120;
+}
+
 const PERSONAS = [
   { value: Persona.EARLY_CAREER, label: 'Early Career' },
   { value: Persona.MID_CAREER, label: 'Professional' },
@@ -39,6 +61,7 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
   const [password, setPassword] = useState('');
   const [selectedPersona, setSelectedPersona] = useState(Persona.EARLY_CAREER);
   const [womanSelfAttested, setWomanSelfAttested] = useState(false);
+  const [dateOfBirth, setDateOfBirth] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleRegister = async () => {
@@ -70,6 +93,17 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
       return;
     }
 
+    // The same rule the server applies, checked here so the answer is immediate
+    // rather than a round trip. ATHENA is an adult platform and the account can
+    // never be age-checked later if this is not collected now.
+    if (!MINIMUM_AGE_PATTERN.test(dateOfBirth.trim()) || !isAdult(dateOfBirth.trim())) {
+      Alert.alert(
+        'Date of birth',
+        `Please enter your date of birth as YYYY-MM-DD. You must be at least ${PLATFORM_MINIMUM_AGE} to join ATHENA.`
+      );
+      return;
+    }
+
     setIsLoading(true);
     try {
       const result = await register({
@@ -79,6 +113,7 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
         password,
         persona: selectedPersona,
         womanSelfAttested,
+        dateOfBirth: dateOfBirth.trim(),
       });
       if (result.verificationRequired) {
         Alert.alert(
@@ -136,6 +171,17 @@ export function RegisterScreen({ navigation }: RegisterScreenProps) {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Date of birth (YYYY-MM-DD)"
+            value={dateOfBirth}
+            onChangeText={setDateOfBirth}
+            keyboardType="numbers-and-punctuation"
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={10}
           />
 
           <Text style={styles.label}>I am a...</Text>

@@ -41,6 +41,10 @@ interface RegisterData {
   lastName: string;
   persona: string;
   womanSelfAttested: boolean;
+  // The server refuses a registration without one: an account created with no
+  // date of birth can never be age-checked afterwards, and ATHENA is an adult
+  // platform. Sent as an ISO date string, the same as the web form sends.
+  dateOfBirth: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
