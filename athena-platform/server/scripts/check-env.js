@@ -59,7 +59,13 @@ const REQUIRED_IN_PRODUCTION = [
   ['AWS_ACCESS_KEY_ID'],
   ['AWS_SECRET_ACCESS_KEY'],
   ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'],
-  ['ML_SERVICE_URL'],
+  // ML_SERVICE_URL is deliberately not here. It used to be, and it made the
+  // platform impossible to report ready: the service cannot start without
+  // trained artefacts, none exist in this repository, and its only real
+  // consumer — the feed re-ranker — already degrades to the unranked feed when
+  // it is absent. Requiring the URL of a service that cannot run is a gate that
+  // can never pass. See docs/runbooks/ML-SERVICE.md for what turning it on
+  // would actually take.
   ['REDIS_URL'],
 ];
 
