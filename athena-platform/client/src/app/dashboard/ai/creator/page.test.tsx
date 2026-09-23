@@ -29,11 +29,14 @@ const QUIET_INCOME_STREAM = {
 
 /**
  * The exact row GET /ai-algorithms/creator-analytics hands back to a member who
- * has just opened the page: the endpoint creates it with nothing but a tier.
- * The page used to be typed against a different, imagined model and threw a
- * TypeError on this payload for every single user, which is why the shape is
- * spelled out here in full rather than trimmed to the fields a test happens to
- * assert on.
+ * has just opened the page. The page used to be typed against a different,
+ * imagined model and threw a TypeError on this payload for every single user,
+ * which is why the shape is spelled out here in full rather than trimmed to the
+ * fields a test happens to assert on.
+ *
+ * The route now recounts this row from the follow, post and video tables before
+ * returning it, so the zeros below are a member with nothing published yet
+ * rather than, as they used to be, every member alive.
  */
 const NEW_CREATOR_ROW = {
   id: 'analytics-1',
@@ -53,7 +56,7 @@ const NEW_CREATOR_ROW = {
   totalEarnings: '0',
   monthlyEarnings: null,
   revenueBySource: null,
-  creatorTier: 'BRONZE',
+  creatorTier: 'Emerging',
   isMonetized: false,
   monetizedAt: null,
   projectedIncome: null,
@@ -73,25 +76,28 @@ describe('Creator analytics page', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('renders the row the server actually returns, without inventing figures', async () => {
-    // The projections endpoint models income from followers and engagement, so
-    // for a brand-new creator it returns three zeros. A zero produced by a
-    // formula that had nothing to work with is not a forecast, and the page
-    // must not present it as one.
+    // The endpoint no longer forecasts anything: projectedIncome is null for
+    // everyone, always, and what it sends instead is the share of each gift she
+    // keeps — a rate the server charges today rather than a guess at her
+    // future.
     respond(NEW_CREATOR_ROW, {
       followerCount: 0,
       avgEngagementRate: null,
-      creatorTier: 'BRONZE',
-      projectedIncome: { conservative: 0, realistic: 0, optimistic: 0 },
-      topRevenueStreams: null,
-      monetizationRoadmap: null,
+      creatorTier: 'Emerging',
+      projectedIncome: null,
+      giftRevenueShare: 70,
+      nextTier: { tier: 'Rising', minFollowers: 1000, giftRevenueShare: 75 },
     });
 
     render(<CreatorAnalyticsPage />);
 
-    expect(await screen.findByText(/We have not measured your reach yet/i)).toBeInTheDocument();
-    expect(screen.getByText('bronze')).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing to count yet/i)).toBeInTheDocument();
+    expect(screen.getByText('Emerging')).toBeInTheDocument();
+    expect(screen.getByText(/You keep 70% of every gift/i)).toBeInTheDocument();
+    expect(screen.getByText(/1.0K followers moves you to Rising/i)).toBeInTheDocument();
     expect(screen.getByText(/Monetisation is not switched on/i)).toBeInTheDocument();
     expect(screen.queryByText(/Monthly income, modelled/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Conservative/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Revenue on record/i)).not.toBeInTheDocument();
 
     // A zero gift total is a real measurement — nobody sent her one — so unlike
@@ -134,17 +140,17 @@ describe('Creator analytics page', () => {
         peakActiveHours: [19, 20, 21],
         totalEarnings: '1450',
         revenueBySource: { gifts: 900, sponsorships: 550 },
-        creatorTier: 'SILVER',
+        creatorTier: 'Rising',
         isMonetized: true,
         monetizedAt: '2026-03-01T00:00:00.000Z',
       },
       {
         followerCount: 1240,
         avgEngagementRate: 0.082,
-        creatorTier: 'SILVER',
-        projectedIncome: { conservative: 10, realistic: 30, optimistic: 80 },
-        topRevenueStreams: [{ stream: 'Sponsorships', potential: 15, effort: 'MEDIUM' }],
-        monetizationRoadmap: null,
+        creatorTier: 'Rising',
+        projectedIncome: null,
+        giftRevenueShare: 75,
+        nextTier: { tier: 'Established', minFollowers: 10000, giftRevenueShare: 80 },
       },
       {
         ...QUIET_INCOME_STREAM,
@@ -162,18 +168,19 @@ describe('Creator analytics page', () => {
     expect(screen.getByText('8.2%')).toBeInTheDocument();
     expect(screen.getByText('woman')).toBeInTheDocument();
     expect(screen.getByText('7pm')).toBeInTheDocument();
-    expect(screen.getByText('Sponsorships')).toBeInTheDocument();
     expect(screen.getByText(/1,450/)).toBeInTheDocument();
     expect(screen.getByText('$128.40')).toBeInTheDocument();
+    expect(screen.getByText('Rising')).toBeInTheDocument();
+    expect(screen.getByText(/You keep 75% of every gift/i)).toBeInTheDocument();
     expect(screen.getByText(/Monetisation is on/i)).toBeInTheDocument();
-    expect(screen.queryByText(/We have not measured your reach yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing to count yet/i)).not.toBeInTheDocument();
   });
 
   it('no longer reads the six fields the model never had', async () => {
     respond(NEW_CREATOR_ROW, null);
 
     render(<CreatorAnalyticsPage />);
-    await screen.findByText(/We have not measured your reach yet/i);
+    await screen.findByText(/Nothing to count yet/i);
 
     // Each of these headings was rendered from a field that does not exist on
     // CreatorAnalytics. Their absence is the regression guard.

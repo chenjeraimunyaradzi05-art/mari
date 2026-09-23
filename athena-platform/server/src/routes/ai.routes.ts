@@ -4,6 +4,16 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest, requirePremium } from '../middleware/auth';
 import { aiLimiter } from '../middleware/rateLimiter';
 import { aiService } from '../services/ai.service';
+import {
+  AI_CHAT_DISCLAIMER,
+  crisisReply,
+  detectChatCrisis,
+  raiseChatCrisisFlag,
+  screenAssistantReply,
+  screenMemberMessage,
+  WITHHELD_REPLY,
+  type FlaggedChatCrisis,
+} from '../services/ai-safety.service';
 import { checkRateLimit, getRateLimitStatus } from '../utils/cache';
 
 function getFreeChatQuotaConfig() {
@@ -27,6 +37,37 @@ function getFreeChatQuotaConfig() {
     : defaultMaxRequests;
 
   return { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests };
+}
+
+/** The free-tier window as every chat response reports it. */
+type ChatUsage = { limit: number; remaining: number; resetIn: number; windowSeconds: number };
+
+/**
+ * The one place the chat answers a member in crisis, so that the three ways of
+ * reaching it — her words, the moderation provider reading her message, and the
+ * provider reading the model's reply — cannot drift into three different
+ * answers. It raises the staff flag first and sends the numbers second: both
+ * happen, and the order only decides which one is awaited.
+ */
+async function respondWithCrisis(
+  res: Response,
+  userId: string,
+  check: FlaggedChatCrisis,
+  usage: ChatUsage | undefined
+) {
+  await raiseChatCrisisFlag(userId, check);
+  const reply = crisisReply(check.kind);
+
+  return res.json({
+    success: true,
+    data: {
+      response: reply.text,
+      crisis: { flagged: true, kind: check.kind, lines: reply.lines },
+      disclaimer: AI_CHAT_DISCLAIMER,
+      timestamp: new Date(),
+      usage,
+    },
+  });
 }
 
 const router = Router();
@@ -544,6 +585,17 @@ router.post('/chat', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(400, 'Context must be a list of up to 40 turns, each with a role and content');
     }
 
+    // The crisis screen runs before anything else in this handler, and in
+    // particular before the free-tier quota. It is a local phrase check, so it
+    // costs nothing to run first, and a member who has spent all twenty of her
+    // free messages and then writes that she cannot go on must not be met with
+    // "upgrade to Premium". She gets the numbers, the model is never called,
+    // and the message does not count against her window.
+    const crisis = detectChatCrisis(message);
+    if (crisis.flagged && crisis.kind) {
+      return await respondWithCrisis(res, req.user!.id, { ...crisis, flagged: true, kind: crisis.kind }, undefined);
+    }
+
     // Check usage limits for free tier
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
@@ -552,9 +604,7 @@ router.post('/chat', authenticate, async (req: AuthRequest, res, next) => {
 
     const tier = user?.subscription?.tier || 'FREE';
 
-    let usage:
-      | { limit: number; remaining: number; resetIn: number; windowSeconds: number }
-      | undefined;
+    let usage: ChatUsage | undefined;
 
     if (tier === 'FREE') {
       const { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests } =
@@ -582,12 +632,33 @@ router.post('/chat', authenticate, async (req: AuthRequest, res, next) => {
       }
     }
 
+    // The provider screen, which reads what a phrase list cannot: it routes a
+    // self-harm disclosure to the crisis reply rather than refusing it, and
+    // refuses only what is aimed at somebody else. See ai-safety.service.
+    const screening = await screenMemberMessage(message);
+    if (screening.decision === 'block') {
+      throw new ApiError(400, screening.reason);
+    }
+    if (screening.decision === 'crisis') {
+      return await respondWithCrisis(res, req.user!.id, screening.check, usage);
+    }
+
     const response = await aiService.chat(message, context); // context is passed as history array
+
+    // The model's reply is screened too. It is a general-purpose model behind a
+    // short system prompt, and what it says is published to a member in her own
+    // dashboard with nobody else in the room.
+    const replyScreening = await screenAssistantReply(response);
+    if (replyScreening.decision === 'crisis') {
+      return await respondWithCrisis(res, req.user!.id, replyScreening.check, usage);
+    }
 
     res.json({
       success: true,
       data: {
-        response,
+        response: replyScreening.decision === 'block' ? WITHHELD_REPLY : response,
+        crisis: { flagged: false },
+        disclaimer: AI_CHAT_DISCLAIMER,
         timestamp: new Date(),
         usage,
       },

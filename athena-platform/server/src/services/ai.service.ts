@@ -438,7 +438,22 @@ Candidate answer: ${params.answer}`;
      }
      
      try {
-         const systemPrompt = "You are ATHENA, an AI career assistant designed to empower women in their professional journeys. Be supportive but professional.";
+         // The prompt used to be the first sentence alone. On a platform whose
+         // members include women living with violence, a general-purpose model
+         // told only to be "supportive but professional" will happily hold a
+         // conversation about self-harm, hand out legal and medical opinions,
+         // and invent a helpline number that rings nobody. The route screens
+         // the message before it ever reaches here and answers a crisis itself
+         // (see ai-safety.service), so what these lines do is cover everything
+         // the screen lets through: they keep the model inside what it is, and
+         // they forbid it from producing contact details of its own, because a
+         // wrong number given to a frightened woman is worse than no number.
+         const systemPrompt = [
+           'You are ATHENA, an AI career assistant designed to empower women in their professional journeys. Be supportive but professional.',
+           'You are not a counsellor, doctor, lawyer or financial adviser. Do not diagnose, do not give medical, legal or financial advice, and say plainly when something needs a qualified person.',
+           'If someone describes self-harm, abuse or being unsafe, do not counsel her and do not talk her through it. Say that you are an automated assistant, that this needs a real person, and point her to the crisis lines shown beneath this chat.',
+           'Never invent a phone number, an organisation, a web address or a statistic. If you do not know, say so.',
+         ].join(' ');
          // The previous version defaulted a missing role to 'user' but passed a
          // supplied one through untouched, so a caller could send role 'system'
          // and replace the prompt above. sanitizeChatHistory drops anything

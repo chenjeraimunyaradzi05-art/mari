@@ -31,6 +31,7 @@ import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
+import { creatorTierStanding, refreshCreatorAnalytics } from '../services/creator.service';
 
 const router = Router();
 const isProductionRuntime =
@@ -540,6 +541,12 @@ router.post('/report', async (req: Request, res: Response, next: NextFunction) =
 // =============================================
 
 // Get creator analytics
+//
+// The row is a cache, and until now nothing filled it: this route created it at
+// the column defaults and handed back zeros, which a creator reads as a
+// measurement of herself rather than as the absence of one. It is now recounted
+// from the follow, post and video tables on read — see refreshCreatorAnalytics
+// — so what she is shown is what the platform has actually recorded.
 router.get('/creator-analytics', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
@@ -547,19 +554,7 @@ router.get('/creator-analytics', async (req: Request, res: Response, next: NextF
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    let analytics = await prisma.creatorAnalytics.findUnique({
-      where: { userId },
-    });
-
-    // Create default analytics if doesn't exist
-    if (!analytics) {
-      analytics = await prisma.creatorAnalytics.create({
-        data: {
-          userId,
-          creatorTier: 'BRONZE',
-        },
-      });
-    }
+    const analytics = await refreshCreatorAnalytics(userId);
 
     res.json({ data: analytics });
   } catch (error) {
@@ -567,7 +562,26 @@ router.get('/creator-analytics', async (req: Request, res: Response, next: NextF
   }
 });
 
-// Get income projections
+// What this route used to be called was "income projections", and what it did
+// was this:
+//
+//   conservative: Math.floor(followers * 0.001 * engagement * 100)
+//   realistic:    Math.floor(followers * 0.003 * engagement * 100)
+//   optimistic:   Math.floor(followers * 0.008 * engagement * 100)
+//
+// and then three revenue streams at 30%, 50% and 20% of the middle figure,
+// named Ad Revenue, Sponsorships and Digital Products. Every coefficient in
+// that block was invented. ATHENA has no advertising product, no sponsorship
+// marketplace and no digital storefront, so those three streams are not things
+// a member here can earn from at all, and nothing anywhere establishes what a
+// follower is worth per month on this platform. It was a forecast of her income
+// with no basis, written to the database and presented to her as her own.
+//
+// There is no way to make that true, so it is gone. What remains is what can be
+// stood behind: the reach the platform has actually measured, and the share of
+// every gift she keeps, which is not a projection but the rate sendGift divides
+// her gifts by today. Money she has actually received is on the same page,
+// counted from live rows, at GET /api/algorithms/income-stream.
 router.get('/creator-analytics/projections', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
@@ -575,54 +589,24 @@ router.get('/creator-analytics/projections', async (req: Request, res: Response,
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const analytics = await prisma.creatorAnalytics.findUnique({
-      where: { userId },
-      select: {
-        followerCount: true,
-        avgEngagementRate: true,
-        creatorTier: true,
-        projectedIncome: true,
-        topRevenueStreams: true,
-        monetizationRoadmap: true,
+    const analytics = await refreshCreatorAnalytics(userId);
+    const standing = creatorTierStanding(analytics.followerCount);
+
+    res.json({
+      data: {
+        followerCount: analytics.followerCount,
+        avgEngagementRate: analytics.avgEngagementRate,
+        creatorTier: analytics.creatorTier,
+        // Null, always, and not because it has not been computed yet: this
+        // platform does not forecast a creator's income. The field stays in the
+        // response so that a client still reading it gets the honest answer
+        // rather than a stale one.
+        projectedIncome: null,
+        topRevenueStreams: null,
+        giftRevenueShare: standing.giftRevenueShare,
+        nextTier: standing.nextTier,
       },
     });
-
-    if (!analytics) {
-      return res.json({ data: null });
-    }
-
-    // Generate projections if not cached
-    if (!analytics.projectedIncome) {
-      const followers = analytics.followerCount;
-      const engagement = analytics.avgEngagementRate || 0.05;
-
-      const projections = {
-        conservative: Math.floor(followers * 0.001 * engagement * 100),
-        realistic: Math.floor(followers * 0.003 * engagement * 100),
-        optimistic: Math.floor(followers * 0.008 * engagement * 100),
-      };
-
-      await prisma.creatorAnalytics.update({
-        where: { userId },
-        data: {
-          projectedIncome: projections,
-          topRevenueStreams: [
-            { stream: 'Ad Revenue', potential: projections.realistic * 0.3, effort: 'LOW' },
-            { stream: 'Sponsorships', potential: projections.realistic * 0.5, effort: 'MEDIUM' },
-            { stream: 'Digital Products', potential: projections.realistic * 0.2, effort: 'HIGH' },
-          ],
-        },
-      });
-
-      return res.json({
-        data: {
-          ...analytics,
-          projectedIncome: projections,
-        },
-      });
-    }
-
-    res.json({ data: analytics });
   } catch (error) {
     next(error);
   }

@@ -13,12 +13,51 @@ import { useAIChat, useAIChatUsage, type AIChatUsage } from '@/lib/hooks';
  * carries. Now one line under the composer says how many messages are left and
  * when the window resets, follows each reply, and offers the upgrade only once
  * there are none left. Paid tiers have no cap and see no line.
+ *
+ * The second thing this page had to learn is what to do when the conversation
+ * stops being about work. The server screens every message and every reply now,
+ * and when it reads crisis language it answers with the crisis lines itself
+ * rather than sending the exchange to a model (see ai-safety.service). This
+ * page renders that answer as something she can act on — numbers she can press
+ * — and keeps the disclaimer above the composer where she is actually looking,
+ * rather than in a footer she will never scroll to.
  */
+
+/** A line as the server sends it, from the wellness library's crisis list. */
+type CrisisLine = {
+  key: string;
+  name: string;
+  phone: string;
+  url: string;
+  when: string;
+  who: string;
+};
 
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
+  /** Present only on a crisis reply, and then rendered as call links. */
+  crisisLines?: CrisisLine[];
 };
+
+/**
+ * The three numbers that stay on screen the whole time she is here.
+ *
+ * BEFORE LAUNCH: 000, Lifeline and 1800RESPECT are the nationally published
+ * Australian numbers, and they are repeated in several places in this app — the
+ * site footer, the housing and safety pages, the wellness library on the
+ * server. Every one of them must be checked against the publisher's own current
+ * page before launch. Do not add a number here that was not copied from a
+ * publisher.
+ */
+const ALWAYS_ON_LINES: Array<{ name: string; phone: string; dial: string }> = [
+  { name: 'Emergency', phone: '000', dial: '000' },
+  { name: 'Lifeline', phone: '13 11 14', dial: '131114' },
+  { name: '1800RESPECT', phone: '1800 737 732', dial: '1800737732' },
+];
+
+/** "13 11 14" is how a number is read; "131114" is how it is dialled. */
+const dialable = (phone: string) => phone.replace(/[^\d+]/g, '');
 
 type Usage = NonNullable<AIChatUsage['usage']>;
 
@@ -76,7 +115,15 @@ export default function AIChatPage() {
           ? data
           : data?.response || data?.data?.response || data?.message || data?.content || JSON.stringify(data);
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: assistantText }]);
+      // A crisis reply carries its lines with it. They are rendered from the
+      // server's list rather than from anything held here, so there is one
+      // place a number can be corrected.
+      const crisisLines: CrisisLine[] | undefined =
+        data && typeof data === 'object' && data.crisis?.flagged && Array.isArray(data.crisis.lines)
+          ? (data.crisis.lines as CrisisLine[])
+          : undefined;
+
+      setMessages((prev) => [...prev, { role: 'assistant', content: assistantText, crisisLines }]);
       if (data && typeof data === 'object' && data.usage) {
         setLiveUsage(data.usage as Usage);
       }
@@ -124,10 +171,30 @@ export default function AIChatPage() {
                 className={
                   m.role === 'user'
                     ? 'max-w-[80%] rounded-lg bg-primary-500 text-white px-4 py-2'
-                    : 'max-w-[80%] rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-4 py-2'
+                    : m.crisisLines
+                      ? 'max-w-[90%] rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-slate-900 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-slate-100'
+                      : 'max-w-[80%] rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-4 py-2'
                 }
               >
                 <div className="whitespace-pre-wrap text-sm leading-relaxed">{m.content}</div>
+
+                {/* The numbers as buttons. The reply above already lists them in
+                    words, for anyone reading it aloud or copying it out; these
+                    are for the woman holding a phone right now. */}
+                {m.crisisLines && m.crisisLines.length > 0 && (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {m.crisisLines.map((line) => (
+                      <a
+                        key={line.key}
+                        href={`tel:${dialable(line.phone)}`}
+                        className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm shadow-sm transition hover:bg-rose-100 dark:bg-slate-950 dark:hover:bg-slate-900"
+                      >
+                        <span className="font-medium text-slate-900 dark:text-white">{line.name}</span>
+                        <span className="font-semibold text-rose-600 dark:text-rose-300">{line.phone}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -135,6 +202,29 @@ export default function AIChatPage() {
           {chat.isPending && (
             <div className="text-sm text-slate-500 dark:text-slate-400">ATHENA is thinking…</div>
           )}
+        </div>
+
+        {/* Above the composer, not below the fold: this is the last thing on
+            screen before she types, and it stays there for every message. */}
+        <div className="border-t border-slate-200 bg-rose-50/60 px-3 py-2.5 text-xs leading-5 text-slate-600 dark:border-slate-800 dark:bg-rose-500/10 dark:text-slate-300">
+          <p>
+            ATHENA AI is an automated assistant — not a counsellor, doctor, lawyer or financial
+            adviser. Nothing it says is professional advice, and it can be wrong.
+          </p>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {ALWAYS_ON_LINES.map((line) => (
+              <a
+                key={line.name}
+                href={`tel:${line.dial}`}
+                className="font-medium text-rose-700 hover:underline dark:text-rose-300"
+              >
+                {line.name} {line.phone}
+              </a>
+            ))}
+            <Link href="/help/safety-center" className="text-slate-500 hover:underline dark:text-slate-400">
+              Safety centre
+            </Link>
+          </p>
         </div>
 
         <form onSubmit={onSend} className="border-t border-slate-200 dark:border-slate-800 p-3 flex gap-2">

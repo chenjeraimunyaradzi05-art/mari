@@ -3,6 +3,7 @@
  * Handles creator monetization, tips/gifts, and creator fund tracking
  */
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import Stripe from 'stripe';
@@ -547,6 +548,119 @@ export async function calculateCreatorFundDistribution(fundAmount: number) {
 // ==========================================
 // CREATOR ANALYTICS
 // ==========================================
+
+/**
+ * Fills the CreatorAnalytics row from the tables that hold her real numbers.
+ *
+ * Nothing on this server had ever written followerCount, totalViews, totalLikes
+ * or avgEngagementRate. The one route that reads the row created it at the
+ * column defaults and returned it, so every creator who opened IncomeStream was
+ * shown zero followers, zero views and zero likes — not as an absence, but as a
+ * measurement of her — and the income model then multiplied those zeros
+ * together and called the product her forecast.
+ *
+ * The numbers were always there to be counted. Follow rows are written on every
+ * follow, Post.impressionCount by the feed's impression batch, Video.viewCount
+ * on every play, and the like, comment and share counters by their own routes.
+ * This reads them and stores the totals, so the row becomes a cache of
+ * something true rather than a set of defaults nobody fills.
+ *
+ * What the numbers mean, precisely, because the page prints them as headlines:
+ *  - Views combines reel plays with the number of times a feed post of hers was
+ *    on somebody's screen. They are not the same event, and the page labels
+ *    them as the two things they are.
+ *  - avgViews is per piece of content — reels and posts together — not per reel.
+ *  - avgEngagementRate is the formula the column documents, likes plus comments
+ *    plus shares over views, and it is null rather than 0 when nothing has been
+ *    seen yet, so the page can leave it out instead of printing "0.0%" at a
+ *    woman who has simply not been measured.
+ *  - creatorTier is the ladder in CREATOR_TIERS, the same one that decides her
+ *    share of every gift in sendGift. It is computed here rather than left at
+ *    its default so that the tier on her screen is the tier her money is
+ *    actually paid at.
+ *
+ * The two projection columns are cleared on every refresh. They hold what the
+ * old formula wrote — an invented dollar figure per follower — and the platform
+ * no longer stands behind those numbers, so they should not survive in a table
+ * that a GDPR export will hand back to her as fact.
+ *
+ * `maxAgeMs` is why the row still exists at all: the recount is five aggregates
+ * and a write, and the creator page asks two endpoints for it in the same
+ * breath. A row counted within the window is handed back as it stands, so
+ * opening the page costs one recount rather than two, and a refresh of the page
+ * a minute later costs none.
+ */
+export async function refreshCreatorAnalytics(userId: string, maxAgeMs = 5 * 60 * 1000) {
+  const existing = await prisma.creatorAnalytics.findUnique({ where: { userId } });
+  if (existing && Date.now() - existing.updatedAt.getTime() < maxAgeMs) {
+    return existing;
+  }
+
+  const [followerCount, followingCount, reels, posts] = await Promise.all([
+    prisma.follow.count({ where: { followingId: userId } }),
+    prisma.follow.count({ where: { followerId: userId } }),
+    prisma.video.aggregate({
+      where: { authorId: userId, isHidden: false, status: 'PUBLISHED' },
+      _count: { _all: true },
+      _sum: { viewCount: true, likeCount: true, commentCount: true, shareCount: true },
+    }),
+    prisma.post.aggregate({
+      where: { authorId: userId, isHidden: false },
+      _count: { _all: true },
+      _sum: { impressionCount: true, likeCount: true, commentCount: true, shareCount: true },
+    }),
+  ]);
+
+  // An aggregate over no rows sums to null, which is the same shape as a sum of
+  // zero and must not become NaN halfway down the arithmetic below.
+  const count = (value: number | null | undefined) => value ?? 0;
+
+  const totalVideos = reels._count._all;
+  const contentCount = totalVideos + posts._count._all;
+  const totalViews = count(reels._sum.viewCount) + count(posts._sum.impressionCount);
+  const totalLikes = count(reels._sum.likeCount) + count(posts._sum.likeCount);
+  const interactions =
+    totalLikes +
+    count(reels._sum.commentCount) +
+    count(posts._sum.commentCount) +
+    count(reels._sum.shareCount) +
+    count(posts._sum.shareCount);
+
+  const measured = {
+    followerCount,
+    followingCount,
+    totalVideos,
+    totalViews,
+    totalLikes,
+    avgViews: contentCount > 0 ? totalViews / contentCount : null,
+    avgEngagementRate: totalViews > 0 ? interactions / totalViews : null,
+    creatorTier: getCreatorTier(followerCount).name,
+  };
+
+  return prisma.creatorAnalytics.upsert({
+    where: { userId },
+    create: { userId, ...measured },
+    update: { ...measured, projectedIncome: Prisma.DbNull, topRevenueStreams: Prisma.DbNull },
+  });
+}
+
+/**
+ * The share of every gift this creator keeps, and the follower count the next
+ * rung starts at. Both come from CREATOR_TIERS, which is not a marketing ladder
+ * — it is the table sendGift divides her gifts by.
+ */
+export function creatorTierStanding(followerCount: number) {
+  const tier = getCreatorTier(followerCount);
+  const next = [...CREATOR_TIERS]
+    .sort((a, b) => a.minFollowers - b.minFollowers)
+    .find((candidate) => candidate.minFollowers > followerCount);
+
+  return {
+    tier: tier.name,
+    giftRevenueShare: tier.revShare,
+    nextTier: next ? { tier: next.name, minFollowers: next.minFollowers, giftRevenueShare: next.revShare } : null,
+  };
+}
 
 export async function getCreatorAnalytics(userId: string, days = 30) {
   const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);

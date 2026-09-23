@@ -12,7 +12,6 @@ import {
   Users,
   Clock,
   Globe,
-  Sparkles,
 } from 'lucide-react';
 import { api, aiAlgorithmsApi } from '@/lib/api';
 
@@ -28,9 +27,19 @@ import { api, aiAlgorithmsApi } from '@/lib/api';
  * figure is rendered only when the row genuinely holds it: a creator is better
  * served by an honest blank than by a confident zero she cannot act on.
  *
- * The earnings the page leads with come from somewhere else entirely — see
- * IncomeStreamResult below — because the CreatorAnalytics row is a cache that
- * nothing on the server currently fills, whereas her gifts are real rows.
+ * That row is no longer a cache nobody fills. The server recounts it from the
+ * follow, post and video tables on every read, so the counters below are
+ * measurements again. Two things changed on this page as a result:
+ *
+ *  - The modelled-income card is gone. The three figures behind it came from a
+ *    formula whose every coefficient was invented, attached to revenue streams
+ *    ATHENA does not operate. There was no way to make it true, so it stopped
+ *    being said. In its place is the share of each gift she actually keeps,
+ *    which is the rate her gifts are divided by today.
+ *  - The tier is the real one. It used to be the string BRONZE, written once at
+ *    row creation and never moved, from a ladder that existed in no code
+ *    anywhere. The tiers below are CREATOR_TIERS on the server, the table that
+ *    decides her revenue share.
  */
 type CreatorAnalytics = {
   id: string;
@@ -57,15 +66,19 @@ type CreatorAnalytics = {
 };
 
 /**
- * The projections endpoint selects six columns rather than returning the whole
- * row, so it is a narrower shape than CreatorAnalytics and gets its own type.
+ * The "projections" endpoint, which no longer projects anything. It returns her
+ * measured reach, the share of each gift she keeps, and the next rung of the
+ * ladder. `projectedIncome` is kept in the type because the endpoint still
+ * sends it, always null, so that any client still reading the field gets the
+ * honest answer instead of a stale forecast.
  */
 type IncomeProjections = {
   followerCount: number;
   avgEngagementRate: number | null;
   creatorTier: string;
-  projectedIncome: { conservative: number; realistic: number; optimistic: number } | null;
-  topRevenueStreams: Array<{ stream: string; potential: number; effort: string }> | null;
+  projectedIncome: null;
+  giftRevenueShare: number;
+  nextTier: { tier: string; minFollowers: number; giftRevenueShare: number } | null;
 };
 
 /**
@@ -90,12 +103,15 @@ type IncomeStreamResult = {
 
 type IncomeStreamEnvelope = { success: boolean; data: IncomeStreamResult };
 
+/** Keyed on CREATOR_TIERS.name, the ladder sendGift divides her gifts by. */
 const TIER_STYLES: Record<string, string> = {
-  BRONZE: 'from-amber-500 to-orange-500',
-  SILVER: 'from-slate-400 to-slate-500',
-  GOLD: 'from-yellow-400 to-amber-500',
-  PLATINUM: 'from-fuchsia-500 to-violet-500',
+  Emerging: 'from-amber-500 to-orange-500',
+  Rising: 'from-rose-400 to-fuchsia-500',
+  Established: 'from-violet-500 to-purple-600',
+  Partner: 'from-fuchsia-500 to-indigo-600',
 };
+
+const DEFAULT_TIER_STYLE = 'from-rose-400 to-fuchsia-500';
 
 /** A record of key/number pairs is only worth a chart when it has real entries. */
 function entriesOf(breakdown: Record<string, number> | null | undefined): Array<[string, number]> {
@@ -191,22 +207,16 @@ export default function CreatorAnalyticsPage() {
   const locationMix = entriesOf(analytics?.audienceLocation);
   const peakHours = hoursOf(analytics?.peakActiveHours);
 
-  // The server models income from her follower count and engagement rate. With
-  // neither measured the model returns zeros, and a zero here is an artefact of
-  // the formula rather than a forecast, so the whole card stays away.
-  const forecast = projections?.projectedIncome ?? null;
-  const hasIncomeForecast = Boolean(
-    forecast &&
-      [forecast.conservative, forecast.realistic, forecast.optimistic].some(
-        (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
-      )
-  );
-  const revenueStreams = hasIncomeForecast && Array.isArray(projections?.topRevenueStreams)
-    ? projections.topRevenueStreams.filter((stream) => stream && typeof stream.stream === 'string')
-    : [];
+  // What she keeps of every gift, and what the next rung would pay. Both are
+  // rates the server charges today, not a forecast of anything.
+  const giftShare =
+    typeof projections?.giftRevenueShare === 'number' && projections.giftRevenueShare > 0
+      ? projections.giftRevenueShare
+      : null;
+  const nextTier = projections?.nextTier ?? null;
 
-  const tier = analytics?.creatorTier || projections?.creatorTier || 'BRONZE';
-  const tierGradient = TIER_STYLES[tier] || TIER_STYLES.BRONZE;
+  const tier = analytics?.creatorTier || projections?.creatorTier || null;
+  const tierGradient = (tier && TIER_STYLES[tier]) || DEFAULT_TIER_STYLE;
 
   // Monetisation is read from the income-stream endpoint rather than the
   // analytics row: creatorStatus is 'non_creator' exactly when CreatorProfile
@@ -252,16 +262,27 @@ export default function CreatorAnalyticsPage() {
         </div>
       ) : (
         <>
-          {/* Tier and monetisation, the two facts held about her account. */}
+          {/* Tier and monetisation, the two facts held about her account. The
+              tier is only named when the server named it: it is a rung on the
+              ladder her gifts are divided by, not decoration. */}
           <div className={`bg-gradient-to-br ${tierGradient} rounded-2xl p-8 text-white`}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <h2 className="text-sm font-medium uppercase tracking-wider opacity-80">
                   Creator tier
                 </h2>
-                <p className="text-3xl md:text-4xl font-bold mt-1 capitalize">
-                  {tier.toLowerCase()}
-                </p>
+                <p className="text-3xl md:text-4xl font-bold mt-1">{tier ?? 'Not set yet'}</p>
+                {giftShare !== null && (
+                  <p className="mt-2 text-sm opacity-90">
+                    You keep {giftShare}% of every gift sent to you.
+                  </p>
+                )}
+                {nextTier && (
+                  <p className="mt-1 text-sm opacity-80">
+                    {formatNumber(nextTier.minFollowers)} followers moves you to {nextTier.tier}, at{' '}
+                    {nextTier.giftRevenueShare}%.
+                  </p>
+                )}
               </div>
               <div className="text-sm sm:text-right">
                 {isMonetized ? (
@@ -314,57 +335,11 @@ export default function CreatorAnalyticsPage() {
             </div>
           )}
 
-          {/* Projected income — shown only when the model had real numbers to work from. */}
-          {hasIncomeForecast && forecast && (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6">
-              <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-pink-600" />
-                Monthly income, modelled
-              </h3>
-              <p className="text-sm text-slate-500 mt-1">
-                Estimated from your follower count and engagement rate. It is a model, not a
-                measurement, and no money moves on it.
-              </p>
-              <div className="grid grid-cols-3 gap-4 mt-5">
-                {[
-                  ['Conservative', forecast.conservative],
-                  ['Realistic', forecast.realistic],
-                  ['Optimistic', forecast.optimistic],
-                ].map(([label, value]) => (
-                  <div key={label as string} className="text-center">
-                    <p className="text-xs uppercase tracking-wider text-slate-400">{label}</p>
-                    <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white mt-1">
-                      {formatCurrency(Number(value))}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              {revenueStreams.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">
-                    Where that could come from
-                  </p>
-                  {revenueStreams.map((stream) => (
-                    <div
-                      key={stream.stream}
-                      className="flex items-center justify-between text-sm p-2 rounded-lg bg-slate-50 dark:bg-slate-800"
-                    >
-                      <span className="text-slate-700 dark:text-slate-300">{stream.stream}</span>
-                      <span className="flex items-center gap-3">
-                        <span className="text-xs uppercase tracking-wider text-slate-400">
-                          {String(stream.effort || '').toLowerCase()} effort
-                        </span>
-                        <span className="font-medium text-slate-900 dark:text-white">
-                          {formatCurrency(Number(stream.potential) || 0)}
-                        </span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* There is no forecast card here, and its absence is the fix: the
+              three figures that used to sit in this space came out of a formula
+              whose every coefficient was invented, split across revenue streams
+              ATHENA does not operate. What she has actually been sent is the
+              card above, and what she keeps of it is on the tier banner. */}
 
           {/* Reach. Nothing here renders until at least one counter has moved. */}
           {measured && analytics ? (
@@ -381,7 +356,7 @@ export default function CreatorAnalyticsPage() {
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-slate-500 mb-2">
                   <Video className="w-4 h-4" />
-                  <span className="text-sm">Videos</span>
+                  <span className="text-sm">Reels</span>
                 </div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">
                   {formatNumber(analytics.totalVideos)}
@@ -395,9 +370,14 @@ export default function CreatorAnalyticsPage() {
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">
                   {formatNumber(analytics.totalViews)}
                 </p>
+                {/* Reel plays and posts seen, counted together — so the average
+                    below is per piece of content, not per reel. Saying "per
+                    video" over a total that includes feed posts would be the
+                    small kind of untrue this page exists to avoid. */}
+                <p className="text-xs text-slate-400 mt-1">reel plays and posts seen</p>
                 {typeof analytics.avgViews === 'number' && (
                   <p className="text-xs text-slate-400 mt-1">
-                    {formatNumber(Math.round(analytics.avgViews))} per video
+                    {formatNumber(Math.round(analytics.avgViews))} per post or reel
                   </p>
                 )}
               </div>
@@ -415,12 +395,12 @@ export default function CreatorAnalyticsPage() {
             <div className="bg-gradient-to-r from-slate-50 to-pink-50 dark:from-slate-800 dark:to-pink-900/20 rounded-xl p-6 text-center">
               <TrendingUp className="w-10 h-10 text-pink-400 mx-auto mb-3" />
               <h3 className="font-semibold text-slate-900 dark:text-white">
-                We have not measured your reach yet
+                Nothing to count yet
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-                Followers, views, likes and engagement appear here once your content has been
-                counted. We would rather leave this blank than show you a number we have not
-                earned.
+                No followers, reels or posts of yours have been counted so far. Followers, views,
+                likes and engagement appear here as soon as there is something to measure — we
+                would rather leave this blank than print a row of zeros at you.
               </p>
             </div>
           )}
