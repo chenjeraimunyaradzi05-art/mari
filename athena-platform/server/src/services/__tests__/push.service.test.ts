@@ -4,6 +4,7 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn() },
     pushToken: { findMany: jest.fn(), updateMany: jest.fn(async () => ({ count: 0 })) },
+    dvSafetyProfile: { findUnique: jest.fn() },
   },
 }));
 
@@ -62,6 +63,9 @@ describe('pushToUser', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.user.findUnique.mockResolvedValue({ notificationPreferences: null });
+    // No DV safety profile: the member has never been near the safety page, so
+    // her notifications read as written.
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue(null);
     delete process.env.EXPO_ACCESS_TOKEN;
   });
   afterEach(() => {
@@ -139,6 +143,37 @@ describe('pushToUser', () => {
     prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[a]', platform: 'ios' }]);
     globalThis.fetch = jest.fn(async () => new Response('rate limited', { status: 429 })) as any;
     await expect(pushToUser('u1', 'MESSAGE', { title: 'x', body: 'y' })).resolves.toMatchObject({ attempted: 1, sent: 0, failed: 1 });
+  });
+
+  it('sends a member who asked for vague notifications a lock screen that says nothing', async () => {
+    prisma.dvSafetyProfile.findUnique.mockResolvedValue({ notificationsSafe: true });
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', {
+      title: 'Mei Chen',
+      body: 'Are you safe tonight?',
+      link: '/dashboard/messages?user=mei',
+      data: { conversationId: 'c1' },
+    });
+
+    expect(calls[0].body[0]).toMatchObject({
+      title: 'New Update',
+      body: 'You have a new update. Open app to view.',
+      // The app still opens on the right screen once she is in it; it is the
+      // lock screen that must not name her or what was said.
+      data: { conversationId: 'c1', link: '/dashboard/messages?user=mei' },
+    });
+  });
+
+  it('falls back to the vague wording when the safety setting cannot be read', async () => {
+    prisma.dvSafetyProfile.findUnique.mockRejectedValue(new Error('connection lost'));
+    prisma.pushToken.findMany.mockResolvedValue([{ id: 't1', token: 'ExponentPushToken[live]', platform: 'ios' }]);
+    const calls = expoAnswers([{ status: 'ok' }]);
+
+    await pushToUser('u1', 'MESSAGE', { title: 'Mei Chen', body: 'Are you safe tonight?' });
+
+    expect(calls[0].body[0]).toMatchObject({ title: 'New Update' });
   });
 
   it('skips non-Expo tokens when Firebase is not configured, counting them as failed', async () => {

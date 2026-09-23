@@ -425,7 +425,7 @@ export default function SafetyCenterPage() {
                   <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Allow Messages</p>
-                      <p className="text-xs text-slate-500">Control who can message you.</p>
+                      <p className="text-xs text-slate-500">Turn this off and nobody can message you, in a new conversation or one you already have.</p>
                     </div>
                     <input
                       type="checkbox"
@@ -437,7 +437,15 @@ export default function SafetyCenterPage() {
                   <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Safe Mode</p>
-                      <p className="text-xs text-slate-500">Enable high safety protections.</p>
+                      <p className="text-xs text-slate-500">
+                        Marks your account as being in Safe Mode, which is what DV-safe housing checks. For the full
+                        switch — hidden from search, messages closed, vague notifications, quick exit and the safety
+                        alert — use{' '}
+                        <a href="/dashboard/safety" className="font-medium text-indigo-700 underline">
+                          Safety &amp; privacy
+                        </a>
+                        .
+                      </p>
                     </div>
                     <input
                       type="checkbox"
@@ -449,7 +457,7 @@ export default function SafetyCenterPage() {
                   <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Hide from Search</p>
-                      <p className="text-xs text-slate-500">Hide your profile from discovery.</p>
+                      <p className="text-xs text-slate-500">You do not come up in search, the member directory or the mentor list.</p>
                     </div>
                     <input
                       type="checkbox"

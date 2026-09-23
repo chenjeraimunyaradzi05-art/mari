@@ -60,6 +60,10 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
       sort: sort as any,
       page: Math.max(1, parseInt(page as string)),
       limit: Math.min(50, Math.max(1, parseInt(limit as string))),
+      // Who is asking decides what comes back: members who asked to be hidden,
+      // posts their author kept to herself and either side of a block are all
+      // filtered in the query, so the id has to travel with the search.
+      viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
       filters: {
         ...(jobType && { jobType: jobType as string }),
@@ -131,6 +135,7 @@ router.get('/users', optionalAuth, async (req: Request, res: Response, next: Nex
       type: 'users',
       page: parseInt(page as string),
       limit: parseInt(limit as string),
+      viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
       filters: {
         ...(role && { role: role as string }),
@@ -161,6 +166,7 @@ router.get('/posts', optionalAuth, async (req: Request, res: Response, next: Nex
       type: 'posts',
       page: parseInt(page as string),
       limit: parseInt(limit as string),
+      viewerId: (req as AuthRequest).user?.id,
       filters: {
         ...(postType && { postType: postType as any }),
         ...(hasMedia === 'true' && { hasMedia: true }),
@@ -199,6 +205,7 @@ router.get('/jobs', optionalAuth, async (req: Request, res: Response, next: Next
       type: 'jobs',
       page: parseInt(page as string),
       limit: parseInt(limit as string),
+      viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
       filters: {
         ...(jobType && { jobType: jobType as string }),
@@ -232,6 +239,7 @@ router.get('/courses', optionalAuth, async (req: Request, res: Response, next: N
       type: 'courses',
       page: parseInt(page as string),
       limit: parseInt(limit as string),
+      viewerId: (req as AuthRequest).user?.id,
       filters: {
         ...(level && { level: level as string }),
         ...(free === 'true' && { free: true }),
@@ -261,6 +269,7 @@ router.get('/videos', optionalAuth, async (req: Request, res: Response, next: Ne
       type: 'videos',
       page: parseInt(page as string),
       limit: parseInt(limit as string),
+      viewerId: (req as AuthRequest).user?.id,
     });
 
     res.json(results);
@@ -286,6 +295,7 @@ router.get('/mentors', optionalAuth, async (req: Request, res: Response, next: N
       type: 'mentors',
       page: parseInt(page as string),
       limit: parseInt(limit as string),
+      viewerId: (req as AuthRequest).user?.id,
       persona: (req as AuthRequest).user?.persona,
     });
 

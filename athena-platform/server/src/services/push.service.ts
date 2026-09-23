@@ -14,6 +14,7 @@
 import type { NotificationType } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { safeNotificationFor } from './dv-safe.service';
 
 export const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 /** Expo accepts at most this many messages per request. */
@@ -233,6 +234,12 @@ async function sendFcmPush(
  * Pushes one message to every active device a member has, honouring their
  * push preferences for this kind of notification. Never throws: a push is a
  * courtesy on top of the in-app notification that already exists.
+ *
+ * A member who has asked for vague notifications gets the wording swapped here
+ * rather than at each caller. Every push on the platform goes out through this
+ * function, so this is the one place that cannot be forgotten — and it had been
+ * forgotten everywhere else: the switch was saved, read back onto the settings
+ * page, and enforced nowhere at all.
  */
 export async function pushToUser(userId: string, type: NotificationType, message: PushMessage): Promise<PushDelivery> {
   const none: PushDelivery = { attempted: 0, sent: 0, failed: 0, deactivated: 0 };
@@ -247,12 +254,18 @@ export async function pushToUser(userId: string, type: NotificationType, message
       return { ...none, skipped: 'no-tokens' };
     }
 
+    const safe = await safeNotificationFor(userId, message.title, message.body);
+    // The link and the payload still travel: the app opens on the right screen
+    // once she is in it. What the lock screen shows is the title and the body,
+    // and those are all anyone reading over her shoulder gets.
+    const outgoing: PushMessage = { ...message, title: safe.title, body: safe.message };
+
     const expo = tokens.filter((t) => isExpoPushToken(t.token));
     const others = tokens.filter((t) => !isExpoPushToken(t.token));
 
     const [viaExpo, viaFcm] = await Promise.all([
-      expo.length ? sendExpoPush(expo, message) : Promise.resolve({ sent: [], failed: [], dead: [] }),
-      others.length ? sendFcmPush(others, message) : Promise.resolve({ sent: [], failed: [], dead: [] }),
+      expo.length ? sendExpoPush(expo, outgoing) : Promise.resolve({ sent: [], failed: [], dead: [] }),
+      others.length ? sendFcmPush(others, outgoing) : Promise.resolve({ sent: [], failed: [], dead: [] }),
     ]);
 
     const dead = [...viaExpo.dead, ...viaFcm.dead];

@@ -366,7 +366,7 @@ export default function SafetyPage() {
             </div>
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               <Toggle on={s.hideFromSearch} onChange={(v) => update.mutate({ hideFromSearch: v })} label="Hide me from search" description="Your profile does not come up when people search." disabled={update.isPending} />
-              <Toggle on={!s.allowMessages} onChange={(v) => update.mutate({ allowMessages: !v })} label="Close my messages" description="Nobody new can start a conversation with you." disabled={update.isPending} />
+              <Toggle on={!s.allowMessages} onChange={(v) => update.mutate({ allowMessages: !v })} label="Close my messages" description="Nobody can message you — not a new conversation, and not one you already have. Your threads are still there to read." disabled={update.isPending} />
               <Toggle on={s.notificationsSafe} onChange={(v) => update.mutate({ notificationsSafe: v })} label="Keep notifications vague" description='Your phone shows "New update" instead of who wrote and what.' disabled={update.isPending} />
               <Toggle on={s.panicButtonEnabled} onChange={(v) => update.mutate({ panicButtonEnabled: v })} label="Safety alert button" description="Lets you tell your emergency contacts with one tap." disabled={update.isPending} />
               <Toggle on={s.safeExitEnabled} onChange={(v) => update.mutate({ safeExitEnabled: v })} label="Quick exit with the Escape key" description="Pressing Escape on this page leaves for the address below." disabled={update.isPending} />

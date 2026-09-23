@@ -6,7 +6,8 @@ jest.mock('../../utils/prisma', () => ({
     dvSafeChat: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), delete: jest.fn() },
     dvSafeMessage: { create: jest.fn(), findMany: jest.fn(), deleteMany: jest.fn() },
     dvPanicAlert: { create: jest.fn() },
-    user: { findUnique: jest.fn() },
+    user: { findUnique: jest.fn(), update: jest.fn() },
+    profile: { upsert: jest.fn() },
   },
 }));
 
@@ -64,6 +65,29 @@ describe('DV safety settings', () => {
       safeExitEnabled: true,
       panicButtonEnabled: true,
     });
+  });
+
+  it('writes safe mode through to the columns the rest of the platform reads', async () => {
+    prisma.dvSafetyProfile.update.mockResolvedValue(profile({ isSafeMode: true, hideFromSearch: true, allowMessages: false }));
+    await dvSafe.enableSafeMode('u1');
+
+    // Profile.isSafeMode is what the Safety Centre page shows and
+    // Profile.hideFromSearch is what the privacy page writes; both are honoured
+    // by the search query, so both have to move when Safe Mode goes on.
+    expect(prisma.profile.upsert.mock.calls[0][0]).toMatchObject({
+      where: { userId: 'u1' },
+      update: { isSafeMode: true, hideFromSearch: true },
+    });
+    // User.allowMessages is the flag direct-message.service checks before it
+    // will let anyone send to her, so closing her messages has to reach it.
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { allowMessages: false } });
+  });
+
+  it('leaves the twin columns alone for a switch that does not have one', async () => {
+    prisma.dvSafetyProfile.update.mockResolvedValue(profile({ panicButtonEnabled: true }));
+    await dvSafe.updateSafetySettings('u1', { panicButtonEnabled: true });
+    expect(prisma.profile.upsert).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('refuses a quick-exit address that is not a web address', async () => {

@@ -4,10 +4,12 @@
  */
 
 import { prisma } from '../utils/prisma';
-import { PostType } from '@prisma/client';
+import { PostType, type Prisma } from '@prisma/client';
 import { cacheGetOrSet, CacheKeys } from '../utils/cache';
 import { getOpenSearchClient, IndexNames } from '../utils/opensearch';
 import { logger } from '../utils/logger';
+import { authorAudienceWhere, followingIdsOf } from './audience.service';
+import { getBlockedRelationshipIds } from '../utils/safety-store';
 
 // ==========================================
 // TYPES
@@ -16,6 +18,14 @@ import { logger } from '../utils/logger';
 export interface SearchOptions {
   query: string;
   type?: 'all' | 'users' | 'posts' | 'jobs' | 'courses' | 'videos' | 'mentors';
+  /**
+   * Who is searching, or undefined for a signed-out visitor. Every route that
+   * reaches this service passes it, because search results are not the same
+   * for everybody: a member who asked to be hidden is absent from all of them,
+   * a member's private posts are hers alone, and neither side of a block ever
+   * appears in the other's results.
+   */
+  viewerId?: string;
   persona?: string;
   sort?: 'relevance' | 'recent' | 'popular';
   page?: number;
@@ -155,14 +165,94 @@ function highlightMatch(text: string, keywords: string[], maxLength = 150): stri
 }
 
 // ==========================================
+// WHO THE VIEWER IS ALLOWED TO SEE
+// ==========================================
+
+/**
+ * Everything about the person searching that narrows what may come back,
+ * gathered once per search so the six searchers below do not each go and ask
+ * the same three questions.
+ */
+export interface ViewerContext {
+  viewerId?: string;
+  /**
+   * Members whose rows must not be returned at all: the ones the viewer
+   * blocked and the ones who blocked the viewer. Blocking is symmetric, so one
+   * list covers both directions.
+   */
+  blockedIds: string[];
+  /** Who the viewer follows, for the connections-only authors in a feed. */
+  followingIds: string[];
+}
+
+/**
+ * Nothing here is best-effort. A lookup that fails takes the search down with
+ * it and the member sees an error, which is the whole point: the alternative —
+ * an empty block list standing in for one that could not be read — would put a
+ * blocked account back in front of the woman who blocked him and tell nobody.
+ * A failed search is a retry; a search that quietly stops filtering is the
+ * defect this function exists to close.
+ */
+export async function viewerContextFor(viewerId?: string): Promise<ViewerContext> {
+  if (!viewerId) return { blockedIds: [], followingIds: [] };
+
+  const [platformBlocks, dvProfile, followingIds] = await Promise.all([
+    getBlockedRelationshipIds(viewerId),
+    prisma.dvSafetyProfile.findUnique({ where: { userId: viewerId }, select: { blockedUserIds: true } }),
+    followingIdsOf(viewerId),
+  ]);
+
+  // Two block lists, because a safety block writes to both stores and the
+  // platform-wide half of that write is best-effort (dv-safe.service.blockUser
+  // logs and carries on if it fails). Reading the union means one failed
+  // mirror cannot bring an abuser back into her search results.
+  return {
+    viewerId,
+    blockedIds: Array.from(new Set([...platformBlocks, ...(dvProfile?.blockedUserIds ?? [])])),
+    followingIds,
+  };
+}
+
+/**
+ * The filter that keeps a member out of another member's search results.
+ *
+ * "Hide me from search" is stored in two places — Profile.hideFromSearch,
+ * written by the Safety Centre and the privacy page, and
+ * DvSafetyProfile.hideFromSearch, written by the DV safety page and by Safe
+ * Mode's one-tap switch. Both are honoured here rather than one, because a
+ * woman who set the switch on either page has been told she is hidden, and
+ * until the two stores are reconciled everywhere, reading only one of them is
+ * how that promise gets broken for half the people who made it.
+ *
+ * The block clause covers the direction the id list cannot: a member who
+ * blocked the viewer from her DV safety page before that block reached the
+ * platform-wide store.
+ */
+export function hiddenMemberWhere(viewer: ViewerContext): Prisma.UserWhereInput {
+  const conditions: Prisma.UserWhereInput[] = [
+    { NOT: { dvSafetyProfile: { is: { hideFromSearch: true } } } },
+    { NOT: { profile: { is: { hideFromSearch: true } } } },
+  ];
+  if (viewer.viewerId) {
+    conditions.push({ NOT: { dvSafetyProfile: { is: { blockedUserIds: { has: viewer.viewerId } } } } });
+  }
+  if (viewer.blockedIds.length > 0) {
+    conditions.push({ id: { notIn: viewer.blockedIds } });
+  }
+  return { AND: conditions };
+}
+
+// ==========================================
 // SEARCH FUNCTIONS
 // ==========================================
 
 export async function search(options: SearchOptions): Promise<SearchResponse> {
+  const viewer = await viewerContextFor(options.viewerId);
+
   const openSearch = getOpenSearchClient();
   if (openSearch) {
     try {
-      return await searchWithOpenSearch(openSearch, options);
+      return await searchWithOpenSearch(openSearch, options, viewer);
     } catch (error) {
       logger.error('OpenSearch failed, falling back to Prisma', { error });
       // Fallback proceeds below
@@ -200,13 +290,13 @@ export async function search(options: SearchOptions): Promise<SearchResponse> {
 
   if (type === 'all' || type === 'users') {
     searchPromises.push(
-      searchUsers(keywords, filters, persona).then((r) => { results.push(...r); })
+      searchUsers(keywords, filters, viewer, persona).then((r) => { results.push(...r); })
     );
   }
 
   if (type === 'all' || type === 'posts') {
     searchPromises.push(
-      searchPosts(keywords, filters).then((r) => { results.push(...r); })
+      searchPosts(keywords, filters, viewer).then((r) => { results.push(...r); })
     );
   }
 
@@ -230,7 +320,7 @@ export async function search(options: SearchOptions): Promise<SearchResponse> {
 
   if (type === 'all' || type === 'mentors') {
     searchPromises.push(
-      searchMentors(keywords, filters, persona).then((r) => { results.push(...r); })
+      searchMentors(keywords, filters, viewer, persona).then((r) => { results.push(...r); })
     );
   }
 
@@ -270,21 +360,31 @@ export async function search(options: SearchOptions): Promise<SearchResponse> {
 async function searchUsers(
   keywords: string[],
   filters: SearchOptions['filters'],
+  viewer: ViewerContext,
   persona?: string
 ): Promise<SearchResult[]> {
   const users = await prisma.user.findMany({
+    // The safety filter is ANDed into the query rather than applied to the
+    // rows afterwards. Filtering after `take: 50` would silently shorten the
+    // page every time somebody hidden matched the keywords, and would hand the
+    // count of hidden matches to anyone willing to compare page lengths.
     where: {
-      isActive: true,
-      OR: [
-        ...keywords.flatMap((kw) => [
-          { displayName: { contains: kw, mode: 'insensitive' as const } },
-          { bio: { contains: kw, mode: 'insensitive' as const } },
-          { headline: { contains: kw, mode: 'insensitive' as const } },
-        ]),
-        { skills: { some: { skill: { name: { in: keywords, mode: 'insensitive' } } } } },
+      AND: [
+        {
+          isActive: true,
+          OR: [
+            ...keywords.flatMap((kw) => [
+              { displayName: { contains: kw, mode: 'insensitive' as const } },
+              { bio: { contains: kw, mode: 'insensitive' as const } },
+              { headline: { contains: kw, mode: 'insensitive' as const } },
+            ]),
+            { skills: { some: { skill: { name: { in: keywords, mode: 'insensitive' } } } } },
+          ],
+          ...(filters?.role && { role: filters.role as any }),
+          ...(filters?.verified && { isVerified: true }),
+        },
+        hiddenMemberWhere(viewer),
       ],
-      ...(filters?.role && { role: filters.role as any }),
-      ...(filters?.verified && { isVerified: true }),
     },
     // Selected explicitly rather than `include`. A bare `include` asks Postgres
     // for every scalar on User — which pulls passwordHash and twoFactorSecret
@@ -339,23 +439,51 @@ async function searchUsers(
   });
 }
 
+/**
+ * Posts the viewer is allowed to read, and no others.
+ *
+ * This used to be a flat object literal with two `OR` keys in it — the keyword
+ * match, and a media filter spread in last — so the second silently replaced
+ * the first and `?q=a&type=posts&hasMedia=true` returned every image and video
+ * post on the platform to whoever asked. Building the clause as an explicit
+ * AND list is what stops one condition from overwriting another, so the shape
+ * here is load-bearing and not a tidy-up.
+ *
+ * The audience rules are the feed's own: authorAudienceWhere is what
+ * feed.service narrows every timeline with, so a post that search returns is a
+ * post the feed would have been willing to show the same person.
+ */
 async function searchPosts(
   keywords: string[],
-  filters: SearchOptions['filters']
+  filters: SearchOptions['filters'],
+  viewer: ViewerContext
 ): Promise<SearchResult[]> {
+  const conditions: Prisma.PostWhereInput[] = [
+    // isPublic was never checked here at all, which is how a post its author
+    // had marked private reached a signed-out stranger as a 200-character
+    // excerpt with her name and picture attached.
+    { isHidden: false, isPublic: true },
+    { OR: keywords.map((kw) => ({ content: { contains: kw, mode: 'insensitive' as const } })) },
+    // Supplies groupId: null as well, so a group's conversation stays on the
+    // group's page.
+    authorAudienceWhere(viewer.viewerId, viewer.followingIds),
+  ];
+
+  if (filters?.postType && Object.values(PostType).includes(filters.postType as any)) {
+    conditions.push({ type: filters.postType as any });
+  }
+  if (filters?.hasMedia) {
+    conditions.push({ OR: [{ type: 'IMAGE' }, { type: 'VIDEO' }] });
+  }
+  if (viewer.blockedIds.length > 0) {
+    conditions.push({ authorId: { notIn: viewer.blockedIds } });
+  }
+  if (viewer.viewerId) {
+    conditions.push({ NOT: { author: { dvSafetyProfile: { is: { blockedUserIds: { has: viewer.viewerId } } } } } });
+  }
+
   const posts = await prisma.post.findMany({
-    where: {
-      isHidden: false,
-      // Group posts stay on their group's page.
-      groupId: null,
-      OR: [
-        ...keywords.map((kw) => ({ content: { contains: kw, mode: 'insensitive' as const } })),
-      ],
-      ...(filters?.postType && Object.values(PostType).includes(filters.postType as any) && { type: filters.postType as any }),
-      ...(filters?.hasMedia && {
-        OR: [{ type: 'IMAGE' }, { type: 'VIDEO' }],
-      }),
-    },
+    where: { AND: conditions },
     include: {
       author: { select: { id: true, displayName: true, avatar: true } },
     },
@@ -565,22 +693,34 @@ async function searchVideos(
   });
 }
 
+/**
+ * The mentor directory is the surface the privacy page names: its "show me in
+ * mentor search" switch writes Profile.hideFromSearch, so a woman who turned
+ * it off and was still being returned here was being contradicted by the one
+ * control that mentions this list by name.
+ */
 async function searchMentors(
   keywords: string[],
   _filters: SearchOptions['filters'],
+  viewer: ViewerContext,
   persona?: string
 ): Promise<SearchResult[]> {
   const mentors = await prisma.mentorProfile.findMany({
     where: {
       isAvailable: true,
       user: {
-        isActive: true,
-        OR: [
-          ...keywords.flatMap((kw) => [
-            { displayName: { contains: kw, mode: 'insensitive' as const } },
-            { headline: { contains: kw, mode: 'insensitive' as const } },
-            { bio: { contains: kw, mode: 'insensitive' as const } },
-          ]),
+        AND: [
+          {
+            isActive: true,
+            OR: [
+              ...keywords.flatMap((kw) => [
+                { displayName: { contains: kw, mode: 'insensitive' as const } },
+                { headline: { contains: kw, mode: 'insensitive' as const } },
+                { bio: { contains: kw, mode: 'insensitive' as const } },
+              ]),
+            ],
+          },
+          hiddenMemberWhere(viewer),
         ],
       },
     },
@@ -960,7 +1100,63 @@ export async function getTrendingSearches(): Promise<string[]> {
 // OPENSEARCH IMPLEMENTATION
 // ==========================================
 
-async function searchWithOpenSearch(client: any, options: SearchOptions): Promise<SearchResponse> {
+/**
+ * Drops the hits the viewer is not allowed to see.
+ *
+ * OpenSearch is the primary engine — search() only falls through to Prisma
+ * when it errors — and its documents carry none of the safety fields: the
+ * indexing calls live in the route files that write users and posts, and none
+ * of them writes hideFromSearch, isPublic or a block list. Filtering in the
+ * query would therefore have filtered on nothing.
+ *
+ * So the hits are confirmed against the database instead, with the same
+ * clauses the Prisma searchers use. It costs one small `id IN (...)` lookup
+ * per hit type per page, and it cannot fail open the way an index that somebody
+ * forgot to re-index after a safety switch was flipped would: a document that
+ * is stale, or that was indexed before any of these rules existed, is checked
+ * against the row as it is now.
+ */
+async function allowedOpenSearchHits(hits: any[], viewer: ViewerContext): Promise<any[]> {
+  const idsOfType = (wanted: SearchResult['type']) =>
+    hits.filter((hit) => mapIndexToType(hit._index) === wanted).map((hit) => String(hit._id));
+
+  const userIds = idsOfType('user');
+  const mentorIds = idsOfType('mentor');
+  const postIds = idsOfType('post');
+
+  const postConditions: Prisma.PostWhereInput[] = [
+    { id: { in: postIds } },
+    { isHidden: false, isPublic: true },
+    authorAudienceWhere(viewer.viewerId, viewer.followingIds),
+  ];
+  if (viewer.blockedIds.length > 0) postConditions.push({ authorId: { notIn: viewer.blockedIds } });
+  if (viewer.viewerId) {
+    postConditions.push({ NOT: { author: { dvSafetyProfile: { is: { blockedUserIds: { has: viewer.viewerId } } } } } });
+  }
+
+  const [users, mentors, posts] = await Promise.all([
+    userIds.length
+      ? prisma.user.findMany({ where: { AND: [{ id: { in: userIds }, isActive: true }, hiddenMemberWhere(viewer)] }, select: { id: true } })
+      : Promise.resolve([]),
+    mentorIds.length
+      ? prisma.mentorProfile.findMany({ where: { id: { in: mentorIds }, user: hiddenMemberWhere(viewer) }, select: { id: true } })
+      : Promise.resolve([]),
+    postIds.length ? prisma.post.findMany({ where: { AND: postConditions }, select: { id: true } }) : Promise.resolve([]),
+  ]);
+
+  const allowed = new Set([...users, ...mentors, ...posts].map((row) => row.id));
+
+  return hits.filter((hit) => {
+    const kind = mapIndexToType(hit._index);
+    // Jobs, courses and videos are not member-visibility material: they belong
+    // to organisations and to published catalogues, and none of the three
+    // switches above applies to them.
+    if (kind !== 'user' && kind !== 'mentor' && kind !== 'post') return true;
+    return allowed.has(String(hit._id));
+  });
+}
+
+async function searchWithOpenSearch(client: any, options: SearchOptions, viewer: ViewerContext): Promise<SearchResponse> {
   const { query, type = 'all', page = 1, limit = 20 } = options;
   const from = (page - 1) * limit;
 
@@ -998,8 +1194,13 @@ async function searchWithOpenSearch(client: any, options: SearchOptions): Promis
     body,
   });
 
-  const hits = response.body.hits.hits;
-  const total = response.body.hits.total.value;
+  const rawHits = response.body.hits.hits;
+  const hits = await allowedOpenSearchHits(rawHits, viewer);
+  // The engine's total less what this page was not allowed to show. It stays an
+  // estimate for the pages nobody has asked for yet, which is the honest
+  // answer: the alternative is reporting a count that includes people who have
+  // asked not to be found.
+  const total = Math.max(0, response.body.hits.total.value - (rawHits.length - hits.length));
 
   const results: SearchResult[] = hits.map((hit: any) => ({
     type: mapIndexToType(hit._index),

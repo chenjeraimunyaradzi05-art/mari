@@ -18,6 +18,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEq
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { sendEmail } from '../utils/email';
 import { ApiError } from '../middleware/errorHandler';
 import { blockUser as platformBlockUser } from '../utils/safety-store';
@@ -154,6 +155,52 @@ export async function getSafetySettings(userId: string): Promise<SafetySettings>
   return toSettings(await profileFor(userId));
 }
 
+/**
+ * Writes a switch through to the store the enforcement code actually reads.
+ *
+ * Three of the five protections this page advertises were saved here and read
+ * nowhere. Two of them have an older twin that predates DvSafetyProfile and is
+ * what the rest of the platform consults:
+ *
+ *   isSafeMode      Profile.isSafeMode, written by the Safety Centre page
+ *   hideFromSearch  Profile.hideFromSearch, written by the privacy page's
+ *                   "show me in mentor search" switch
+ *   allowMessages   User.allowMessages, the flag direct-message.service checks
+ *                   before it will let anyone send to her
+ *
+ * DvSafetyProfile is the canonical record — it is what Safe Mode writes and
+ * what the DV-safe housing check reads — and the twins are kept in step rather
+ * than dropped, because the Safety Centre page still reads them and a release
+ * that changed both at once would have no way back. Search honours both
+ * hideFromSearch columns for the same reason.
+ *
+ * allowMessagesFrom is deliberately NOT written here. It records an audience
+ * she chose — anyone, only people she follows, nobody — and closing her
+ * messages from this page would overwrite that choice with 'none' and have
+ * nothing to restore it from when she opens them again. User.allowMessages is
+ * a plain yes/no with exactly this switch's meaning and is checked on every
+ * send, so it closes her messages without spending a setting she made
+ * elsewhere.
+ */
+async function writeThroughToEnforcement(userId: string, updates: Partial<SafetySettings>): Promise<void> {
+  const profileUpdates = {
+    ...(typeof updates.isSafeMode === 'boolean' ? { isSafeMode: updates.isSafeMode } : {}),
+    ...(typeof updates.hideFromSearch === 'boolean' ? { hideFromSearch: updates.hideFromSearch } : {}),
+  };
+
+  if (Object.keys(profileUpdates).length > 0) {
+    await prisma.profile.upsert({
+      where: { userId },
+      update: profileUpdates,
+      create: { userId, isSafeMode: false, hideFromSearch: false, ...profileUpdates },
+    });
+  }
+
+  if (typeof updates.allowMessages === 'boolean') {
+    await prisma.user.update({ where: { id: userId }, data: { allowMessages: updates.allowMessages } });
+  }
+}
+
 /** Only the switches and the exit URL; contacts and blocks have their own functions. */
 export async function updateSafetySettings(userId: string, updates: Partial<SafetySettings>): Promise<SafetySettings> {
   const data: Record<string, unknown> = {};
@@ -176,6 +223,11 @@ export async function updateSafetySettings(userId: string, updates: Partial<Safe
   }
   await profileFor(userId);
   const profile = (await prisma.dvSafetyProfile.update({ where: { userId }, data })) as ProfileRow;
+  // Not best-effort. A mirror that failed quietly would leave her looking at a
+  // switch that says she is hidden while the query that decides it reads the
+  // other column; if this throws she gets an error and can try again, which is
+  // the only one of the two outcomes she can do anything about.
+  await writeThroughToEnforcement(userId, updates);
   logger.info('DV safety settings updated', { userId, safeMode: profile.isSafeMode });
   return toSettings(profile);
 }
@@ -441,6 +493,46 @@ export function getSafeNotificationContent(
   return { title: 'New Update', message: 'You have a new update. Open app to view.' };
 }
 
+/**
+ * The same shaping, for a member we have only the id of.
+ *
+ * "Keep notifications vague" was saved, shown back on the settings page as
+ * though it were in force, and consulted by nothing but a preview endpoint —
+ * so a woman who turned it on because her partner reads her lock screen went
+ * on receiving "Message from Rachel: are you safe tonight?" in full. This is
+ * what push.service calls on the way out, which is the single door every
+ * notification leaves by.
+ *
+ * Two deliberate answers in the edge cases:
+ *
+ * A member with no DvSafetyProfile row reads as NOT safe-mode, even though the
+ * column's own default is true. The row is created the first time she opens
+ * anything DV-related, so "no row" means she has never been near this feature,
+ * and defaulting those members to vague would replace every notification on
+ * the platform with "New Update".
+ *
+ * A lookup that FAILS reads as safe-mode. That is the opposite direction and
+ * also on purpose: the cost of being wrong is a vague notification for someone
+ * who did not ask for one, against a lock screen in a house where that is the
+ * thing she was trying to prevent.
+ */
+export async function safeNotificationFor(
+  userId: string,
+  originalTitle: string,
+  originalMessage: string
+): Promise<{ title: string; message: string }> {
+  const row = await bestEffort(
+    'dv-safe.notification-privacy-lookup',
+    () => prisma.dvSafetyProfile.findUnique({ where: { userId }, select: { notificationsSafe: true } }),
+    { notificationsSafe: true }
+  );
+
+  if (!row?.notificationsSafe) {
+    return { title: originalTitle, message: originalMessage };
+  }
+  return { title: 'New Update', message: 'You have a new update. Open app to view.' };
+}
+
 /** The server keeps no browsing traces; the client clears its own storage. Logged so it is auditable. */
 export async function clearActivityTraces(userId: string): Promise<boolean> {
   logger.info('Activity traces cleared for safety', { userId });
@@ -536,6 +628,7 @@ export default {
   blockUser,
   isUserVisible,
   getSafeNotificationContent,
+  safeNotificationFor,
   clearActivityTraces,
   getDVResources,
 };
