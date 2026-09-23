@@ -10,6 +10,7 @@ import {
   deleteFeatureFlag,
   getActiveFeatureFlagsForUser,
 } from '../services/feature-flags.service';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 
@@ -94,6 +95,17 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
     const data = parseFlag(createFlagSchema, req.body);
     const flag = await upsertFeatureFlag({ ...data, description: data.description ?? undefined, createdById: req.user?.id });
 
+    // A flag is how a feature reaches some members and not others, so who
+    // turned one on, and for whom, is part of the record.
+    await recordAdminAction(req, 'FEATURE_FLAG_CREATED', {
+      resourceType: 'FeatureFlag',
+      resourceId: flag.key,
+      enabled: flag.enabled,
+      rolloutPercentage: flag.rolloutPercentage,
+      allowListSize: flag.allowList.length,
+      denyListSize: flag.denyList.length,
+    });
+
     res.status(201).json(flag);
   } catch (error) {
     next(error);
@@ -109,6 +121,16 @@ router.patch('/:key', async (req: AuthRequest, res: Response, next: NextFunction
     const data = parseFlag(updateFlagSchema, req.body);
     const flag = await updateFeatureFlag(req.params.key, { ...data, description: data.description ?? undefined });
 
+    await recordAdminAction(req, 'FEATURE_FLAG_UPDATED', {
+      resourceType: 'FeatureFlag',
+      resourceId: flag.key,
+      changedFields: Object.keys(data),
+      enabled: flag.enabled,
+      rolloutPercentage: flag.rolloutPercentage,
+      allowListSize: flag.allowList.length,
+      denyListSize: flag.denyList.length,
+    });
+
     res.json(flag);
   } catch (error) {
     next(error);
@@ -122,6 +144,12 @@ router.patch('/:key', async (req: AuthRequest, res: Response, next: NextFunction
 router.delete('/:key', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const result = await deleteFeatureFlag(req.params.key);
+
+    await recordAdminAction(req, 'FEATURE_FLAG_DELETED', {
+      resourceType: 'FeatureFlag',
+      resourceId: req.params.key,
+    });
+
     res.json(result);
   } catch (error) {
     next(error);

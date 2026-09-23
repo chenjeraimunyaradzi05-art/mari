@@ -4,6 +4,10 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 jest.mock('../../utils/prisma', () => ({
   prisma: {
     $transaction: jest.fn(async (ops: any) => Promise.all(ops)),
+    // Staff actions on these catalogues are attributable now. Nine of the eleven
+    // admin routers wrote nothing to the audit log before, on a platform holding
+    // domestic-violence survivors' data.
+    auditLog: { create: jest.fn(async () => ({})) },
     acceleratorCohort: {
       findMany: jest.fn(async () => []),
       findUnique: jest.fn(),

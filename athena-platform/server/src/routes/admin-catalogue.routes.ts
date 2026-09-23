@@ -25,6 +25,7 @@ import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 
@@ -209,6 +210,15 @@ router.post('/accelerator/cohorts', ...adminOnly, async (req: AuthRequest, res: 
     });
 
     logger.info('Accelerator cohort created', { cohortId: cohort.id, sessions: sessions.length, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_COHORT_CREATED', {
+      resourceType: 'AcceleratorCohort',
+      resourceId: cohort.id,
+      name: cohort.name,
+      status: cohort.status,
+      sessions: sessions.length,
+    });
+
     res.status(201).json({ success: true, data: cohort });
   } catch (error) {
     next(error);
@@ -256,6 +266,15 @@ router.patch('/accelerator/cohorts/:id', ...adminOnly, async (req: AuthRequest, 
     });
 
     logger.info('Accelerator cohort updated', { cohortId: cohort.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_COHORT_UPDATED', {
+      resourceType: 'AcceleratorCohort',
+      resourceId: cohort.id,
+      changedFields: Object.keys(data),
+      previousStatus: existing.status,
+      status: cohort.status,
+    });
+
     res.json({ success: true, data: cohort });
   } catch (error) {
     next(error);
@@ -277,6 +296,14 @@ router.delete('/accelerator/cohorts/:id', ...adminOnly, async (req: AuthRequest,
     ]);
 
     logger.info('Accelerator cohort deleted', { cohortId: existing.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_COHORT_DELETED', {
+      resourceType: 'AcceleratorCohort',
+      resourceId: existing.id,
+      name: existing.name,
+      status: existing.status,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -328,6 +355,14 @@ router.post('/accelerator/cohorts/:id/sessions/default', ...adminOnly, async (re
 
     const created = await prisma.acceleratorSession.findMany({ where: { cohortId: cohort.id }, orderBy: { weekNumber: 'asc' } });
     logger.info('Default curriculum added to cohort', { cohortId: cohort.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_SESSION_CREATED', {
+      resourceType: 'AcceleratorSession',
+      cohortId: cohort.id,
+      fromDefaultCurriculum: true,
+      sessions: created.length,
+    });
+
     res.status(201).json({ success: true, data: created });
   } catch (error) {
     next(error);
@@ -355,6 +390,14 @@ router.post('/accelerator/cohorts/:id/sessions', ...adminOnly, async (req: AuthR
     });
 
     logger.info('Accelerator session created', { cohortId: cohort.id, sessionId: session.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_SESSION_CREATED', {
+      resourceType: 'AcceleratorSession',
+      resourceId: session.id,
+      cohortId: cohort.id,
+      weekNumber: session.weekNumber,
+    });
+
     res.status(201).json({ success: true, data: session });
   } catch (error) {
     next(error);
@@ -384,6 +427,14 @@ router.patch('/accelerator/cohorts/:id/sessions/:sessionId', ...adminOnly, async
     });
 
     logger.info('Accelerator session updated', { sessionId: session.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_SESSION_UPDATED', {
+      resourceType: 'AcceleratorSession',
+      resourceId: session.id,
+      cohortId: existing.cohortId,
+      changedFields: Object.keys(data),
+    });
+
     res.json({ success: true, data: session });
   } catch (error) {
     next(error);
@@ -396,6 +447,14 @@ router.delete('/accelerator/cohorts/:id/sessions/:sessionId', ...adminOnly, asyn
     if (!existing) throw new ApiError(404, 'Session not found');
     await prisma.acceleratorSession.delete({ where: { id: existing.id } });
     logger.info('Accelerator session deleted', { sessionId: existing.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'ACCELERATOR_SESSION_DELETED', {
+      resourceType: 'AcceleratorSession',
+      resourceId: existing.id,
+      cohortId: existing.cohortId,
+      weekNumber: existing.weekNumber,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -503,6 +562,22 @@ router.patch('/investors/introductions/:id', ...adminOnly, async (req: AuthReque
     await tellMember(existing.userId, 'Update on your investor introduction', `${line[data.status]}${note ? ` ${note}` : ''}`, '/dashboard/investors');
 
     logger.info('Investor introduction decided', { introductionId: existing.id, status: data.status, by: req.user!.id });
+
+    // A decision here decides whether a founder gets in front of money, and
+    // the founder is told about it, so it is attributable to a person.
+    await recordAdminAction(req, 'INVESTOR_INTRODUCTION_UPDATED', {
+      resourceType: 'InvestorIntroduction',
+      resourceId: existing.id,
+      targetUserId: existing.userId,
+      // Optional because the audit detail is describing work that has already
+      // succeeded and the founder has already been told about. Reaching through
+      // a shape the update did not return would turn a bookkeeping line into a
+      // 500 on a decision that was made.
+      investorId: updated.investor?.id,
+      previousStatus: existing.status,
+      status: updated.status,
+    });
+
     res.json({ success: true, data: updated });
   } catch (error) {
     next(error);
@@ -555,6 +630,14 @@ router.post('/investors', ...adminOnly, async (req: AuthRequest, res: Response, 
     });
 
     logger.info('Investor created', { investorId: investor.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INVESTOR_CREATED', {
+      resourceType: 'Investor',
+      resourceId: investor.id,
+      name: investor.name,
+      type: investor.type,
+    });
+
     res.status(201).json({ success: true, data: investor });
   } catch (error) {
     next(error);
@@ -594,6 +677,15 @@ router.patch('/investors/:id', ...adminOnly, async (req: AuthRequest, res: Respo
     });
 
     logger.info('Investor updated', { investorId: investor.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INVESTOR_UPDATED', {
+      resourceType: 'Investor',
+      resourceId: investor.id,
+      changedFields: Object.keys(data),
+      isActive: investor.isActive,
+      isVerified: investor.isVerified,
+    });
+
     res.json({ success: true, data: investor });
   } catch (error) {
     next(error);
@@ -613,6 +705,14 @@ router.delete('/investors/:id', ...adminOnly, async (req: AuthRequest, res: Resp
     }
     await prisma.investor.delete({ where: { id: existing.id } });
     logger.info('Investor deleted', { investorId: existing.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INVESTOR_DELETED', {
+      resourceType: 'Investor',
+      resourceId: existing.id,
+      name: existing.name,
+      type: existing.type,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -690,6 +790,17 @@ router.post('/insurance/products', ...adminOnly, async (req: AuthRequest, res: R
       },
     });
     logger.info('Insurance product created', { productId: product.id, by: req.user!.id });
+
+    // The premium and the commission are the two numbers a member is priced
+    // on, so a later dispute needs to know who set them and when.
+    await recordAdminAction(req, 'INSURANCE_PRODUCT_CREATED', {
+      resourceType: 'InsuranceProduct',
+      resourceId: product.id,
+      provider: product.provider,
+      name: product.name,
+      commissionPct: product.commissionPct,
+    });
+
     res.status(201).json({ success: true, data: product });
   } catch (error) {
     next(error);
@@ -721,6 +832,15 @@ router.patch('/insurance/products/:id', ...adminOnly, async (req: AuthRequest, r
       }),
     });
     logger.info('Insurance product updated', { productId: product.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INSURANCE_PRODUCT_UPDATED', {
+      resourceType: 'InsuranceProduct',
+      resourceId: product.id,
+      changedFields: Object.keys(data),
+      commissionPct: product.commissionPct,
+      isActive: product.isActive,
+    });
+
     res.json({ success: true, data: product });
   } catch (error) {
     next(error);
@@ -740,6 +860,14 @@ router.delete('/insurance/products/:id', ...adminOnly, async (req: AuthRequest, 
     }
     await prisma.insuranceProduct.delete({ where: { id: existing.id } });
     logger.info('Insurance product deleted', { productId: existing.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INSURANCE_PRODUCT_DELETED', {
+      resourceType: 'InsuranceProduct',
+      resourceId: existing.id,
+      provider: existing.provider,
+      name: existing.name,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);

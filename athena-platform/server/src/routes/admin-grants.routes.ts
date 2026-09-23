@@ -28,6 +28,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 
@@ -210,6 +211,16 @@ router.post('/grants', ...adminOnly, async (req: AuthRequest, res: Response, nex
     });
 
     logger.info('Grant programme listed', { grantId: grant.id, by: req.user!.id });
+
+    // The log line above is for whoever is reading logs today; the audit row
+    // is what answers the question months later, when the logs have rolled.
+    await recordAdminAction(req, 'GRANT_CREATED', {
+      resourceType: 'Grant',
+      resourceId: grant.id,
+      name: grant.name,
+      provider: grant.provider,
+    });
+
     res.status(201).json({ success: true, data: grant });
   } catch (error) {
     next(error);
@@ -257,6 +268,15 @@ router.patch('/grants/:id', ...adminOnly, async (req: AuthRequest, res: Response
     });
 
     logger.info('Grant programme updated', { grantId: grant.id, by: req.user!.id, fields: Object.keys(input) });
+
+    await recordAdminAction(req, 'GRANT_UPDATED', {
+      resourceType: 'Grant',
+      resourceId: grant.id,
+      name: grant.name,
+      changedFields: Object.keys(input),
+      isActive: grant.isActive,
+    });
+
     res.json({ success: true, data: grant });
   } catch (error) {
     next(error);

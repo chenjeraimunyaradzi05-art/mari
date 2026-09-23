@@ -27,6 +27,7 @@ import { logger } from '../utils/logger';
 import { sendEmail } from '../utils/email';
 import { AU_STATES } from '../services/strategy/au-rates';
 import { ASSESSING_BODIES_AS_AT, listAssessingBodies, suggestPathway } from '../services/community-support/assessing-bodies';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 const adminOnly: RequestHandler[] = [authenticate, requireRole('ADMIN')];
@@ -131,6 +132,14 @@ router.post('/impact/programs', ...adminOnly, async (req: AuthRequest, res: Resp
       include: programInclude,
     });
     logger.info('Community program created', { programId: program.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'IMPACT_PROGRAM_CREATED', {
+      resourceType: 'CommunitySupportProgram',
+      resourceId: program.id,
+      name: program.name,
+      communityType: program.communityType,
+    });
+
     res.status(201).json({ success: true, data: program });
   } catch (error) {
     next(error);
@@ -146,6 +155,14 @@ router.patch('/impact/programs/:id', ...adminOnly, async (req: AuthRequest, res:
       data: { ...body, startDate: toDate(body.startDate), endDate: toDate(body.endDate) },
       include: programInclude,
     });
+
+    await recordAdminAction(req, 'IMPACT_PROGRAM_UPDATED', {
+      resourceType: 'CommunitySupportProgram',
+      resourceId: program.id,
+      changedFields: Object.keys(body),
+      isActive: program.isActive,
+    });
+
     res.json({ success: true, data: program });
   } catch (error) {
     next(error);
@@ -157,6 +174,15 @@ router.delete('/impact/programs/:id', ...adminOnly, async (req: AuthRequest, res
   try {
     await mustExist(await prisma.communitySupportProgram.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Program');
     const program = await prisma.communitySupportProgram.update({ where: { id: idParam(req) }, data: { isActive: false }, include: programInclude });
+
+    await recordAdminAction(req, 'IMPACT_PROGRAM_DELETED', {
+      resourceType: 'CommunitySupportProgram',
+      resourceId: program.id,
+      name: program.name,
+      // Retired, not removed; the row and its enrolments stay.
+      retired: true,
+    });
+
     res.json({ success: true, data: program });
   } catch (error) {
     next(error);
@@ -178,6 +204,14 @@ router.post('/impact/programs/:id/milestones', ...adminOnly, async (req: AuthReq
     await mustExist(await prisma.communitySupportProgram.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Program');
     const orderIndex = body.orderIndex ?? (await prisma.programMilestone.count({ where: { programId: idParam(req) } }));
     const milestone = await prisma.programMilestone.create({ data: { ...body, orderIndex, programId: idParam(req) } });
+
+    await recordAdminAction(req, 'IMPACT_MILESTONE_CREATED', {
+      resourceType: 'ProgramMilestone',
+      resourceId: milestone.id,
+      programId: milestone.programId,
+      title: milestone.title,
+    });
+
     res.status(201).json({ success: true, data: milestone });
   } catch (error) {
     next(error);
@@ -189,6 +223,14 @@ router.patch('/impact/milestones/:id', ...adminOnly, async (req: AuthRequest, re
     const body = parse(milestoneSchema.partial(), req.body);
     await mustExist(await prisma.programMilestone.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Milestone');
     const milestone = await prisma.programMilestone.update({ where: { id: idParam(req) }, data: body });
+
+    await recordAdminAction(req, 'IMPACT_MILESTONE_UPDATED', {
+      resourceType: 'ProgramMilestone',
+      resourceId: milestone.id,
+      programId: milestone.programId,
+      changedFields: Object.keys(body),
+    });
+
     res.json({ success: true, data: milestone });
   } catch (error) {
     next(error);
@@ -206,6 +248,14 @@ router.delete('/impact/milestones/:id', ...adminOnly, async (req: AuthRequest, r
       throw new ApiError(409, 'Members have recorded progress against this milestone; edit it instead of removing it');
     }
     await prisma.programMilestone.delete({ where: { id: milestone.id } });
+
+    await recordAdminAction(req, 'IMPACT_MILESTONE_DELETED', {
+      resourceType: 'ProgramMilestone',
+      resourceId: milestone.id,
+      programId: milestone.programId,
+      title: milestone.title,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -253,6 +303,14 @@ router.post('/impact/bridging-programs', ...adminOnly, async (req: AuthRequest, 
       data: { ...body, requirements: body.requirements ?? [], outcomes: body.outcomes ?? [] },
     });
     logger.info('Bridging program created', { programId: program.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'BRIDGING_PROGRAM_CREATED', {
+      resourceType: 'BridgingProgram',
+      resourceId: program.id,
+      name: program.name,
+      profession: program.profession,
+    });
+
     res.status(201).json({ success: true, data: program });
   } catch (error) {
     next(error);
@@ -264,6 +322,14 @@ router.patch('/impact/bridging-programs/:id', ...adminOnly, async (req: AuthRequ
     const body = parse(bridgingSchema.partial(), req.body);
     await mustExist(await prisma.bridgingProgram.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Bridging program');
     const program = await prisma.bridgingProgram.update({ where: { id: idParam(req) }, data: body });
+
+    await recordAdminAction(req, 'BRIDGING_PROGRAM_UPDATED', {
+      resourceType: 'BridgingProgram',
+      resourceId: program.id,
+      changedFields: Object.keys(body),
+      isActive: program.isActive,
+    });
+
     res.json({ success: true, data: program });
   } catch (error) {
     next(error);
@@ -275,6 +341,14 @@ router.delete('/impact/bridging-programs/:id', ...adminOnly, async (req: AuthReq
   try {
     await mustExist(await prisma.bridgingProgram.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Bridging program');
     const program = await prisma.bridgingProgram.update({ where: { id: idParam(req) }, data: { isActive: false } });
+
+    await recordAdminAction(req, 'BRIDGING_PROGRAM_DELETED', {
+      resourceType: 'BridgingProgram',
+      resourceId: program.id,
+      name: program.name,
+      retired: true,
+    });
+
     res.json({ success: true, data: program });
   } catch (error) {
     next(error);

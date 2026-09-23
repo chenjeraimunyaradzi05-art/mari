@@ -11,9 +11,18 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 const adminOnly: RequestHandler[] = [authenticate, requireRole('ADMIN')];
+
+/**
+ * A lead's email belongs to somebody who has not joined yet. It is on the Lead
+ * row, where erasure and retention can reach it; copying it into an audit
+ * record that outlives the lead would put a prospect's address somewhere the
+ * privacy register cannot properly clear. The audit rows here name the row,
+ * never the person.
+ */
 
 const CHANNELS = ['EMAIL', 'SOCIAL', 'PAID_SOCIAL', 'SEARCH', 'PARTNER', 'EVENT', 'PRESS', 'REFERRAL', 'IN_APP', 'INFLUENCER'];
 const CAMPAIGN_STATUSES = ['DRAFT', 'SCHEDULED', 'ACTIVE', 'PAUSED', 'COMPLETED'];
@@ -134,6 +143,15 @@ router.post('/campaigns', ...adminOnly, campaignValidators, async (req: AuthRequ
       throw new ApiError(400, 'A campaign needs a name and a channel');
     }
     const campaign = await prisma.marketingCampaign.create({ data: { ...data, createdById: req.user!.id } as any });
+
+    await recordAdminAction(req, 'MARKETING_CAMPAIGN_CREATED', {
+      resourceType: 'MarketingCampaign',
+      resourceId: campaign.id,
+      name: campaign.name,
+      channel: campaign.channel,
+      budgetCents: campaign.budgetCents,
+    });
+
     res.status(201).json({ success: true, data: campaign });
   } catch (error) {
     next(error);
@@ -145,7 +163,17 @@ router.patch('/campaigns/:id', ...adminOnly, campaignValidators, async (req: Aut
     bad(req);
     const existing = await prisma.marketingCampaign.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!existing) throw new ApiError(404, 'Campaign not found');
-    const campaign = await prisma.marketingCampaign.update({ where: { id: req.params.id }, data: campaignData(req.body ?? {}) as any });
+    const changes = campaignData(req.body ?? {});
+    const campaign = await prisma.marketingCampaign.update({ where: { id: req.params.id }, data: changes as any });
+
+    await recordAdminAction(req, 'MARKETING_CAMPAIGN_UPDATED', {
+      resourceType: 'MarketingCampaign',
+      resourceId: campaign.id,
+      changedFields: Object.keys(changes),
+      status: campaign.status,
+      budgetCents: campaign.budgetCents,
+    });
+
     res.json({ success: true, data: campaign });
   } catch (error) {
     next(error);
@@ -154,9 +182,17 @@ router.patch('/campaigns/:id', ...adminOnly, campaignValidators, async (req: Aut
 
 router.delete('/campaigns/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const existing = await prisma.marketingCampaign.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const existing = await prisma.marketingCampaign.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, spentCents: true } });
     if (!existing) throw new ApiError(404, 'Campaign not found');
     await prisma.marketingCampaign.delete({ where: { id: req.params.id } });
+
+    await recordAdminAction(req, 'MARKETING_CAMPAIGN_DELETED', {
+      resourceType: 'MarketingCampaign',
+      resourceId: existing.id,
+      name: existing.name,
+      spentCents: existing.spentCents,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -233,6 +269,14 @@ router.post('/leads', ...adminOnly, leadValidators, async (req: AuthRequest, res
       create: { ...data, source } as any,
       update: data as any,
     });
+
+    await recordAdminAction(req, 'MARKETING_LEAD_CREATED', {
+      resourceType: 'Lead',
+      resourceId: lead.id,
+      source: lead.source,
+      status: lead.status,
+    });
+
     res.status(201).json({ success: true, data: lead });
   } catch (error) {
     next(error);
@@ -261,6 +305,17 @@ router.post('/leads/import', ...adminOnly, async (req: AuthRequest, res: Respons
       imported += 1;
     }
     logger.info('Leads imported', { imported, skipped, source, by: req.user!.id });
+
+    // A bulk import is the one marketing action that puts a thousand people's
+    // contact details on the platform at once, so it is the one most worth
+    // being able to trace back to whoever pasted the spreadsheet.
+    await recordAdminAction(req, 'MARKETING_LEADS_IMPORTED', {
+      resourceType: 'Lead',
+      source,
+      imported,
+      skipped,
+    });
+
     res.json({ success: true, data: { imported, skipped } });
   } catch (error) {
     next(error);
@@ -281,6 +336,18 @@ router.patch('/leads/:id', ...adminOnly, leadValidators, async (req: AuthRequest
       data.convertedUserId = req.body.convertedUserId;
     }
     const lead = await prisma.lead.update({ where: { id: req.params.id }, data: data as any });
+
+    await recordAdminAction(req, 'MARKETING_LEAD_UPDATED', {
+      resourceType: 'Lead',
+      resourceId: lead.id,
+      changedFields: Object.keys(data),
+      previousStatus: existing.status,
+      status: lead.status,
+      // Converting a lead ties a prospect record to a member account, which is
+      // a link worth being able to explain later.
+      ...(lead.convertedUserId ? { targetUserId: lead.convertedUserId } : {}),
+    });
+
     res.json({ success: true, data: lead });
   } catch (error) {
     next(error);
@@ -289,9 +356,17 @@ router.patch('/leads/:id', ...adminOnly, leadValidators, async (req: AuthRequest
 
 router.delete('/leads/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const existing = await prisma.lead.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const existing = await prisma.lead.findUnique({ where: { id: req.params.id }, select: { id: true, source: true, status: true } });
     if (!existing) throw new ApiError(404, 'Lead not found');
     await prisma.lead.delete({ where: { id: req.params.id } });
+
+    await recordAdminAction(req, 'MARKETING_LEAD_DELETED', {
+      resourceType: 'Lead',
+      resourceId: existing.id,
+      source: existing.source,
+      status: existing.status,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -344,6 +419,14 @@ router.post('/initiatives', ...adminOnly, initiativeValidators, async (req: Auth
     const area = (data.area as string) || 'launch';
     const position = await prisma.gtmInitiative.count({ where: { area } });
     const initiative = await prisma.gtmInitiative.create({ data: { ...data, area, position, status: 'PLANNED' } as any });
+
+    await recordAdminAction(req, 'GTM_INITIATIVE_CREATED', {
+      resourceType: 'GtmInitiative',
+      resourceId: initiative.id,
+      title: initiative.title,
+      area: initiative.area,
+    });
+
     res.status(201).json({ success: true, data: initiative });
   } catch (error) {
     next(error);
@@ -355,7 +438,16 @@ router.patch('/initiatives/:id', ...adminOnly, initiativeValidators, async (req:
     bad(req);
     const existing = await prisma.gtmInitiative.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!existing) throw new ApiError(404, 'Initiative not found');
-    const initiative = await prisma.gtmInitiative.update({ where: { id: req.params.id }, data: initiativeData(req.body ?? {}) as any });
+    const changes = initiativeData(req.body ?? {});
+    const initiative = await prisma.gtmInitiative.update({ where: { id: req.params.id }, data: changes as any });
+
+    await recordAdminAction(req, 'GTM_INITIATIVE_UPDATED', {
+      resourceType: 'GtmInitiative',
+      resourceId: initiative.id,
+      changedFields: Object.keys(changes),
+      status: initiative.status,
+    });
+
     res.json({ success: true, data: initiative });
   } catch (error) {
     next(error);
@@ -364,9 +456,17 @@ router.patch('/initiatives/:id', ...adminOnly, initiativeValidators, async (req:
 
 router.delete('/initiatives/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const existing = await prisma.gtmInitiative.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const existing = await prisma.gtmInitiative.findUnique({ where: { id: req.params.id }, select: { id: true, title: true, area: true } });
     if (!existing) throw new ApiError(404, 'Initiative not found');
     await prisma.gtmInitiative.delete({ where: { id: req.params.id } });
+
+    await recordAdminAction(req, 'GTM_INITIATIVE_DELETED', {
+      resourceType: 'GtmInitiative',
+      resourceId: existing.id,
+      title: existing.title,
+      area: existing.area,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);

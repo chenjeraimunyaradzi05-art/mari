@@ -29,6 +29,10 @@ import {
 import { prisma } from '../utils/prisma';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { logger } from '../utils/logger';
+import { hashOpaqueToken } from '../utils/opaqueToken';
+import { bestEffort } from '../utils/best-effort';
+import { PRIVACY_CONTACT_ROUTE, resolveContactEmail } from '../config/region.config';
+import { emailService } from './email.service';
 import {
   consentService,
   parseRestrictedProcessing,
@@ -81,10 +85,44 @@ interface PersonalDataModel {
  * key would otherwise pin come first.
  */
 export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
-  // Children whose parent rows cannot be removed while they exist.
+  // Children whose parent rows cannot be removed while they exist. Several of
+  // these would also fall to a database cascade when the parent goes, but the
+  // register is what the export reads, and a table only a cascade covers is a
+  // table a member can never be shown.
   { model: 'milestoneProgress', section: 'programMilestoneProgress', keys: [], where: (userId) => ({ enrollment: { userId } }), erasure: 'delete' },
   { model: 'savingsContribution', section: 'savingsContributions', keys: [], where: (userId) => ({ goal: { userId } }), erasure: 'delete' },
   { model: 'rfpResponse', section: 'rfpResponsesReceived', keys: [], where: (userId) => ({ rfp: { userId } }), erasure: 'delete' },
+  { model: 'habitLog', section: 'habitLogs', keys: [], where: (userId) => ({ habit: { userId } }), erasure: 'delete' },
+  { model: 'storyHighlightItem', section: 'storyHighlightItems', keys: [], where: (userId) => ({ highlight: { userId } }), erasure: 'delete' },
+  { model: 'vehicleServiceRecord', section: 'vehicleServiceRecords', keys: [], where: (userId) => ({ vehicle: { userId } }), erasure: 'delete' },
+  { model: 'bankTransaction', section: 'bankTransactions', keys: [], where: (userId) => ({ bankAccount: { connection: { userId } } }), erasure: 'delete' },
+  { model: 'bankAccount', section: 'bankAccounts', keys: [], where: (userId) => ({ connection: { userId } }), erasure: 'delete' },
+
+  // The domestic violence safety tables. These hang off DvSafetyProfile rather
+  // than off the account, which is how they came to be missing from the
+  // register entirely: an erasure request used to leave a member's covert safe
+  // chats, her panic alert history and her emergency contacts on the platform.
+  {
+    model: 'dvSafeMessage',
+    section: 'dvSafeChatMessages',
+    keys: [],
+    where: (userId) => ({ chat: { profile: { userId } } }),
+    erasure: 'delete',
+    exportable: false,
+    reason:
+      'A safe chat holds what the other people in it said as well as what she said. Only the messages she sent are handed back, under dvSafeMessagesSent.',
+  },
+  { model: 'dvPanicAlert', section: 'dvPanicAlerts', keys: [], where: (userId) => ({ profile: { userId } }), erasure: 'delete' },
+  {
+    model: 'dvSafeChat',
+    section: 'dvSafeChats',
+    keys: [],
+    where: (userId) => ({ profile: { userId } }),
+    erasure: 'delete',
+    exportable: false,
+    reason:
+      'The disguised name and access PIN on a safe chat are safety mechanisms, and the participant list names the other people in it.',
+  },
 
   // Engagement signals.
   { model: 'like', section: 'postLikes', keys: ['userId'], erasure: 'delete' },
@@ -104,12 +142,25 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'userStreak', section: 'streaks', keys: ['userId'], erasure: 'delete' },
   { model: 'userAchievement', section: 'achievements', keys: ['userId'], erasure: 'delete' },
   { model: 'notification', section: 'notifications', keys: ['userId'], erasure: 'delete' },
+  { model: 'commentLike', section: 'commentLikes', keys: ['userId'], erasure: 'delete' },
+  { model: 'pollVote', section: 'pollVotes', keys: ['userId'], erasure: 'delete' },
+  // PostImpression stores the member id twice: once in userId and once as the
+  // viewerKey, which for a signed-in reader is the id itself. Detaching would
+  // clear one and leave the other, so the rows go.
+  { model: 'postImpression', section: 'postImpressions', keys: ['userId'], erasure: 'delete' },
+  { model: 'statusView', section: 'storyViews', keys: ['userId'], erasure: 'delete' },
+  { model: 'vehicleListingSave', section: 'vehicleListingSaves', keys: ['userId'], erasure: 'delete' },
+  { model: 'followRequest', section: 'followRequests', keys: ['requesterId', 'targetId'], erasure: 'delete' },
+  { model: 'closeFriend', section: 'closeFriends', keys: ['userId', 'friendId'], erasure: 'delete' },
+  { model: 'wellnessSupport', section: 'wellnessSupports', keys: ['userId'], erasure: 'delete' },
 
   // Conversation and comment content.
   { model: 'comment', section: 'comments', keys: ['authorId'], erasure: 'delete' },
   { model: 'videoComment', section: 'videoComments', keys: ['authorId'], erasure: 'delete' },
   { model: 'message', section: 'messages', keys: ['senderId', 'receiverId'], erasure: 'delete' },
   { model: 'conversationParticipant', section: 'conversations', keys: ['userId'], erasure: 'delete' },
+  { model: 'liveStreamMessage', section: 'liveStreamMessages', keys: ['userId'], erasure: 'delete' },
+  { model: 'wellnessReply', section: 'wellnessReplies', keys: ['authorId'], erasure: 'delete' },
 
   // Memberships, applications and bookings.
   { model: 'groupMember', section: 'groupMemberships', keys: ['userId'], erasure: 'delete' },
@@ -142,6 +193,20 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'serviceReview', section: 'serviceReviews', keys: ['clientId'], erasure: 'delete' },
   { model: 'serviceRequest', section: 'serviceRequests', keys: ['clientId'], erasure: 'delete' },
   { model: 'mentorSession', section: 'mentorSessions', keys: ['menteeId'], erasure: 'delete' },
+  { model: 'lessonProgress', section: 'lessonProgress', keys: ['userId'], erasure: 'delete' },
+  { model: 'courseCertificate', section: 'courseCertificates', keys: ['userId'], erasure: 'delete' },
+  { model: 'wellnessCircleCheckIn', section: 'wellnessCircleCheckIns', keys: ['userId'], erasure: 'delete' },
+  { model: 'wellnessCircleMember', section: 'wellnessCircleMemberships', keys: ['userId'], erasure: 'delete' },
+  { model: 'wellnessChallengeMember', section: 'wellnessChallengeMemberships', keys: ['userId'], erasure: 'delete' },
+  { model: 'healthReview', section: 'healthReviews', keys: ['userId'], erasure: 'delete' },
+  { model: 'healthBooking', section: 'healthBookings', keys: ['userId'], erasure: 'delete' },
+  { model: 'mechanicReview', section: 'mechanicReviews', keys: ['userId'], erasure: 'delete' },
+  { model: 'mechanicBooking', section: 'mechanicBookings', keys: ['userId'], erasure: 'delete' },
+  { model: 'carReview', section: 'carReviews', keys: ['userId'], erasure: 'delete' },
+  { model: 'testDriveRequest', section: 'testDriveRequests', keys: ['userId'], erasure: 'delete' },
+  { model: 'tradeInRequest', section: 'tradeInRequests', keys: ['userId'], erasure: 'delete' },
+  { model: 'vehicleInspection', section: 'vehicleInspectionsRequested', keys: ['requestedById'], erasure: 'delete' },
+  { model: 'carFinanceApplication', section: 'carFinanceApplications', keys: ['userId'], erasure: 'delete' },
 
   // Content and listings the member owns. Removing these takes their replies,
   // likes and registrations with them.
@@ -156,6 +221,43 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'skillService', section: 'skillServices', keys: ['providerId'], erasure: 'delete' },
   { model: 'rfp', section: 'rfps', keys: ['userId'], erasure: 'delete' },
   { model: 'referral', section: 'referrals', keys: ['referrerId', 'referredId'], erasure: 'delete' },
+  { model: 'liveStream', section: 'liveStreams', keys: ['hostId'], erasure: 'delete' },
+  { model: 'storyHighlight', section: 'storyHighlights', keys: ['userId'], erasure: 'delete' },
+  { model: 'savedCollection', section: 'savedCollections', keys: ['userId'], erasure: 'delete' },
+  { model: 'postDraft', section: 'postDrafts', keys: ['userId'], erasure: 'delete' },
+  { model: 'article', section: 'articlesAuthored', keys: ['authorId'], erasure: 'delete' },
+  { model: 'wellnessPost', section: 'wellnessPosts', keys: ['authorId'], erasure: 'delete' },
+  { model: 'wellnessCircle', section: 'wellnessCirclesFacilitated', keys: ['facilitatorId'], erasure: 'delete' },
+  { model: 'wellnessChallenge', section: 'wellnessChallengesCreated', keys: ['createdById'], erasure: 'delete' },
+  { model: 'vehicle', section: 'vehicles', keys: ['userId'], erasure: 'delete' },
+  // Feedback keeps the sender's email beside the optional account link, so
+  // nulling the link alone would leave her addressable in the admin queue.
+  { model: 'feedback', section: 'feedbackSubmitted', keys: ['userId'], erasure: 'delete' },
+
+  // A car sale is two members deep. A listing or an offer that never took money
+  // is hers to erase; one that settled is the counterparty's record as well,
+  // and the listing cascades its purchases, so removing it would erase a buyer
+  // the request never mentioned. The filter is what separates the two.
+  {
+    model: 'vehiclePurchase',
+    section: 'vehiclePurchasesUnpaid',
+    keys: [],
+    where: (userId) => ({
+      OR: [{ buyerId: userId }, { sellerId: userId }],
+      paidAt: null,
+    }),
+    erasure: 'delete',
+  },
+  {
+    model: 'vehicleListing',
+    section: 'vehicleListings',
+    keys: [],
+    where: (userId) => ({
+      sellerId: userId,
+      purchases: { none: { paidAt: { not: null } } },
+    }),
+    erasure: 'delete',
+  },
 
   // Profiles, settings and derived insight, including special category data.
   { model: 'profile', section: 'profile', keys: ['userId'], erasure: 'delete' },
@@ -179,6 +281,26 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'salaryAnalysis', section: 'salaryAnalyses', keys: ['userId'], erasure: 'delete' },
   { model: 'mentorMatchScore', section: 'mentorMatchScores', keys: ['menteeId', 'mentorId'], erasure: 'delete' },
   { model: 'businessRegistration', section: 'businessRegistrations', keys: ['userId'], erasure: 'delete' },
+  { model: 'dvSafetyProfile', section: 'dvSafetyProfile', keys: ['userId'], erasure: 'delete' },
+
+  // Health and wellbeing. Article 9 special category data under the GDPR and
+  // sensitive information under APP 3; the reason a gap here matters more than
+  // a gap in, say, saved jobs.
+  { model: 'healthSettings', section: 'healthSettings', keys: ['userId'], erasure: 'delete' },
+  { model: 'healthEntry', section: 'healthEntries', keys: ['userId'], erasure: 'delete' },
+  { model: 'medication', section: 'medications', keys: ['userId'], erasure: 'delete' },
+  { model: 'healthNote', section: 'healthNotes', keys: ['userId'], erasure: 'delete' },
+  { model: 'healthShare', section: 'healthShares', keys: ['userId'], erasure: 'delete' },
+  { model: 'mentalLoadEntry', section: 'mentalLoadEntries', keys: ['userId'], erasure: 'delete' },
+  { model: 'habit', section: 'habits', keys: ['userId'], erasure: 'delete' },
+  { model: 'wellnessGoal', section: 'wellnessGoals', keys: ['userId'], erasure: 'delete' },
+
+  // Money the member tracks rather than money the platform took: her own
+  // ledger, not a record anybody has a duty to keep.
+  { model: 'bankConnection', section: 'bankConnections', keys: ['userId'], erasure: 'delete' },
+  { model: 'netWorthSnapshot', section: 'netWorthSnapshots', keys: ['userId'], erasure: 'delete' },
+  { model: 'portfolioHolding', section: 'portfolioHoldings', keys: ['userId'], erasure: 'delete' },
+  { model: 'strategyPlan', section: 'strategyPlans', keys: ['userId'], erasure: 'delete' },
 
   // Verification, appeals and moderation.
   { model: 'verificationBadge', section: 'verificationBadges', keys: ['userId'], erasure: 'delete' },
@@ -195,6 +317,30 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     reason: 'Naming the incidents a member reported would identify the people they reported.',
   },
   { model: 'adminFlag', section: 'adminFlags', keys: ['userId'], erasure: 'delete' },
+  {
+    model: 'safetyIncident',
+    section: 'safetyIncidentsResolved',
+    keys: ['resolvedById'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'Naming the incidents a member closed would identify the people those incidents are about.',
+  },
+  {
+    model: 'adminFlag',
+    section: 'adminFlagsResolved',
+    keys: ['resolvedById'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'Moderation decisions belong to the flagged member, not to the moderator who closed them.',
+  },
+  {
+    model: 'dvSafeMessage',
+    section: 'dvSafeMessagesSent',
+    keys: ['senderId'],
+    erasure: 'pseudonymise',
+    reason:
+      'A safe chat message names its sender without a foreign key to the account, so the link becomes a one-way hash. Messages she sent inside a safe chat belonging to another member are only reachable this way.',
+  },
   {
     model: 'adminFlag',
     section: 'adminFlagsRaised',
@@ -291,6 +437,69 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   { model: 'taxReturn', section: 'taxReturns', keys: ['userId'], erasure: 'detach' },
   { model: 'inventoryTransaction', section: 'inventoryTransactions', keys: ['createdByUserId'], erasure: 'detach' },
   { model: 'moneyTransaction', section: 'moneyTransactions', keys: ['userId'], erasure: 'detach' },
+  { model: 'conversation', section: 'conversationRequests', keys: ['requestedById'], erasure: 'detach' },
+  { model: 'event', section: 'eventsHosted', keys: ['hostUserId'], erasure: 'detach' },
+  { model: 'audioTrack', section: 'audioTracksCreated', keys: ['createdById'], erasure: 'detach' },
+  { model: 'carReferral', section: 'carReferrals', keys: ['userId'], erasure: 'detach' },
+
+  // Businesses she runs through the platform. The listing is about the
+  // business and other members rely on it, so it survives without naming her.
+  { model: 'vendor', section: 'vendorsOwned', keys: ['ownerId'], erasure: 'detach' },
+  { model: 'dealership', section: 'dealershipsOwned', keys: ['ownerUserId'], erasure: 'detach' },
+  { model: 'mechanic', section: 'mechanicsOwned', keys: ['ownerUserId'], erasure: 'detach' },
+  { model: 'healthPractitioner', section: 'practitionerProfilesOwned', keys: ['ownerUserId'], erasure: 'detach' },
+
+  // Staff are members too, so the columns that name the person who ran a
+  // campaign or signed off an assessment are personal data about her. The
+  // record survives without the name; it is the record that matters, not who
+  // is still on the payroll.
+  { model: 'lead', section: 'marketingLeadRecord', keys: ['convertedUserId'], erasure: 'detach' },
+  {
+    model: 'lead',
+    section: 'marketingLeadsOwned',
+    keys: ['ownerId'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'A lead assigned to a staff member describes the prospect, not the staff member.',
+  },
+  {
+    model: 'marketingCampaign',
+    section: 'marketingCampaignsOpened',
+    keys: ['createdById'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'A campaign record describes the campaign, not the staff member who opened it.',
+  },
+  {
+    model: 'gtmInitiative',
+    section: 'gtmInitiativesOwned',
+    keys: ['ownerId'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'An initiative describes a piece of company work, not the staff member carrying it.',
+  },
+  {
+    model: 'processingActivity',
+    section: 'processingActivitiesApproved',
+    keys: ['approvedBy'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'The Article 30 record describes the company, not the staff member who signed it off.',
+  },
+  {
+    model: 'dPIA',
+    section: 'impactAssessmentsApproved',
+    keys: ['approvedBy'],
+    erasure: 'detach',
+    exportable: false,
+    reason: 'An impact assessment describes the company, not the staff member who signed it off.',
+  },
+
+  // Stock a sole trader owns personally rather than through an organisation.
+  // Only rows with the member link set are hers; an organisation's stock has a
+  // null userId and is untouched.
+  { model: 'inventoryItem', section: 'inventoryItems', keys: ['userId'], erasure: 'delete' },
+  { model: 'inventoryLocation', section: 'inventoryLocations', keys: ['userId'], erasure: 'delete' },
 
   // Financial records with a seven year retention duty and a non-null link to
   // the account, so they are what forces an anonymised shell over a deletion.
@@ -358,6 +567,30 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
     holdsAccount: true,
     reason: 'Creator earnings record behind a payout, retained seven years.',
   },
+  {
+    model: 'vehiclePurchase',
+    section: 'vehiclePurchasesPaid',
+    keys: [],
+    where: (userId) => ({
+      OR: [{ buyerId: userId }, { sellerId: userId }],
+      paidAt: { not: null },
+    }),
+    erasure: 'retain',
+    holdsAccount: true,
+    reason: 'Settlement record for a vehicle sale between two members, retained seven years.',
+  },
+  {
+    model: 'vehicleListing',
+    section: 'vehicleListingsSoldThrough',
+    keys: [],
+    where: (userId) => ({
+      sellerId: userId,
+      purchases: { some: { paidAt: { not: null } } },
+    }),
+    erasure: 'retain',
+    holdsAccount: true,
+    reason: 'A listing a sale settled through cascades its purchases, so removing it would erase the buyer record too.',
+  },
 
   // Deliberately outside both rights.
   {
@@ -370,21 +603,115 @@ export const PERSONAL_DATA_MODELS: PersonalDataModel[] = [
   },
 ];
 
-// Fields that must never leave the platform inside an export bundle.
+/**
+ * Tables that hold a member id and are deliberately left out of the register,
+ * each with the reason it is out.
+ *
+ * The drift test at src/services/__tests__/gdpr.personal-data-register.test.ts
+ * reads the schema and this map together, so a new table carrying a member id
+ * fails the suite until somebody either registers it above or writes down here
+ * why it does not belong. That is the only thing that keeps the register
+ * honest: it fell fifty tables behind the schema once already, and nothing in
+ * the build noticed.
+ *
+ * Empty today. Every model in the schema that carries a member id is reached by
+ * an entry above, directly or through a parent row.
+ */
+export const MODELS_OUTSIDE_PERSONAL_DATA_REGISTER: Record<string, string> = {};
+
+// Fields that must never leave the platform inside an export bundle. These are
+// credentials rather than facts about the member: a bundle carrying one would
+// hand whoever opens it the ability to act as her.
 const SECRET_EXPORT_FIELDS = new Set([
   'passwordHash',
   'twoFactorSecret',
+  'twoFactorRecoveryCodes',
   'token',
   'tokenHash',
   'accessToken',
   'refreshToken',
   'sessionToken',
   'secret',
+  // A live stream key lets the holder broadcast as her.
+  'streamKey',
+  // The PIN that opens a disguised safe chat.
+  'accessPinHash',
 ]);
 
 const DOWNLOAD_PATH_PREFIX = '/api/gdpr/download/';
 const EXPORT_TOKEN_BYTES = 32;
 const EXPORT_WINDOW_HOURS = 72;
+
+/**
+ * What a member may correct about herself through the rectification right.
+ *
+ * Exported because the route validates each one before the request is filed:
+ * a correction the service would silently drop should be refused at the door,
+ * not accepted and then ignored.
+ */
+export const RECTIFIABLE_FIELDS = [
+  'firstName',
+  'lastName',
+  'email',
+  'city',
+  'state',
+  'country',
+  'bio',
+  'headline',
+] as const;
+
+export type RectifiableField = (typeof RECTIFIABLE_FIELDS)[number];
+
+/**
+ * A corrected address does not become the sign-in identity until somebody
+ * opens the confirmation link sent to it.
+ *
+ * This route used to write `email` straight onto the account from the request
+ * body. A member could move her account to an address she could not read —
+ * locking herself out, since sign-in and password reset both go to that
+ * address — and a member sitting at somebody else's open session could move
+ * theirs. Neither needed a password.
+ *
+ * VerificationToken has no column saying what a token is about, so the request
+ * id rides in `type` behind this prefix. The existing EMAIL_VERIFICATION and
+ * PASSWORD_RESET lookups match `type` exactly, so a prefixed value cannot
+ * collide with them, and the request row stays the one record of which address
+ * was asked for.
+ */
+const EMAIL_CHANGE_TOKEN_PREFIX = 'EMAIL_CHANGE:';
+const EMAIL_CHANGE_TOKEN_BYTES = 32;
+const EMAIL_CHANGE_WINDOW_HOURS = 24;
+
+/** What a rectification actually did, so the route does not have to guess. */
+export interface RectificationOutcome {
+  requestId: string;
+  /** Columns written to the account now. */
+  applied: string[];
+  /** Fields this right does not cover, named back rather than dropped. */
+  ignored: string[];
+  /** The address waiting to be confirmed, when one was asked for. */
+  pendingEmail: string | null;
+}
+
+/** The outcome of opening a confirmation link, in the words the route answers with. */
+export type EmailChangeConfirmation =
+  | { status: 'CONFIRMED'; email: string; userId: string }
+  | { status: 'INVALID' }
+  | { status: 'TAKEN' };
+
+/** Where the confirmation link has to come back to. */
+function apiBaseUrl(): string {
+  return (process.env.API_URL || 'http://localhost:5000').replace(/\/$/, '');
+}
+
+/** Where to tell a member to go when a change she did not ask for arrives. */
+function supportContact(): string {
+  const mailbox = resolveContactEmail('support');
+  if (mailbox) return mailbox;
+
+  const client = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+  return `${client}${PRIVACY_CONTACT_ROUTE}`;
+}
 
 // Erasure walks well over a hundred statements, so it needs far longer than the
 // five second default Prisma allows an interactive transaction.
@@ -470,6 +797,28 @@ function subjectFilter(entry: PersonalDataModel, userId: string): Record<string,
 
 function pseudonym(userId: string): string {
   return createHash('sha256').update(userId).digest('hex');
+}
+
+/**
+ * The address a rectification request asked for, read back off the request row.
+ *
+ * The request is what the member submitted and what a regulator would be shown,
+ * so it is the only thing the confirmation step trusts for the new address. A
+ * request whose details are not the JSON this route writes returns null, and
+ * the confirmation refuses rather than inventing an address.
+ */
+function readRequestedEmail(requestDetails: string | null): string | null {
+  if (!requestDetails) return null;
+
+  try {
+    const parsed = JSON.parse(requestDetails) as { email?: unknown };
+    if (typeof parsed?.email !== 'string') return null;
+
+    const email = parsed.email.trim().toLowerCase();
+    return email || null;
+  } catch {
+    return null;
+  }
 }
 
 /** The member's own words for why they restricted processing, if they gave any. */
@@ -782,66 +1131,240 @@ export class GDPRService {
   }
 
   /**
-   * Process Rectification Request
+   * Carry out a correction (APP 13, Article 16).
+   *
+   * Everything but the sign-in address is written on the spot. The address is
+   * held back until the inbox it names answers, because it is the credential
+   * the whole account recovers through: see EMAIL_CHANGE_TOKEN_PREFIX.
    */
   async processRectificationRequest(
     dsarId: string,
-    corrections: Record<string, any>
-  ): Promise<void> {
+    corrections: Record<string, unknown>
+  ): Promise<RectificationOutcome> {
     const dsar = await prisma.dSARRequest.findUnique({
       where: { id: dsarId },
     });
 
     if (!dsar) throw new Error('DSAR request not found');
 
-    const allowedFields = [
-      'firstName',
-      'lastName',
-      'email',
-      'city',
-      'state',
-      'country',
-      'bio',
-      'headline',
-    ];
-
-    const sanitizedCorrections: Record<string, any> = {};
-    for (const [key, value] of Object.entries(corrections)) {
-      if (allowedFields.includes(key)) {
-        sanitizedCorrections[key] = value;
-      }
-    }
-
-    // Get previous values for audit
-    const previousUser = await prisma.user.findUnique({
+    const account = await prisma.user.findUnique({
       where: { id: dsar.userId },
-      select: Object.fromEntries(allowedFields.map(f => [f, true])),
-    });
-
-    // Update user data
-    await prisma.user.update({
-      where: { id: dsar.userId },
-      data: sanitizedCorrections,
-    });
-
-    // Update DSAR
-    await prisma.dSARRequest.update({
-      where: { id: dsarId },
-      data: {
-        status: DSARStatus.COMPLETED,
-        completedAt: new Date(),
+      select: {
+        id: true,
+        ...(Object.fromEntries(RECTIFIABLE_FIELDS.map((field) => [field, true])) as Record<
+          RectifiableField,
+          true
+        >),
       },
     });
 
-    // Log with audit trail
+    if (!account) throw new Error('Account behind the request no longer exists');
+
+    const writeNow: Record<string, unknown> = {};
+    const ignored: string[] = [];
+    let requestedEmail: string | null = null;
+
+    for (const [key, value] of Object.entries(corrections)) {
+      if (!(RECTIFIABLE_FIELDS as readonly string[]).includes(key)) {
+        ignored.push(key);
+        continue;
+      }
+
+      if (key === 'email') {
+        requestedEmail = String(value).trim().toLowerCase();
+        continue;
+      }
+
+      writeNow[key] = value;
+    }
+
+    // Asking for the address the account already has corrects nothing, and
+    // sending a confirmation for it would be a link to nowhere.
+    const pendingEmail = requestedEmail && requestedEmail !== account.email ? requestedEmail : null;
+    if (requestedEmail && !pendingEmail) ignored.push('email');
+
+    if (Object.keys(writeNow).length > 0) {
+      await prisma.user.update({
+        where: { id: dsar.userId },
+        data: writeNow,
+      });
+    }
+
+    if (pendingEmail) {
+      await this.beginEmailChange(dsar.id, account, pendingEmail);
+    }
+
+    await prisma.dSARRequest.update({
+      where: { id: dsarId },
+      data: pendingEmail
+        ? {
+            // Not COMPLETED: the request is only half honoured until the new
+            // address answers, and a row that says otherwise would tell a
+            // regulator the wrong thing.
+            status: DSARStatus.IN_PROGRESS,
+            processingNotes: 'Waiting for the new sign-in address to be confirmed from that inbox.',
+          }
+        : {
+            status: DSARStatus.COMPLETED,
+            completedAt: new Date(),
+          },
+    });
+
     await this.logPrivacyAction({
       userId: dsar.userId,
-      action: 'DSAR_RECTIFICATION_COMPLETED',
+      action: pendingEmail ? 'DSAR_RECTIFICATION_PENDING_EMAIL' : 'DSAR_RECTIFICATION_COMPLETED',
       resourceType: 'User',
       resourceId: dsar.userId,
-      previousValue: previousUser || undefined,
-      newValue: sanitizedCorrections,
+      previousValue: account,
+      newValue: pendingEmail ? { ...writeNow, pendingEmail } : writeNow,
     });
+
+    return {
+      requestId: dsar.id,
+      applied: Object.keys(writeNow),
+      ignored,
+      pendingEmail,
+    };
+  }
+
+  /**
+   * Whether an address is free to become somebody's sign-in identity.
+   *
+   * Checked when the request is filed and again when the link is opened: an
+   * hour can pass between the two, and the unique index would otherwise report
+   * the collision as a 500 from the database layer.
+   */
+  async emailAvailableFor(userId: string, email: string): Promise<boolean> {
+    const holder = await prisma.user.findFirst({
+      where: { email: email.trim().toLowerCase(), NOT: { id: userId } },
+      select: { id: true },
+    });
+
+    return holder === null;
+  }
+
+  /**
+   * Mint the confirmation token and write to both addresses: the new one to
+   * ask, the old one to warn. The warning matters most for the member this
+   * platform was built for — if somebody else is asking to move her account,
+   * the inbox she still controls is the only place she will hear about it.
+   */
+  private async beginEmailChange(
+    dsarId: string,
+    account: { id: string; email: string; firstName: string },
+    newEmail: string
+  ): Promise<void> {
+    // One live request at a time, so an address she changed her mind about
+    // stops being claimable the moment she asks for a different one.
+    await prisma.verificationToken.deleteMany({
+      where: { userId: account.id, type: { startsWith: EMAIL_CHANGE_TOKEN_PREFIX } },
+    });
+
+    const token = randomBytes(EMAIL_CHANGE_TOKEN_BYTES).toString('hex');
+
+    await prisma.verificationToken.create({
+      data: {
+        userId: account.id,
+        token: hashOpaqueToken(token),
+        type: `${EMAIL_CHANGE_TOKEN_PREFIX}${dsarId}`,
+        expiresAt: new Date(Date.now() + EMAIL_CHANGE_WINDOW_HOURS * 60 * 60 * 1000),
+      },
+    });
+
+    const confirmUrl = `${apiBaseUrl()}/api/gdpr/dsar/rectify/confirm-email?token=${encodeURIComponent(token)}`;
+
+    // Best effort on the send, not on the record: the token is already stored,
+    // so a mail outage leaves a request she can make again rather than an
+    // account half moved.
+    await bestEffort(
+      'gdpr email change confirmation',
+      emailService.sendEmailChangeConfirmation(
+        newEmail,
+        account.firstName,
+        confirmUrl,
+        EMAIL_CHANGE_WINDOW_HOURS
+      ),
+      false
+    );
+
+    await bestEffort(
+      'gdpr email change notice to the current address',
+      emailService.sendEmailChangeNotice(
+        account.email,
+        account.firstName,
+        newEmail,
+        supportContact()
+      ),
+      false
+    );
+  }
+
+  /**
+   * Finish a correction of the sign-in address.
+   *
+   * The address is taken from the request row the token names rather than from
+   * anything the caller sends, so opening the link can only commit the change
+   * that was asked for.
+   */
+  async confirmRectifiedEmail(token: string): Promise<EmailChangeConfirmation> {
+    const record = await prisma.verificationToken.findFirst({
+      where: {
+        token: hashOpaqueToken(token),
+        type: { startsWith: EMAIL_CHANGE_TOKEN_PREFIX },
+        expiresAt: { gt: new Date() },
+      },
+      include: { user: { select: { id: true, email: true } } },
+    });
+
+    if (!record) return { status: 'INVALID' };
+
+    const dsarId = record.type.slice(EMAIL_CHANGE_TOKEN_PREFIX.length);
+    const dsar = await prisma.dSARRequest.findUnique({ where: { id: dsarId } });
+
+    const requested = readRequestedEmail(dsar?.requestDetails ?? null);
+    if (!dsar || dsar.userId !== record.userId || !requested) {
+      // The token outlived the request it belongs to, so there is nothing left
+      // saying which address it was for. Spent rather than guessed at.
+      await prisma.verificationToken.delete({ where: { id: record.id } });
+      return { status: 'INVALID' };
+    }
+
+    if (!(await this.emailAvailableFor(record.userId, requested))) {
+      return { status: 'TAKEN' };
+    }
+
+    await prisma.user.update({
+      where: { id: record.userId },
+      data: {
+        email: requested,
+        // She has just read a link in that inbox, which is the same proof
+        // registration asks for.
+        emailVerified: true,
+        emailVerifiedAt: new Date(),
+      },
+    });
+
+    await prisma.verificationToken.delete({ where: { id: record.id } });
+
+    await prisma.dSARRequest.update({
+      where: { id: dsar.id },
+      data: {
+        status: DSARStatus.COMPLETED,
+        completedAt: new Date(),
+        processingNotes: 'New sign-in address confirmed from that inbox.',
+      },
+    });
+
+    await this.logPrivacyAction({
+      userId: record.userId,
+      action: 'DSAR_RECTIFICATION_COMPLETED',
+      resourceType: 'User',
+      resourceId: record.userId,
+      previousValue: { email: record.user.email },
+      newValue: { email: requested },
+    });
+
+    return { status: 'CONFIRMED', email: requested, userId: record.userId };
   }
 
   // ============================================
@@ -1322,6 +1845,15 @@ export class GDPRService {
       async (tx) => {
         let rowsRemoved = 0;
 
+        // Event copies the host's name, title and avatar into plain columns
+        // beside the link, so detaching hostUserId on its own would leave her
+        // named on the listing. It runs first because the register walk below
+        // is what clears the link these rows are found by.
+        await tx.event.updateMany({
+          where: { hostUserId: userId },
+          data: { hostName: 'Former host', hostTitle: '', hostAvatar: '' },
+        });
+
         for (const entry of PERSONAL_DATA_MODELS) {
           if (entry.erasure === 'retain' || entry.erasure === 'skip') continue;
 
@@ -1356,6 +1888,20 @@ export class GDPRService {
               "denyList" = array_remove("denyList", ${userId}::text)
           WHERE ${userId}::text = ANY("allowList") OR ${userId}::text = ANY("denyList")
         `;
+
+        // Her own safe chats went with her safety profile above, but a chat
+        // another member owns lists its participants as bare ids in an array,
+        // and she has to come out of those too.
+        await tx.$executeRaw`
+          UPDATE "DvSafeChat"
+          SET "participants" = array_remove("participants", ${userId}::text)
+          WHERE ${userId}::text = ANY("participants")
+        `;
+
+        // DvSafetyProfile.blockedUserIds is knowingly left alone. Her id in
+        // another woman's block list is personal data about her, but taking it
+        // out would unblock her on the way past, and a block on a safety
+        // platform outlives the account it was placed against.
 
         const retainedSections: string[] = [];
         for (const entry of PERSONAL_DATA_MODELS) {

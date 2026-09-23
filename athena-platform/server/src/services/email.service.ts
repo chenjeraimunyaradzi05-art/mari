@@ -32,6 +32,17 @@ function escapeHtml(unsafe: string): string {
 
 const DEFAULT_CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
+/**
+ * Where a member actually manages what we send her. The notification settings
+ * page lives under the dashboard shell; these templates used to link to
+ * /settings/notifications, which is not a route the web app has, so every
+ * "unsubscribe" and "manage preferences" link in every bulk email landed on a
+ * 404. An unsubscribe link that does not work is a Spam Act 2003 problem as
+ * well as a broken promise, so it is spelled once here rather than typed out
+ * per template.
+ */
+const NOTIFICATION_PREFERENCES_URL = `${DEFAULT_CLIENT_URL}/dashboard/settings/notifications`;
+
 // Email templates
 const templates = {
   welcome: (data: { firstName: string; referralCode?: string }): EmailTemplate => {
@@ -85,7 +96,7 @@ const templates = {
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         
         <p style="font-size: 14px; color: #666; text-align: center;">
-          Questions? Reply to this email or visit our <a href="${process.env.CLIENT_URL}/help" style="color: #7c3aed;">Help Center</a>.
+          Questions? Reply to this email or visit our <a href="${DEFAULT_CLIENT_URL}/help" style="color: #7c3aed;">Help Center</a>.
         </p>
         
         <p style="font-size: 12px; color: #999; text-align: center;">
@@ -211,7 +222,7 @@ View your referrals: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashbo
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         
         <p style="font-size: 12px; color: #999; text-align: center;">
-          Don't want these emails? <a href="${process.env.CLIENT_URL}/settings/notifications" style="color: #666;">Manage preferences</a>
+          Don't want these emails? <a href="${NOTIFICATION_PREFERENCES_URL}" style="color: #666;">Manage preferences</a>
         </p>
       </body>
       </html>
@@ -231,7 +242,7 @@ Your community is waiting for you. Jump back in and continue your journey!
 
 Return to ATHENA: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 
-Don't want these emails? Manage preferences: ${process.env.CLIENT_URL}/settings/notifications
+Don't want these emails? Manage preferences: ${NOTIFICATION_PREFERENCES_URL}
     `,
   }),
 
@@ -281,7 +292,7 @@ Don't want these emails? Manage preferences: ${process.env.CLIENT_URL}/settings/
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         
         <p style="font-size: 12px; color: #999; text-align: center;">
-          <a href="${process.env.CLIENT_URL}/settings/notifications" style="color: #666;">Unsubscribe</a> • 
+          <a href="${NOTIFICATION_PREFERENCES_URL}" style="color: #666;">Unsubscribe</a> •
           © ${new Date().getFullYear()} ATHENA
         </p>
       </body>
@@ -298,7 +309,7 @@ Here's what happened on ATHENA this week:
 
 Explore now: ${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard
 
-Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
+Unsubscribe: ${NOTIFICATION_PREFERENCES_URL}
 © ${new Date().getFullYear()} ATHENA
     `,
   }),
@@ -526,6 +537,94 @@ Unsubscribe: ${process.env.CLIENT_URL}/settings/notifications
     `,
     text: `Congratulations, ${data.firstName}!\n\nYou've completed "${data.courseName}" by ${data.instructorName}.\n\nCompleted: ${data.completionDate}\n\n${data.certificateUrl ? `View certificate: ${data.certificateUrl}` : ''}`,
   }),
+
+  /**
+   * Sent to the address a member has asked to move her account to. Until she
+   * opens this link the change has not happened: the correction right under
+   * APP 13 lets her fix her address, not claim one she cannot read.
+   */
+  emailChangeConfirmation: (data: {
+    firstName: string;
+    newEmail: string;
+    confirmUrl: string;
+    expiresInHours: number;
+  }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safeNewEmail = escapeHtml(data.newEmail);
+    return {
+      subject: 'Confirm your new ATHENA sign-in address',
+      html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><title>Confirm your new address</title></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
+        </div>
+        <h2 style="color: #1f2937;">Confirm your new address</h2>
+        <p>Hi ${safeFirstName},</p>
+        <p>You asked us to correct the email address on your ATHENA account to <strong>${safeNewEmail}</strong>. Nothing has changed yet.</p>
+        <p>Opening the link below confirms that you can read this inbox, and makes it the address you sign in with.</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${data.confirmUrl}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Confirm this address</a>
+        </div>
+        <p style="color: #666;">The link works for ${data.expiresInHours} hours. If you did not ask for this, ignore this email and nothing will change.</p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+        <p style="font-size: 12px; color: #999; text-align: center;">© ${new Date().getFullYear()} ATHENA</p>
+      </body>
+      </html>
+    `,
+      text: `Hi ${data.firstName},
+
+You asked us to correct the email address on your ATHENA account to ${data.newEmail}. Nothing has changed yet.
+
+Opening the link below confirms that you can read this inbox, and makes it the address you sign in with:
+
+${data.confirmUrl}
+
+The link works for ${data.expiresInHours} hours. If you did not ask for this, ignore this email and nothing will change.`,
+    };
+  },
+
+  /**
+   * Sent to the address the account currently uses, so a change she did not ask
+   * for reaches the inbox she still controls. Deliberately carries no link: its
+   * job is to warn, not to offer another thing to click.
+   */
+  emailChangeNotice: (data: {
+    firstName: string;
+    newEmail: string;
+    /** A mailbox when one is published, otherwise the privacy centre address. */
+    supportContact: string;
+  }): EmailTemplate => {
+    const safeFirstName = escapeHtml(data.firstName);
+    const safeNewEmail = escapeHtml(data.newEmail);
+    return {
+      subject: 'Someone asked to change your ATHENA sign-in address',
+      html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><title>Sign-in address change requested</title></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #7c3aed; margin: 0;">ATHENA</h1>
+        </div>
+        <h2 style="color: #1f2937;">A change was requested on your account</h2>
+        <p>Hi ${safeFirstName},</p>
+        <p>We received a request to change the sign-in address on your ATHENA account to <strong>${safeNewEmail}</strong>. It will not take effect until somebody opens the confirmation link we sent to that address.</p>
+        <p><strong>If this was not you</strong>, change your password now and tell us at ${escapeHtml(data.supportContact)}. We can stop the change.</p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+        <p style="font-size: 12px; color: #999; text-align: center;">© ${new Date().getFullYear()} ATHENA</p>
+      </body>
+      </html>
+    `,
+      text: `Hi ${data.firstName},
+
+We received a request to change the sign-in address on your ATHENA account to ${data.newEmail}. It will not take effect until somebody opens the confirmation link we sent to that address.
+
+If this was not you, change your password now and tell us at ${data.supportContact}. We can stop the change.`,
+    };
+  },
 };
 
 /**
@@ -584,6 +683,47 @@ export const emailService = {
    */
   async sendReEngagementEmail(to: string, firstName: string, daysInactive: number): Promise<boolean> {
     const template = templates.reEngagement({ firstName, daysInactive });
+    return sendEmailCore({
+      to,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+    });
+  },
+
+  /**
+   * Ask the new address to prove itself before the account moves to it.
+   */
+  async sendEmailChangeConfirmation(
+    to: string,
+    firstName: string,
+    confirmUrl: string,
+    expiresInHours: number
+  ): Promise<boolean> {
+    const template = templates.emailChangeConfirmation({
+      firstName,
+      newEmail: to,
+      confirmUrl,
+      expiresInHours,
+    });
+    return sendEmailCore({
+      to,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+    });
+  },
+
+  /**
+   * Warn the address the account still uses that somebody asked to move it.
+   */
+  async sendEmailChangeNotice(
+    to: string,
+    firstName: string,
+    newEmail: string,
+    supportContact: string
+  ): Promise<boolean> {
+    const template = templates.emailChangeNotice({ firstName, newEmail, supportContact });
     return sendEmailCore({
       to,
       subject: template.subject,

@@ -32,6 +32,7 @@ import {
   updateAuthorityEscalationStatus,
 } from '../services/content-report.service';
 import { getMaintenanceState, setMaintenanceState } from '../services/feature-flags.service';
+import { recordAdminAction } from '../services/admin-audit.service';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -837,6 +838,16 @@ router.post('/maintenance', ...adminOnly, async (req: AuthRequest, res: Response
     // back, is the single most important line in an incident timeline.
     logger.warn(`Maintenance mode ${enabled ? 'ENABLED' : 'DISABLED'}`, {
       adminId: req.user?.id,
+      message: state.message,
+      endsAt: state.endsAt,
+    });
+
+    // The log line above is the incident timeline; this row is the durable
+    // record. Closing the platform takes the domestic violence tooling down
+    // with everything else, so who did it has to survive log rotation.
+    await recordAdminAction(req, 'MAINTENANCE_MODE_CHANGED', {
+      resourceType: 'MaintenanceMode',
+      enabled: state.enabled,
       message: state.message,
       endsAt: state.endsAt,
     });

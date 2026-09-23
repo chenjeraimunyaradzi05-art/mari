@@ -12,6 +12,7 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { AUTHOR_SELECT } from './blog.routes';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 const adminOnly: RequestHandler[] = [authenticate, requireRole('ADMIN')];
@@ -107,6 +108,14 @@ router.post('/', ...adminOnly, validators(false), async (req: AuthRequest, res: 
       },
       include: { author: { select: AUTHOR_SELECT } },
     });
+
+    await recordAdminAction(req, 'BLOG_ARTICLE_CREATED', {
+      resourceType: 'Article',
+      resourceId: article.id,
+      slug: article.slug,
+      status: article.status,
+    });
+
     res.status(201).json({ success: true, data: article });
   } catch (error) {
     next(error);
@@ -136,6 +145,18 @@ router.patch('/:id', ...adminOnly, validators(true), async (req: AuthRequest, re
     }
 
     const article = await prisma.article.update({ where: { id: existing.id }, data, include: { author: { select: AUTHOR_SELECT } } });
+
+    // Publishing and archiving are the two that change what the public sees,
+    // so the status is recorded on both sides of the edit.
+    await recordAdminAction(req, 'BLOG_ARTICLE_UPDATED', {
+      resourceType: 'Article',
+      resourceId: article.id,
+      slug: article.slug,
+      changedFields: Object.keys(data),
+      previousStatus: existing.status,
+      status: article.status,
+    });
+
     res.json({ success: true, data: article });
   } catch (error) {
     next(error);
@@ -145,9 +166,19 @@ router.patch('/:id', ...adminOnly, validators(true), async (req: AuthRequest, re
 /** DELETE /api/admin/blog/:id — gone for good; archive instead to keep it. */
 router.delete('/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const existing = await prisma.article.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const existing = await prisma.article.findUnique({ where: { id: req.params.id }, select: { id: true, slug: true, status: true } });
     if (!existing) throw new ApiError(404, 'No such article');
     await prisma.article.delete({ where: { id: existing.id } });
+
+    // Nothing is left to look the row up by afterwards, so the slug and the
+    // status it died at are the only record that it existed.
+    await recordAdminAction(req, 'BLOG_ARTICLE_DELETED', {
+      resourceType: 'Article',
+      resourceId: existing.id,
+      slug: existing.slug,
+      status: existing.status,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);

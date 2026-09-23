@@ -7,6 +7,7 @@ import { Router, Response, NextFunction, RequestHandler } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { recordAdminAction } from '../services/admin-audit.service';
 
 const router = Router();
 const adminOnly: RequestHandler[] = [authenticate, requireRole('ADMIN')];
@@ -43,9 +44,20 @@ router.patch('/:id', ...adminOnly, async (req: AuthRequest, res: Response, next:
   try {
     const status = req.body?.status;
     if (!(STATUSES as readonly string[]).includes(status)) throw new ApiError(400, 'status must be NEW, SEEN or DONE');
-    const existing = await prisma.feedback.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const existing = await prisma.feedback.findUnique({ where: { id: req.params.id }, select: { id: true, status: true, userId: true } });
     if (!existing) throw new ApiError(404, 'No such feedback');
     const updated = await prisma.feedback.update({ where: { id: existing.id }, data: { status } });
+
+    // Feedback is often the first place a member reports something going
+    // wrong for her, so who marked it done is worth knowing.
+    await recordAdminAction(req, 'FEEDBACK_UPDATED', {
+      resourceType: 'Feedback',
+      resourceId: existing.id,
+      targetUserId: existing.userId,
+      previousStatus: existing.status,
+      status: updated.status,
+    });
+
     res.json({ success: true, data: updated });
   } catch (error) {
     next(error);

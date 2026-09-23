@@ -19,7 +19,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { randomUUID } from 'crypto';
-import { gdprService } from '../services/gdpr.service';
+import { gdprService, RectifiableField } from '../services/gdpr.service';
 import {
   consentService,
   CookiePreferences,
@@ -80,6 +80,25 @@ const erasureRateLimit = dsarRateLimit(5, 60 * 60 * 1000, 'dsar-erasure');
 const rectifyRateLimit = dsarRateLimit(10, 60 * 60 * 1000, 'dsar-rectify');
 const restrictRateLimit = dsarRateLimit(10, 60 * 60 * 1000, 'dsar-restrict');
 
+/**
+ * How long each correctable text field may be. The lengths match the ones the
+ * profile editor enforces in user.routes.ts, so the same value is accepted
+ * whichever door a member comes through.
+ *
+ * Typed off RectifiableField rather than written as a loose list: a field
+ * added to the register in gdpr.service.ts and not given a length here stops
+ * the build, instead of quietly reaching Prisma unchecked.
+ */
+const RECTIFIABLE_TEXT_LIMITS: Record<Exclude<RectifiableField, 'email'>, number> = {
+  firstName: 80,
+  lastName: 80,
+  city: 120,
+  state: 120,
+  country: 120,
+  bio: 2000,
+  headline: 200,
+};
+
 const VISITOR_COOKIE = 'athena_visitor_id';
 const VISITOR_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -88,6 +107,17 @@ const NO_COOKIE_PREFERENCES: CookiePreferences = {
   marketing: false,
   functional: false,
 };
+
+/**
+ * Where a member lands after opening an email-change link. The outcome rides
+ * in the query string so the page can say what happened; a page that has not
+ * been taught the parameter yet simply renders the privacy centre, which is
+ * still where she needs to be.
+ */
+function privacyCentreUrl(outcome: 'CONFIRMED' | 'INVALID' | 'TAKEN'): string {
+  const base = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+  return `${base}/privacy-center?emailChange=${outcome.toLowerCase()}`;
+}
 
 function consentContext(req: AuthRequest) {
   return {
@@ -274,6 +304,53 @@ router.get('/retention-policies', async (_req: AuthRequest, res: Response, next:
   try {
     const policies = await gdprService.getRetentionPolicies();
     res.json({ success: true, data: policies });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/gdpr/dsar/rectify/confirm-email
+ * Finish a correction of the sign-in address.
+ *
+ * Ahead of the authenticate gate on purpose. This is the link in the email,
+ * and the inbox it was sent to is the proof: a member moving to a new address
+ * will very often open it in a browser that has never been signed in, and on a
+ * platform whose members sometimes leave an address behind in a hurry, making
+ * her sign in first would mean making her sign in from the account she is
+ * trying to reach. The token is 32 random bytes, stored hashed, spent on use
+ * and good for a day.
+ *
+ * It answers with a redirect rather than JSON because a person is reading it,
+ * and the privacy centre is where the rest of her requests live.
+ */
+router.get('/dsar/rectify/confirm-email', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    const outcome = token
+      ? await gdprService.confirmRectifiedEmail(token)
+      : ({ status: 'INVALID' } as const);
+
+    if (outcome.status === 'CONFIRMED') {
+      await logAudit({
+        action: AuditAction.DATA_ACCESS,
+        actorUserId: outcome.userId,
+        targetUserId: outcome.userId,
+        ipAddress: auditIpAddress(req),
+        userAgent: req.get('user-agent') || null,
+        metadata: {
+          resourceType: 'User',
+          resourceId: outcome.userId,
+          dsarType: DSARType.RECTIFICATION,
+          // The address itself stays on the request row; what belongs in a
+          // system-wide log is that the sign-in identity moved, and when.
+          fields: ['email'],
+          emailChangeConfirmed: true,
+        },
+      });
+    }
+
+    res.redirect(303, privacyCentreUrl(outcome.status));
   } catch (error) {
     next(error);
   }
@@ -491,54 +568,119 @@ router.post('/dsar/delete', erasureRateLimit, async (req: AuthRequest, res: Resp
 /**
  * POST /api/gdpr/dsar/rectify
  * Request data correction (Right to Rectification)
+ *
+ * The address is validated, checked for a collision and then held back for
+ * confirmation rather than written: gdpr.service.ts:EMAIL_CHANGE_TOKEN_PREFIX
+ * explains what this route used to do with it and why that was a way into
+ * somebody's account.
  */
-router.post('/dsar/rectify', rectifyRateLimit, async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const userId = req.user!.id;
-    const { corrections } = req.body;
+router.post(
+  '/dsar/rectify',
+  rectifyRateLimit,
+  [
+    body('corrections')
+      .custom((value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value))
+      .withMessage('Please provide corrections as an object of fields to update')
+      .bail()
+      .custom((value: Record<string, unknown>) => Object.keys(value).length > 0)
+      .withMessage('Please name at least one field to correct'),
+    body('corrections.email')
+      .optional()
+      .isString()
+      .withMessage('Email must be text')
+      .bail()
+      .trim()
+      .isEmail()
+      .withMessage('That is not an address we could reach you at')
+      .bail()
+      .isLength({ max: 254 })
+      .withMessage('That email address is too long')
+      // The same normalisation registration applies, so a correction cannot
+      // create a second spelling of an address the platform already holds.
+      .normalizeEmail(),
+    ...Object.entries(RECTIFIABLE_TEXT_LIMITS).map(([field, max]) =>
+      body(`corrections.${field}`)
+        .optional()
+        .isString()
+        .withMessage(`${field} must be text`)
+        .bail()
+        .trim()
+        .isLength({ max })
+        .withMessage(`${field} must be ${max} characters or fewer`)
+    ),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, error: errors.array()[0].msg });
+      }
 
-    if (!corrections || Object.keys(corrections).length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Please provide corrections object with fields to update',
+      const userId = req.user!.id;
+      const corrections = req.body.corrections as Record<string, unknown>;
+      const requestedEmail =
+        typeof corrections.email === 'string' ? corrections.email.trim().toLowerCase() : null;
+
+      // Refused here rather than at the unique index, which would surface as a
+      // 500 from the database layer, and refused before the request is filed,
+      // so a collision does not leave a rectification row nobody can honour.
+      if (requestedEmail && !(await gdprService.emailAvailableFor(userId, requestedEmail))) {
+        return res.status(409).json({
+          success: false,
+          error: 'That email address is already in use on ATHENA.',
+        });
+      }
+
+      const dsar = await gdprService.createDSARRequest({
+        userId,
+        type: DSARType.RECTIFICATION,
+        requestDetails: JSON.stringify(corrections),
       });
+
+      const outcome = await gdprService.processRectificationRequest(dsar.id, corrections);
+
+      // DATA_ACCESS is the only value AuditAction carries for a data-subject right
+      // other than export and erasure; the metadata says which right it was.
+      await logAudit({
+        action: AuditAction.DATA_ACCESS,
+        actorUserId: userId,
+        targetUserId: userId,
+        ipAddress: auditIpAddress(req),
+        userAgent: req.get('user-agent') || null,
+        metadata: {
+          resourceType: 'DSARRequest',
+          resourceId: dsar.id,
+          dsarType: DSARType.RECTIFICATION,
+          // The values themselves are already in the DSAR row and the privacy
+          // audit trail; only the field names belong in a system-wide log.
+          fields: outcome.applied,
+          ignoredFields: outcome.ignored,
+          // That an address change was asked for is a security event on this
+          // account; which address it was belongs to the request row.
+          emailChangeRequested: outcome.pendingEmail !== null,
+        },
+      });
+
+      res.json({
+        success: true,
+        message: outcome.pendingEmail
+          ? 'Your details have been corrected. Your sign-in address changes once you open the link we have sent to the new inbox.'
+          : 'Your data has been corrected.',
+        data: {
+          requestId: dsar.id,
+          status: outcome.pendingEmail ? 'AWAITING_EMAIL_CONFIRMATION' : 'COMPLETED',
+          applied: outcome.applied,
+          // Named back rather than dropped in silence, so nobody is told a
+          // field was corrected when this right does not cover it.
+          ignored: outcome.ignored,
+          pendingEmail: outcome.pendingEmail,
+        },
+      });
+    } catch (error) {
+      next(error);
     }
-
-    const dsar = await gdprService.createDSARRequest({
-      userId,
-      type: DSARType.RECTIFICATION,
-      requestDetails: JSON.stringify(corrections),
-    });
-
-    await gdprService.processRectificationRequest(dsar.id, corrections);
-
-    // DATA_ACCESS is the only value AuditAction carries for a data-subject right
-    // other than export and erasure; the metadata says which right it was.
-    await logAudit({
-      action: AuditAction.DATA_ACCESS,
-      actorUserId: userId,
-      targetUserId: userId,
-      ipAddress: auditIpAddress(req),
-      userAgent: req.get('user-agent') || null,
-      metadata: {
-        resourceType: 'DSARRequest',
-        resourceId: dsar.id,
-        dsarType: DSARType.RECTIFICATION,
-        // The values themselves are already in the DSAR row and the privacy
-        // audit trail; only the field names belong in a system-wide log.
-        fields: Object.keys(corrections),
-      },
-    });
-
-    res.json({
-      success: true,
-      message: 'Your data has been corrected.',
-      data: { requestId: dsar.id },
-    });
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 /**
  * POST /api/gdpr/dsar/restrict
