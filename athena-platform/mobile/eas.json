@@ -8,15 +8,15 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "APP_VARIANT": "development"
+        "APP_VARIANT": "development",
+        "API_URL": "http://localhost:5000"
       }
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "APP_VARIANT": "preview",
-        "API_URL": "https://api.athena.app"
+        "APP_VARIANT": "preview"
       },
       "ios": {
         "simulator": true
@@ -27,8 +27,7 @@
       "channel": "staging",
       "autoIncrement": true,
       "env": {
-        "APP_VARIANT": "staging",
-        "API_URL": "https://staging-api.athena.app"
+        "APP_VARIANT": "staging"
       },
       "ios": {
         "resourceClass": "m1-medium"
@@ -41,8 +40,7 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "APP_VARIANT": "production",
-        "API_URL": "https://api.athena.app"
+        "APP_VARIANT": "production"
       },
       "ios": {
         "resourceClass": "m1-large"

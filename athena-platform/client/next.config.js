@@ -85,29 +85,54 @@ const nextConfig = {
     // Auth routes (/api/auth/*) MUST be handled by Next.js API route handlers
     // in app/api/auth/* so they can forward Set-Cookie headers (refresh token).
     // All other /api/* and /uploads/* requests proxy directly to the backend.
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-    return {
-      beforeFiles: [
-        {
-          source: '/uploads/:path*',
-          destination: `${backendUrl}/uploads/:path*`,
-        },
-      ],
-      afterFiles: [
-        {
-          source: '/api/auth/:path*',
-          destination: '/api/auth/:path*',
-        },
-      ],
-      fallback: [
-        {
-          source: '/api/:path*',
-          destination: `${backendUrl}/api/:path*`,
-        },
-      ],
-    };
+    //
+    // The localhost default is for `next dev` only. A production build that
+    // reaches this line is one being self-hosted (Docker, a VPS) rather than
+    // built on Netlify, and baking localhost into its rewrite table would send
+    // every /api request to a port nothing is listening on, in a way that only
+    // shows up as a connection refused in the browser. It stops here instead,
+    // for the same reason src/lib/runtime-config.ts does.
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL;
+    if (!backendUrl) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'NEXT_PUBLIC_API_URL is not set. A self-hosted production build has ' +
+            'to be told the origin of the deployed ATHENA API (for example ' +
+            'https://athena-api.onrender.com, no trailing slash) so that /api ' +
+            'and /uploads can be proxied to it. See DEPLOYMENT_GUIDE.md.'
+        );
+      }
+      return rewritesTo('http://localhost:5000');
+    }
+
+    return rewritesTo(backendUrl);
   },
 };
+
+// The three rewrite groups, in one place, so the development default and the
+// configured origin cannot drift apart.
+function rewritesTo(backendUrl) {
+  return {
+    beforeFiles: [
+      {
+        source: '/uploads/:path*',
+        destination: `${backendUrl}/uploads/:path*`,
+      },
+    ],
+    afterFiles: [
+      {
+        source: '/api/auth/:path*',
+        destination: '/api/auth/:path*',
+      },
+    ],
+    fallback: [
+      {
+        source: '/api/:path*',
+        destination: `${backendUrl}/api/:path*`,
+      },
+    ],
+  };
+}
 
 // Sentry configuration for production error tracking
 const sentryWebpackPluginOptions = {

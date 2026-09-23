@@ -56,6 +56,20 @@ jobs:
         with:
           node-version: '20'
 
+      # client/src/lib/runtime-config.ts has no default API origin any more, so
+      # a build without this secret throws rather than quietly proxying sign-ins
+      # somewhere. A preview pointed at the wrong API is worse than no preview,
+      # and failing here names the secret instead of burying the reason in a
+      # Next build log.
+      - name: Require the API origin
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_API_URL" ]; then
+            echo "::error::NEXT_PUBLIC_API_URL is not set. Add it as a repository secret pointing at the deployed API's origin. See DEPLOYMENT_GUIDE.md."
+            exit 1
+          fi
+
       # `--build` runs the build described by netlify.toml, including the
       # Next.js runtime plugin. Uploading a prebuilt .next directory skips the
       # plugin and publishes a preview with no server routes, which is worse

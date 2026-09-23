@@ -1,16 +1,33 @@
 name: Build and Deploy
 
-# The main-branch release pipeline: migrate the Neon database, then publish
-# the web app to Netlify. Verification lives in CI, which runs on the same
-# commit; nothing is rebuilt here that CI already builds.
+# The main-branch release pipeline, in the one order that keeps the site up:
+# migrate the Neon database, deploy the API, then publish the web app to
+# Netlify. Migrations are written to be safe against the code already running,
+# so database-first is fine; publishing the client first would put it in front
+# of an API that has not caught up. Verification lives in CI; nothing is
+# rebuilt here that CI already builds.
 #
-# The Express API is not deployed from here. Neon hosts the database only, so
-# the API runs on whichever always-on Node host is configured (see
-# DEPLOYMENT_GUIDE.md). A host that builds from GitHub redeploys itself on
-# this same push and reads the same Neon URLs from its own environment.
+# The API is deployed by asking its host to build, not by building here — the
+# image is athena-platform/server/Dockerfile and the host owns it. render.yaml
+# at the repository root describes the Render service this triggers;
+# athena-platform/server/fly.toml is the Fly.io alternative, which has no deploy
+# hook and is deployed with `fly deploy`. DEPLOYMENT_GUIDE.md has the steps.
+# Whichever host is used, turn its own auto-deploy off: it fires on the push,
+# which is the race described below.
+#
+# This used to trigger on `push` to main, exactly as ci.yml does. Two workflows
+# on one event do not queue behind each other, so the migration ran against the
+# production Neon database at the same moment CI was deciding whether the commit
+# that wrote it was any good — and usually finished first, because CI builds the
+# client and runs Playwright. A commit could migrate production and then fail
+# its own tests. `workflow_run` is the only trigger that can wait for another
+# workflow's verdict, so the release now starts when CI reports success and does
+# not start at all otherwise.
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -23,12 +40,21 @@ jobs:
   # `if` — job level or step level. Gating a deploy on `secrets.X != ''` in an
   # `if` does not evaluate to false, it makes the whole workflow invalid, which
   # is why every optional target is resolved to a boolean here first.
+  #
+  # This job is also the gate. `workflow_run` fires on every CI conclusion,
+  # including failure, cancellation and the runs CI does for pull requests, so
+  # the verdict has to be read explicitly. Skipping here skips everything
+  # behind it: a skipped job produces no outputs, and every job below requires
+  # one of those outputs to equal 'true'.
   preflight:
     name: Resolve configured targets
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     outputs:
       database: ${{ steps.probe.outputs.database }}
       netlify: ${{ steps.probe.outputs.netlify }}
+      api: ${{ steps.probe.outputs.api }}
+      sha: ${{ steps.probe.outputs.sha }}
     steps:
       - name: Probe deployment credentials
         id: probe
@@ -40,6 +66,18 @@ jobs:
           DIRECT_DATABASE_URL: ${{ secrets.NEON_DIRECT_DATABASE_URL || secrets.DIRECT_DATABASE_URL }}
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          # Render's deploy hook for the athena-api service in render.yaml.
+          # The blueprint sets autoDeploy: false so that Render does not
+          # redeploy the API on the push, in parallel with CI; this is how the
+          # deploy happens instead, once CI is green and the migration has run.
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          # On a `workflow_run` event GITHUB_SHA is the head of the default
+          # branch when the event fired, which is not necessarily the commit CI
+          # just approved. The commit to release is the one CI ran on, so it is
+          # resolved once here and every job below checks that out by name.
+          # `workflow_dispatch` has no workflow_run context and GITHUB_SHA is
+          # already the chosen ref.
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           configured() {
             for value in "$@"; do
@@ -50,6 +88,8 @@ jobs:
           {
             echo "database=$(configured "$DIRECT_DATABASE_URL")"
             echo "netlify=$(configured "$NETLIFY_AUTH_TOKEN" "$NETLIFY_SITE_ID")"
+            echo "api=$(configured "$RENDER_DEPLOY_HOOK_URL")"
+            echo "sha=$RELEASE_SHA"
           } >> "$GITHUB_OUTPUT"
 
   migrate:
@@ -67,7 +107,11 @@ jobs:
       DIRECT_DATABASE_URL: ${{ secrets.NEON_DIRECT_DATABASE_URL || secrets.DIRECT_DATABASE_URL }}
 
     steps:
+      # The commit CI approved, not whatever main happens to be now. See the
+      # RELEASE_SHA note in preflight.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
 
       - name: Use Node.js
         uses: actions/setup-node@v4
@@ -104,24 +148,91 @@ jobs:
               labels: ['bug', 'database'],
             })
 
-  # `!cancelled()` rather than `success()`: when no database URL is configured
-  # the migrate job is skipped, and a skipped dependency would otherwise skip
-  # the deploy behind it. A failed migration still blocks it.
+  # The API. render.yaml describes the service; this asks it to build the
+  # commit the migration just prepared the database for. A deploy hook only
+  # queues the build, so a green step here means Render accepted the request,
+  # not that the new image is live — watch the Render dashboard, or /health on
+  # the API, for that.
+  #
+  # The API is deployed after the migration and before the web app on purpose.
+  # A migration is written to be safe against the code already running, so
+  # database-then-API is the order that keeps the site up; publishing the web
+  # app first would put a client in front of an API that has not caught up.
+  #
+  # Fly.io is the other supported host (athena-platform/server/fly.toml). It
+  # has no deploy hook — it needs flyctl and FLY_API_TOKEN — so a Fly
+  # deployment either runs `fly deploy` by hand or replaces this job. Only one
+  # of the two should ever be pointed at the same Neon database.
+  deploy-api-render:
+    name: Deploy API to Render
+    runs-on: ubuntu-latest
+    needs: [preflight, migrate]
+    if: ${{ !cancelled() && !failure() && needs.preflight.outputs.api == 'true' }}
+    environment:
+      name: production
+
+    steps:
+      - name: Trigger the Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          # The hook takes the commit to build as ?ref=. Without it Render
+          # builds the branch head, which by then may be a commit CI has not
+          # finished testing — the race this workflow exists to close.
+          response="$(curl --silent --show-error --fail-with-body \
+            --request POST "${RENDER_DEPLOY_HOOK_URL}&ref=${RELEASE_SHA}")"
+          echo "$response"
+
+      - name: Open an issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'API deploy failed on main',
+              body: `The Render deploy hook was not accepted, so the API is still running the previous build while the database has already been migrated.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['bug', 'deployment'],
+            })
+
+  # `!cancelled()` rather than `success()`: when no database URL and no deploy
+  # hook are configured, the two jobs above are skipped, and a skipped
+  # dependency would otherwise skip the deploy behind it. A failed migration or
+  # a rejected deploy hook still blocks it, which is the point of listing them
+  # as needs at all — the web app goes out last, after the API it talks to.
   deploy-web-netlify:
     name: Deploy web to Netlify
     runs-on: ubuntu-latest
-    needs: [preflight, migrate]
+    needs: [preflight, migrate, deploy-api-render]
     if: ${{ !cancelled() && !failure() && needs.preflight.outputs.netlify == 'true' }}
     environment:
       name: production
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
 
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # client/src/lib/runtime-config.ts no longer has a default for this, on
+      # purpose: the one it had pointed at a domain ATHENA does not own, and
+      # the login route handler was forwarding credentials to it. So a build
+      # without the secret now throws. Checking first turns a failed Next build
+      # several minutes in into a one-line failure that names the secret.
+      - name: Require the API origin
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_API_URL" ]; then
+            echo "::error::NEXT_PUBLIC_API_URL is not set. Add it as a repository secret pointing at the deployed API's origin. See DEPLOYMENT_GUIDE.md."
+            exit 1
+          fi
 
       # `--build` runs the build described by netlify.toml, which is the only
       # way the Next.js runtime plugin gets a chance to run. Uploading a bare
@@ -135,4 +246,5 @@ jobs:
           NEXT_PUBLIC_STRIPE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_KEY }}
           NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
           NEXT_TELEMETRY_DISABLED: '1'
-        run: npx --yes netlify-cli deploy --build --prod --message "main @ ${GITHUB_SHA}"
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+        run: npx --yes netlify-cli deploy --build --prod --message "main @ ${RELEASE_SHA}"

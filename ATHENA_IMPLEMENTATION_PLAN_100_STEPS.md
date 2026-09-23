@@ -197,7 +197,7 @@ This document outlines a granular, step-by-step plan to bridge the gaps identifi
 26. ✅ Notification Engine — [athena-platform/server/src/services/notification.service.ts](athena-platform/server/src/services/notification.service.ts)
 27. ✅ Email Templates — [athena-platform/server/src/services/email.service.ts](athena-platform/server/src/services/email.service.ts)
 28. ✅ OpportunityVerse Feed Mixer Logic — [athena-platform/server/src/services/opportunity-verse.service.ts](athena-platform/server/src/services/opportunity-verse.service.ts)
-29. ✅ Mentor Scheduling Logic — [athena-platform/server/src/routes/mentor-scheduling.routes.ts](athena-platform/server/src/routes/mentor-scheduling.routes.ts)
+29. ✅ Mentor Scheduling Logic — [athena-platform/server/src/routes/mentor.routes.ts](athena-platform/server/src/routes/mentor.routes.ts) — the superseded `/api/mentoring` router was removed on 2026-09-23; it booked paid sessions without escrow, so any signed-in caller could book a mentor for free. Scheduling lives with the rest of mentoring now.
 30. ✅ Chat Storage Logic — [athena-platform/server/src/services/chat-storage.service.ts](athena-platform/server/src/services/chat-storage.service.ts)
 31. ✅ Group Chat Role Validation — [athena-platform/server/src/routes/group-chat.routes.ts](athena-platform/server/src/routes/group-chat.routes.ts)
 32. ✅ Compliance Export — [athena-platform/server/src/routes/user.routes.ts](athena-platform/server/src/routes/user.routes.ts)

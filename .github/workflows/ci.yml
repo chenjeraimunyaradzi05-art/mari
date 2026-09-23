@@ -49,8 +49,26 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Apply schema to test DB
-        run: npx prisma db push --accept-data-loss
+      # `migrate deploy`, not `db push`. `db push` builds the test database
+      # from schema.prisma and never opens prisma/migrations, so a migration
+      # with broken SQL in it passed CI and only failed later against the real
+      # database — which is the one place a failed migration costs something.
+      # Running the migrations here means the same SQL production will run has
+      # already run once, on an empty database, before anything is merged.
+      - name: Apply migrations to test DB
+        run: npx prisma migrate deploy
+
+      # `db push` also hid the opposite mistake: a schema.prisma edit shipped
+      # without the migration that makes it real. The tests would pass against
+      # the pushed schema and production would be missing the column. This
+      # compares the database the migrations just built against schema.prisma
+      # and exits 2 when they disagree, which fails the step.
+      - name: Check migrations match schema.prisma
+        run: >-
+          npx prisma migrate diff
+          --from-url "$DATABASE_URL"
+          --to-schema-datamodel prisma/schema.prisma
+          --exit-code
 
       # `build` is `tsc`, so this typechecks the whole server as well as
       # producing dist/. Running it before the tests means a type error is

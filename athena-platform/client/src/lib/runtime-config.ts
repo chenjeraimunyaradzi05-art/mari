@@ -1,5 +1,14 @@
 const DEFAULT_PUBLIC_APP_URL = 'https://athena-empress.netlify.app';
-const DEFAULT_BACKEND_API_URL = 'https://api.athena.app';
+
+// There is deliberately no default for the backend API origin. See
+// getBackendApiUrl below for the incident that removed the one that was here.
+
+const API_URL_ENV_KEYS = [
+  'API_URL',
+  'BACKEND_URL',
+  'NEXT_PRIVATE_API_URL',
+  'NEXT_PUBLIC_API_URL',
+] as const;
 
 const STATIC_PUBLIC_ENV = {
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
@@ -86,15 +95,42 @@ export function getAppSiteUrl(): string {
   );
 }
 
+/**
+ * The origin every server-side route handler under app/api forwards to.
+ *
+ * This used to fall back to `https://api.athena.app` whenever none of
+ * API_URL_ENV_KEYS was set in a production build. ATHENA does not own that
+ * domain. It resolves, today, to a live third party — and the handlers that
+ * read this value include app/api/auth/login and app/api/auth/register, which
+ * forward a member's email and password verbatim. The Netlify site shipped
+ * with NEXT_PUBLIC_API_URL unset, so that is what the fallback was doing with
+ * real credentials.
+ *
+ * A default that is wrong in that particular way is worse than no default at
+ * all, so there is no default: an unconfigured production build stops here,
+ * naming the variable to set, rather than starting and sending sign-ins to a
+ * stranger. Development still assumes the local API, because a wrong guess
+ * there reaches nobody.
+ */
 export function getBackendApiUrl(): string {
-  return (
-    readFirst([
-      'API_URL',
-      'BACKEND_URL',
-      'NEXT_PRIVATE_API_URL',
-      'NEXT_PUBLIC_API_URL',
-    ]) ?? (isProductionLike() ? DEFAULT_BACKEND_API_URL : 'http://localhost:5000')
-  );
+  const configured = readFirst([...API_URL_ENV_KEYS]);
+  if (configured) {
+    return configured;
+  }
+
+  if (isProductionLike()) {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set, so the ATHENA web app has no API to ' +
+        'talk to. Set NEXT_PUBLIC_API_URL to the origin of the deployed API ' +
+        '(for example https://athena-api.onrender.com, no trailing slash) in ' +
+        'the Netlify site environment and redeploy. On a host that builds ' +
+        `outside Netlify, any of ${API_URL_ENV_KEYS.join(', ')} is read, in ` +
+        'that order. This build refuses to guess: the default it used to fall ' +
+        'back to pointed at a domain ATHENA does not own.'
+    );
+  }
+
+  return 'http://localhost:5000';
 }
 
 export function getSocketOrigin(): string {

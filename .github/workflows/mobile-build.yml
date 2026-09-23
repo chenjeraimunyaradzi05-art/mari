@@ -120,6 +120,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The API origin is not in eas.json any more. The values that were there
+      # named api.athena.app, a domain ATHENA does not own, so every preview and
+      # production binary was built pointing at a stranger. It now comes from
+      # the EAS project's own environment — `eas secret:create --scope project
+      # --name API_URL --value https://...` — which is where a value that
+      # differs per deployment belongs. A build with it unset fails in
+      # app.config.js rather than picking a host for you.
       - name: Build
         run: eas build --platform "$EAS_PLATFORM" --profile "$EAS_PROFILE" --non-interactive
 
