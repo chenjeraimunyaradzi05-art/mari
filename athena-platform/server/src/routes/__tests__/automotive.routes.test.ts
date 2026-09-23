@@ -114,6 +114,21 @@ jest.mock('../../services/stripe-connect.service', () => ({
   getEscrowClientSecret: jest.fn(async (pi: string) => `${pi}_secret`),
 }));
 
+/**
+ * The hold behind a car purchase is now settled against the processor rather
+ * than against the escrow row alone, so the suite has to be certain which
+ * answer it gets. Left to the environment, a machine with a STRIPE_SECRET_KEY
+ * set would send purchase-escrow.service to the real Stripe with the `pi_N`
+ * ids the mock above invents, and the tests would fail on infrastructure
+ * rather than on behaviour. Unconfigured is the honest fixture here: it is
+ * what a developer's machine and CI both have.
+ */
+jest.mock('../../utils/stripe', () => ({
+  isStripeConfigured: () => false,
+  getStripe: () => { throw new Error('Stripe is not configured in tests'); },
+  STRIPE_API_VERSION: '2023-10-16',
+}));
+
 jest.mock('../../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => { req.user = { id: req.headers['x-test-user'] || 'member', role: req.headers['x-test-role'] || 'USER', email: 'x@athena.com' }; next(); },
   optionalAuth: (req: any, _res: any, next: any) => { if (req.headers['x-test-user']) req.user = { id: req.headers['x-test-user'], role: req.headers['x-test-role'] || 'USER', email: 'x@athena.com' }; next(); },
@@ -155,6 +170,9 @@ const soldAndRated = async (sellerId: string, listing: Row, rating: number): Pro
   const pid = offer.body.data.id;
   await request(app).post(`/api/automotive/purchases/${pid}/accept`).set(as(sellerId)).expect(200);
   await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+  // Paying only opens the card step now; the purchase moves when the hold is
+  // confirmed, which is what the card form does on its way out.
+  await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
   await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(200);
   await request(app).post(`/api/automotive/purchases/${pid}/release`).set(as('member')).expect(200);
   await request(app).post(`/api/automotive/purchases/${pid}/review`).set(as('member')).send({ rating }).expect(200);
@@ -264,9 +282,18 @@ describe('The automotive routes', () => {
     expect(accepted.body.data.status).toBe('ACCEPTED');
     expect(store.listings[0].status).toBe('UNDER_OFFER');
     const paid = await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
-    expect(paid.body.data.status).toBe('PAID_HELD');
+    // Starting the card step is not paying. The purchase stays ACCEPTED and
+    // the seller is told nothing, because at this point no card has been seen.
+    expect(paid.body.data.status).toBe('ACCEPTED');
+    expect(paid.body.data.alreadyHeld).toBe(false);
     expect(paid.body.data.payment.clientSecret).toContain('_secret');
+    expect(store.notifications.some((x) => x.data.kind === 'CAR_PAID')).toBe(false);
     expect((createEscrowPayment as jest.Mock).mock.calls[0][0]).toMatchObject({ amount: 2100000, platformFeePercent: 6, sessionType: 'vehicle_purchase' });
+    await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(400);
+    const held = await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
+    expect(held.body.data.status).toBe('PAID_HELD');
+    expect(store.escrows[0].status).toBe('AUTHORIZED');
+    expect(store.notifications.some((x) => x.userId === 'seller' && x.data.kind === 'CAR_PAID')).toBe(true);
     await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('seller')).expect(400);
     const handed = await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).send({ note: 'Collected with both keys and the service book.' }).expect(200);
     expect(handed.body.data.status).toBe('HANDED_OVER');
@@ -291,6 +318,7 @@ describe('The automotive routes', () => {
     const pid = offer.body.data.id;
     await request(app).post(`/api/automotive/purchases/${pid}/accept`).set(as('seller')).expect(200);
     await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+    await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
     await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(200);
     const released = await request(app).post(`/api/automotive/purchases/${pid}/release`).set(as('member')).expect(200);
     expect(released.body.data.status).toBe('RELEASED');
@@ -300,6 +328,73 @@ describe('The automotive routes', () => {
     const mine = await request(app).get('/api/automotive/purchases').set(as('seller')).expect(200);
     expect(mine.body.data.selling).toHaveLength(1);
     expect(mine.body.data.buying).toHaveLength(0);
+  });
+
+  /**
+   * The buyer who closes the card form. Before this, the pay route wrote
+   * PAID_HELD and told the seller the money was held before the response
+   * carrying the client secret had left the server, so shutting the form left
+   * her with a purchase that claimed she had paid and no Pay button to come
+   * back to — and a seller who might hand over a car against it.
+   */
+  it('lets a buyer who closed the card form come back to it, and tells the seller nothing until the card has gone through', async () => {
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2018 Honda Jazz', make: 'Honda', model: 'Jazz', year: 2018, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 70000, price: 15000, description: 'One owner, logbooks complete, new tyres last winter, never smoked in.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JHMGK5H50JX123456', ppsrChecked: true, publish: true }).expect(201);
+    const offer = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 15000 }).expect(201);
+    const pid = offer.body.data.id;
+    await request(app).post(`/api/automotive/purchases/${pid}/accept`).set(as('seller')).expect(200);
+
+    const started = await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+    expect(started.body.data.status).toBe('ACCEPTED');
+    expect(store.notifications.some((x) => x.data.kind === 'CAR_PAID')).toBe(false);
+
+    // She closes the form. The detail page still says what is true to both of
+    // them, and the seller is not waiting on a handover.
+    const hers = await request(app).get(`/api/automotive/purchases/${pid}`).set(as('member')).expect(200);
+    expect(hers.body.data.nextStep).toContain('not been authorised');
+    const his = await request(app).get(`/api/automotive/purchases/${pid}`).set(as('seller')).expect(200);
+    expect(his.body.data.nextStep).toContain('Nothing is held');
+
+    // And she cannot walk past the card step: the handover is not open to her.
+    await request(app).post(`/api/automotive/purchases/${pid}/handover`).set(as('member')).expect(400);
+
+    // Coming back reopens the same hold rather than starting a second one.
+    const resumed = await request(app).get(`/api/automotive/purchases/${pid}/payment`).set(as('member')).expect(200);
+    expect(resumed.body.data.clientSecret).toContain('_secret');
+    await request(app).get(`/api/automotive/purchases/${pid}/payment`).set(as('seller')).expect(403);
+    const again = await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+    expect(again.body.data.payment.paymentIntentId).toBe(started.body.data.payment.paymentIntentId);
+    expect((createEscrowPayment as jest.Mock).mock.calls).toHaveLength(1);
+    expect(store.escrows).toHaveLength(1);
+
+    // Only the card going through moves the purchase, and only then does the
+    // seller hear anything.
+    await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('seller')).expect(403);
+    const held = await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
+    expect(held.body.data.status).toBe('PAID_HELD');
+    expect(held.body.data.paidAt).toBeTruthy();
+    expect(store.notifications.filter((x) => x.userId === 'seller' && x.data.kind === 'CAR_PAID')).toHaveLength(1);
+
+    // Confirming twice does not tell the seller twice.
+    await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
+    expect(store.notifications.filter((x) => x.userId === 'seller' && x.data.kind === 'CAR_PAID')).toHaveLength(1);
+  });
+
+  it('starts a fresh hold when the first card was declined, rather than leaving her with a dead one', async () => {
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2017 Subaru Impreza', make: 'Subaru', model: 'Impreza', year: 2017, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 88000, price: 14000, description: 'All-wheel drive, serviced at the dealer, two owners, tyres near new.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JF1GPAK60H8123456', ppsrChecked: true, publish: true }).expect(201);
+    const offer = await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 14000 }).expect(201);
+    const pid = offer.body.data.id;
+    await request(app).post(`/api/automotive/purchases/${pid}/accept`).set(as('seller')).expect(200);
+    await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+
+    // The webhook's answer to a card the issuer refused outright.
+    store.escrows[0].status = 'CANCELED';
+    const retried = await request(app).post(`/api/automotive/purchases/${pid}/pay`).set(as('member')).expect(200);
+    expect((createEscrowPayment as jest.Mock).mock.calls).toHaveLength(2);
+    expect(retried.body.data.payment.paymentIntentId).not.toBe(store.escrows[0].paymentIntentId);
+    await request(app).post(`/api/automotive/purchases/${pid}/payment/confirm`).set(as('member')).expect(200);
+    const view = await request(app).get(`/api/automotive/purchases/${pid}`).set(as('member')).expect(200);
+    expect(view.body.data.status).toBe('PAID_HELD');
+    expect(view.body.data.escrow.status).toBe('AUTHORIZED');
   });
 
   it('finds a workshop, books inside its hours, takes a quote line by line, and writes the job into the garage when it is done', async () => {

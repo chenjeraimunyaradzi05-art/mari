@@ -100,7 +100,14 @@ export type Party = 'buyer' | 'seller' | 'admin' | 'other';
 const TRANSITIONS: Record<PurchaseAction, { from: PurchaseStatus[]; by: Party[]; to: PurchaseStatus }> = {
   accept: { from: ['OFFERED'], by: ['seller'], to: 'ACCEPTED' },
   decline: { from: ['OFFERED'], by: ['seller'], to: 'DECLINED' },
-  pay: { from: ['ACCEPTED'], by: ['buyer'], to: 'PAID_HELD' },
+  // What `pay` permits is the card step, not the move: the purchase reaches
+  // PAID_HELD only when the hold behind it is authorised, which is decided in
+  // purchase-escrow.service and can happen from the webhook rather than from
+  // this request. PAID_HELD is a legal starting point as well as the
+  // destination, so that a purchase left in it by the old behaviour — marked
+  // paid before the buyer had seen a card field — can still be finished
+  // instead of only cancelled.
+  pay: { from: ['ACCEPTED', 'PAID_HELD'], by: ['buyer'], to: 'PAID_HELD' },
   handover: { from: ['PAID_HELD'], by: ['buyer'], to: 'HANDED_OVER' },
   release: { from: ['HANDED_OVER'], by: ['buyer', 'admin'], to: 'RELEASED' },
   dispute: { from: ['HANDED_OVER'], by: ['buyer'], to: 'DISPUTED' },

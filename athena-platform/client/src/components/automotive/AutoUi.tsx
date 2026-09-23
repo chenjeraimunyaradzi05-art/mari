@@ -146,18 +146,23 @@ export function VerdictChip({ verdict }: { verdict: string | null | undefined })
  * element; without one (development, or before the keys are set) the
  * server's mock has already recorded the hold and the page says so plainly
  * rather than pretending a card was charged.
+ *
+ * Closing this is a supported way out, not an accident, so the way out says
+ * so. It used to read "Not now" over a purchase the server had already marked
+ * paid, which made leaving the form the start of a dead end rather than a
+ * pause; the caller is expected to keep offering a way back in.
  */
-export function PayHold({ clientSecret, amountLabel, onDone, onCancel, what }: { clientSecret: string | null; amountLabel: string; onDone: () => void; onCancel?: () => void; what: string }) {
+export function PayHold({ clientSecret, amountLabel, onDone, onCancel, what, skipLabel = 'Finish this later' }: { clientSecret: string | null; amountLabel: string; onDone: () => void; onCancel?: () => void; what: string; skipLabel?: string }) {
   if (!clientSecret || !stripeConfigured) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-900/20">
         <p className="font-semibold text-amber-900 dark:text-amber-100">{amountLabel} recorded as held for {what}.</p>
         <p className="mt-1 text-amber-800 dark:text-amber-200">No card processor is configured on this deployment, so nothing has left a card. When one is, this step becomes the card form and the hold is real.</p>
-        <div className="mt-3 flex gap-2"><button type="button" onClick={onDone} className="btn-primary text-sm">Continue</button>{onCancel && <button type="button" onClick={onCancel} className="btn-ghost text-sm">Back</button>}</div>
+        <div className="mt-3 flex gap-2"><button type="button" onClick={onDone} className="btn-primary text-sm">Continue</button>{onCancel && <button type="button" onClick={onCancel} className="btn-ghost text-sm">{skipLabel}</button>}</div>
       </div>
     );
   }
-  return <PaymentIntentForm clientSecret={clientSecret} amountLabel={amountLabel} onAuthorised={onDone} onSkip={onCancel} skipLabel="Not now" />;
+  return <PaymentIntentForm clientSecret={clientSecret} amountLabel={amountLabel} onAuthorised={onDone} onSkip={onCancel} skipLabel={skipLabel} />;
 }
 
 export const AutoDisclaimer = ({ what = 'These figures are estimates from published rates and typical costs, for planning.' }: { what?: string }) => (

@@ -48,6 +48,7 @@ import {
   DEFAULT_INSPECTION_FEE, INSPECTION_FEE_PERCENT, PURCHASE_FEE_PERCENT, SERVICE_FEE_PERCENT, assessListingRisk, emptyInspectionReport, historyChecks, inspectionDays, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin,
   normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection, type Party, type PurchaseStatus,
 } from '../services/automotive/marketplace.service';
+import { readHoldState, settlePurchaseHold } from '../services/automotive/purchase-escrow.service';
 import {
   bookingMinutes, nextServiceAfter, normaliseParts, normalisePriceList, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, vehicleName, vehicleReminders,
 } from '../services/automotive/garage.service';
@@ -230,13 +231,24 @@ type PurchaseRow = Prisma.VehiclePurchaseGetPayload<{ include: { listing: { incl
 function purchaseCard(p: PurchaseRow, viewerId: string, admin = false, now = new Date()) {
   const role: Party = admin && p.buyerId !== viewerId && p.sellerId !== viewerId ? 'admin' : p.buyerId === viewerId ? 'buyer' : p.sellerId === viewerId ? 'seller' : 'other';
   const daysLeft = p.inspectionEndsAt ? Math.max(0, Math.ceil((p.inspectionEndsAt.getTime() - now.getTime()) / 86400000)) : null;
+  // A card step she started and did not finish. The purchase stays ACCEPTED
+  // until the hold authorises, so this is the difference between "she has not
+  // paid yet" and "she is part-way through paying" — and the seller is told
+  // which, rather than being told the money is held when no card was charged.
+  const unfinishedHold = Boolean(p.escrow) && !['AUTHORIZED', 'CAPTURED', 'CANCELED', 'REFUNDED'].includes(p.escrow!.status);
   const next: Record<PurchaseStatus, { buyer: string; seller: string }> = {
     OFFERED: { buyer: 'Waiting for the seller to accept or decline.', seller: 'Accept the offer to agree the price, or decline it.' },
-    ACCEPTED: { buyer: 'Pay through ATHENA. The money is held, not sent, until you have the car.', seller: 'Waiting for the buyer to pay. Nothing changes hands until the money is held.' },
+    ACCEPTED: unfinishedHold
+      ? { buyer: 'Your card has not been authorised, so nothing is held yet. Finish paying and the money is held for you.', seller: 'The buyer has started paying. Nothing is held, and nothing should change hands, until her card goes through.' }
+      : { buyer: 'Pay through ATHENA. The money is held, not sent, until you have the car.', seller: 'Waiting for the buyer to pay. Nothing changes hands until the money is held.' },
     PAID_HELD: { buyer: 'The money is held. Arrange the handover, check the papers, then confirm you have the car.', seller: 'The money is held. Hand the car over with the papers; the buyer confirms receipt and the inspection period starts.' },
     HANDED_OVER: { buyer: `${daysLeft} day${daysLeft === 1 ? '' : 's'} to check the car. Release the money when you are satisfied, or open a dispute if it is not as described.`, seller: `The buyer has ${daysLeft} day${daysLeft === 1 ? '' : 's'} to check the car. The money is released to you when the period ends or sooner.` },
     RELEASED: { buyer: 'Done. Leave a word for the next buyer.', seller: 'The money has been released to your payout account.' },
-    DISPUTED: { buyer: 'ATHENA is reviewing the dispute. Add anything useful to the conversation.', seller: 'The buyer has opened a dispute. ATHENA will ask both of you for the facts and decide.' },
+    // Neutral about who raised it: the buyer usually does, but the sweep also
+    // brings a purchase here when the money cannot be released at all, and
+    // telling the seller "the buyer has opened a dispute" in that case would
+    // be untrue.
+    DISPUTED: { buyer: 'ATHENA is reviewing this purchase. Add anything useful to the conversation.', seller: 'This purchase is with ATHENA to decide. Nothing is released while we look at it; you will be asked for your side.' },
     REFUNDED: { buyer: 'The money has gone back to your card.', seller: 'The dispute was decided for the buyer and the money returned.' },
     DECLINED: { buyer: 'The seller declined. You can make another offer.', seller: 'You declined this offer.' },
     CANCELLED: { buyer: 'Cancelled. Any held money has gone back to your card.', seller: 'Cancelled.' },
@@ -1032,17 +1044,45 @@ router.post('/purchases/:id/decline', authenticate, async (req: AuthRequest, res
   } catch (error) { next(error); }
 });
 
+/**
+ * Start the card step, or come back to one that was left unfinished.
+ *
+ * This route no longer marks the purchase paid. It used to write PAID_HELD, a
+ * paidAt and the seller's "the money is held" notification before the response
+ * carrying the client secret had left the server — before the buyer had seen a
+ * card field — so closing the form or having a card declined stranded her in a
+ * state that said her money was held and offered no way back. The move belongs
+ * to the hold, and the hold is settled in purchase-escrow.service once the
+ * processor says the money is really there.
+ */
 router.post('/purchases/:id/pay', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { p, party } = await loadPurchase(req, req.params.id);
-    const to = transition('pay', p, party);
+    // The stage and the party, not the move — see the note on TRANSITIONS.pay.
+    transition('pay', p, party);
     const amount = p.agreedAmount ?? p.offerAmount;
+    if (p.escrow?.paymentIntentId) {
+      const state = await readHoldState(p.escrow);
+      if (state !== 'GONE') {
+        // She has been here before. Creating a second intent would leave two
+        // holds against one car and two ways for the money to move, so the
+        // existing one is handed back with a fresh client secret — the resume
+        // the bookings and inspections routes have always done. If the hold
+        // turns out to have authorised while she was away, settling it here
+        // means she comes back to a purchase that has moved on rather than to
+        // a card form for money already taken.
+        const clientSecret = await getEscrowClientSecret(p.escrow.paymentIntentId);
+        if (state === 'HELD') await settlePurchaseHold(p.id);
+        const { p: fresh } = await loadPurchase(req, p.id);
+        ok(res, { ...purchaseCard(fresh, req.user!.id, isAdmin(req)), alreadyHeld: state === 'HELD', payment: { paymentIntentId: p.escrow.paymentIntentId, clientSecret, amount: p.escrow.amount, platformFee: p.escrow.platformFee, currency: 'aud' } });
+        return;
+      }
+    }
     let hold;
     try { hold = await createEscrowPayment({ buyerId: p.buyerId, sellerId: p.sellerId, amount: amount * 100, currency: 'aud', description: `${p.listing.title} (buyer protection)`, sessionType: 'vehicle_purchase', platformFeePercent: PURCHASE_FEE_PERCENT[p.listing.sellerKind], metadata: { purchaseId: p.id, listingId: p.listingId } }); }
     catch (error) { if (error instanceof ApiError && error.statusCode === 400) throw new ApiError(409, 'The seller has not finished setting up payouts, so the money cannot be held yet. Ask them to finish that from their payouts page.'); throw error; }
-    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, escrowPaymentId: hold.escrowId, paidAt: new Date(), platformFee: Math.round(hold.platformFee / 100) }, include: purchaseInclude });
-    await note(p.sellerId, 'The buyer has paid; the money is held', `$${amount.toLocaleString('en-AU')} for "${p.listing.title}" is held by ATHENA. Arrange the handover with the papers; it is released to you after the buyer's inspection period.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PAID', id: p.id });
-    ok(res, { ...purchaseCard(updated, req.user!.id), payment: { paymentIntentId: hold.paymentIntentId, clientSecret: hold.clientSecret, amount: hold.amount, platformFee: hold.platformFee, currency: 'aud' } });
+    const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { escrowPaymentId: hold.escrowId, platformFee: Math.round(hold.platformFee / 100) }, include: purchaseInclude });
+    ok(res, { ...purchaseCard(updated, req.user!.id, isAdmin(req)), alreadyHeld: false, payment: { paymentIntentId: hold.paymentIntentId, clientSecret: hold.clientSecret, amount: hold.amount, platformFee: hold.platformFee, currency: 'aud' } });
   } catch (error) { next(error); }
 });
 
@@ -1050,8 +1090,30 @@ router.get('/purchases/:id/payment', authenticate, async (req: AuthRequest, res:
   try {
     const { p, party } = await loadPurchase(req, req.params.id);
     if (party !== 'buyer') throw new ApiError(403, 'Only the buyer sees the payment');
-    if (!p.escrow?.paymentIntentId) throw new ApiError(404, 'Nothing has been paid yet');
-    ok(res, { clientSecret: await getEscrowClientSecret(p.escrow.paymentIntentId), status: p.escrow.status, amount: p.escrow.amount });
+    if (!p.escrow?.paymentIntentId) throw new ApiError(404, 'No payment has been started for this purchase');
+    const state = await readHoldState(p.escrow);
+    if (state === 'GONE') throw new ApiError(409, 'That hold is no longer live. Start the payment again.');
+    ok(res, { clientSecret: await getEscrowClientSecret(p.escrow.paymentIntentId), status: p.escrow.status, amount: p.escrow.amount, held: state === 'HELD' });
+  } catch (error) { next(error); }
+});
+
+/**
+ * The buyer's browser saying the card has been authorised — which the server
+ * does not take her word for. settlePurchaseHold asks the processor and
+ * promotes the purchase only on its answer, so this is the same decision the
+ * webhook makes, reached by the door that does not depend on a webhook being
+ * configured at all.
+ */
+router.post('/purchases/:id/payment/confirm', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { p, party } = await loadPurchase(req, req.params.id);
+    if (party !== 'buyer') throw new ApiError(403, 'Only the buyer confirms her own payment');
+    if (!p.escrow?.paymentIntentId) throw new ApiError(400, 'No payment has been started for this purchase');
+    const settled = await settlePurchaseHold(p.id);
+    if (settled.state === 'GONE') throw new ApiError(409, 'That hold is no longer live, so nothing was taken. Start the payment again.');
+    if (settled.state === 'AWAITING_CARD') throw new ApiError(409, 'Your card has not been authorised yet, so nothing is held. If you have just entered it, give it a moment and try again.');
+    const { p: fresh } = await loadPurchase(req, p.id);
+    ok(res, purchaseCard(fresh, req.user!.id, isAdmin(req)));
   } catch (error) { next(error); }
 });
 
@@ -1073,7 +1135,15 @@ router.post('/purchases/:id/release', authenticate, async (req: AuthRequest, res
   try {
     const { p, party } = await loadPurchase(req, req.params.id);
     const to = transition('release', p, party);
-    if (p.escrow?.paymentIntentId && (p.escrow.status === 'PENDING' || p.escrow.status === 'AUTHORIZED')) await captureEscrowPayment(p.escrow.paymentIntentId, { id: p.buyerId, role: party === 'admin' ? 'ADMIN' : undefined });
+    if (p.escrow?.paymentIntentId && p.escrow.status !== 'CAPTURED') {
+      // Releasing money that was never authorised used to reach Stripe and
+      // come back as a bare "Failed to capture payment" 500, which tells her
+      // nothing about what to do next. It can only happen to a purchase from
+      // before the hold and the status were tied together, but it is exactly
+      // the case where a plain answer matters most.
+      if (await readHoldState(p.escrow) !== 'HELD') throw new ApiError(409, 'No money was ever authorised for this purchase, so there is nothing to release. Tell us what happened and ATHENA will sort it out with the seller.');
+      await captureEscrowPayment(p.escrow.paymentIntentId, { id: p.buyerId, role: party === 'admin' ? 'ADMIN' : undefined });
+    }
     const updated = await prisma.vehiclePurchase.update({ where: { id: p.id }, data: { status: to, releasedAt: new Date() }, include: purchaseInclude });
     await note(p.sellerId, 'The money has been released to you', `The buyer released $${(p.agreedAmount ?? p.offerAmount).toLocaleString('en-AU')} for "${p.listing.title}". It is on its way to your payout account.`, `/dashboard/cars/purchases/${p.id}`, { kind: 'CAR_PURCHASE_RELEASED', id: p.id });
     ok(res, purchaseCard(updated, req.user!.id));
