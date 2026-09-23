@@ -3,7 +3,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    user: { findUnique: jest.fn(async () => ({ id: 'them', allowMessages: true })) },
+    user: { findUnique: jest.fn(async () => ({ id: 'them', allowMessages: true, womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') })) },
     userSafetySettings: { findUnique: jest.fn(async () => null) },
     follow: { findUnique: jest.fn() },
     conversation: {
@@ -47,7 +47,7 @@ const otherUser = { id: 'them', firstName: 'Ana', lastName: 'Ruiz', displayName:
 describe('Message requests and thread preferences', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.user.findUnique.mockResolvedValue({ id: 'them', allowMessages: true });
+    prisma.user.findUnique.mockResolvedValue({ id: 'them', allowMessages: true, womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') });
     prisma.userSafetySettings.findUnique.mockResolvedValue(null);
     prisma.conversation.findMany.mockResolvedValue([]);
     prisma.conversation.findFirst.mockResolvedValue(null);

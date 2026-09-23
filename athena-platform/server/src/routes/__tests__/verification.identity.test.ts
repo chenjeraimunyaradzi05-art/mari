@@ -121,6 +121,13 @@ describe('Identity verification through Stripe Identity', () => {
     prisma.verificationBadge.findMany.mockResolvedValue([{ id: 'b1', type: 'EMPLOYER', status: 'PENDING', user: { id: 'u1' } }]);
     const res = await request(app).get('/api/verification/badges/pending').set('x-test-role', 'ADMIN').expect(200);
     expect(res.body.data).toHaveLength(1);
-    expect(prisma.verificationBadge.findMany.mock.calls[0][0].where).toEqual({ status: 'PENDING' });
+    // Women-gate submissions are VerificationBadge rows too — same model, same
+    // IDENTITY type, same Stripe session — and they are reviewed in their own
+    // queue against evidence this screen does not show. Excluding them here is
+    // what keeps a reviewer from approving one by eye from the generic list.
+    expect(prisma.verificationBadge.findMany.mock.calls[0][0].where).toEqual({
+      status: 'PENDING',
+      NOT: { metadata: { path: ['purpose'], equals: 'WOMAN_GATE' } },
+    });
   });
 });

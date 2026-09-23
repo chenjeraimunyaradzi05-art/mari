@@ -107,6 +107,7 @@ describe('registration flow (mocked prisma)', () => {
         lastName: 'User',
         persona: 'mid_career',
         womanSelfAttested: true,
+        dateOfBirth: '1990-05-12',
         inviteCode: 'athena-2026',
       })
       .expect(201);

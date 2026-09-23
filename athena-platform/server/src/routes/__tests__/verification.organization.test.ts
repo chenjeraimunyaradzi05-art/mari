@@ -6,6 +6,10 @@ jest.mock('../../utils/prisma', () => ({
     verificationBadge: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      // The review route reads the badge's metadata first so the generic badge
+      // screen cannot silently approve a women-only gate request, which has its
+      // own queue and insists on evidence. An ordinary badge carries no purpose.
+      findUnique: jest.fn(async () => ({ metadata: null })),
       create: jest.fn(),
       update: jest.fn(),
     },

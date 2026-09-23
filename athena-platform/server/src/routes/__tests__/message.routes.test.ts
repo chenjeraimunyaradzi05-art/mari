@@ -79,7 +79,7 @@ function mockOpenConversation() {
     id: CONVERSATION,
     participants: [{ userId: VIEWER }, { userId: OTHER }],
   });
-  (prisma.user.findUnique as any).mockResolvedValue({ id: OTHER, allowMessages: true });
+  (prisma.user.findUnique as any).mockResolvedValue({ id: OTHER, allowMessages: true, womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') });
   (prisma.userSafetySettings.findMany as any).mockResolvedValue([]);
 }
 

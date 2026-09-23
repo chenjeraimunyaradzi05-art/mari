@@ -68,7 +68,7 @@ function mockOpenConversation(disappearingTtlSeconds: number | null) {
     disappearingTtlSeconds,
     participants: [{ userId: VIEWER }, { userId: OTHER }],
   });
-  prisma.user.findUnique.mockResolvedValue({ id: OTHER, allowMessages: true, displayName: 'Sarah D.' });
+  prisma.user.findUnique.mockResolvedValue({ id: OTHER, allowMessages: true, displayName: 'Sarah D.', womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') });
   prisma.userSafetySettings.findMany.mockResolvedValue([]);
   prisma.conversationParticipant.findUnique.mockResolvedValue({ id: 'cp-1', conversationId: CONVERSATION, userId: VIEWER, hasUnread: false });
   prisma.conversationParticipant.findMany.mockResolvedValue([{ id: 'cp-1', userId: VIEWER }, { id: 'cp-2', userId: OTHER }]);
@@ -111,7 +111,7 @@ describe('Disappearing messages', () => {
 
   it('turning the timer on records a system message and tells both sides', async () => {
     mockOpenConversation(null);
-    prisma.user.findUnique.mockResolvedValue({ displayName: 'Mei C.', firstName: 'Mei', lastName: 'Chen' });
+    prisma.user.findUnique.mockResolvedValue({ displayName: 'Mei C.', firstName: 'Mei', lastName: 'Chen', womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') });
     const notice = { id: 'm-sys', type: 'SYSTEM', content: 'x', conversationId: CONVERSATION };
     prisma.$transaction.mockResolvedValue([{ id: CONVERSATION }, notice]);
 

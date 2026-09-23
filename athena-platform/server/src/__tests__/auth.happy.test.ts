@@ -239,6 +239,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
         firstName: 'Test',
         lastName: 'User',
         womanSelfAttested: true,
+        dateOfBirth: '1990-05-12',
       })
       .expect(201);
 
@@ -247,6 +248,45 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
     expect(res.body?.data?.verificationRequired).toBe(true);
     expect(res.body?.data?.accessToken).toBeUndefined();
     expect(getSetCookieHeader(res)).not.toContain('refreshToken=');
+  });
+
+  // The platform's own Terms say it is for adults and that it verifies this.
+  // Nothing collected a date of birth until now, so these two cases are the
+  // whole of the check: no date, and a date that does not clear the minimum.
+  it('POST /api/auth/register refuses a sign-up with no date of birth', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: 'no.dob@example.com',
+        password: 'Password123!',
+        firstName: 'No',
+        lastName: 'Birthday',
+        womanSelfAttested: true,
+      })
+      .expect(400);
+
+    expect(res.body?.message).toContain('date of birth');
+  });
+
+  it('POST /api/auth/register refuses a sign-up under the minimum age', async () => {
+    const twelveYearsAgo = new Date();
+    twelveYearsAgo.setFullYear(twelveYearsAgo.getFullYear() - 12);
+
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: 'too.young@example.com',
+        password: 'Password123!',
+        firstName: 'Too',
+        lastName: 'Young',
+        womanSelfAttested: true,
+        dateOfBirth: twelveYearsAgo.toISOString().slice(0, 10),
+      })
+      .expect(400);
+
+    // The refusal must not name the threshold back to someone who is guessing
+    // at it, or the form becomes a calculator.
+    expect(res.body?.message).not.toMatch(/\b18\b/);
   });
 
   it('POST /api/auth/login returns 200 and tokens', async () => {
@@ -352,6 +392,7 @@ describe('auth endpoints (happy path, mocked prisma)', () => {
         lastName: 'Persona',
         persona: '',
         womanSelfAttested: true,
+        dateOfBirth: '1990-05-12',
       })
       .expect(201);
 

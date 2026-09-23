@@ -6,7 +6,7 @@ jest.mock('../../utils/prisma', () => ({
     userSafetySettings: { findUnique: jest.fn(async () => null), findMany: jest.fn(async () => []) },
     conversation: { findFirst: jest.fn(async () => null), create: jest.fn(), findUnique: jest.fn() },
     follow: { findUnique: jest.fn(async () => null) },
-    user: { findUnique: jest.fn(async () => ({ id: 'mei' })) },
+    user: { findUnique: jest.fn(async () => ({ id: 'mei', womanVerificationStatus: 'UNVERIFIED', dvSafetyProfile: null, profile: null, dateOfBirth: new Date('1990-01-01') })) },
   },
 }));
 
