@@ -1,12 +1,31 @@
-/** @type {import('jest').Config} */
+/**
+ * The fast project: every suite here answers from a mock.
+ *
+ * Worth saying plainly, because the directory layout suggests otherwise. Two
+ * conventions are in use — suites beside the code they cover, in `__tests__`
+ * folders under `src`, and route-level suites under `tests/` — and the second
+ * set used to be described here as "integration suites". They are not, and
+ * never were: `tests/course-enrollment.test.ts` and `tests/mentor-booking.test.ts`
+ * both open with `jest.mock('../src/utils/prisma')`, as do 138 of the files in
+ * the first set. Nothing this project runs has ever opened a database
+ * connection. The suites that do are the separate project in
+ * `jest.integration.config.cjs`.
+ *
+ * Both patterns are listed because one that covered only the first would skip
+ * the second in silence rather than report it missing.
+ *
+ * @type {import('jest').Config}
+ */
 const config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  // Two conventions are in use: suites that live beside the code they cover in
-  // `src/**/__tests__`, and the older integration suites under `tests/`. Both
-  // are listed because a pattern that covers only the first silently skips the
-  // second rather than reporting it as missing.
   testMatch: ['<rootDir>/src/**/__tests__/**/*.test.ts', '<rootDir>/tests/**/*.test.ts'],
+  // `tests/integration` belongs to the other project. The pattern above would
+  // otherwise collect it, and those suites need a Postgres container and a
+  // `prisma migrate deploy` that this project's setup never runs — so `npm test`
+  // would start failing on every machine without Docker, which is the opposite
+  // of what a separate project is for.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/integration/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },

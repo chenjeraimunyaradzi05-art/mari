@@ -1,0 +1,58 @@
+# The database the integration suite runs against.
+#
+# It exists because every one of the server's mocked suites answers whatever the
+# test told it to answer, so a migration, a unique constraint, a cascade and a
+# conditional `updateMany` racing another transaction have never once been
+# exercised. The guards that most need exercising — the creator payout claim and
+# the gift-point debit — are correct only because the database makes them
+# atomic, and that is an argument about Postgres, not about TypeScript.
+#
+# Deliberately separate from ../docker-compose.yml. That file is a developer's
+# working environment and its volume holds data somebody cares about; this one
+# is thrown away between runs, and the integration suite truncates every table
+# in it before each test. Mixing the two would mean a test run wiping a
+# developer's local data.
+#
+# Port 5434 rather than 5433, so running this alongside the dev stack does not
+# make one of the two fail to bind and the other look broken.
+services:
+  athena-test-db:
+    image: postgres:16-alpine
+    container_name: athena_test_db
+    environment:
+      POSTGRES_USER: athena_test
+      POSTGRES_PASSWORD: athena_test
+      POSTGRES_DB: athena_test
+    ports:
+      - '5434:5432'
+    # Deliberately no volume declared here. The postgres image declares one of
+    # its own over PGDATA, so Docker creates an anonymous volume, and
+    # `docker compose down -v` — which is what `scripts/integration-db.js down`
+    # runs — takes it away with the container. Nothing survives to be restored
+    # by accident, and the next `up` applies the 63 migrations to an empty
+    # database, which is the only way applying them proves anything.
+    #
+    # A tmpfs at PGDATA would be faster still, but it mounts root-owned over the
+    # directory initdb wants, and the entrypoint's permission dance around that
+    # is one more thing to go wrong. fsync off buys most of the speed for none
+    # of the risk: this database is disposable, so durability costs the suite
+    # several seconds a run and buys nothing.
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      # The concurrency tests hold two transactions open against the same row at
+      # once, and every test opens its own pool. The default of 100 is ample,
+      # but saying so here keeps a future "why did this hang" from starting at
+      # the wrong end.
+      - -c
+      - max_connections=200
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U athena_test -d athena_test']
+      interval: 2s
+      timeout: 3s
+      retries: 30

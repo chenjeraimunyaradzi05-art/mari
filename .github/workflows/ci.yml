@@ -96,6 +96,18 @@ jobs:
       - name: Run tests
         run: npm test --silent
 
+      # The mocked suite cannot exercise a migration, a constraint, a cascade or a
+      # concurrent transaction, and the guards that most need exercising are the
+      # conditional-updateMany claims on creator payouts and gift balances whose
+      # whole correctness argument is that the database makes them atomic. This
+      # job already has a Postgres service and has already run migrate deploy
+      # against it, so the integration project runs here for free. It skips
+      # loudly rather than silently when TEST_DATABASE_URL is unset.
+      - name: Run integration tests (real database)
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: npx jest --config jest.integration.config.cjs --silent
+
       # Last, and deliberately independent of everything above it: a console.log
       # left behind should not stop the typecheck and the tests from reporting,
       # and a failing test should not hide the lint result either, so this runs
