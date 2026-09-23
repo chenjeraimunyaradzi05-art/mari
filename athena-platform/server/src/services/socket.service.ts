@@ -6,7 +6,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { authenticateSocketToken } from '../middleware/auth';
-import { socketMessageThrottle } from '../middleware/socialLimits';
+import { liveChatThrottle, socketMessageThrottle } from '../middleware/socialLimits';
 import { sessionEvents, SessionRevokedEvent } from '../utils/session-events';
 import { isBlockedRelationship } from '../utils/safety-store';
 import { canOpenConversation } from './message-permissions.service';
@@ -34,6 +34,7 @@ function pushMessageIfAway(
 import { prisma } from '../utils/prisma';
 import { i18nService, NOTIFICATION_KEYS, SupportedLocale } from './i18n.service';
 import { getLocaleForUser } from '../utils/region';
+import { directMessageGateRefusal } from '../middleware/account-gates';
 import { CONTENT_LIMITS, normalizeUserText } from '../utils/contentSafety';
 import { findDirectConversation, getOrCreateDirectConversation } from './direct-message.service';
 import { conversationTtl, expiryFor } from './message-expiry.service';
@@ -187,7 +188,8 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         // The socket is a second door into someone's inbox, so it is held to
         // exactly what the REST route enforces: a ceiling on how fast one
         // account can send, no thread across a block, the recipient's "who
-        // can message me" choice, and the same content moderation.
+        // can message me" choice, the women-only floor, the age gate, and the
+        // same content moderation.
         if (!socketMessageThrottle.allow(userId)) {
           socket.emit('messages:error', {
             message: 'You are sending messages very quickly. Take a short break and try again.',
@@ -200,6 +202,11 @@ export function initializeSocketHandlers(io: SocketIOServer) {
         }
         if (await isBlockedRelationship(userId, receiverId)) {
           socket.emit('messages:error', { message: 'You cannot message this user' });
+          return;
+        }
+        const gateRefusal = await directMessageGateRefusal(userId);
+        if (gateRefusal) {
+          socket.emit('messages:error', gateRefusal);
           return;
         }
         const verdict = await canOpenConversation(userId, receiverId);
@@ -451,6 +458,14 @@ export function initializeSocketHandlers(io: SocketIOServer) {
           socket.emit('live:error', { streamId, message: 'This stream is not live' });
           return;
         }
+        // The room was the one social surface a block did not reach. Refusing
+        // the join, rather than only the chat, is what makes the host's
+        // "remove from my stream" hold: he does not get to sit in her audience
+        // reading it either.
+        if (await isBlockedRelationship(userId, stream.hostId)) {
+          socket.emit('live:error', { streamId, message: 'You cannot take part in this stream.' });
+          return;
+        }
         socket.join(getLiveRoomId(streamId));
         joinedLiveRooms.add(streamId);
         broadcastViewerCount(streamId);
@@ -473,6 +488,21 @@ export function initializeSocketHandlers(io: SocketIOServer) {
       const streamId = typeof data?.streamId === 'string' ? data.streamId : '';
       try {
         if (!streamId) return;
+        // This is the real door into a host's chat — the page sends here, and
+        // the REST route calls itself the other one — and it had no ceiling of
+        // any kind, so one account could flood a woman's room at socket speed
+        // while she was on camera. Keyed on the account, not the room, so
+        // opening five streams does not buy five budgets. The block check and
+        // the moderation gate are inside postChatMessage, which both doors
+        // share; only the throttle has to live out here, because a socket has
+        // no middleware chain to mount one on.
+        if (!liveChatThrottle.allow(userId)) {
+          socket.emit('live:error', {
+            streamId,
+            message: 'You are sending messages very quickly. Take a short break and try again.',
+          });
+          return;
+        }
         const content = normalizeUserText(data?.content, {
           field: 'content',
           maxLength: LIVE_CHAT_MAX_LENGTH,
@@ -566,6 +596,38 @@ export function getLiveRoomId(streamId: string): string {
 export function liveRoomSize(streamId: string): number {
   if (!ioInstance) return 0;
   return ioInstance.sockets.adapter.rooms.get(getLiveRoomId(streamId))?.size ?? 0;
+}
+
+/**
+ * Put someone out of a stream's room now.
+ *
+ * Recording the host's removal is what keeps him out of every future join;
+ * this is what ends the one he is already sitting in, without waiting for him
+ * to reload. His own clients are told why — `live:removed` — so the page can
+ * say so rather than appearing to break, and the room is recounted so the
+ * viewer number the host sees is the truth a second later.
+ *
+ * Returns how many sockets were put out, which is zero when he was not
+ * watching; the removal is no less recorded for that.
+ */
+export function removeFromLiveRoom(streamId: string, userId: string): number {
+  if (!ioInstance) return 0;
+  const room = getLiveRoomId(streamId);
+  let removed = 0;
+  for (const socket of ioInstance.sockets.sockets.values()) {
+    const client = socket as AuthenticatedSocket;
+    if (client.userId !== userId) continue;
+    if (!client.rooms.has(room)) continue;
+    client.leave(room);
+    client.emit('live:removed', { streamId, message: 'The host removed you from this stream.' });
+    removed += 1;
+  }
+  if (removed > 0) {
+    const count = liveRoomSize(streamId);
+    ioInstance.to(room).emit('live:viewers', { streamId, count });
+    void recordViewerCount(streamId, count);
+  }
+  return removed;
 }
 
 // The live stream routes and service push chat, gifts and status changes to

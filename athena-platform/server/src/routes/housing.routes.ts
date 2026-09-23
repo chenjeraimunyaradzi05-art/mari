@@ -6,6 +6,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { bestEffort, labelSegment } from '../utils/best-effort';
+import { mayEnterConfidentialSpace, requireWomanMember, womanGateState } from '../middleware/account-gates';
 
 /**
  * Housing: listings, inquiries, and the safety rules around them.
@@ -131,15 +132,19 @@ const canSeeAddress = (req: AuthRequest, l: ListingRow, released: Set<string>) =
 /**
  * Whether this viewer may see confidential listings: an admin, a woman-verified
  * member, or a member with Safe Mode on. Anyone else gets the reason.
+ *
+ * The Safe Mode half used to read `DvSafetyProfile.isSafeMode` alone, which is
+ * the column the DV safety screen writes. The Safety Centre writes the other
+ * one, `Profile.isSafeMode`, so a woman who turned Safe Mode on there — the
+ * page whose own copy tells her it unlocks safe housing — was still refused.
+ * `womanGateState` reads both, so the switch means the same thing wherever she
+ * found it, and the answer to "may she be in this room" is decided in one file
+ * rather than in this helper.
  */
 async function confidentialAccess(req: AuthRequest): Promise<{ eligible: boolean; reason: string | null }> {
   if (!req.user) return { eligible: false, reason: ANONYMOUS_REASON };
   if (isAdmin(req)) return { eligible: true, reason: null };
-  const u = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: { womanVerificationStatus: true, dvSafetyProfile: { select: { isSafeMode: true } } },
-  });
-  const eligible = u?.womanVerificationStatus === 'VERIFIED' || Boolean(u?.dvSafetyProfile?.isSafeMode);
+  const eligible = mayEnterConfidentialSpace(await womanGateState(req.user.id));
   return { eligible, reason: eligible ? null : MEMBER_REASON };
 }
 
@@ -327,6 +332,10 @@ router.get('/listings/:id', optionalAuth, async (req: AuthRequest, res: Response
 router.post(
   '/listings/:id/inquire',
   authenticate,
+  // Asking about a place puts a member in contact with the woman who listed
+  // it. An account a reviewer has already refused does not get to start that
+  // conversation, which until now it could.
+  requireWomanMember,
   [body('message').optional().isString().isLength({ max: 2000 })],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -486,6 +495,9 @@ router.post('/inquiries/:id/share-contact', authenticate, async (req: AuthReques
 router.post(
   '/listings',
   authenticate,
+  // Same reason as the inquiry route: a listing is an invitation to contact a
+  // stranger, and a refused account does not get to publish one here.
+  requireWomanMember,
   [
     body('title').isString().trim().notEmpty().withMessage('Title is required').isLength({ max: 200 }),
     body('description').isString().trim().notEmpty().withMessage('Description is required').isLength({ max: 5000 }),

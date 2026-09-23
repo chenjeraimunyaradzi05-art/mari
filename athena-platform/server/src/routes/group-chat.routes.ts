@@ -9,7 +9,9 @@ import { Router, Response, NextFunction } from 'express';
 import { groupChatService, validatePermission, type GroupRole } from '../services/group-chat.service';
 import { chatStorageService } from '../services/chat-storage.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { requireWomanMember } from '../middleware/account-gates';
 import { ApiError } from '../middleware/errorHandler';
+import { assertContentAllowed } from '../services/moderation.service';
 import {
   CONTENT_LIMITS,
   normalizeMessageAttachments,
@@ -101,7 +103,9 @@ router.get('/:groupId/chat/pinned', authenticate, async (req: AuthRequest, res: 
  * @desc Send a message to group chat
  * @access Private (Group members)
  */
-router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Speaking in a group chat is the surface a refused account would use to reach
+// a room full of members at once, so the women-only floor applies to the write.
+router.post('/:groupId/chat/message', authenticate, requireWomanMember, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
     const attachments = normalizeMessageAttachments(req.body?.attachments);
@@ -123,6 +127,14 @@ router.post('/:groupId/chat/message', authenticate, async (req: AuthRequest, res
     const sendPolicy = await groupChatService.canSendMessage(groupId, req.user!.id);
     if (!sendPolicy.allowed) {
       throw new ApiError(403, sendPolicy.reason || 'You are not allowed to send messages in this group');
+    }
+
+    // Screened after the membership check, so somebody who cannot post here
+    // never gets their text scanned on the group's behalf, and before the
+    // write, so nothing a provider refuses is ever stored or broadcast. A
+    // message that is only an attachment has no text to screen.
+    if (content) {
+      await assertContentAllowed(content, { kind: 'group_message', userId: req.user!.id });
     }
 
     await ensureGroupConversation(groupId);

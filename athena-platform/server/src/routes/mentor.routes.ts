@@ -7,6 +7,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { body, query, validationResult } from 'express-validator';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { isWomanVerified, womanGateState } from '../middleware/account-gates';
 import * as mentorService from '../services/mentor.service';
 import * as mentorScheduling from '../services/mentor-scheduling.service';
 
@@ -22,13 +23,17 @@ const router = Router();
  */
 router.get(
   '/',
+  // optionalAuth so the directory stays browsable while signed out, but a
+  // signed-in viewer's blocks are known and can be applied. Members who asked
+  // to be hidden are excluded either way.
+  optionalAuth,
   [
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('minRate').optional().isFloat({ min: 0 }),
     query('maxRate').optional().isFloat({ min: 0 }),
   ],
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const filters: mentorService.MentorFilters = {
         specialization: req.query.specialization as string,
@@ -41,7 +46,7 @@ router.get(
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
 
-      const result = await mentorService.getMentors(filters, page, limit);
+      const result = await mentorService.getMentors(filters, page, limit, req.user?.id);
       res.json(result);
     } catch (error) {
       next(error);
@@ -141,6 +146,25 @@ router.post(
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         throw new ApiError(400, 'Validation failed: ' + errors.array().map(e => e.msg).join(', '));
+      }
+
+      // Becoming a mentor is the one place ATHENA presents a member to
+      // strangers as checked and then takes their money for the introduction.
+      // The confidential housing surfaces deliberately accept Safe Mode instead
+      // of a completed check, because a woman leaving violence needs a place
+      // tonight; nobody needs to start charging for mentoring tonight, so this
+      // asks for the check itself. Editing a profile that already exists is not
+      // gated: the promise was made when it was published, and locking an
+      // existing mentor out of her own rate card would fix nothing.
+      const alreadyAMentor = await mentorService.hasMentorProfile(req.user!.id);
+      if (!alreadyAMentor) {
+        const state = await womanGateState(req.user!.id);
+        if (!isWomanVerified(state)) {
+          throw new ApiError(
+            403,
+            'Mentors are listed as verified members, so finish the women-only check before you publish a mentor profile. It is in Settings, under Verification.'
+          );
+        }
       }
 
       const profile = await mentorService.updateMentorProfile(req.user!.id, req.body);

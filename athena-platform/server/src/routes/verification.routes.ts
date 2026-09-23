@@ -1,10 +1,12 @@
 import { Router, Response, NextFunction } from 'express';
-import { body, validationResult } from 'express-validator';
+import { body, query, validationResult } from 'express-validator';
+import { WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { logAudit } from '../utils/audit';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
+import { WOMAN_GATE_PURPOSE, isWomanGateMetadata, readWomanGateEvidence } from '../middleware/account-gates';
 
 const router = Router();
 
@@ -33,6 +35,13 @@ const router = Router();
 
 const ORGANISATION_BADGE_TYPES = new Set(['EMPLOYER', 'EDUCATOR']);
 const ORGANISATION_VERIFYING_ROLES = new Set(['OWNER', 'ADMIN']);
+
+/**
+ * Matches the identity badges that belong to the women-only gate rather than
+ * to the ordinary verified badge. Both use type IDENTITY and the same Stripe
+ * Identity session, so `metadata.purpose` is the only thing separating them.
+ */
+const womanGateBadgeFilter = { metadata: { path: ['purpose'], equals: WOMAN_GATE_PURPOSE } } as const;
 
 function organisationIdFrom(metadata: unknown): string | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
@@ -121,7 +130,9 @@ router.get('/badges/pending', authenticate, requireRole('ADMIN'), async (req: Au
   try {
     const status = typeof req.query.status === 'string' && ['PENDING', 'APPROVED', 'REJECTED'].includes(req.query.status) ? req.query.status : 'PENDING';
     const badges = await prisma.verificationBadge.findMany({
-      where: { status: status as any },
+      // Women-gate submissions share this model but are reviewed in their own
+      // queue, against evidence this screen does not show.
+      where: { status: status as any, NOT: womanGateBadgeFilter },
       include: { user: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, avatar: true } } },
       orderBy: { submittedAt: status === 'PENDING' ? 'asc' : 'desc' },
       take: 200,
@@ -133,6 +144,206 @@ router.get('/badges/pending', authenticate, requireRole('ADMIN'), async (req: Au
 });
 
 // ===========================================
+// WOMEN-ONLY GATE REVIEW (ADMIN)
+// ===========================================
+// The queue a reviewer actually works. Before this she decided a membership
+// from a name, an email and a subscription tier — `womanSelfAttested` is true
+// for every account, because registration rejects false, so the one other
+// column on the screen carried no information at all.
+//
+// Now each request arrives with what the member submitted: a passed Stripe
+// Identity document-and-selfie check, or her own account of why she is asking,
+// or both. Approving a request with neither is refused rather than merely
+// discouraged, because a button that can be pressed on an empty record will be.
+
+const WOMAN_GATE_STATUSES: WomanVerificationStatus[] = ['UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED'];
+
+router.get(
+  '/woman-gate/requests',
+  authenticate,
+  requireRole('ADMIN'),
+  [
+    query('status').optional().isIn(WOMAN_GATE_STATUSES),
+    query('page').optional().isInt({ min: 1 }).toInt(),
+    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const status = (req.query.status as WomanVerificationStatus) || 'PENDING';
+      const page = Number(req.query.page ?? 1);
+      const limit = Number(req.query.limit ?? 20);
+
+      const where = { womanVerificationStatus: status };
+      const [users, total] = await Promise.all([
+        prisma.user.findMany({
+          where,
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            avatar: true,
+            womanVerificationStatus: true,
+            womanVerifiedAt: true,
+            createdAt: true,
+            // Present when the member completed the document check: the age
+            // the gate now has is itself part of what the reviewer is looking
+            // at, and a blank one says the check has not run.
+            ageVerifiedAt: true,
+            subscription: { select: { tier: true, status: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.user.count({ where }),
+      ]);
+
+      // One query for the whole page rather than one per row: the queue is the
+      // page a reviewer keeps open, and a per-row lookup turns a twenty-row
+      // page into twenty-one round trips.
+      const badges = users.length
+        ? await prisma.verificationBadge.findMany({
+            where: { userId: { in: users.map((user) => user.id) }, type: 'IDENTITY', ...womanGateBadgeFilter },
+            orderBy: { submittedAt: 'desc' },
+            select: { id: true, userId: true, status: true, metadata: true, submittedAt: true, reason: true },
+          })
+        : [];
+
+      const latestByUser = new Map<string, (typeof badges)[number]>();
+      for (const badge of badges) {
+        if (!latestByUser.has(badge.userId)) latestByUser.set(badge.userId, badge);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          users: users.map((user) => {
+            const badge = latestByUser.get(user.id) ?? null;
+            return {
+              ...user,
+              submission: badge
+                ? {
+                    badgeId: badge.id,
+                    badgeStatus: badge.status,
+                    submittedAt: badge.submittedAt,
+                    reason: badge.reason,
+                    evidence: readWomanGateEvidence(badge.metadata),
+                  }
+                : null,
+            };
+          }),
+          pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.patch(
+  '/woman-gate/:userId',
+  authenticate,
+  requireRole('ADMIN'),
+  [
+    body('status').isIn(['VERIFIED', 'REJECTED']),
+    body('reason').optional().isString().trim().isLength({ max: 500 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { userId } = req.params;
+      const status = req.body.status as 'VERIFIED' | 'REJECTED';
+      const reason: string | null = req.body.reason ?? null;
+
+      const subject = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+      if (!subject) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const badge = await prisma.verificationBadge.findFirst({
+        where: { userId, type: 'IDENTITY', ...womanGateBadgeFilter },
+        orderBy: { submittedAt: 'desc' },
+        select: { id: true, metadata: true },
+      });
+      const evidence = badge ? readWomanGateEvidence(badge.metadata) : null;
+
+      if (status === 'VERIFIED' && !evidence) {
+        throw new ApiError(
+          409,
+          'There is nothing on this request to review. Ask her to complete the document check or send a note before approving.'
+        );
+      }
+
+      await prisma.$transaction([
+        prisma.user.update({
+          where: { id: userId },
+          data: {
+            womanVerificationStatus: status,
+            womanVerifiedAt: status === 'VERIFIED' ? new Date() : null,
+          },
+        }),
+        ...(badge
+          ? [
+              prisma.verificationBadge.update({
+                where: { id: badge.id },
+                data: {
+                  status: status === 'VERIFIED' ? 'APPROVED' : 'REJECTED',
+                  reason,
+                  reviewedAt: new Date(),
+                  reviewedById: req.user!.id,
+                },
+              }),
+            ]
+          : []),
+        prisma.notification.create({
+          data: {
+            userId,
+            type: 'SYSTEM',
+            title: status === 'VERIFIED' ? 'You are verified' : 'About your verification',
+            message:
+              status === 'VERIFIED'
+                ? 'Your women-only verification is complete. The members-only parts of ATHENA are open to you.'
+                : reason || 'Your women-only verification was not approved. You can appeal from Settings.',
+            link: '/dashboard/settings/profile',
+          },
+        }),
+      ]);
+
+      await logAudit({
+        action: status === 'VERIFIED' ? 'ADMIN_VERIFICATION_APPROVE' : 'ADMIN_VERIFICATION_REJECT',
+        actorUserId: req.user?.id ?? null,
+        targetUserId: userId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+        metadata: {
+          verificationType: 'WOMAN_ONLY',
+          status,
+          reason,
+          evidenceProvider: evidence?.provider ?? null,
+          documentCheckPassed: Boolean(evidence?.documentCheckPassedAt),
+        },
+      });
+
+      res.json({ success: true, data: { userId, womanVerificationStatus: status } });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
 // IDENTITY CHECK THROUGH STRIPE IDENTITY
 // ===========================================
 router.post('/identity/session', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -141,7 +352,16 @@ router.post('/identity/session', authenticate, async (req: AuthRequest, res: Res
       throw new ApiError(503, 'Automated identity checks are not set up on this server yet. You can still apply for the badge and a person will review it.');
     }
     const userId = req.user!.id;
-    const approved = await prisma.verificationBadge.findFirst({ where: { userId, type: 'IDENTITY', status: 'APPROVED' }, select: { id: true } });
+    // The women-only gate runs its own document check through the same model
+    // and the same Stripe integration, discriminated by metadata.purpose. Its
+    // badges are excluded here so that applying for one does not read as
+    // "already verified" for the other, and so a retry of this badge does not
+    // repoint the women-gate submission at a session the reviewer is not
+    // waiting on.
+    const approved = await prisma.verificationBadge.findFirst({
+      where: { userId, type: 'IDENTITY', status: 'APPROVED', NOT: womanGateBadgeFilter },
+      select: { id: true },
+    });
     if (approved) {
       throw new ApiError(409, 'Your identity is already verified');
     }
@@ -156,7 +376,10 @@ router.post('/identity/session', authenticate, async (req: AuthRequest, res: Res
 
     // One pending identity badge per member; a retry points it at the new session.
     const metadata = { provider: 'stripe_identity', sessionId: session.id, startedAt: new Date().toISOString() };
-    const pending = await prisma.verificationBadge.findFirst({ where: { userId, type: 'IDENTITY', status: 'PENDING' }, select: { id: true } });
+    const pending = await prisma.verificationBadge.findFirst({
+      where: { userId, type: 'IDENTITY', status: 'PENDING', NOT: womanGateBadgeFilter },
+      select: { id: true },
+    });
     if (pending) {
       await prisma.verificationBadge.update({ where: { id: pending.id }, data: { metadata, reason: null } });
     } else {
@@ -255,6 +478,18 @@ router.patch(
 
       const { id } = req.params;
       const { status, reason } = req.body;
+
+      // A women-gate submission wears the same type as an identity badge but
+      // is a different decision with a different consequence, and approving it
+      // here would set the verified mark while leaving the gate itself shut.
+      // It has its own route above, which insists on evidence.
+      const existing = await prisma.verificationBadge.findUnique({ where: { id }, select: { metadata: true } });
+      if (!existing) {
+        throw new ApiError(404, 'Verification request not found');
+      }
+      if (isWomanGateMetadata(existing.metadata)) {
+        throw new ApiError(409, 'Review women-only verification from the women-gate queue, where the evidence is.');
+      }
 
       const badge = await prisma.verificationBadge.update({
         where: { id },

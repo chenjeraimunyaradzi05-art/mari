@@ -32,6 +32,7 @@ import {
 import { claimTotpStep } from '../utils/totp-replay';
 import { openSecret, sealSecret } from '../utils/secret-box';
 import { sessionEvents } from '../utils/session-events';
+import { DATE_OF_BIRTH_REFUSAL, isPlausibleDateOfBirth, meetsMinimumAge } from '../middleware/account-gates';
 
 const router = Router();
 
@@ -46,6 +47,13 @@ const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const RECOVERY_CODE_LENGTH = 10;
 const RECOVERY_CODE_GROUP_LENGTH = 5;
 const RECOVERY_CODE_COUNT = 10;
+/** True when a registration body carries a date of birth an adult could have. */
+function acceptableDateOfBirth(value: unknown): boolean {
+  if (typeof value !== 'string' && !(value instanceof Date)) return false;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return isPlausibleDateOfBirth(parsed) && meetsMinimumAge(parsed);
+}
+
 const PERSONA_VALUES = [
   'EARLY_CAREER',
   'MID_CAREER',
@@ -517,6 +525,16 @@ router.post(
       .isBoolean()
       .custom((value) => value === true)
       .withMessage('You must confirm you are a woman to join ATHENA'),
+    // Collected here because it cannot be collected later: an account created
+    // without a date of birth has no age to check, and the Terms and Privacy
+    // Policy both say the platform is for adults and that it verifies this.
+    body('dateOfBirth')
+      .isISO8601()
+      .withMessage(DATE_OF_BIRTH_REFUSAL)
+      .bail()
+      .custom((value) => acceptableDateOfBirth(value))
+      .withMessage(DATE_OF_BIRTH_REFUSAL)
+      .toDate(),
     body('inviteCode')
       .optional({ checkFalsy: true })
       .isString()
@@ -552,6 +570,14 @@ router.post(
 
       if (!womanSelfAttested) {
         throw new ApiError(400, 'Women-only access requires self-attestation');
+      }
+
+      // `.toDate()` above has already turned the field into a Date, but a body
+      // that reached here another way would otherwise create an account with
+      // no age on it, which is the one state the gate cannot recover from.
+      const dateOfBirth = req.body.dateOfBirth instanceof Date ? req.body.dateOfBirth : new Date(req.body.dateOfBirth);
+      if (!acceptableDateOfBirth(dateOfBirth)) {
+        throw new ApiError(400, DATE_OF_BIRTH_REFUSAL);
       }
 
       // Check if user exists
@@ -612,6 +638,7 @@ router.post(
               displayName: `${firstName} ${lastName}`,
               persona,
               womanSelfAttested: true,
+              dateOfBirth,
               inviteCodeId: inviteRecord?.id ?? undefined,
               referralCode: newUserReferralCode,
               profile: {
@@ -908,6 +935,10 @@ router.post(
     }),
     body('mode').optional().isIn(['login', 'register']),
     body('womanSelfAttested').optional().isBoolean(),
+    // Optional at the validator because a returning member sends none; the
+    // branch that creates a new account insists on it below. Google does not
+    // return a birthday in the identity token, so it has to come from the form.
+    body('dateOfBirth').optional({ checkFalsy: true }).isISO8601().withMessage(DATE_OF_BIRTH_REFUSAL),
     body('inviteCode')
       .optional({ checkFalsy: true })
       .isString()
@@ -1085,6 +1116,14 @@ router.post(
           throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');
         }
 
+        // Refused for the same reason the attestation is: an account created
+        // without a date of birth can never be age-checked afterwards, and a
+        // sign-up through Google is still a sign-up.
+        if (!acceptableDateOfBirth(req.body?.dateOfBirth)) {
+          throw new ApiError(400, DATE_OF_BIRTH_REFUSAL);
+        }
+        const googleDateOfBirth = new Date(req.body.dateOfBirth);
+
         const inviteRecord = await findUsableInviteCode(req.body?.inviteCode);
 
         const generateReferralCode = (): string => crypto.randomBytes(8).toString('hex').toUpperCase();
@@ -1111,6 +1150,7 @@ router.post(
               avatar: googleProfile.picture || undefined,
               persona,
               womanSelfAttested: true,
+              dateOfBirth: googleDateOfBirth,
               emailVerified: true,
               emailVerifiedAt: new Date(),
               lastLoginAt: new Date(),
@@ -1204,6 +1244,9 @@ router.post(
     body('accessToken').isString().isLength({ min: 1, max: EXTERNAL_AUTH_TOKEN_MAX_LENGTH }),
     body('mode').optional().isIn(['login', 'register']),
     body('womanSelfAttested').optional().isBoolean(),
+    // Same reasoning as the Google route: optional at the validator because a
+    // returning member sends none, insisted on below where an account is made.
+    body('dateOfBirth').optional({ checkFalsy: true }).isISO8601().withMessage(DATE_OF_BIRTH_REFUSAL),
     body('inviteCode')
       .optional({ checkFalsy: true })
       .isString()
@@ -1396,6 +1439,13 @@ router.post(
           throw new ApiError(400, 'You must confirm you are a woman to join ATHENA');
         }
 
+        // Facebook's Graph profile does not carry a usable birthday for most
+        // accounts, so the form supplies it and no account is created without one.
+        if (!acceptableDateOfBirth(req.body?.dateOfBirth)) {
+          throw new ApiError(400, DATE_OF_BIRTH_REFUSAL);
+        }
+        const fbDateOfBirth = new Date(req.body.dateOfBirth);
+
         const fbInviteRecord = await findUsableInviteCode(req.body?.inviteCode);
 
         const fbGenerateReferralCode = (): string => crypto.randomBytes(8).toString('hex').toUpperCase();
@@ -1422,6 +1472,7 @@ router.post(
               avatar: fbAvatarUrl || undefined,
               persona: fbPersona,
               womanSelfAttested: true,
+              dateOfBirth: fbDateOfBirth,
               emailVerified: true,
               emailVerifiedAt: new Date(),
               lastLoginAt: new Date(),
@@ -2002,6 +2053,10 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
         womanSelfAttested: true,
         womanVerificationStatus: true,
         womanVerifiedAt: true,
+        // The client needs to know whether the age gate is satisfied so it can
+        // ask once, rather than letting her walk into a 403 on the feed.
+        dateOfBirth: true,
+        ageVerifiedAt: true,
         city: true,
         state: true,
         country: true,

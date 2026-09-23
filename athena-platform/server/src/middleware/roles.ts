@@ -1,6 +1,12 @@
 /**
  * Role-based Authorization Middleware
  * Provides role checking functionality for protected routes
+ *
+ * The other two gates an account has to clear — the women-only check and the
+ * minimum age — are `requireWomanVerified`, `requireWomanMember` and
+ * `requireAdultAccount` in ./account-gates. They live in their own file
+ * because they read the database, and this one is imported by a unit suite
+ * that does not mock Prisma.
  */
 
 import { Request, Response, NextFunction } from 'express';

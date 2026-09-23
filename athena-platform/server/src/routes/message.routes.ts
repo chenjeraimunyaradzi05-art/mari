@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { requireAdultAccount, requireWomanMember } from '../middleware/account-gates';
 import { emitToUserRoom, sendRealTimeMessage } from '../services/socket.service';
 import { parsePagination } from '../utils/pagination';
 import {
@@ -252,9 +253,15 @@ router.get('/conversations/:id/messages', authenticate, async (req: AuthRequest,
 // ===========================================
 // START CONVERSATION
 // ===========================================
+// Opening a thread is where an unwanted stranger first reaches a member, so the
+// women-only gate and the age gate are applied here rather than on the reads.
+// Threads that already exist keep working either way: this refuses the first
+// contact, not the conversation a member has already chosen to be in.
 router.post(
   '/conversations',
   authenticate,
+  requireWomanMember,
+  requireAdultAccount,
   conversationLimiter,
   [body('userId').isString().notEmpty().withMessage('Target user ID is required')],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -297,6 +304,7 @@ router.post(
 router.post(
   '/conversations/:id/messages',
   authenticate,
+  requireAdultAccount,
   messageLimiter,
   [
     body('content').optional().isString().isLength({ max: CONTENT_LIMITS.directMessage }),

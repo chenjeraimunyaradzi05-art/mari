@@ -10,9 +10,12 @@
 
 import { Router } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { requireAdultAccount, requireWomanMember } from '../middleware/account-gates';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
 import { normalizeOptionalUserText, normalizeSafeUrl } from '../utils/contentSafety';
+import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
+import { assertContentAllowed } from '../services/moderation.service';
 
 const router = Router();
 
@@ -80,9 +83,22 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const now = new Date();
     const viewerId = req.user?.id;
 
+    // Stories were the one social surface that never asked about blocking:
+    // posts, comments, reposts, highlights, profiles and messages all check
+    // this list, and the story ring did not, so a woman's blocked ex still saw
+    // her face at the top of his feed every morning. Blocking is symmetric,
+    // so the one list drops her stories from his feed and his from hers.
+    const blockedIds = viewerId ? await getBlockedRelationshipIds(viewerId) : [];
+
     const stories = await prisma.status.findMany({
-      // Close-friends stories reach the author's list and the author.
-      where: { expiresAt: { gt: now }, ...closeFriendsAudienceWhere(viewerId) },
+      // Close-friends stories reach the author's list and the author. The
+      // block exclusion is a top-level key, so it ANDs with the audience OR
+      // above rather than widening it.
+      where: {
+        expiresAt: { gt: now },
+        ...closeFriendsAudienceWhere(viewerId),
+        ...(blockedIds.length ? { userId: { notIn: blockedIds } } : {}),
+      },
       include: {
         user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } },
       },
@@ -138,7 +154,10 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 /**
  * POST /api/status
  */
-router.post('/', authenticate, async (req: AuthRequest, res, next) => {
+// Posting a story is publishing to the network, so it carries both gates.
+// Viewing one does not: a member who has not yet given her date of birth can
+// still read, she just cannot broadcast.
+router.post('/', authenticate, requireWomanMember, requireAdultAccount, async (req: AuthRequest, res, next) => {
   try {
     const type: StoryType = normalizeStoryType(req.body?.type);
     const mediaUrl = normalizeSafeUrl(req.body?.mediaUrl, {
@@ -151,6 +170,15 @@ router.post('/', authenticate, async (req: AuthRequest, res, next) => {
       allowEmpty: true,
     });
     const audience = req.body?.audience === 'close_friends' ? 'CLOSE_FRIENDS' : 'EVERYONE';
+
+    // A caption is user-written text shown to everyone the story reaches, so
+    // it goes through the same gate a post or a comment does. Filed as a
+    // comment because that is what it is: a short line attached to a picture.
+    // Only when there is something to screen — an empty caption has nothing
+    // for a provider to read and should not cost a call.
+    if (caption) {
+      await assertContentAllowed(caption, { kind: 'comment', userId: req.user!.id });
+    }
 
     const created = await prisma.status.create({
       data: {
@@ -180,6 +208,11 @@ router.post('/:id/view', authenticate, async (req: AuthRequest, res, next) => {
       select: { id: true, userId: true, expiresAt: true, viewCount: true },
     });
     if (!story || story.expiresAt.getTime() <= Date.now()) throw new ApiError(404, 'Story not found');
+
+    // 404 rather than 403: a refusal that named the reason would confirm to
+    // the person she blocked that the story exists and that she posted it,
+    // which is the piece of information the block was meant to withhold.
+    if (await isBlockedRelationship(req.user!.id, story.userId)) throw new ApiError(404, 'Story not found');
 
     // Authors watching their own story are not an audience.
     if (story.userId === req.user!.id) {
@@ -218,8 +251,15 @@ router.get('/:id/viewers', authenticate, async (req: AuthRequest, res, next) => 
     if (!story) throw new ApiError(404, 'Story not found');
     if (story.userId !== req.user!.id) throw new ApiError(403, 'Only the author can see who watched');
 
+    // Filtered at read time because blocking does not reach back into views
+    // already recorded: severTies (utils/safety-store) clears follows, follow
+    // requests and close-friends rows, and leaves StatusView alone. Without
+    // this, a man she blocked this morning stays on her viewer list until the
+    // story expires tonight.
+    const blockedIds = await getBlockedRelationshipIds(req.user!.id);
+
     const views = await prisma.statusView.findMany({
-      where: { statusId: story.id },
+      where: { statusId: story.id, ...(blockedIds.length ? { userId: { notIn: blockedIds } } : {}) },
       include: { user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } } },
       orderBy: { viewedAt: 'desc' },
       take: 100,

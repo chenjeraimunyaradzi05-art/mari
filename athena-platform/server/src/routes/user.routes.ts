@@ -18,6 +18,15 @@ import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { getBlockedRelationshipIds } from '../utils/safety-store';
 import { approvesFollowers, profileAccess } from '../services/audience.service';
 import { followLimiter } from '../middleware/socialLimits';
+import {
+  DATE_OF_BIRTH_REFUSAL,
+  WOMAN_GATE_PURPOSE,
+  isPlausibleDateOfBirth,
+  meetsMinimumAge,
+  readWomanGateEvidence,
+} from '../middleware/account-gates';
+import { getStripe, isStripeConfigured } from '../utils/stripe';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -94,48 +103,410 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
 });
 
 // ===========================================
-// WOMEN-ONLY VERIFICATION REQUEST
+// WOMEN-ONLY VERIFICATION
 // ===========================================
-router.post('/me/woman-verification', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+/**
+ * The women-only gate, which is the product's premise.
+ *
+ * What was here before collected nothing: it checked the self-attestation
+ * every account already carries, refused anyone without a paid subscription,
+ * and set the status to PENDING. The reviewer on the other end then decided a
+ * membership from a name, an email and a subscription tier. Meanwhile a
+ * working Stripe Identity document-and-selfie check sat in
+ * verification.routes.ts, wired only to the ordinary verified badge.
+ *
+ * Now the request starts that same check, tagged for this purpose, and the
+ * result is attached to the member's request as evidence a person can read.
+ * The identity check is not treated as the decision: a document proves who she
+ * is and how old she is, not that she is a woman, so a reviewer still makes
+ * the call — with something in front of her this time.
+ *
+ * Paying is no longer part of it. Whether ATHENA is a women-only space and
+ * whether a member has a card on file are two different questions, and tying
+ * them together meant the platform's central promise covered paying members
+ * only.
+ */
+const WOMAN_GATE_RETURN_PATH = '/dashboard/settings/profile?woman-verification=done';
+
+/** The one pending women-gate submission for this member, if she has made one. */
+async function pendingWomanGateBadge(userId: string) {
+  return prisma.verificationBadge.findFirst({
+    where: {
+      userId,
+      type: 'IDENTITY',
+      status: 'PENDING',
+      metadata: { path: ['purpose'], equals: WOMAN_GATE_PURPOSE },
+    },
+    orderBy: { submittedAt: 'desc' },
+    select: { id: true, metadata: true, submittedAt: true },
+  });
+}
+
+/**
+ * Both gates on this account in one read: how old the platform believes she
+ * is, and where her women-only verification stands. The settings page asks one
+ * question because a member experiences them as one thing — what is still
+ * standing between her and the rest of ATHENA.
+ */
+router.get('/me/identity-gates', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        womanSelfAttested: true,
-        womanVerificationStatus: true,
-        subscription: { select: { tier: true, status: true } },
-      },
-    });
+    const [user, badge] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          womanSelfAttested: true,
+          womanVerificationStatus: true,
+          womanVerifiedAt: true,
+          dateOfBirth: true,
+          ageVerifiedAt: true,
+        },
+      }),
+      pendingWomanGateBadge(userId),
+    ]);
 
     if (!user) {
       throw new ApiError(404, 'User not found');
     }
 
-    if (!user.womanSelfAttested) {
-      throw new ApiError(403, 'Women-only verification requires self-attestation');
-    }
-
-    if (!user.subscription || user.subscription.status !== 'ACTIVE' || user.subscription.tier === 'FREE') {
-      throw new ApiError(402, 'Paid subscription required for women verification');
-    }
-
-    if (user.womanVerificationStatus === 'VERIFIED') {
-      return res.json({ success: true, status: 'VERIFIED' });
-    }
-
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data: { womanVerificationStatus: 'PENDING' },
-      select: { id: true, womanVerificationStatus: true },
+    res.json({
+      success: true,
+      data: {
+        // The date itself, so she can see what is on file and tell us if it is
+        // wrong, rather than being refused by a number she cannot look at.
+        dateOfBirth: user.dateOfBirth,
+        ageVerifiedAt: user.ageVerifiedAt,
+        minimumAgeMet: Boolean(user.dateOfBirth && meetsMinimumAge(user.dateOfBirth)),
+        womanVerification: {
+          status: user.womanVerificationStatus,
+          verifiedAt: user.womanVerifiedAt,
+          selfAttested: user.womanSelfAttested,
+          // Whether the document check is available decides which of the two
+          // forms the settings page shows, so the page never offers a path
+          // this deployment cannot actually run.
+          identityCheckAvailable: isStripeConfigured(),
+          submittedAt: badge?.submittedAt ?? null,
+          evidence: badge ? readWomanGateEvidence(badge.metadata) : null,
+        },
+      },
     });
-
-    res.json({ success: true, status: updated.womanVerificationStatus });
   } catch (error) {
     next(error);
   }
 });
+
+router.post(
+  '/me/woman-verification',
+  authenticate,
+  [
+    body('method').optional().isIn(['IDENTITY', 'MANUAL']),
+    body('statement').optional().isString().trim().isLength({ min: 20, max: 1000 })
+      .withMessage('Tell us in a couple of sentences why you are asking, so a reviewer has something to go on.'),
+    body('evidenceUrl')
+      .optional({ checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ max: 2048 })
+      .isURL({ protocols: ['https'], require_protocol: true })
+      .withMessage('A link to supporting evidence has to be a full https address'),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const userId = req.user!.id;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, womanSelfAttested: true, womanVerificationStatus: true },
+      });
+
+      if (!user) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      if (!user.womanSelfAttested) {
+        throw new ApiError(403, 'Women-only verification requires self-attestation');
+      }
+
+      if (user.womanVerificationStatus === 'VERIFIED') {
+        return res.json({ success: true, status: 'VERIFIED' });
+      }
+
+      // A refusal a member can undo herself is not a refusal. Re-requesting from
+      // REJECTED used to set the status back to PENDING, and because the
+      // women-only floor refuses only REJECTED, one request reopened every
+      // surface the reviewer had just closed. Appeals exist for exactly this and
+      // put the decision back in front of a person rather than the applicant.
+      if (user.womanVerificationStatus === 'REJECTED') {
+        throw new ApiError(
+          403,
+          'This check has already been reviewed and refused. If you think that was wrong, open an appeal and a person will look at it again.'
+        );
+      }
+
+      const statement: string | undefined = req.body.statement;
+      const evidenceUrl: string | undefined = req.body.evidenceUrl;
+      const identityAvailable = isStripeConfigured();
+      const requestedMethod: 'IDENTITY' | 'MANUAL' =
+        req.body.method ?? (identityAvailable && !statement ? 'IDENTITY' : 'MANUAL');
+
+      if (requestedMethod === 'IDENTITY' && !identityAvailable) {
+        throw new ApiError(
+          503,
+          'The document check is not set up on this server yet. Write us a short note instead and a person will review it.'
+        );
+      }
+
+      const existing = await pendingWomanGateBadge(userId);
+      const submittedAt = new Date().toISOString();
+
+      if (requestedMethod === 'IDENTITY') {
+        const base = (process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+        const session = await getStripe().identity.verificationSessions.create({
+          type: 'document',
+          metadata: { userId, purpose: WOMAN_GATE_PURPOSE },
+          options: { document: { require_matching_selfie: true } },
+          return_url: `${base}${WOMAN_GATE_RETURN_PATH}`,
+        });
+
+        // One open submission per member, pointed at whichever session is
+        // current: a member who abandons the Stripe page and starts again
+        // should not leave a queue of half-finished requests behind her.
+        const metadata = {
+          purpose: WOMAN_GATE_PURPOSE,
+          provider: 'stripe_identity',
+          sessionId: session.id,
+          submittedAt,
+        };
+        if (existing) {
+          await prisma.verificationBadge.update({ where: { id: existing.id }, data: { metadata, reason: null } });
+        } else {
+          await prisma.verificationBadge.create({
+            data: { userId, type: 'IDENTITY', status: 'PENDING', metadata },
+          });
+        }
+
+        await prisma.user.update({ where: { id: userId }, data: { womanVerificationStatus: 'PENDING' } });
+
+        await logAudit({
+          action: 'USER_VERIFICATION_SUBMIT',
+          actorUserId: userId,
+          targetUserId: userId,
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') || undefined,
+          metadata: { purpose: WOMAN_GATE_PURPOSE, provider: 'stripe_identity', sessionId: session.id },
+        });
+
+        return res.json({
+          success: true,
+          status: 'PENDING',
+          method: 'IDENTITY',
+          data: { redirectUrl: session.url, sessionId: session.id },
+        });
+      }
+
+      if (!statement) {
+        throw new ApiError(
+          400,
+          'Tell us in a couple of sentences why you are asking, so a reviewer has something to go on.'
+        );
+      }
+
+      const metadata = {
+        purpose: WOMAN_GATE_PURPOSE,
+        provider: 'manual',
+        statement,
+        ...(evidenceUrl ? { evidenceUrl } : {}),
+        submittedAt,
+      };
+      if (existing) {
+        await prisma.verificationBadge.update({ where: { id: existing.id }, data: { metadata, reason: null } });
+      } else {
+        await prisma.verificationBadge.create({
+          data: { userId, type: 'IDENTITY', status: 'PENDING', metadata },
+        });
+      }
+
+      await prisma.user.update({ where: { id: userId }, data: { womanVerificationStatus: 'PENDING' } });
+
+      await logAudit({
+        action: 'USER_VERIFICATION_SUBMIT',
+        actorUserId: userId,
+        targetUserId: userId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+        metadata: { purpose: WOMAN_GATE_PURPOSE, provider: 'manual' },
+      });
+
+      res.json({ success: true, status: 'PENDING', method: 'MANUAL' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * Called when the member comes back from Stripe's hosted check.
+ *
+ * The webhook is the durable path, but it is a different deployment concern —
+ * a missing endpoint secret, a queue backlog — and a woman standing in front of
+ * the page she was just returned to should not be told "we are still waiting"
+ * about something Stripe already decided. This asks Stripe directly and writes
+ * the same result, so the loop closes with or without the webhook.
+ */
+router.post('/me/woman-verification/complete', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const badge = await pendingWomanGateBadge(userId);
+    const sessionId = badge ? readWomanGateEvidence(badge.metadata)?.sessionId ?? sessionIdOf(badge.metadata) : null;
+
+    if (!badge || !sessionId) {
+      throw new ApiError(404, 'There is no document check waiting on your account');
+    }
+
+    if (!isStripeConfigured()) {
+      throw new ApiError(503, 'The document check is not set up on this server');
+    }
+
+    // verified_outputs carries the document's own fields and is only returned
+    // when asked for by name, so the expand is what makes this call worth
+    // making at all.
+    const session = await getStripe().identity.verificationSessions.retrieve(sessionId, {
+      expand: ['verified_outputs'],
+    });
+
+    if (session.status !== 'verified') {
+      return res.json({
+        success: true,
+        status: 'PENDING',
+        data: { documentCheck: session.status, reason: session.last_error?.reason ?? null },
+      });
+    }
+
+    const outputs = session.verified_outputs ?? null;
+    await applyWomanGateDocumentResult(userId, badge.id, badge.metadata, outputs);
+
+    res.json({ success: true, status: 'PENDING', data: { documentCheck: 'verified' } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** The `sessionId` on a badge whose evidence is not yet readable as a finished submission. */
+function sessionIdOf(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const value = (metadata as Record<string, unknown>).sessionId;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+type StripeVerifiedOutputs = {
+  first_name?: string | null;
+  last_name?: string | null;
+  dob?: { day?: number | null; month?: number | null; year?: number | null } | null;
+  id_number_type?: string | null;
+} | null;
+
+/**
+ * Writes a passed document check onto the member's record: the evidence the
+ * reviewer will read, and the date of birth the platform has never had.
+ *
+ * The date of birth is the part worth having twice over. A member who
+ * completes this check has proved her age against a government document, so
+ * `ageVerifiedAt` is stamped alongside it and the account stops relying on
+ * what she typed at sign-up. An account that already carries a date of birth
+ * keeps it unless the document disagrees; the document wins, because it is the
+ * better evidence.
+ */
+export async function applyWomanGateDocumentResult(
+  userId: string,
+  badgeId: string,
+  metadata: unknown,
+  outputs: StripeVerifiedOutputs
+): Promise<void> {
+  const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? (metadata as Record<string, unknown>) : {};
+  const name = [outputs?.first_name, outputs?.last_name].filter(Boolean).join(' ').trim();
+  const dob = outputs?.dob;
+  const documentDateOfBirth =
+    dob && dob.year && dob.month && dob.day ? new Date(Date.UTC(dob.year, dob.month - 1, dob.day)) : null;
+
+  await prisma.verificationBadge.update({
+    where: { id: badgeId },
+    data: {
+      metadata: {
+        ...base,
+        purpose: WOMAN_GATE_PURPOSE,
+        provider: 'stripe_identity',
+        documentCheckPassedAt: new Date().toISOString(),
+        ...(name ? { documentName: name } : {}),
+        ...(outputs?.id_number_type ? { documentType: outputs.id_number_type } : {}),
+      },
+    },
+  });
+
+  if (documentDateOfBirth) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { dateOfBirth: documentDateOfBirth, ageVerifiedAt: new Date() },
+    });
+  }
+
+  await prisma.notification.create({
+    data: {
+      userId,
+      type: 'SYSTEM',
+      title: 'Your document check passed',
+      message: 'Thank you. Your women-only verification is now with a reviewer, and you will hear from us shortly.',
+      link: '/dashboard/settings/profile',
+    },
+  });
+}
+
+// ===========================================
+// DATE OF BIRTH
+// ===========================================
+/**
+ * Set once, by the member, and then only staff or a document check may change
+ * it. Accounts created before the column existed have none, and the age gate
+ * treats that as "not permitted" rather than waving them through, so this is
+ * the door back in for them. It is deliberately not part of PATCH /me: a
+ * birthday that can be edited at will is not an age check, it is a preference.
+ */
+router.post(
+  '/me/date-of-birth',
+  authenticate,
+  [body('dateOfBirth').isISO8601().withMessage(DATE_OF_BIRTH_REFUSAL)],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const userId = req.user!.id;
+      const existing = await prisma.user.findUnique({ where: { id: userId }, select: { dateOfBirth: true } });
+      if (!existing) {
+        throw new ApiError(404, 'User not found');
+      }
+      if (existing.dateOfBirth) {
+        throw new ApiError(409, 'Your date of birth is already on file. Contact support if it is wrong.');
+      }
+
+      const dateOfBirth = new Date(req.body.dateOfBirth);
+      if (!isPlausibleDateOfBirth(dateOfBirth) || !meetsMinimumAge(dateOfBirth)) {
+        throw new ApiError(400, DATE_OF_BIRTH_REFUSAL);
+      }
+
+      await prisma.user.update({ where: { id: userId }, data: { dateOfBirth } });
+
+      res.json({ success: true, message: 'Date of birth saved', data: { dateOfBirth } });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // Helper to sync user data to OpenSearch
 const syncUserToIndex = async (userId: string) => {

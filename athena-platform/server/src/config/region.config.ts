@@ -197,7 +197,14 @@ export const EU_PRICING = {
 export const UK_ONLINE_SAFETY_CONFIG = {
   // Age verification requirements
   ageVerificationRequired: false, // Not yet mandated for our category
-  minimumAge: 13,
+  // The statutory floor this regime sets, not the age ATHENA admits at. The two
+  // were read as interchangeable while nothing enforced either; now that the age
+  // gate refuses anyone under PLATFORM_MINIMUM_AGE, a 13 sitting here
+  // unqualified read as a second, lower policy that some surface might honour.
+  // ATHENA is an adult platform everywhere it operates, so the admitting age is
+  // PLATFORM_MINIMUM_AGE and this records only what the Act itself requires.
+  statutoryMinimumAge: 13,
+  minimumAge: PLATFORM_MINIMUM_AGE,
   
   // Content moderation requirements
   illegalContentRemovalHours: 24,
