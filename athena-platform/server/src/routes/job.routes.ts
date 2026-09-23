@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, query, validationResult } from 'express-validator';
+import { JobType, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, requireRole, AuthRequest } from '../middleware/auth';
@@ -15,72 +16,166 @@ const router = Router();
 // ===========================================
 // SEARCH JOBS
 // ===========================================
+
+/**
+ * The bands behind the "Experience Level" filter, in years. A job is not filed
+ * under one level — it advertises a range, and a posting asking for three to
+ * six years belongs to more than one band — so a band matches whenever the two
+ * ranges overlap. `max: null` is the open-ended top band.
+ */
+interface ExperienceBand {
+  min: number;
+  max: number | null;
+}
+
+const EXPERIENCE_BANDS: Record<string, ExperienceBand> = {
+  entry: { min: 0, max: 2 },
+  mid: { min: 2, max: 5 },
+  senior: { min: 5, max: 8 },
+  lead: { min: 8, max: 12 },
+  executive: { min: 12, max: null },
+};
+
+/**
+ * Relevance is the search index's own ordering, so it has no entry here; it is
+ * what a request gets when it asks for nothing else.
+ */
+const JOB_SORT_ORDERS: Record<string, Prisma.JobOrderByWithRelationInput> = {
+  recent: { publishedAt: 'desc' },
+  salary_high: { salaryMax: { sort: 'desc', nulls: 'last' } },
+  salary_low: { salaryMin: { sort: 'asc', nulls: 'last' } },
+};
+
+/**
+ * `type` arrives as a comma-separated list because the filter panel lets her
+ * tick more than one. Anything that is not a real job type is dropped here
+ * rather than handed to Prisma, which answers an unknown enum value with a
+ * 500 — which is what ticking two boxes used to do.
+ */
+function parseJobTypes(raw: string): JobType[] {
+  const known = new Set<string>(Object.values(JobType));
+  return raw
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter((value): value is JobType => known.has(value));
+}
+
+function parseExperienceBands(raw: string): ExperienceBand[] {
+  return raw
+    .split(',')
+    .map((value) => EXPERIENCE_BANDS[value.trim().toLowerCase()])
+    .filter((band): band is ExperienceBand => Boolean(band));
+}
+
+function experienceBandWhere(band: ExperienceBand): Prisma.JobWhereInput {
+  const clauses: Prisma.JobWhereInput[] = [
+    // A posting that names no ceiling is open-ended above, so it reaches up
+    // into this band from wherever it starts.
+    { OR: [{ experienceMax: null }, { experienceMax: { gte: band.min } }] },
+  ];
+  if (band.max !== null) {
+    clauses.push({ OR: [{ experienceMin: null }, { experienceMin: { lte: band.max } }] });
+  }
+  return { AND: clauses };
+}
+
 router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { page, limit } = parsePagination(req.query as { page?: string; limit?: string });
-    const search = req.query.search as string;
-    const type = req.query.type as string;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const typeParam = typeof req.query.type === 'string' ? req.query.type.trim() : '';
+    const experienceParam = typeof req.query.experience === 'string' ? req.query.experience.trim() : '';
+    const types = parseJobTypes(typeParam);
+    const bands = parseExperienceBands(experienceParam);
     const city = req.query.city as string;
     const state = req.query.state as string;
     const remote = req.query.remote === 'true';
     const salaryMin = parseInt(req.query.salaryMin as string) || undefined;
     const salaryMax = parseInt(req.query.salaryMax as string) || undefined;
+    const sort = typeof req.query.sort === 'string' ? req.query.sort : 'relevance';
+
+    const emptyPage = {
+      success: true,
+      data: [],
+      pagination: { page, limit, total: 0, pages: 0 },
+    };
+
+    // A filter that names only values which do not exist matches nothing, and
+    // that is a different answer from no filter at all — the second would hand
+    // her the whole board back when she had asked for one kind of work.
+    if ((typeParam && types.length === 0) || (experienceParam && bands.length === 0)) {
+      return res.json(emptyPage);
+    }
+
+    // The search index and the database do not know the same things. The index
+    // can match free text and rank it; it has never heard of a city or of years
+    // of experience, and it reads a salary filter as a range the job must sit
+    // inside rather than one it has to overlap. Handing it half the query is
+    // what left the location box on the member's job search doing nothing the
+    // moment she typed a keyword beside it. So the index answers plain keyword
+    // browsing in relevance order, and as soon as she narrows or re-sorts,
+    // every condition is applied together in the one place that knows them all.
+    const hasStructuredFilter =
+      types.length > 0 ||
+      bands.length > 0 ||
+      Boolean(city) ||
+      Boolean(state) ||
+      remote ||
+      salaryMin !== undefined ||
+      salaryMax !== undefined;
+    const useSearchIndex = Boolean(search) && sort === 'relevance' && !hasStructuredFilter;
 
     let jobIds: string[] | null = null;
     let totalCount = 0;
 
-    // 1. Try OpenSearch if there is a text query
-    if (search) {
+    if (useSearchIndex) {
       try {
         const searchResult = await searchService({
           query: search,
           type: 'jobs',
           page,
           limit,
-          filters: {
-            jobType: type,
-            salary: { min: salaryMin, max: salaryMax },
-            remote,
-          },
         });
         jobIds = searchResult.results.map((r) => r.id);
         totalCount = searchResult.total;
       } catch (error) {
-        // Fallback will happen in the 'else' logic usually, but here we just proceed with null jobIds
-        // effectively falling back to Prisma below if we structure it right.
+        // Losing the index is not losing the search: jobIds stays null and the
+        // database answers the same question below.
         logger.error('Search service failed', { error });
       }
     }
 
-    // 2. Build Prisma Query
-    const where: any = { status: 'ACTIVE' };
+    const conditions: Prisma.JobWhereInput[] = [];
 
     if (jobIds !== null) {
-      // OpenSearch path
       if (jobIds.length === 0) {
-        // No results from search
-        return res.json({
-          success: true,
-          data: [],
-          pagination: { page, limit, total: 0, pages: 0 },
+        return res.json(emptyPage);
+      }
+      conditions.push({ id: { in: jobIds } });
+    } else {
+      if (search) {
+        conditions.push({
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ],
         });
       }
-      where.id = { in: jobIds };
-    } else {
-      // Prisma path (Browse or Fallback)
-      if (search) {
-        where.OR = [
-          { title: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-        ];
-      }
-      if (type) where.type = type;
-      if (city) where.city = { contains: city, mode: 'insensitive' };
-      if (state) where.state = state;
-      if (remote) where.isRemote = true;
-      if (salaryMin) where.salaryMin = { gte: salaryMin };
-      if (salaryMax) where.salaryMax = { lte: salaryMax };
+      if (types.length > 0) conditions.push({ type: { in: types } });
+      if (city) conditions.push({ city: { contains: city, mode: 'insensitive' } });
+      if (state) conditions.push({ state });
+      if (remote) conditions.push({ isRemote: true });
+      // A salary filter is the range she would accept, so a job qualifies when
+      // its advertised range overlaps hers. Read the other way round — the
+      // job's floor above her floor and its ceiling below her ceiling — it
+      // threw away every listing whose band was merely wider than the one she
+      // picked, which is most of the good ones.
+      if (salaryMin !== undefined) conditions.push({ salaryMax: { gte: salaryMin } });
+      if (salaryMax !== undefined) conditions.push({ salaryMin: { lte: salaryMax } });
+      if (bands.length > 0) conditions.push({ OR: bands.map(experienceBandWhere) });
     }
+
+    const where: Prisma.JobWhereInput = { status: 'ACTIVE', AND: conditions };
 
     const [jobs, total] = await Promise.all([
       prisma.job.findMany({
@@ -91,7 +186,6 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
               id: true,
               name: true,
               logo: true,
-              safetyScore: true,
             },
           },
           skills: {
@@ -103,7 +197,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
         },
         skip: jobIds ? undefined : (page - 1) * limit, // Pagination handled by OS if used
         take: jobIds ? undefined : limit,
-        orderBy: jobIds ? undefined : { publishedAt: 'desc' },
+        orderBy: jobIds ? undefined : JOB_SORT_ORDERS[sort] ?? { publishedAt: 'desc' },
       }),
       jobIds ? Promise.resolve(totalCount) : prisma.job.count({ where }),
     ]);
@@ -170,7 +264,12 @@ router.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
             state: true,
             industry: true,
             size: true,
-            safetyScore: true,
+            // Organization.safetyScore is not served here. Nothing on the
+            // platform computes one — safety-score.service.ts only ever scores
+            // a User — so the only value the column has ever held is the random
+            // number the demo seed wrote into it. A score about an employer,
+            // published by a women's safety platform, has to be measured before
+            // it is shown.
             isVerified: true,
           },
         },
@@ -784,7 +883,6 @@ router.get('/me/saved', authenticate, async (req: AuthRequest, res, next) => {
                 id: true,
                 name: true,
                 logo: true,
-                safetyScore: true,
               },
             },
             skills: {

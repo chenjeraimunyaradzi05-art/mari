@@ -183,7 +183,7 @@ export default function SkillsMarketplacePage() {
         title="Hire a woman who has done it before"
         description="Members offering what they are good at — by the hour or as a fixed package. You see the rate before you get in touch, and the money moves through Stripe."
         primaryAction={{ label: 'Browse services', href: '#all-services' }}
-        secondaryAction={{ label: 'Offer your own', href: '/dashboard/creator' }}
+        secondaryAction={{ label: 'Offer your own', href: '/skills-marketplace/sell' }}
       />
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span>
@@ -197,6 +197,12 @@ export default function SkillsMarketplacePage() {
             Your bookings
           </Link>
           <span className="text-slate-400"> · time booked by the hour</span>
+        </span>
+        <span>
+          <Link href="/skills-marketplace/sell" className="font-medium text-primary-600 hover:underline">
+            Your listings
+          </Link>
+          <span className="text-slate-400"> · what you are offering</span>
         </span>
       </div>
 
@@ -267,7 +273,9 @@ export default function SkillsMarketplacePage() {
               })
             }
             primaryAction={
-              hasMarketplaceFilters ? undefined : { label: 'Offer a service', href: '/dashboard/creator' }
+              hasMarketplaceFilters
+                ? undefined
+                : { label: 'Offer a service', href: '/skills-marketplace/sell/new' }
             }
             secondaryAction={
               hasMarketplaceFilters ? undefined : { label: 'Post what you need instead', href: '/dashboard/rfps' }

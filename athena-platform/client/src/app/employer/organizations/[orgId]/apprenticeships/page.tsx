@@ -16,6 +16,7 @@ import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { ArrowLeft, GraduationCap, Globe, Loader2, Plus, Users } from 'lucide-react';
+import { api } from '@/lib/api';
 import { apprenticeshipApi } from '@/lib/api-extensions';
 import { apiMessage } from '@/lib/strategy-api';
 import { Button } from '@/components/ui/button';
@@ -57,6 +58,39 @@ const TONE: Record<string, string> = {
 
 const EMPTY = { title: '', description: '', framework: '', level: 'CERTIFICATE_III', durationMonths: '24', positions: '1', city: '', state: '', wageMin: '', wageMax: '' };
 
+type ApplicationRow = {
+  id: string;
+  status: string;
+  submittedAt: string;
+  user?: { id: string; displayName?: string | null; email?: string | null } | null;
+};
+
+/**
+ * What a provider may set. WITHDRAWN is missing on purpose: that is the
+ * candidate's own word about her application and only she can say it, so an
+ * application she withdrew is shown as settled rather than as a menu.
+ */
+const DECISIONS = [
+  ['SCREENING', 'Reviewing'],
+  ['INTERVIEW', 'Interviewing'],
+  ['OFFERED', 'Offered'],
+  ['ACCEPTED', 'Accepted'],
+  ['REJECTED', 'Not successful'],
+] as const;
+
+type Decision = (typeof DECISIONS)[number][0];
+
+const DECIDED: Record<Decision, string> = {
+  SCREENING: 'Moved to review. She has been told.',
+  INTERVIEW: 'Shortlisted for interview. She has been told.',
+  OFFERED: 'Offer sent. She has been told.',
+  ACCEPTED: 'Placement confirmed. She can start tracking her competencies.',
+  REJECTED: 'Marked unsuccessful. She has been told.',
+};
+
+const applicantName = (application: ApplicationRow) =>
+  application.user?.displayName || application.user?.email || 'An applicant';
+
 export default function ProviderApprenticeshipsPage() {
   const params = useParams();
   const orgId = params.orgId as string;
@@ -74,8 +108,27 @@ export default function ProviderApprenticeshipsPage() {
   const applications = useQuery({
     queryKey: ['apprenticeship-applications', showApplications],
     queryFn: () => apprenticeshipApi.getApplicationsFor(showApplications as string),
-    select: (r) => (r.data?.data ?? []) as Array<{ id: string; status: string; createdAt: string; applicant?: { displayName?: string | null } | null }>,
+    // The route selects `user` and orders by `submittedAt`; this used to read
+    // `applicant` and `createdAt`, neither of which is in the payload, so every
+    // applicant showed as "An applicant" with an unreadable date.
+    select: (r) => (r.data?.data ?? []) as ApplicationRow[],
     enabled: Boolean(showApplications),
+  });
+
+  // Moving an application along. There was no endpoint for this at all, so an
+  // applicant sat at "submitted" for ever and the milestone, evidence and
+  // certificate screens behind an accepted placement were unreachable for
+  // everybody. `api.patch` inline rather than a new helper, because this is the
+  // one screen that decides an apprenticeship application.
+  const decide = useMutation({
+    mutationFn: ({ applicationId, status }: { applicationId: string; status: Decision }) =>
+      api.patch(`/apprenticeships/applications/${applicationId}`, { status }),
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['apprenticeship-applications', showApplications] });
+      queryClient.invalidateQueries({ queryKey: ['provider-apprenticeships', orgId] });
+      toast.success(DECIDED[variables.status]);
+    },
+    onError: (err) => toast.error(apiMessage(err, 'That application could not be updated.')),
   });
 
   const create = useMutation({
@@ -239,9 +292,36 @@ export default function ProviderApprenticeshipsPage() {
                   ) : (
                     <ul className="space-y-2 text-sm">
                       {applications.data!.map((application) => (
-                        <li key={application.id} className="flex items-center justify-between">
-                          <span className="text-slate-800 dark:text-slate-200">{application.applicant?.displayName ?? 'An applicant'}</span>
-                          <span className="text-xs text-slate-500">{application.status.toLowerCase()} · {formatDate(application.createdAt)}</span>
+                        <li key={application.id} className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="min-w-0">
+                            <span className="text-slate-800 dark:text-slate-200">{applicantName(application)}</span>
+                            <span className="ml-2 text-xs text-slate-500">applied {formatDate(application.submittedAt)}</span>
+                          </span>
+                          {application.status === 'WITHDRAWN' ? (
+                            <span className="text-xs text-slate-500">withdrawn</span>
+                          ) : (
+                            <label className="flex items-center gap-2 text-xs text-slate-500">
+                              <span className="sr-only">Decision for {applicantName(application)}</span>
+                              <select
+                                value={application.status}
+                                disabled={decide.isPending}
+                                onChange={(e) =>
+                                  decide.mutate({ applicationId: application.id, status: e.target.value as Decision })
+                                }
+                                className="input py-1 text-xs"
+                              >
+                                {/* A freshly submitted application has no decision on it yet,
+                                    so its own status has to be selectable or the control would
+                                    open showing somebody else's. */}
+                                {application.status === 'SUBMITTED' && <option value="SUBMITTED">Submitted</option>}
+                                {DECISIONS.map(([value, label]) => (
+                                  <option key={value} value={value}>
+                                    {label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
                         </li>
                       ))}
                     </ul>

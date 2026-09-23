@@ -1,15 +1,25 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ClipboardList } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { educationApi } from '@/lib/api';
+import {
+  decideEducationApplication,
+  EDUCATION_DECISIONS,
+  type EducationDecision,
+} from '@/lib/education-provider';
 import { Badge } from '@/components/ui/badge';
 
 export default function ProviderEducationApplicationsPage() {
   const params = useParams();
   const orgId = params.orgId as string;
+  const queryClient = useQueryClient();
+  // Which row is mid-decision, so only that select is disabled while it saves.
+  const [decidingId, setDecidingId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['provider-education-applications', orgId],
@@ -17,6 +27,23 @@ export default function ProviderEducationApplicationsPage() {
       const response = await educationApi.getProviderApplications(orgId);
       return response.data.data;
     },
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ applicationId, status }: { applicationId: string; status: EducationDecision }) =>
+      decideEducationApplication(orgId, applicationId, status),
+    onMutate: ({ applicationId }) => setDecidingId(applicationId),
+    onSuccess: () => {
+      toast.success('Decision saved');
+      queryClient.invalidateQueries({ queryKey: ['provider-education-applications', orgId] });
+    },
+    onError: (err: unknown) => {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      // A VIEWER can read this page but may not decide on it, and the server
+      // says so plainly — pass that through rather than a generic failure.
+      toast.error(typeof message === 'string' && message ? message : 'Could not save that decision');
+    },
+    onSettled: () => setDecidingId(null),
   });
 
   const applications = (data as any[]) || [];
@@ -41,7 +68,10 @@ export default function ProviderEducationApplicationsPage() {
 
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Education Applications</h1>
-        <p className="text-slate-600 dark:text-slate-400 mt-1">Applications submitted to this provider</p>
+        <p className="text-slate-600 dark:text-slate-400 mt-1">
+          Applications submitted to this provider. Setting a status here records your
+          institution&rsquo;s decision, and the applicant sees it on her own page.
+        </p>
       </div>
 
       {isLoading ? (
@@ -116,7 +146,41 @@ export default function ProviderEducationApplicationsPage() {
                       ) : null}
                     </td>
                     <td className="px-6 py-4">
-                      <Badge variant="secondary">{a.status}</Badge>
+                      {/* A withdrawn application is the applicant's own decision, so
+                          there is nothing here for the provider to change. */}
+                      {a.status === 'WITHDRAWN' ? (
+                        <Badge variant="secondary">WITHDRAWN</Badge>
+                      ) : (
+                        <label className="block">
+                          <span className="sr-only">
+                            Decision for {a.user ? `${a.user.firstName} ${a.user.lastName}` : 'this applicant'}
+                          </span>
+                          <select
+                            value={
+                              EDUCATION_DECISIONS.some((d) => d.value === a.status) ? a.status : ''
+                            }
+                            disabled={decidingId === a.id}
+                            onChange={(e) => {
+                              const status = e.target.value as EducationDecision;
+                              if (!status || status === a.status) return;
+                              decide.mutate({ applicationId: a.id, status });
+                            }}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                          >
+                            {/* SUBMITTED is where every application starts and is not
+                                something the provider chooses, so it shows as the
+                                current value but cannot be selected back into. */}
+                            <option value="" disabled>
+                              {a.status === 'SUBMITTED' ? 'Awaiting decision' : a.status}
+                            </option>
+                            {EDUCATION_DECISIONS.map((decision) => (
+                              <option key={decision.value} value={decision.value}>
+                                {decision.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
                       {a.submittedAt ? new Date(a.submittedAt).toLocaleDateString() : '—'}

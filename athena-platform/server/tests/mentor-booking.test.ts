@@ -20,6 +20,11 @@ jest.mock('../src/utils/prisma', () => ({
       findMany: jest.fn(),
     },
     user: { findUnique: jest.fn() },
+    // Mentor holds run through the shared escrow path now, so the booking
+    // writes an EscrowPayment row the expiry sweeper can see. Before this the
+    // hold was a bare PaymentIntent invisible to the sweeper, and a session
+    // booked more than seven days out lapsed with the mentor never paid.
+    escrowPayment: { create: jest.fn(async (args: any) => ({ id: 'esc-1', ...args.data })), update: jest.fn(), findUnique: jest.fn() },
   },
 }));
 
@@ -107,6 +112,24 @@ function mockMentorProfile(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/**
+ * prisma.user.findUnique answers two questions in this flow: the mentee's
+ * preferred currency, and — since the Stripe Connect identity was unified onto
+ * User.stripeConnectAccountId — which connected account the mentor is paid
+ * through. One default serves both, and the not-connected test clears it.
+ */
+function mockUser(overrides: Record<string, unknown> = {}) {
+  (prisma.user.findUnique as any).mockResolvedValue({
+    preferredCurrency: 'AUD',
+    stripeConnectAccountId: 'acct_mentor',
+    // Escrow refuses a seller Stripe has not finished verifying.
+    stripeConnectStatus: 'ACTIVE',
+    mentorProfile: { stripeAccountId: 'acct_mentor' },
+    creatorProfile: null,
+    ...overrides,
+  });
+}
+
 function bookingBody(overrides: Record<string, unknown> = {}) {
   return {
     scheduledAt: '2026-02-15T02:00:00.000Z',
@@ -119,7 +142,12 @@ function bookingBody(overrides: Record<string, unknown> = {}) {
 describe('Booking a mentor session', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (prisma.user.findUnique as any).mockResolvedValue({ preferredCurrency: 'AUD' });
+    // The hold is created through the shared escrow service now, and that
+    // service falls back to a fabricated intent when no key is configured. This
+    // suite is about the real authorisation — the amount, the currency, the
+    // platform fee and the manual capture — so it configures one.
+    process.env.STRIPE_SECRET_KEY = 'sk_test_mentor_booking';
+    mockUser();
     (prisma.mentorSession.create as any).mockImplementation(async (args: any) => ({
       id: 'sess-1',
       ...args.data,
@@ -204,7 +232,7 @@ describe('Booking a mentor session', () => {
 
   it('honours a supported preferred currency', async () => {
     mockMentorProfile();
-    (prisma.user.findUnique as any).mockResolvedValue({ preferredCurrency: 'gbp' });
+    mockUser({ preferredCurrency: 'gbp' });
 
     await request(app)
       .post(`/api/mentors/${MENTOR_PROFILE}/book`)
@@ -271,6 +299,9 @@ describe('Booking a mentor session', () => {
 
   it('refuses a mentor who is not connected to payments', async () => {
     mockMentorProfile({ stripeAccountId: null });
+    // No connected account anywhere: not on the profile, and not the unified
+    // identity the resolver prefers.
+    mockUser({ stripeConnectAccountId: null, mentorProfile: { stripeAccountId: null } });
 
     await request(app)
       .post(`/api/mentors/${MENTOR_PROFILE}/book`)

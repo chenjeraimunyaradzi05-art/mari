@@ -14,19 +14,29 @@ import {
   Filter,
   X,
   Bookmark,
-  Target,
 } from 'lucide-react';
 import { useJobs, useSavedJobs, useSaveJob, useUnsaveJob } from '@/lib/hooks';
-import { formatRelativeTime, formatSalaryRange, JOB_TYPE_LABELS, cn } from '@/lib/utils';
+import type { JobSearchResult } from '@/lib/hooks';
+import { formatRelativeTime, formatSalaryRange, cn } from '@/lib/utils';
 
+// These are the six values the JobType enum actually holds. The list used to
+// offer "Freelance", which is not one of them, so ticking it asked Prisma for
+// an enum member that does not exist and the search came back as a 500.
 const jobTypes = [
   { value: 'FULL_TIME', label: 'Full-time' },
   { value: 'PART_TIME', label: 'Part-time' },
   { value: 'CONTRACT', label: 'Contract' },
-  { value: 'FREELANCE', label: 'Freelance' },
+  { value: 'CASUAL', label: 'Casual' },
   { value: 'INTERNSHIP', label: 'Internship' },
+  { value: 'APPRENTICESHIP', label: 'Apprenticeship' },
 ];
 
+const jobTypeLabels: Record<string, string> = Object.fromEntries(
+  jobTypes.map((type) => [type.value, type.label])
+);
+
+// The bands the jobs route reads; a posting matches one when the years of
+// experience it asks for overlap the band.
 const experienceLevels = [
   { value: 'entry', label: 'Entry Level' },
   { value: 'mid', label: 'Mid Level' },
@@ -42,21 +52,16 @@ const sortOptions = [
   { value: 'salary_low', label: 'Lowest Salary' },
 ];
 
-type JobListItem = {
-  id: string;
-  title: string;
-  location?: string;
-  type: string;
-  salaryMin?: number | null;
-  salaryMax?: number | null;
-  createdAt: string | Date;
-  organization?: {
-    name?: string;
-    logo?: string | null;
-  };
-  matchScore?: number | null;
-  requiredSkills?: string[];
-};
+const salaryRanges: { value: string; label: string; min?: number; max?: number }[] = [
+  { value: '', label: 'Any' },
+  { value: '0-50000', label: 'Under $50,000', max: 50000 },
+  { value: '50000-80000', label: '$50,000 - $80,000', min: 50000, max: 80000 },
+  { value: '80000-120000', label: '$80,000 - $120,000', min: 80000, max: 120000 },
+  { value: '120000-150000', label: '$120,000 - $150,000', min: 120000, max: 150000 },
+  { value: '150000+', label: '$150,000+', min: 150000 },
+];
+
+const PAGE_SIZE = 20;
 
 export default function JobsPage() {
   return (
@@ -69,22 +74,34 @@ export default function JobsPage() {
 function JobsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
-  const [location, setLocation] = useState(searchParams.get('location') || '');
+
+  // What she has actually searched for lives in the URL, so a page of results
+  // can be shared or reloaded, and typing in the box does not fire a request
+  // per keystroke. The inputs below start from it and catch up on submit.
+  const appliedQuery = searchParams.get('q') || '';
+  const appliedLocation = searchParams.get('location') || '';
+
+  const [searchQuery, setSearchQuery] = useState(appliedQuery);
+  const [location, setLocation] = useState(appliedLocation);
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [selectedLevels, setSelectedLevels] = useState<string[]>([]);
+  const [salaryRange, setSalaryRange] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState('relevance');
+  const [page, setPage] = useState(1);
+
+  const selectedSalary = salaryRanges.find((range) => range.value === salaryRange);
 
   const { data, isLoading } = useJobs({
-    q: searchQuery,
-    location,
-    type: selectedTypes.join(','),
-    experience: selectedLevels.join(','),
+    search: appliedQuery || undefined,
+    city: appliedLocation || undefined,
+    type: selectedTypes.length ? selectedTypes.join(',') : undefined,
+    experience: selectedLevels.length ? selectedLevels.join(',') : undefined,
     sort: sortBy,
-    page: 1,
-    limit: 20,
+    salaryMin: selectedSalary?.min,
+    salaryMax: selectedSalary?.max,
+    page,
+    limit: PAGE_SIZE,
   });
 
   const { data: savedJobs } = useSavedJobs();
@@ -92,35 +109,70 @@ function JobsContent() {
   const unsaveJobMutation = useUnsaveJob();
   const savedJobIds = new Set((savedJobs || []).map((job: { id: string }) => job.id));
 
+  const jobs = data?.jobs ?? [];
+  const pagination = data?.pagination;
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    // Update URL params
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
     if (location) params.set('location', location);
-    router.push(`/dashboard/jobs?${params.toString()}`);
+    const queryString = params.toString();
+    setPage(1);
+    router.push(queryString ? `/dashboard/jobs?${queryString}` : '/dashboard/jobs');
   };
 
+  // Every filter change puts her back on the first page: page four of the old
+  // result set is rarely page four of the new one, and is often past its end.
   const toggleType = (type: string) => {
+    setPage(1);
     setSelectedTypes((prev) =>
       prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
   };
 
   const toggleLevel = (level: string) => {
+    setPage(1);
     setSelectedLevels((prev) =>
       prev.includes(level) ? prev.filter((l) => l !== level) : [...prev, level]
     );
   };
 
+  const changeSalaryRange = (value: string) => {
+    setPage(1);
+    setSalaryRange(value);
+  };
+
+  const changeSort = (value: string) => {
+    setPage(1);
+    setSortBy(value);
+  };
+
   const clearFilters = () => {
     setSelectedTypes([]);
     setSelectedLevels([]);
+    setSalaryRange('');
     setSearchQuery('');
     setLocation('');
+    setPage(1);
+    router.push('/dashboard/jobs');
   };
 
-  const hasFilters = selectedTypes.length > 0 || selectedLevels.length > 0 || searchQuery || location;
+  const hasFilters =
+    selectedTypes.length > 0 ||
+    selectedLevels.length > 0 ||
+    Boolean(salaryRange) ||
+    Boolean(appliedQuery) ||
+    Boolean(appliedLocation);
+
+  const activeFilterCount =
+    selectedTypes.length + selectedLevels.length + (salaryRange ? 1 : 0);
+
+  const describeLocation = (job: JobSearchResult) => {
+    if (job.isRemote) return 'Remote';
+    const parts = [job.city, job.state].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : 'Location not stated';
+  };
 
   return (
     <div className="p-6">
@@ -151,7 +203,7 @@ function JobsContent() {
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="City, state, or remote"
+              placeholder="City or suburb"
               className="input pl-10 w-full"
             />
           </div>
@@ -173,9 +225,9 @@ function JobsContent() {
           >
             <Filter className="w-4 h-4" />
             <span>Filters</span>
-            {hasFilters && (
+            {activeFilterCount > 0 && (
               <span className="w-5 h-5 bg-primary-500 text-white text-xs rounded-full flex items-center justify-center">
-                {selectedTypes.length + selectedLevels.length}
+                {activeFilterCount}
               </span>
             )}
           </button>
@@ -214,7 +266,7 @@ function JobsContent() {
           <span className="text-sm text-slate-500">Sort by:</span>
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
+            onChange={(e) => changeSort(e.target.value)}
             className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-900"
           >
             {sortOptions.map((option) => (
@@ -272,18 +324,28 @@ function JobsContent() {
 
             {/* Salary Range */}
             <div>
-              <label className="text-sm font-medium text-slate-900 dark:text-white mb-2 block">
+              <label
+                htmlFor="salary-range"
+                className="text-sm font-medium text-slate-900 dark:text-white mb-2 block"
+              >
                 Salary Range
               </label>
               <div className="space-y-2">
-                <select className="input text-sm">
-                  <option value="">Any</option>
-                  <option value="0-50000">Under $50,000</option>
-                  <option value="50000-80000">$50,000 - $80,000</option>
-                  <option value="80000-120000">$80,000 - $120,000</option>
-                  <option value="120000-150000">$120,000 - $150,000</option>
-                  <option value="150000+">$150,000+</option>
+                <select
+                  id="salary-range"
+                  value={salaryRange}
+                  onChange={(e) => changeSalaryRange(e.target.value)}
+                  className="input text-sm"
+                >
+                  {salaryRanges.map((range) => (
+                    <option key={range.value} value={range.value}>
+                      {range.label}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-xs text-slate-500">
+                  Only listings that publish a salary can be filtered this way.
+                </p>
               </div>
             </div>
           </div>
@@ -295,7 +357,7 @@ function JobsContent() {
         {/* Results count */}
         {data && (
           <div className="text-sm text-slate-600 dark:text-slate-400">
-            Showing {data.jobs?.length || 0} of {data.total || 0} jobs
+            Showing {jobs.length} of {data.total} jobs
           </div>
         )}
 
@@ -315,119 +377,122 @@ function JobsContent() {
               </div>
             ))}
           </div>
-        ) : data?.jobs?.length ? (
+        ) : jobs.length > 0 ? (
           <div className="space-y-4">
-            {data.jobs.map((job: JobListItem) => (
-              <Link
-                key={job.id}
-                href={`/dashboard/jobs/${job.id}`}
-                className="card hover:shadow-md transition group block"
-              >
-                <div className="flex items-start space-x-4">
-                  {/* Company logo */}
-                  <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center flex-shrink-0">
-                    {job.organization?.logo ? (
-                      <Image
-                        src={job.organization.logo}
-                        alt={job.organization.name || 'Company logo'}
-                        width={40}
-                        height={40}
-                        unoptimized
-                        className="w-10 h-10 object-contain"
-                      />
-                    ) : (
-                      <Building2 className="w-6 h-6 text-slate-400" />
-                    )}
-                  </div>
+            {jobs.map((job) => {
+              const skillNames = (job.skills ?? []).map((entry) => entry.skill.name);
 
-                  {/* Job details */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition">
-                          {job.title}
-                        </h3>
-                        <p className="text-slate-600 dark:text-slate-400">
-                          {job.organization?.name}
-                        </p>
+              return (
+                <Link
+                  key={job.id}
+                  href={`/dashboard/jobs/${job.id}`}
+                  className="card hover:shadow-md transition group block"
+                >
+                  <div className="flex items-start space-x-4">
+                    {/* Company logo */}
+                    <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center flex-shrink-0">
+                      {job.organization?.logo ? (
+                        <Image
+                          src={job.organization.logo}
+                          alt={job.organization.name || 'Company logo'}
+                          width={40}
+                          height={40}
+                          unoptimized
+                          className="w-10 h-10 object-contain"
+                        />
+                      ) : (
+                        <Building2 className="w-6 h-6 text-slate-400" />
+                      )}
+                    </div>
+
+                    {/* Job details */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition">
+                            {job.title}
+                          </h3>
+                          <p className="text-slate-600 dark:text-slate-400">
+                            {job.organization?.name}
+                          </p>
+                        </div>
+
+                        {job.hasApplied && (
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+                            Applied
+                          </span>
+                        )}
                       </div>
-                      
-                      {job.matchScore && (
-                        <div className="flex items-center space-x-1 text-green-600 text-sm">
-                          <Target className="w-4 h-4" />
-                          <span>{job.matchScore}% match</span>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center">
+                          <MapPin className="w-4 h-4 mr-1" />
+                          {describeLocation(job)}
+                        </span>
+                        <span className="flex items-center">
+                          <Briefcase className="w-4 h-4 mr-1" />
+                          {jobTypeLabels[job.type] || job.type}
+                        </span>
+                        {(job.salaryMin || job.salaryMax) && (
+                          <span className="flex items-center">
+                            <DollarSign className="w-4 h-4 mr-1" />
+                            {formatSalaryRange(job.salaryMin ?? undefined, job.salaryMax ?? undefined)}
+                          </span>
+                        )}
+                        <span className="flex items-center">
+                          <Clock className="w-4 h-4 mr-1" />
+                          {formatRelativeTime(job.createdAt)}
+                        </span>
+                      </div>
+
+                      {/* Skills */}
+                      {skillNames.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {skillNames.slice(0, 5).map((skill) => (
+                            <span
+                              key={skill}
+                              className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs"
+                            >
+                              {skill}
+                            </span>
+                          ))}
+                          {skillNames.length > 5 && (
+                            <span className="px-2 py-1 text-slate-500 text-xs">
+                              +{skillNames.length - 5} more
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
-                      <span className="flex items-center">
-                        <MapPin className="w-4 h-4 mr-1" />
-                        {job.location}
-                      </span>
-                      <span className="flex items-center">
-                        <Briefcase className="w-4 h-4 mr-1" />
-                        {JOB_TYPE_LABELS[job.type] || job.type}
-                      </span>
-                      {(job.salaryMin || job.salaryMax) && (
-                        <span className="flex items-center">
-                          <DollarSign className="w-4 h-4 mr-1" />
-                          {formatSalaryRange(job.salaryMin ?? undefined, job.salaryMax ?? undefined)}
-                        </span>
-                      )}
-                      <span className="flex items-center">
-                        <Clock className="w-4 h-4 mr-1" />
-                        {formatRelativeTime(job.createdAt)}
-                      </span>
-                    </div>
-
-                    {/* Skills */}
-                    {(job.requiredSkills?.length ?? 0) > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {(job.requiredSkills ?? []).slice(0, 5).map((skill: string) => (
-                          <span
-                            key={skill}
-                            className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded text-xs"
-                          >
-                            {skill}
-                          </span>
-                        ))}
-                        {(job.requiredSkills?.length ?? 0) > 5 && (
-                          <span className="px-2 py-1 text-slate-500 text-xs">
-                            +{(job.requiredSkills?.length ?? 0) - 5} more
-                          </span>
+                    {/* Actions */}
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const isSaved = savedJobIds.has(job.id);
+                          if (isSaved) {
+                            unsaveJobMutation.mutate(job.id);
+                          } else {
+                            saveJobMutation.mutate(job.id);
+                          }
+                        }}
+                        disabled={saveJobMutation.isPending || unsaveJobMutation.isPending}
+                        aria-label={savedJobIds.has(job.id) ? 'Remove from saved jobs' : 'Save job'}
+                        className={cn(
+                          'p-2 transition disabled:opacity-50',
+                          savedJobIds.has(job.id)
+                            ? 'text-primary-600 hover:text-primary-700'
+                            : 'text-slate-400 hover:text-primary-600'
                         )}
-                      </div>
-                    )}
+                      >
+                        <Bookmark className={cn('w-5 h-5', savedJobIds.has(job.id) && 'fill-current')} />
+                      </button>
+                    </div>
                   </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        const isSaved = savedJobIds.has(job.id);
-                        if (isSaved) {
-                          unsaveJobMutation.mutate(job.id);
-                        } else {
-                          saveJobMutation.mutate(job.id);
-                        }
-                      }}
-                      disabled={saveJobMutation.isPending || unsaveJobMutation.isPending}
-                      aria-label={savedJobIds.has(job.id) ? 'Remove from saved jobs' : 'Save job'}
-                      className={cn(
-                        'p-2 transition disabled:opacity-50',
-                        savedJobIds.has(job.id)
-                          ? 'text-primary-600 hover:text-primary-700'
-                          : 'text-slate-400 hover:text-primary-600'
-                      )}
-                    >
-                      <Bookmark className={cn('w-5 h-5', savedJobIds.has(job.id) && 'fill-current')} />
-                    </button>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         ) : (
           <div className="card text-center py-12">
@@ -446,19 +511,21 @@ function JobsContent() {
       </div>
 
       {/* Pagination */}
-      {data?.pagination && data.pagination.pages > 1 && (
+      {pagination && pagination.pages > 1 && (
         <div className="mt-8 flex items-center justify-center space-x-2">
           <button
-            disabled={data.pagination.page === 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={pagination.page === 1}
             className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-50"
           >
             Previous
           </button>
           <span className="text-sm text-slate-600">
-            Page {data.pagination.page} of {data.pagination.pages}
+            Page {pagination.page} of {pagination.pages}
           </span>
           <button
-            disabled={data.pagination.page === data.pagination.pages}
+            onClick={() => setPage((current) => Math.min(pagination.pages, current + 1))}
+            disabled={pagination.page === pagination.pages}
             className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-50"
           >
             Next

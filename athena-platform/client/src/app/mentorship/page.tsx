@@ -37,7 +37,7 @@ export default function MentorshipPage() {
             <p className="text-slate-600 dark:text-slate-300 text-sm mb-4">
               Schedule 1-on-1 sessions with your mentor for personalised career guidance.
             </p>
-            <Link href="/dashboard" className="text-purple-600 dark:text-purple-400 text-sm font-medium inline-flex items-center hover:underline">
+            <Link href="/dashboard/mentors/sessions" className="text-purple-600 dark:text-purple-400 text-sm font-medium inline-flex items-center hover:underline">
               My Sessions <ArrowRight className="w-4 h-4 ml-1" />
             </Link>
           </div>
@@ -46,7 +46,7 @@ export default function MentorshipPage() {
             <Star className="w-10 h-10 text-purple-500 mb-4" />
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Become a Mentor</h3>
             <p className="text-slate-600 dark:text-slate-300 text-sm mb-4">
-              Share your expertise, earn income, and make a lasting impact on women&apos;s careers.
+              Share your expertise, earn income, and make a lasting impact on women&apos;s careers. Set your rate, connect payouts, and you are open for bookings.
             </p>
             <Link href="/mentor-agreement" className="text-purple-600 dark:text-purple-400 text-sm font-medium inline-flex items-center hover:underline">
               Apply Now <ArrowRight className="w-4 h-4 ml-1" />

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -7,7 +8,6 @@ import {
   TrendingUp,
   TrendingDown,
   Eye,
-  Users,
   Briefcase,
   FileText,
   ArrowLeft,
@@ -19,11 +19,25 @@ import {
 import Link from 'next/link';
 import { api } from '@/lib/api';
 
+/**
+ * `previous` and `change` are null where there is nothing honest to compare
+ * against: job views are a running total with no date attached to them, and a
+ * window that saw no applications at all gives a percentage change nothing can
+ * be divided by. The page says so rather than printing a zero that reads as a
+ * collapse in interest.
+ */
+interface Trend {
+  current: number;
+  previous: number | null;
+  change: number | null;
+}
+
 interface AnalyticsData {
+  period: { days: number; startDate: string; endDate: string };
   trends: {
-    views: { current: number; previous: number; change: number };
-    applications: { current: number; previous: number; change: number };
-    hires: { current: number; previous: number; change: number };
+    views: Trend;
+    applications: Trend;
+    hires: Trend;
   };
   applicationFunnel: {
     stage: string;
@@ -41,40 +55,44 @@ interface AnalyticsData {
     average: number;
     fastest: number;
     slowest: number;
-  };
-  sourceBreakdown: {
-    source: string;
-    count: number;
-    percentage: number;
-  }[];
+    sampleSize: number;
+  } | null;
 }
+
+const periodOptions = [
+  { value: 7, label: 'Last 7 days' },
+  { value: 30, label: 'Last 30 days' },
+  { value: 90, label: 'Last 90 days' },
+];
 
 export default function AnalyticsPage() {
   const params = useParams();
   const orgId = params.orgId as string;
+  const [days, setDays] = useState(30);
 
-  const { data: analyticsData, isLoading } = useQuery({
-    queryKey: ['employer-analytics', orgId],
+  const { data: analyticsData, isLoading } = useQuery<{ success: boolean; data: AnalyticsData }>({
+    queryKey: ['employer-analytics', orgId, days],
     queryFn: async () => {
-      const response = await api.get(`/employer/organizations/${orgId}/analytics`);
+      const response = await api.get(`/employer/organizations/${orgId}/analytics`, {
+        params: { days },
+      });
       return response.data;
     },
   });
 
-  const analytics: AnalyticsData = analyticsData?.data || {
-    trends: {
-      views: { current: 0, previous: 0, change: 0 },
-      applications: { current: 0, previous: 0, change: 0 },
-      hires: { current: 0, previous: 0, change: 0 },
-    },
-    applicationFunnel: [],
-    topJobs: [],
-    timeToHire: { average: 0, fastest: 0, slowest: 0 },
-    sourceBreakdown: [],
-  };
+  // The page used to assume the payload already matched this shape and read
+  // straight into `analytics.trends.views.change`, which threw on every
+  // successful response because the route had never sent a `trends` key. Each
+  // section now has its own fallback, so a response missing one of them costs
+  // that card and not the page.
+  const analytics = analyticsData?.data;
+  const trends = analytics?.trends;
+  const applicationFunnel = analytics?.applicationFunnel ?? [];
+  const topJobs = analytics?.topJobs ?? [];
+  const timeToHire = analytics?.timeToHire ?? null;
 
-  const TrendIndicator = ({ change }: { change: number }) => {
-    if (change === 0) return null;
+  const TrendIndicator = ({ change }: { change: number | null }) => {
+    if (change === null || change === 0) return null;
     const isPositive = change > 0;
     return (
       <span className={`flex items-center text-sm ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
@@ -83,6 +101,7 @@ export default function AnalyticsPage() {
       </span>
     );
   };
+
 
   return (
     <div className="max-w-6xl mx-auto p-6">
@@ -108,7 +127,21 @@ export default function AnalyticsPage() {
         </div>
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Calendar className="h-4 w-4" />
-          Last 30 days
+          <label htmlFor="analytics-period" className="sr-only">
+            Reporting period
+          </label>
+          <select
+            id="analytics-period"
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-900"
+          >
+            {periodOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -126,14 +159,14 @@ export default function AnalyticsPage() {
                 <div className="h-12 w-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
                   <Eye className="h-6 w-6 text-blue-600" />
                 </div>
-                <TrendIndicator change={analytics.trends.views.change} />
+                <TrendIndicator change={trends?.views.change ?? null} />
               </div>
               <p className="text-3xl font-bold text-slate-900 dark:text-white">
-                {analytics.trends.views.current.toLocaleString()}
+                {(trends?.views.current ?? 0).toLocaleString()}
               </p>
               <p className="text-slate-500 text-sm">Job Views</p>
               <p className="text-xs text-slate-400 mt-1">
-                vs {analytics.trends.views.previous.toLocaleString()} previous period
+                All time — views are counted per listing, not per day
               </p>
             </div>
 
@@ -142,14 +175,14 @@ export default function AnalyticsPage() {
                 <div className="h-12 w-12 bg-purple-100 dark:bg-purple-900/30 rounded-xl flex items-center justify-center">
                   <FileText className="h-6 w-6 text-purple-600" />
                 </div>
-                <TrendIndicator change={analytics.trends.applications.change} />
+                <TrendIndicator change={trends?.applications.change ?? null} />
               </div>
               <p className="text-3xl font-bold text-slate-900 dark:text-white">
-                {analytics.trends.applications.current.toLocaleString()}
+                {(trends?.applications.current ?? 0).toLocaleString()}
               </p>
               <p className="text-slate-500 text-sm">Applications Received</p>
               <p className="text-xs text-slate-400 mt-1">
-                vs {analytics.trends.applications.previous.toLocaleString()} previous period
+                vs {(trends?.applications.previous ?? 0).toLocaleString()} previous period
               </p>
             </div>
 
@@ -158,14 +191,14 @@ export default function AnalyticsPage() {
                 <div className="h-12 w-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center">
                   <CheckCircle className="h-6 w-6 text-green-600" />
                 </div>
-                <TrendIndicator change={analytics.trends.hires.change} />
+                <TrendIndicator change={trends?.hires.change ?? null} />
               </div>
               <p className="text-3xl font-bold text-slate-900 dark:text-white">
-                {analytics.trends.hires.current}
+                {trends?.hires.current ?? 0}
               </p>
-              <p className="text-slate-500 text-sm">Successful Hires</p>
+              <p className="text-slate-500 text-sm">Offers Accepted</p>
               <p className="text-xs text-slate-400 mt-1">
-                vs {analytics.trends.hires.previous} previous period
+                vs {trends?.hires.previous ?? 0} previous period
               </p>
             </div>
           </div>
@@ -176,9 +209,12 @@ export default function AnalyticsPage() {
               <Target className="h-5 w-5 text-blue-600" />
               Application Funnel
             </h2>
-            {analytics.applicationFunnel.length > 0 ? (
+            <p className="text-sm text-slate-500 -mt-2 mb-4">
+              Where every application you have ever received stands today.
+            </p>
+            {applicationFunnel.length > 0 ? (
               <div className="space-y-4">
-                {analytics.applicationFunnel.map((stage, index) => (
+                {applicationFunnel.map((stage) => (
                   <div key={stage.stage}>
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-slate-700 dark:text-slate-300">{stage.stage}</span>
@@ -210,9 +246,9 @@ export default function AnalyticsPage() {
                 <Briefcase className="h-5 w-5 text-blue-600" />
                 Top Performing Jobs
               </h2>
-              {analytics.topJobs.length > 0 ? (
+              {topJobs.length > 0 ? (
                 <div className="space-y-4">
-                  {analytics.topJobs.map((job, index) => (
+                  {topJobs.map((job, index) => (
                     <div
                       key={job.id}
                       className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg"
@@ -253,25 +289,31 @@ export default function AnalyticsPage() {
 
             {/* Time to Hire */}
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-1 flex items-center gap-2">
                 <Clock className="h-5 w-5 text-blue-600" />
                 Time to Hire
               </h2>
-              {analytics.timeToHire.average > 0 ? (
+              <p className="text-sm text-slate-500 mb-4">
+                Days from application to the offer being accepted.
+              </p>
+              {timeToHire ? (
                 <div className="space-y-6">
                   <div className="text-center py-4">
                     <p className="text-5xl font-bold text-slate-900 dark:text-white">
-                      {analytics.timeToHire.average}
+                      {timeToHire.average}
                     </p>
-                    <p className="text-slate-500">Average days to hire</p>
+                    <p className="text-slate-500">
+                      Average, across {timeToHire.sampleSize}{' '}
+                      {timeToHire.sampleSize === 1 ? 'hire' : 'hires'}
+                    </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-green-600">{analytics.timeToHire.fastest}</p>
+                      <p className="text-2xl font-bold text-green-600">{timeToHire.fastest}</p>
                       <p className="text-sm text-slate-500">Fastest (days)</p>
                     </div>
                     <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 text-center">
-                      <p className="text-2xl font-bold text-red-600">{analytics.timeToHire.slowest}</p>
+                      <p className="text-2xl font-bold text-red-600">{timeToHire.slowest}</p>
                       <p className="text-sm text-slate-500">Slowest (days)</p>
                     </div>
                   </div>
@@ -285,32 +327,13 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Application Sources */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <Users className="h-5 w-5 text-blue-600" />
-              Application Sources
-            </h2>
-            {analytics.sourceBreakdown.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {analytics.sourceBreakdown.map((source) => (
-                  <div
-                    key={source.source}
-                    className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 text-center"
-                  >
-                    <p className="text-2xl font-bold text-slate-900 dark:text-white">{source.count}</p>
-                    <p className="text-sm text-slate-500">{source.source}</p>
-                    <p className="text-xs text-slate-400">{source.percentage}%</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-slate-500">
-                <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>Source data will appear when you receive applications</p>
-              </div>
-            )}
-          </div>
+          {/*
+            An "Application Sources" card used to sit here. Nothing records where
+            an application came from — JobApplication has no source, referrer or
+            channel column — so the card could only ever show its own empty
+            state, promising a breakdown that had no data behind it. It belongs
+            back on this page once applications carry a source, and not before.
+          */}
 
           {/* Tips */}
           <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl p-6 text-white">

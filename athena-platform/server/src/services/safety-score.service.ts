@@ -431,12 +431,19 @@ export async function getSafetyStatus(userId: string): Promise<{
   score: number;
   level: 'TRUSTED' | 'GOOD' | 'CAUTION' | 'RESTRICTED';
   badges: string[];
+  /**
+   * When the score was last calculated, or null if it never has been — in which
+   * case `score` is the column default rather than a measurement, and a caller
+   * that shows it to anyone has to say "not assessed" instead of printing a
+   * number nobody worked out.
+   */
+  assessedAt: Date | null;
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { verificationBadges: true },
   });
-  
+
   const score = user?.safetyScore ?? WEIGHTS.DEFAULT_SCORE;
   
   let level: 'TRUSTED' | 'GOOD' | 'CAUTION' | 'RESTRICTED';
@@ -449,7 +456,7 @@ export async function getSafetyStatus(userId: string): Promise<{
     .filter((b: any) => b.isActive)
     .map((b: any) => b.type);
   
-  return { score, level, badges };
+  return { score, level, badges, assessedAt: user?.safetyScoreUpdatedAt ?? null };
 }
 
 export const safetyScoreService = {

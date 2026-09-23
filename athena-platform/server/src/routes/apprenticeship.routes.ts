@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { notificationService } from '../services/notification.service';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -728,6 +729,146 @@ router.get('/applications/:applicationId', authenticate, async (req: AuthRequest
     next(error);
   }
 });
+
+// ===========================================
+// DECIDE AN APPLICATION
+// ===========================================
+// The provider's half of the conversation, and it was missing. Until this
+// existed the only writes to `ApprenticeshipApplication.status` were the row's
+// own SUBMITTED default and the candidate's WITHDRAWN below, so five of the
+// seven values in `ApprenticeshipApplicationStatus` were unreachable. Because
+// `requirePlacement` gates progress, evidence and the certificate on ACCEPTED,
+// nothing under this listing's competency stack could ever answer anything but
+// 403: an RTO could publish a placement and read its applicants, and then the
+// pipeline stopped for good.
+//
+// WITHDRAWN is deliberately not offered here. That is the candidate's own word
+// about her own application and it stays with her at the DELETE below; a
+// provider who no longer wants her rejects her under its own name instead of
+// recording it as though she walked away.
+const PROVIDER_DECISIONS = ['SCREENING', 'INTERVIEW', 'OFFERED', 'ACCEPTED', 'REJECTED'] as const;
+
+type ProviderDecision = (typeof PROVIDER_DECISIONS)[number];
+
+/** What the applicant is told, in her words rather than the enum's. */
+const DECISION_NOTICE: Record<ProviderDecision, { title: string; message: (title: string) => string }> = {
+  SCREENING: {
+    title: 'Your application is being reviewed',
+    message: (title) => `Your application for ${title} has moved to screening.`,
+  },
+  INTERVIEW: {
+    title: 'You have been shortlisted for an interview',
+    message: (title) => `The provider would like to interview you for ${title}.`,
+  },
+  OFFERED: {
+    title: 'You have been offered a placement',
+    message: (title) => `You have been offered the ${title} placement.`,
+  },
+  ACCEPTED: {
+    title: 'Your placement is confirmed',
+    message: (title) =>
+      `Your placement on ${title} is confirmed. You can now track your competencies and upload evidence.`,
+  },
+  REJECTED: {
+    title: 'An update on your application',
+    message: (title) => `Your application for ${title} was not successful this time.`,
+  },
+};
+
+router.patch(
+  '/applications/:applicationId',
+  authenticate,
+  [body('status').isIn(PROVIDER_DECISIONS)],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const { applicationId } = req.params;
+      const status = req.body.status as ProviderDecision;
+
+      const application = await prisma.apprenticeshipApplication.findUnique({
+        where: { id: applicationId },
+      });
+      if (!application) {
+        throw new ApiError(404, 'Application not found');
+      }
+
+      // The same gate the applicant list and the assessor review already use,
+      // and it reports someone else's application as absent rather than
+      // forbidden so ids cannot be probed.
+      const apprenticeship = await findApprenticeshipForStaff(application.apprenticeshipId, req.user!);
+      if (!apprenticeship) {
+        throw new ApiError(404, 'Application not found');
+      }
+
+      if (application.status === 'WITHDRAWN') {
+        throw new ApiError(400, 'This candidate withdrew her application');
+      }
+      if (application.status === status) {
+        return res.json({ success: true, data: application, message: 'No change' });
+      }
+
+      // Seats are claimed before the decision is recorded, and claimed with a
+      // conditional update rather than a read followed by a write, so two
+      // coordinators accepting at the same moment cannot both pass a check
+      // against the same stale count and overfill the placement.
+      if (status === 'ACCEPTED') {
+        const claimed = await prisma.apprenticeship.updateMany({
+          where: { id: apprenticeship.id, positionsFilled: { lt: apprenticeship.positions } },
+          data: { positionsFilled: { increment: 1 } },
+        });
+        if (claimed.count === 0) {
+          throw new ApiError(409, 'Every position on this apprenticeship is already filled');
+        }
+      }
+
+      let updated;
+      try {
+        updated = await prisma.apprenticeshipApplication.update({
+          where: { id: applicationId },
+          data: { status },
+        });
+      } catch (error) {
+        // The seat was taken a moment ago and the placement it was taken for
+        // never happened, so give it back rather than leaving the listing
+        // permanently one apprentice short.
+        if (status === 'ACCEPTED') {
+          await prisma.apprenticeship.update({
+            where: { id: apprenticeship.id },
+            data: { positionsFilled: { decrement: 1 } },
+          });
+        }
+        throw error;
+      }
+
+      // Releasing a seat when a confirmed placement is later withdrawn by the
+      // provider is the mirror of claiming one above.
+      if (application.status === 'ACCEPTED') {
+        await prisma.apprenticeship.update({
+          where: { id: apprenticeship.id },
+          data: { positionsFilled: { decrement: 1 } },
+        });
+      }
+
+      const notice = DECISION_NOTICE[status];
+      await notificationService.notify({
+        userId: application.userId,
+        type: 'APPLICATION_UPDATE',
+        title: notice.title,
+        message: notice.message(apprenticeship.title),
+        link: '/dashboard/apprenticeships',
+        channels: ['in-app', 'email'],
+      });
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // ===========================================
 // WITHDRAW AN APPLICATION

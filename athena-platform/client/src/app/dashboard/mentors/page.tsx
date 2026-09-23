@@ -95,6 +95,12 @@ export default function MentorsPage() {
           <Link href="/dashboard/mentors/sessions" className="btn-outline px-5 py-2.5 text-center">
             My sessions
           </Link>
+          {/* Become a mentor tells her that paid sessions need payouts
+              connected "from the mentor dashboard", and this is that dashboard,
+              so it has to be possible to get there from here. */}
+          <Link href="/dashboard/earnings" className="btn-outline px-5 py-2.5 text-center">
+            Payouts &amp; earnings
+          </Link>
           <Link
             href="/dashboard/mentors/become-mentor"
             className="btn-primary px-6 py-2.5 text-center"

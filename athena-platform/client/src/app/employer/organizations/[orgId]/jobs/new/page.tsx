@@ -13,8 +13,6 @@ import {
   DollarSign,
   Clock,
   FileText,
-  Globe,
-  Mail,
   X,
   Plus,
 } from 'lucide-react';
@@ -37,9 +35,6 @@ interface JobForm {
   showSalary: boolean;
   experienceMin: number | null;
   experienceMax: number | null;
-  benefits: string;
-  applicationUrl: string;
-  applicationEmail: string;
   status: string;
 }
 
@@ -49,6 +44,7 @@ const jobTypes = [
   { value: 'CONTRACT', label: 'Contract' },
   { value: 'INTERNSHIP', label: 'Internship' },
   { value: 'CASUAL', label: 'Casual' },
+  { value: 'APPRENTICESHIP', label: 'Apprenticeship' },
 ];
 
 const australianStates = [
@@ -386,52 +382,20 @@ export default function CreateJobPage() {
           {step === 3 && (
             <div className="space-y-6">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-                Application Settings
+                Review & Publish
               </h2>
 
-              {/* Benefits */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Benefits & Perks
-                </label>
-                <textarea
-                  {...register('benefits')}
-                  rows={4}
-                  className="input w-full"
-                  placeholder="e.g., Health insurance, Flexible hours, Professional development..."
-                />
-              </div>
-
-              {/* Application URL */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  <Globe className="inline h-4 w-4 mr-1" />
-                  External Application URL (optional)
-                </label>
-                <input
-                  {...register('applicationUrl')}
-                  type="url"
-                  className="input w-full"
-                  placeholder="https://yourcompany.com/apply"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Leave blank to receive applications through ATHENA
-                </p>
-              </div>
-
-              {/* Application Email */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  <Mail className="inline h-4 w-4 mr-1" />
-                  Application Email (optional)
-                </label>
-                <input
-                  {...register('applicationEmail')}
-                  type="email"
-                  className="input w-full"
-                  placeholder="jobs@yourcompany.com"
-                />
-              </div>
+              {/*
+                A "Benefits & Perks" box and an external application URL and
+                email used to sit here. Job has no column for any of the three,
+                so everything an employer typed into them was dropped on the way
+                to the database and never appeared on her listing. They belong
+                back in this step once the listing can actually carry them.
+              */}
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Applications come to you through ATHENA, where you can review and
+                respond to them from your applications page.
+              </p>
 
               {/* Summary */}
               <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4">

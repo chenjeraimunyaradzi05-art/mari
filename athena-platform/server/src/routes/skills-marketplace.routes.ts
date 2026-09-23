@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -94,6 +95,103 @@ router.get('/services', optionalAuth, async (req: AuthRequest, res, next) => {
 });
 
 // ===========================================
+// SERVICE PACKAGES
+// ===========================================
+// `SkillService.packages` is the fixed-scope side of the marketplace, and it is
+// what `POST /services/:id/order` reads to price the escrow hold. Neither the
+// create nor the update route used to accept it, so the column was null on
+// every listing and the whole order path answered "Selected package is not
+// available for this service" no matter what a buyer clicked. A seller can now
+// put packages on her listing; a listing with none is still perfectly valid and
+// simply sells by the hour.
+//
+// It is a Json column, so what a caller sends is rebuilt field by field rather
+// than stored as given: an unrecognised key on a package would otherwise sit in
+// the payload the buyer's order is priced against.
+const MAX_PACKAGES = 5;
+
+interface StoredPackage {
+  name: string;
+  description: string | null;
+  price: number;
+  deliveryDays: number;
+  revisions: number | null;
+  features: string[];
+}
+
+function normalisePackages(value: unknown): Prisma.InputJsonValue {
+  if (!Array.isArray(value)) return [];
+
+  const packages: StoredPackage[] = value.map((item) => {
+    const entry = (item ?? {}) as Record<string, unknown>;
+    const revisions = Number(entry.revisions);
+
+    return {
+      name: String(entry.name).trim(),
+      description: typeof entry.description === 'string' ? entry.description.trim() : null,
+      price: Math.round(Number(entry.price)),
+      deliveryDays: Math.round(Number(entry.deliveryDays)),
+      revisions: Number.isFinite(revisions) ? Math.round(revisions) : null,
+      features: Array.isArray(entry.features)
+        ? entry.features.filter((f): f is string => typeof f === 'string' && f.trim().length > 0).slice(0, 10)
+        : [],
+    };
+  });
+
+  // Prisma types a Json column as its own union rather than as the object
+  // being stored, so the shape has to be handed over as plain JSON.
+  return packages as unknown as Prisma.InputJsonValue;
+}
+
+/**
+ * Rejects the package list the buyer would otherwise be quoted from. Prices are
+ * whole dollars because the order route multiplies by 100 for Stripe, and a
+ * delivery window has to be a real number of days because it becomes the
+ * order's due date.
+ */
+function assertPackagesAreSellable(value: unknown): true {
+  if (!Array.isArray(value)) {
+    throw new Error('Packages must be a list');
+  }
+  if (value.length > MAX_PACKAGES) {
+    throw new Error(`A service can offer at most ${MAX_PACKAGES} packages`);
+  }
+
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error('Each package must be an object');
+    }
+    const entry = item as Record<string, unknown>;
+
+    if (typeof entry.name !== 'string' || entry.name.trim().length === 0 || entry.name.length > 120) {
+      throw new Error('Each package needs a name of up to 120 characters');
+    }
+    if (typeof entry.description === 'string' && entry.description.length > 2000) {
+      throw new Error('A package description can be up to 2000 characters');
+    }
+    const price = Number(entry.price);
+    if (!Number.isInteger(price) || price < 1) {
+      throw new Error('Each package needs a price of at least $1, in whole dollars');
+    }
+    const deliveryDays = Number(entry.deliveryDays);
+    if (!Number.isInteger(deliveryDays) || deliveryDays < 1 || deliveryDays > 365) {
+      throw new Error('Each package needs a delivery time between 1 and 365 days');
+    }
+    if (entry.revisions !== undefined && entry.revisions !== null) {
+      const revisions = Number(entry.revisions);
+      if (!Number.isInteger(revisions) || revisions < 0 || revisions > 20) {
+        throw new Error('Revisions must be a whole number between 0 and 20');
+      }
+    }
+    if (entry.features !== undefined && !Array.isArray(entry.features)) {
+      throw new Error('Package features must be a list');
+    }
+  }
+
+  return true;
+}
+
+// ===========================================
 // CREATE SERVICE
 // ===========================================
 router.post(
@@ -108,6 +206,7 @@ router.post(
     body('isAvailable').optional().isBoolean(),
     body('availabilityJson').optional(),
     body('tags').optional().isArray(),
+    body('packages').optional().custom(assertPackagesAreSellable),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -127,6 +226,7 @@ router.post(
           isAvailable: req.body.isAvailable ?? true,
           availabilityJson: req.body.availabilityJson,
           tags: req.body.tags || [],
+          packages: req.body.packages === undefined ? undefined : normalisePackages(req.body.packages),
         },
       });
 
@@ -234,6 +334,7 @@ router.patch(
     body('isAvailable').optional().isBoolean(),
     body('availabilityJson').optional(),
     body('tags').optional().isArray(),
+    body('packages').optional().custom(assertPackagesAreSellable),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -264,6 +365,7 @@ router.patch(
           isAvailable: req.body.isAvailable,
           availabilityJson: req.body.availabilityJson,
           tags: req.body.tags,
+          packages: req.body.packages === undefined ? undefined : normalisePackages(req.body.packages),
         },
       });
 

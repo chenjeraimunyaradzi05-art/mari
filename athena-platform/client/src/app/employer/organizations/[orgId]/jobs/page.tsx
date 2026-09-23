@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Briefcase,
@@ -38,6 +38,18 @@ interface Job {
   createdAt: string;
 }
 
+/**
+ * The route answers with the postings directly under `data`, the same shape
+ * every other list on this server uses. This page was reading `data.jobs`, a
+ * key that has never existed, so an organisation with a board full of live ads
+ * was told it had posted nothing and the status menu behind each row — pause,
+ * activate, close — could not be opened at all.
+ */
+interface EmployerJobsResponse {
+  success: boolean;
+  data: Job[];
+}
+
 const statusColors: Record<string, string> = {
   DRAFT: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
   ACTIVE: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -48,7 +60,6 @@ const statusColors: Record<string, string> = {
 
 export default function EmployerJobsPage() {
   const params = useParams();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const orgId = params.orgId as string;
 
@@ -56,7 +67,7 @@ export default function EmployerJobsPage() {
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
-  const { data: jobsData, isLoading } = useQuery({
+  const { data: jobsData, isLoading } = useQuery<EmployerJobsResponse>({
     queryKey: ['employer-jobs', orgId],
     queryFn: async () => {
       const response = await api.get(`/employer/organizations/${orgId}/jobs`);
@@ -79,7 +90,7 @@ export default function EmployerJobsPage() {
     },
   });
 
-  const jobs: Job[] = jobsData?.data?.jobs || [];
+  const jobs: Job[] = jobsData?.data ?? [];
 
   const filteredJobs = jobs.filter((job) => {
     const matchesFilter = filter === 'all' || job.status === filter;

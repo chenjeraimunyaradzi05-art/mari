@@ -252,7 +252,14 @@ export default function BecomeMentorPage() {
             Your mentor profile is live now. People can find you on the mentors page and ask for a session; nothing waits on a review.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
-            <Link href="/mentors" className="btn-primary">
+            {/* The payouts step is the one that decides whether she can ever be
+                paid, so it leads. This used to be prose pointing at a "mentor
+                dashboard" that had no such control on it, and every mentor who
+                followed the instruction found a disabled button. */}
+            <Link href="/dashboard/earnings" className="btn-primary">
+              Connect payouts
+            </Link>
+            <Link href="/mentors" className="btn-outline">
               See the mentors page
             </Link>
             <Link href="/dashboard/mentors" className="btn-outline">
@@ -260,7 +267,7 @@ export default function BecomeMentorPage() {
             </Link>
           </div>
           <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
-            Paid sessions need payouts connected from the mentor dashboard. You can change your rate, expertise and availability there at any time.
+            Until payouts are connected, nobody can pay for a session with you — it only takes a few minutes. You can change your rate, expertise and availability from the mentor dashboard at any time.
           </p>
         </div>
       </div>

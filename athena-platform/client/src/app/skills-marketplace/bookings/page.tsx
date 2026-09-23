@@ -133,7 +133,7 @@ export default function BookingsPage() {
           reason="empty"
           title={role === 'client' ? 'You have not booked anyone yet' : 'Nobody has booked you yet'}
           description={role === 'client' ? 'Find someone who sells time by the hour and pick a slot that suits you.' : 'Listings with an hourly rate can be booked directly. Make sure yours has one and is taking work.'}
-          primaryAction={role === 'client' ? { label: 'Browse the marketplace', href: '/skills-marketplace' } : { label: 'Your listings', href: '/dashboard/services' }}
+          primaryAction={role === 'client' ? { label: 'Browse the marketplace', href: '/skills-marketplace' } : { label: 'Your listings', href: '/skills-marketplace/sell' }}
         />
       ) : (
         <ul className="space-y-3">

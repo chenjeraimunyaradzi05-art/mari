@@ -292,11 +292,56 @@ export function useDeleteAccount() {
 // ============================================
 // JOB HOOKS
 // ============================================
-export function useJobs(params?: any) {
+export interface JobSearchParams {
+  search?: string;
+  city?: string;
+  /** Comma-separated job types, because the filter panel allows more than one. */
+  type?: string;
+  /** Comma-separated experience bands: entry, mid, senior, lead, executive. */
+  experience?: string;
+  sort?: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  remote?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+export interface JobSearchResult {
+  id: string;
+  title: string;
+  type: string;
+  city?: string | null;
+  state?: string | null;
+  isRemote?: boolean;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  createdAt: string;
+  hasApplied?: boolean;
+  organization?: { id: string; name: string; logo?: string | null } | null;
+  skills?: { skill: { id: string; name: string } }[];
+}
+
+export interface JobSearchPage {
+  jobs: JobSearchResult[];
+  pagination?: { page: number; limit: number; total: number; pages: number };
+  total: number;
+}
+
+export function useJobs(params?: JobSearchParams) {
   return useQuery({
     queryKey: ['jobs', params],
     queryFn: () => jobApi.search(params),
-    select: (response) => response.data.data,
+    // The route puts the rows under `data` and the page counts beside them
+    // under `pagination`, so unwrapping all the way to `data.data` threw the
+    // counts away and handed the search page a bare array where it was reading
+    // `.jobs` and `.pagination`. Every response, however full, came out as
+    // "Showing 0 of 0 jobs" above "No jobs found".
+    select: (response): JobSearchPage => ({
+      jobs: (response.data?.data ?? []) as JobSearchResult[],
+      pagination: response.data?.pagination,
+      total: response.data?.pagination?.total ?? 0,
+    }),
   });
 }
 

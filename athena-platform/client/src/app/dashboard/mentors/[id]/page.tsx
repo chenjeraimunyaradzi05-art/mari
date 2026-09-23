@@ -66,7 +66,18 @@ export default function MentorProfilePage() {
   const specializations = useMemo(() => toStringArray(mentor?.specializations), [mentor?.specializations]);
   const name = mentor?.user?.displayName || 'ATHENA Mentor';
   const isOwnProfile = Boolean(user && mentor?.userId === user.id);
-  const acceptsBookings = Boolean(mentor?.isAvailable && hourlyRate && hourlyRate > 0 && mentor?.stripeAccountId);
+  // `acceptsBookings` is the answer the server should be giving, and the
+  // payload it was derived from here — a raw Stripe account id on a public
+  // profile — is one nobody browsing mentors needs to see. Prefer the derived
+  // boolean when it is there, so the day the server stops sending the account
+  // id this page keeps working rather than quietly declaring every mentor
+  // unbookable.
+  const acceptsBookings = Boolean(
+    mentor?.isAvailable &&
+      hourlyRate &&
+      hourlyRate > 0 &&
+      (mentor?.acceptsBookings ?? mentor?.stripeAccountId)
+  );
   const estimate = hourlyRate ? (hourlyRate * duration) / 60 : null;
 
   // Which hours this mentor is actually free, rather than a fixed list of times

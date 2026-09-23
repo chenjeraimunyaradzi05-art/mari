@@ -38,9 +38,21 @@ interface TeamMember {
     firstName: string;
     lastName: string;
     email: string;
-    profile: {
-      avatar: string | null;
-    } | null;
+    avatar: string | null;
+  };
+}
+
+interface TeamPermissions {
+  canPostJobs: boolean;
+  canManageTeam: boolean;
+  canViewAnalytics: boolean;
+}
+
+interface TeamResponse {
+  success: boolean;
+  data: {
+    members: TeamMember[];
+    currentUserPermissions: TeamPermissions;
   };
 }
 
@@ -81,7 +93,7 @@ export default function TeamPage() {
   const [inviteRole, setInviteRole] = useState('RECRUITER');
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
-  const { data: teamData, isLoading } = useQuery({
+  const { data: teamData, isLoading } = useQuery<TeamResponse>({
     queryKey: ['employer-team', orgId],
     queryFn: async () => {
       const response = await api.get(`/employer/organizations/${orgId}/team`);
@@ -121,9 +133,10 @@ export default function TeamPage() {
     },
   });
 
-  const members: TeamMember[] = teamData?.data?.members || [];
-  const currentUserPermissions = teamData?.data?.currentUserPermissions || {};
-  const canManageTeam = currentUserPermissions.canManageTeam;
+  const members: TeamMember[] = teamData?.data?.members ?? [];
+  // Until the route started sending this, it was undefined for everyone, so the
+  // Invite button and the per-row Remove menu were hidden from the owner too.
+  const canManageTeam = teamData?.data?.currentUserPermissions?.canManageTeam ?? false;
 
   const sortedMembers = [...members].sort((a, b) => {
     const roleOrder = { OWNER: 0, ADMIN: 1, RECRUITER: 2, VIEWER: 3 };
@@ -205,9 +218,9 @@ export default function TeamPage() {
                 <div key={member.id} className="p-4 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className="h-12 w-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
-                      {member.user.profile?.avatar ? (
+                      {member.user.avatar ? (
                         <img
-                          src={member.user.profile.avatar}
+                          src={member.user.avatar}
                           alt=""
                           className="h-12 w-12 rounded-full object-cover"
                         />
