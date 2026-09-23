@@ -70,7 +70,7 @@ const tiles = [
   },
   {
     title: 'Car finance',
-    description: 'Repayments, loans compared, what you can carry, and a pre-approval to walk in with.',
+    description: 'Repayments, loans compared, what you can carry, and your figures scored before you walk in.',
     href: '/dashboard/cars/finance',
     icon: Car,
     highlight: true,

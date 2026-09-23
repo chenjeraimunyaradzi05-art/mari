@@ -174,7 +174,8 @@ function Insurance() {
       )}
 
       <div className="mt-6"><Stat label="A second policy" value={est.result ? `about ${aud0(est.result.multiPolicySaving)} a year off` : 'about 10% off'} sub="home or contents cover with the same insurer usually earns a discount on each" /></div>
-      <div className="mt-4"><AutoDisclaimer what="The estimate is built from typical Australian pricing factors, not from any insurer's rates." /></div>
+      {/* Checked against the finance flow's failure and clean: this page estimates and compares, it never quotes, binds or approves. ATHENA is not an insurer or an insurance broker, and saying so keeps it that way. */}
+      <div className="mt-4"><AutoDisclaimer what="The estimate is built from typical Australian pricing factors, not from any insurer's rates. ATHENA is not an insurer or an insurance broker: nothing here is a quote and no cover is arranged. Only an insurer can quote you." /></div>
     </PageShell>
   );
 }

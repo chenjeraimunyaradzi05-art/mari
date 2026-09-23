@@ -5,7 +5,12 @@
  * really does, several loans compared on their whole cost, what she can
  * carry from her take-home pay, the whole cost of owning one car against
  * another, and how ready an application is, with the glossary and what a
- * lender will ask. Pre-approval itself lives behind a sign-in.
+ * lender will ask. Saving the readiness figures lives behind a sign-in.
+ *
+ * Everything here is ATHENA's own arithmetic. ATHENA is not a lender and
+ * not a licensed credit broker, so no page in this vertical may offer,
+ * approve or pre-approve credit; the dashboard page this one links to used
+ * to, and no longer does.
  */
 
 import { Suspense, useState } from 'react';
@@ -64,7 +69,7 @@ function Finance() {
 
   return (
     <PageShell width="wide" backTo={{ href: '/cars', label: 'Back to cars' }}>
-      <PageHero kicker="Car finance" title="The arithmetic before the paperwork" description="What a loan really costs, what a balloon does, what you can carry from your take-home pay, and what one car costs against another over the years you will keep it. Then, if it adds up, a pre-approval you can walk into a dealership with." primaryAction={{ label: 'Get pre-approved', href: '/dashboard/cars/finance' }} secondaryAction={{ label: 'Insurance estimate', href: '/cars/insurance' }} />
+      <PageHero kicker="Car finance" title="The arithmetic before the paperwork" description="What a loan really costs, what a balloon does, what you can carry from your take-home pay, and what one car costs against another over the years you will keep it. Then, if it adds up, your figures saved and scored so you walk into a lender knowing where you stand." primaryAction={{ label: 'Work out where you stand', href: '/dashboard/cars/finance' }} secondaryAction={{ label: 'Insurance estimate', href: '/cars/insurance' }} />
       <div className="mt-6"><JumpLinks items={JUMPS} /></div>
       {d && <p className="mt-3 text-xs text-slate-500">Typical secured rates, {d.asAt}: new cars {d.newCarSecured.low}% to {d.newCarSecured.high}%, used cars {d.usedCarSecured.low}% to {d.usedCarSecured.high}%, unsecured {d.unsecured.low}% to {d.unsecured.high}%.</p>}
 
@@ -164,7 +169,7 @@ function Finance() {
       </div>
 
       <div className="mt-6">
-        <Panel id="ready" title="Ready to apply?" intro="A score from what a lender reads, and the notes that say why. Nothing here is a credit check; it is what a good broker would tell you across the desk.">
+        <Panel id="ready" title="Ready to apply?" intro="A score from what a lender reads, and the notes that say why. ATHENA is not a lender and not a licensed credit broker: nothing here is a credit check, an approval or a pre-approval, and no lender sees it. It is the arithmetic to have done before you go to one.">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
             <Field label="Car price"><NumberInput value={rd.vehiclePrice} onChange={(v) => setRd((x) => ({ ...x, vehiclePrice: v }))} prefix="$" /></Field>
             <Field label="Deposit and trade-in"><NumberInput value={rd.deposit} onChange={(v) => setRd((x) => ({ ...x, deposit: v }))} prefix="$" /></Field>
@@ -180,7 +185,7 @@ function Finance() {
           <Pending loading={ready.loading} error={ready.error}>
             {ready.result && (
               <div className="mt-4 grid gap-4 md:grid-cols-[1fr_2fr]">
-                <div><Stat label="Readiness" value={`${ready.result.score} / 100`} sub={ready.result.band === 'ready' ? 'Ready to apply' : ready.result.band === 'nearly' ? 'Nearly; read the notes' : 'Not yet; the notes say what to fix'} tone={ready.result.band === 'ready' ? 'good' : ready.result.band === 'nearly' ? 'plain' : 'warn'} big /><p className="mt-2 text-sm text-slate-700 dark:text-slate-300">Borrowing {aud0(ready.result.amount)} at about {ready.result.ratePct}% is {aud0(ready.result.repaymentMonthly)} a month.</p><Link href="/dashboard/cars/finance" className="btn-primary mt-3 inline-block text-sm">Start a pre-approval</Link></div>
+                <div><Stat label="Readiness" value={`${ready.result.score} / 100`} sub={ready.result.band === 'ready' ? 'Ready to apply' : ready.result.band === 'nearly' ? 'Nearly; read the notes' : 'Not yet; the notes say what to fix'} tone={ready.result.band === 'ready' ? 'good' : ready.result.band === 'nearly' ? 'plain' : 'warn'} big /><p className="mt-2 text-sm text-slate-700 dark:text-slate-300">Borrowing {aud0(ready.result.amount)} at about {ready.result.ratePct}% is {aud0(ready.result.repaymentMonthly)} a month.</p><Link href="/dashboard/cars/finance" className="btn-primary mt-3 inline-block text-sm">Save these figures</Link></div>
                 <div><Notes items={ready.result.notes} title="What a lender will see" /><details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">What a lender will ask for</summary><ul className="mt-1 list-disc pl-4">{ready.result.lenderChecks.map((c) => <li key={c}>{c}</li>)}</ul></details></div>
               </div>
             )}
@@ -191,7 +196,7 @@ function Finance() {
       <section id="glossary" className="mt-8 scroll-mt-24">
         <h2 className="rail-title">The words, in plain English</h2>
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">{(ref.data?.finance.glossary ?? []).map((g: Reference['finance']['glossary'][number]) => <div key={g.term} className="surface p-4"><dt className="font-semibold text-slate-900 dark:text-white">{g.term}</dt><dd className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">{g.plain}</dd></div>)}</dl>
-        <div className="mt-4"><AutoDisclaimer /></div>
+        <div className="mt-4"><AutoDisclaimer what="These figures are estimates from published rates and typical costs, for planning. ATHENA is not a lender or a licensed credit broker and cannot approve or pre-approve credit." /></div>
       </section>
     </PageShell>
   );

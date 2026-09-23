@@ -3,8 +3,9 @@
  * garage is due (service by time or kilometres, registration, insurance,
  * the warranty running out), each sent once a month at most; the buyer
  * protection window, nudged two days out and released when it passes
- * without a dispute; trade-in requests and pre-approvals that have run
- * their time; and featured flags that have expired.
+ * without a dispute; trade-in requests that have run their time; featured
+ * flags that have expired; and the retraction of the car finance
+ * "pre-approvals" ATHENA was never licensed to issue.
  */
 
 import { Prisma } from '@prisma/client';
@@ -69,14 +70,13 @@ async function alreadyNotified(userId: string, kind: string, id: string): Promis
   // your inspection period" arriving every six hours until it cleared.
   //
   // Skipping is the safer side here because of the margins, not because the
-  // reminders are unimportant — one of them is the last warning before her
-  // money goes to the seller. Both callers re-check a window far wider than
-  // the sweep interval: the inspection-period nudge is due for the whole two
-  // days before the window closes and the pre-approval nudge for the whole
-  // seven days before it lapses, against a sweep that runs every six hours. A
-  // skipped round is retried about eight times over in the tightest case, with
-  // the better part of two days still on the clock to raise a dispute. And
-  // unlike before, the failure is now in the log rather than invisible.
+  // reminders are unimportant — the caller left is the last warning before her
+  // money goes to the seller. It re-checks a window far wider than the sweep
+  // interval: the inspection-period nudge is due for the whole two days before
+  // the window closes, against a sweep that runs every six hours. A skipped
+  // round is retried about eight times over, with the better part of two days
+  // still on the clock to raise a dispute. And unlike before, the failure is
+  // now in the log rather than invisible.
   return bestEffort(`notification.duplicate-check.${labelSegment(kind)}`, async () => Boolean(await prisma.notification.findFirst({ where: { userId, data: { path: ['kind'], equals: kind }, AND: [{ data: { path: ['id'], equals: id } }] }, select: { id: true } })), true);
 }
 
@@ -289,20 +289,54 @@ async function releaseUnstartedHolds(now: Date): Promise<number> {
   return released;
 }
 
-export async function sweepExpiries(now = new Date()): Promise<{ tradeIns: number; approvals: number; nudged: number; featured: number }> {
-  const tradeIns = await prisma.tradeInRequest.updateMany({ where: { status: { in: ['OPEN', 'QUOTED'] }, expiresAt: { lt: now } }, data: { status: 'EXPIRED' } });
-  const approvals = await prisma.carFinanceApplication.updateMany({ where: { status: 'PRE_APPROVED', expiresAt: { lt: now } }, data: { status: 'EXPIRED' } });
-  let nudged = 0;
-  const closing = await prisma.carFinanceApplication.findMany({ where: { status: 'PRE_APPROVED', expiresAt: { gte: now, lte: new Date(now.getTime() + 7 * DAY) } }, select: { id: true, userId: true, expiresAt: true, amount: true }, take: 500 });
-  for (const a of closing) {
-    if (await alreadyNotified(a.userId, 'CAR_FINANCE_EXPIRING', a.id)) continue;
-    await notify(a.userId, 'Your pre-approval expires within a week', `The pre-approval for $${a.amount.toLocaleString('en-AU')} lapses on ${a.expiresAt!.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}. Buy before then, or ask for it to be refreshed.`, '/dashboard/cars/finance', { kind: 'CAR_FINANCE_EXPIRING', id: a.id });
-    nudged += 1;
+/**
+ * The retraction of the pre-approvals ATHENA was never entitled to issue.
+ *
+ * Until this change, an admin could move a car finance application to
+ * PRE_APPROVED from a dropdown. The member was then told she was
+ * pre-approved for an amount, at a rate, with "ATHENA finance desk" as the
+ * lender, good for sixty days — and this same sweep wrote to her a week
+ * before it lapsed to say so again. No lender had seen any of it, because
+ * ATHENA has no lender, no credit-bureau check and no Australian Credit
+ * Licence. A woman could have walked into a dealership on that reference
+ * code believing her finance was arranged.
+ *
+ * The route can no longer write PRE_APPROVED, but the rows that were
+ * written before it stopped are still in the database, and leaving them
+ * there would leave the claim standing. So every one of them is closed,
+ * stripped of the lender and the expiry, given a timeline entry that says
+ * plainly what happened, and — because she may be acting on it right now —
+ * she is told. Any referral fee booked against the introduction is voided
+ * at the same time; there was no introduction to be paid for.
+ *
+ * The pass converges: once a row is WITHDRAWN it is no longer selected, so
+ * after the first sweep that reaches them this does nothing at all. It is
+ * written as a sweep rather than a migration because the data lives in a
+ * database shared with another application, where hand-written SQL is the
+ * thing the runbook tells us to avoid.
+ */
+const RETRACTION = 'Closed. This was shown as a pre-approval, which ATHENA is not licensed to give and no lender had seen. The affordability estimate stands; the approval never existed.';
+
+export async function retractFinancePreApprovals(now = new Date()): Promise<{ retracted: number }> {
+  const stale = await prisma.carFinanceApplication.findMany({ where: { status: { in: ['PRE_APPROVED', 'EXPIRED'] } }, select: { id: true, userId: true, referenceCode: true, timeline: true }, take: 500 });
+  let retracted = 0;
+  for (const a of stale) {
+    const timeline = [...(Array.isArray(a.timeline) ? (a.timeline as unknown[]) : []), { at: now.toISOString(), status: 'WITHDRAWN', note: RETRACTION }];
+    await prisma.carFinanceApplication.update({ where: { id: a.id }, data: { status: 'WITHDRAWN', lender: null, expiresAt: null, decisionAt: now, decisionNote: RETRACTION, timeline: timeline as unknown as Prisma.InputJsonValue } });
+    await prisma.carReferral.updateMany({ where: { kind: 'FINANCE', referenceId: a.id, status: { in: ['PENDING', 'CONFIRMED'] } }, data: { status: 'VOID' } });
+    await notify(a.userId, 'Correcting what we told you about your car finance', `${a.referenceCode} was shown to you as a pre-approval. It was not one. ATHENA is not a lender or a licensed credit broker, no lender ever saw your application, and nothing was approved. The affordability estimate on the page is still ours and still stands — take it to a lender or a broker, who are the only people who can pre-approve anything. We are sorry.`, '/dashboard/cars/finance', { kind: 'CAR_FINANCE_RETRACTED', id: a.id });
+    retracted += 1;
   }
+  return { retracted };
+}
+
+export async function sweepExpiries(now = new Date()): Promise<{ tradeIns: number; retracted: number; featured: number }> {
+  const tradeIns = await prisma.tradeInRequest.updateMany({ where: { status: { in: ['OPEN', 'QUOTED'] }, expiresAt: { lt: now } }, data: { status: 'EXPIRED' } });
+  const { retracted } = await retractFinancePreApprovals(now);
   const f1 = await prisma.mechanic.updateMany({ where: { isFeatured: true, featuredUntil: { lt: now } }, data: { isFeatured: false } });
   const f2 = await prisma.dealership.updateMany({ where: { isFeatured: true, featuredUntil: { lt: now } }, data: { isFeatured: false } });
   const f3 = await prisma.vehicleListing.updateMany({ where: { isFeatured: true, featuredUntil: { lt: now } }, data: { isFeatured: false } });
-  return { tradeIns: tradeIns.count, approvals: approvals.count, nudged, featured: f1.count + f2.count + f3.count };
+  return { tradeIns: tradeIns.count, retracted, featured: f1.count + f2.count + f3.count };
 }
 
 export async function runAutomotiveSweep(now = new Date()) {
@@ -316,7 +350,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startAutomotiveSweeper(intervalMs = 6 * 60 * 60 * 1000): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.purchases.stuck || r.purchases.abandoned || r.expiries.nudged)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
+  const run = () => runExclusively('automotive', () => runAutomotiveSweep()).then((r) => { if (r && (r.garage.sent || r.purchases.released || r.purchases.nudged || r.purchases.stuck || r.purchases.abandoned || r.expiries.retracted)) logger.info('Automotive sweep', r); }).catch((err) => logger.warn('Automotive sweep failed', { error: (err as Error).message }));
   setTimeout(run, 120_000).unref();
   timer = setInterval(run, intervalMs);
   timer.unref();

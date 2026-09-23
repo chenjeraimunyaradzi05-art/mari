@@ -149,7 +149,7 @@ export function upgradePath(input: UpgradeInput): { changeoverPrivate: number; c
     `Selling privately nets about $${(input.current.privateSale - input.current.tradeIn).toLocaleString('en-AU')} more than a trade-in; it costs a weekend, an advertisement and a safety certificate.`,
     `The changeover is $${changeoverPrivate.toLocaleString('en-AU')} selling privately, $${changeoverTradeIn.toLocaleString('en-AU')} trading in.`,
     monthsToSave !== null ? (monthsToSave === 0 ? 'Your savings cover the changeover now.' : `At $${input.monthlySaving!.toLocaleString('en-AU')} a month the changeover is covered in ${monthsToSave} month${monthsToSave === 1 ? '' : 's'}.`) : 'Set a monthly amount to see when the changeover is covered without borrowing.',
-    'Get finance pre-approved before you talk to a dealer, so the trade-in and the price are negotiated separately.',
+    'Get finance pre-approved by a lender or a licensed broker before you talk to a dealer, so the trade-in and the price are negotiated separately. ATHENA cannot pre-approve anything; it is not a lender.',
   ];
   return { changeoverPrivate, changeoverTradeIn, privateAdvantage: input.current.privateSale - input.current.tradeIn, equity, negativeEquity: equity < 0, monthsToSave, steps };
 }

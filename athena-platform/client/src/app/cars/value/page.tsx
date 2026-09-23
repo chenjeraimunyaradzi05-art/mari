@@ -81,7 +81,7 @@ export default function ValuePage() {
                 <div className="grid grid-cols-2 gap-2"><Stat label="Selling privately, you need" value={aud0(upgrade.result.changeoverPrivate)} tone="good" big /><Stat label="Trading in, you need" value={aud0(upgrade.result.changeoverTradeIn)} sub={`${aud0(upgrade.result.privateAdvantage)} more by selling it yourself`} /></div>
                 {upgrade.result.negativeEquity && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">You owe {aud0(Math.abs(upgrade.result.equity))} more than the car is worth. Rolling that into the next loan is possible and expensive; paying it down first is cheaper.</p>}
                 <Notes items={upgrade.result.steps} title="The path" />
-                <div className="flex flex-wrap gap-2"><Link href={`/cars/finance?price=${num(up.targetPrice)}`} className="btn-secondary text-sm">What the loan would cost</Link><Link href="/dashboard/cars/finance" className="btn-ghost text-sm">Get pre-approved first</Link></div>
+                <div className="flex flex-wrap gap-2"><Link href={`/cars/finance?price=${num(up.targetPrice)}`} className="btn-secondary text-sm">What the loan would cost</Link><Link href="/dashboard/cars/finance" className="btn-ghost text-sm">Check where you stand first</Link></div>
               </div>
             )}
           </Pending>

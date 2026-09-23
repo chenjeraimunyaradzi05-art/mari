@@ -193,7 +193,7 @@ const GROUPS: Group[] = [
       { href: '/cars/value', label: 'What is it worth', blurb: 'Your car\x27s value and the changeover to the next one' },
       { href: '/cars/safety', label: 'Safety, explained', blurb: 'What every acronym on the spec sheet does for you' },
       { href: '/cars/dealerships', label: 'Dealerships', blurb: 'Test drives and trade-in quotes' },
-      { href: '/dashboard/cars', label: 'Your cars', blurb: 'The garage, reminders, purchases, bookings and pre-approval', gated: true },
+      { href: '/dashboard/cars', label: 'Your cars', blurb: 'The garage, reminders, purchases, bookings and finance readiness', gated: true },
       { href: '/dashboard/cars/garage', label: 'Your garage', blurb: 'Service history, warranty, rego and insurance reminders', gated: true },
       { href: '/dashboard/cars/sell', label: 'Sell a car', blurb: 'List it with a price guide and buyer protection', gated: true },
     ],

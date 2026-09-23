@@ -422,7 +422,7 @@ export function assessReadiness(input: ReadinessInput): ReadinessResult {
       break;
     default:
       score -= 20;
-      notes.push('Without an income of your own a loan in your name alone will not be approved; a co-borrower changes that.');
+      notes.push('Without an income of your own, no lender will approve a loan in your name alone; a co-borrower changes that.');
   }
 
   if (input.residency === 'VISA') { score -= 6; notes.push('On a visa the loan usually has to end before the visa does.'); }

@@ -77,7 +77,7 @@ export const AUTO_GROUPS: AutoGroup[] = [
       { href: '/cars/finance', label: 'Finance', blurb: 'Repayments, loans compared, what you can carry, and pre-approval', icon: Banknote },
       { href: '/cars/insurance', label: 'Insurance', blurb: 'A fair premium, the cover types, and the claims process', icon: Umbrella },
       { href: '/cars/value', label: 'What is it worth', short: 'Valuation', blurb: 'Your car\'s value, a trade-in quote, and the changeover to the next one', icon: BadgeDollarSign },
-      { href: '/dashboard/cars/finance', label: 'Pre-approval', blurb: 'Your applications and where they are up to', icon: FileCheck2, gated: true, pill: false },
+      { href: '/dashboard/cars/finance', label: 'Finance readiness', blurb: 'Where you stand before you go to a lender', icon: FileCheck2, gated: true, pill: false },
     ],
   },
   {

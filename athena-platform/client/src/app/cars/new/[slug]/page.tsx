@@ -129,7 +129,7 @@ export default function CarPage() {
 
               <Panel icon={Banknote} title="If you borrowed for it" intro={`A ${aud0(c.finance.deposit)} deposit and ${aud0(c.finance.amount)} over ${c.finance.termMonths} months at ${c.finance.ratePct}%, a typical new-car secured rate.`}>
                 <div className="grid grid-cols-2 gap-2"><Stat label="A month" value={aud0(c.finance.repayment)} big /><Stat label="Interest over the loan" value={aud0(c.finance.totalInterest)} /></div>
-                <div className="mt-3 flex flex-wrap gap-2"><Link href={`/cars/finance?price=${c.priceFrom}`} className="btn-secondary text-sm">Compare loans and what you can carry</Link><Link href={`/dashboard/cars/finance?price=${c.priceFrom}&purpose=NEW&carModelId=${c.id}`} className="btn-ghost text-sm">Get pre-approved</Link></div>
+                <div className="mt-3 flex flex-wrap gap-2"><Link href={`/cars/finance?price=${c.priceFrom}`} className="btn-secondary text-sm">Compare loans and what you can carry</Link><Link href={`/dashboard/cars/finance?price=${c.priceFrom}&purpose=NEW&carModelId=${c.id}`} className="btn-ghost text-sm">Work out where you stand</Link></div>
               </Panel>
 
               <Panel icon={Umbrella} title="Insurance, roughly" intro={`Comprehensive cover for a 35-year-old in ${c.insurance.state} with a clean record.`}>

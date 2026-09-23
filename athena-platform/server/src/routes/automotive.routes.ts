@@ -5,7 +5,19 @@
  * pre-loved listings with price guides, checks, inspections and a
  * purchase held under buyer protection; the mechanic directory with
  * bookings, quotes, payment and verified reviews; dealerships with test
- * drives and trade-in quotes; finance pre-approval; and the admin queues.
+ * drives and trade-in quotes; finance affordability enquiries; and the
+ * admin queues.
+ *
+ * Finance is ATHENA's own arithmetic and nothing more. ATHENA holds no
+ * Australian Credit Licence and is nobody's authorised credit
+ * representative, has no lender on a panel, runs no credit-bureau check
+ * and does no underwriting. It therefore cannot pre-approve, approve or
+ * decline anything, and this file must never write a word that says it
+ * did. What a member gets is an affordability estimate, a readiness score
+ * against what lenders are known to ask for, and — if she wants it — an
+ * enquiry kept on file so ATHENA can come back to her when a licensed
+ * broker or lender partnership actually exists. Nothing is charged to any
+ * partner for an introduction that has not happened.
  *
  * Browsing is open: the catalogue, the calculators, the listings, the
  * workshops and the dealerships can all be read before anyone signs up.
@@ -1669,9 +1681,27 @@ router.patch('/trade-ins/:id', authenticate, async (req: AuthRequest, res: Respo
   } catch (error) { next(error); }
 });
 
-// ------------------------------------------------------ finance applications
+// -------------------------------------------------- finance enquiries
+//
+// These rows used to be called pre-approvals, and they behaved like them:
+// submitting one set the lender to the literal string "ATHENA finance
+// desk", an admin picked PRE_APPROVED from a dropdown, the member was told
+// she was pre-approved for an amount at a rate and that it was good for
+// sixty days, and the platform booked itself a referral fee on the loan.
+// No lender had seen the application, because there is no lender. In
+// Australia that is credit assistance offered without a licence, and a
+// woman who took that reference code to a dealership believing she had
+// finance behind her could have signed a contract she could not fund.
+//
+// So the decision is gone rather than quietened. What is left is the part
+// that was always real: ATHENA's own affordability and readiness model,
+// saved as a draft or registered as an enquiry, with no lender named, no
+// expiry that implies an offer, and no fee booked.
 
 const applicationSchema = z.object({ purpose: z.enum(['NEW', 'USED', 'REFINANCE']), vehiclePrice: money, deposit: money.optional(), tradeIn: money.optional(), termMonths: z.coerce.number().int().min(12).max(84), balloonPct: z.coerce.number().min(0).max(60).optional(), ratePct: z.coerce.number().min(0).max(40).optional(), incomeAnnual: money, expensesMonthly: money, otherDebtsMonthly: money.optional(), dependants: z.coerce.number().int().min(0).max(12).optional(), employment: z.string().trim().max(30), employmentMonths: z.coerce.number().int().min(0).max(600).nullable().optional(), residency: z.enum(['CITIZEN', 'PR', 'VISA']).nullable().optional(), hasDefaults: z.boolean().optional(), listingId: uuid.nullable().optional(), carModelId: uuid.nullable().optional(), submit: z.boolean().optional() });
+
+/** What submitting one actually does, in the words the member reads on her own timeline. */
+const ENQUIRY_NOTE = 'Registered as an enquiry with ATHENA. No lender has seen it.';
 
 function applicationCard(a: CarFinanceApplication) {
   return { id: a.id, referenceCode: a.referenceCode, status: a.status, purpose: a.purpose, vehiclePrice: a.vehiclePrice, deposit: a.deposit, tradeIn: a.tradeIn, amount: a.amount, termMonths: a.termMonths, balloonPct: num0(a.balloonPct), ratePct: num0(a.ratePct), repaymentMonthly: a.repaymentMonthly, incomeAnnual: a.incomeAnnual, expensesMonthly: a.expensesMonthly, otherDebtsMonthly: a.otherDebtsMonthly, dependants: a.dependants, employment: a.employment, employmentMonths: a.employmentMonths, residency: a.residency, readinessScore: a.readinessScore, readinessNotes: a.readinessNotes, lender: a.lender, submittedAt: a.submittedAt, decisionAt: a.decisionAt, expiresAt: a.expiresAt, decisionNote: a.decisionNote, timeline: Array.isArray(a.timeline) ? a.timeline : [], listingId: a.listingId, carModelId: a.carModelId, createdAt: a.createdAt, updatedAt: a.updatedAt };
@@ -1697,8 +1727,11 @@ router.post('/finance/applications', authenticate, async (req: AuthRequest, res:
     const calc = withReadiness(data, data.purpose === 'NEW' ? 0 : 5);
     const { submit, ...rest } = data;
     const now = new Date();
-    const a = await prisma.carFinanceApplication.create({ data: { ...rest, employmentMonths: rest.employmentMonths ?? null, residency: rest.residency ?? null, userId: req.user!.id, deposit: rest.deposit ?? 0, tradeIn: rest.tradeIn ?? 0, otherDebtsMonthly: rest.otherDebtsMonthly ?? 0, dependants: rest.dependants ?? 0, balloonPct: rest.balloonPct ?? 0, ...calc, ratePct: rest.ratePct ?? calc.ratePct, referenceCode: `CF-${randomBytes(3).toString('hex').toUpperCase()}`, status: submit ? 'SUBMITTED' : 'DRAFT', submittedAt: submit ? now : null, lender: submit ? 'ATHENA finance desk' : null, timeline: [{ at: now.toISOString(), status: submit ? 'SUBMITTED' : 'DRAFT', note: submit ? 'Sent to the finance desk' : 'Saved as a draft' }] } });
-    if (submit) await noteAdmins('A car finance pre-approval was submitted', `${a.referenceCode}: $${a.amount.toLocaleString('en-AU')} over ${a.termMonths} months, readiness ${a.readinessScore}.`, '/dashboard/cars/admin', { kind: 'CAR_FINANCE_SUBMITTED', id: a.id });
+    // lender stays null on submit. It used to be set to "ATHENA finance
+    // desk", which named a lender that does not exist and is the whole of
+    // what made this look like a pre-approval.
+    const a = await prisma.carFinanceApplication.create({ data: { ...rest, employmentMonths: rest.employmentMonths ?? null, residency: rest.residency ?? null, userId: req.user!.id, deposit: rest.deposit ?? 0, tradeIn: rest.tradeIn ?? 0, otherDebtsMonthly: rest.otherDebtsMonthly ?? 0, dependants: rest.dependants ?? 0, balloonPct: rest.balloonPct ?? 0, ...calc, ratePct: rest.ratePct ?? calc.ratePct, referenceCode: `CF-${randomBytes(3).toString('hex').toUpperCase()}`, status: submit ? 'SUBMITTED' : 'DRAFT', submittedAt: submit ? now : null, lender: null, timeline: [{ at: now.toISOString(), status: submit ? 'SUBMITTED' : 'DRAFT', note: submit ? ENQUIRY_NOTE : 'Saved as a draft' }] } });
+    if (submit) await noteAdmins('A car finance enquiry was registered', `${a.referenceCode}: $${a.amount.toLocaleString('en-AU')} over ${a.termMonths} months, readiness ${a.readinessScore}. ATHENA's own estimate; no lender has seen it.`, '/dashboard/cars/admin', { kind: 'CAR_FINANCE_SUBMITTED', id: a.id });
     ok(res, applicationCard(a), 201);
   } catch (error) { next(error); }
 });
@@ -1716,13 +1749,13 @@ router.patch('/finance/applications/:id', authenticate, async (req: AuthRequest,
       ok(res, applicationCard(await prisma.carFinanceApplication.update({ where: { id: a.id }, data: { status: 'WITHDRAWN', timeline: timeline as unknown as Prisma.InputJsonValue } })));
       return;
     }
-    if (a.status !== 'DRAFT') throw new ApiError(400, 'A submitted application is read by the desk as it stands; withdraw it and start again to change it');
+    if (a.status !== 'DRAFT') throw new ApiError(400, 'A registered enquiry is kept as it stands; withdraw it and start again to change it');
     const merged = { ...applicationCard(a), ...data, employmentMonths: data.employmentMonths ?? a.employmentMonths, residency: (data.residency ?? a.residency) as 'CITIZEN' | 'PR' | 'VISA' | null } as unknown as z.infer<typeof applicationSchema>;
     const calc = withReadiness(merged, merged.purpose === 'NEW' ? 0 : 5);
     const { submit, withdraw: _withdraw, ...rest } = data;
-    if (submit) timeline.push({ at: now.toISOString(), status: 'SUBMITTED', note: 'Sent to the finance desk' });
-    const updated = await prisma.carFinanceApplication.update({ where: { id: a.id }, data: { ...rest, ...calc, ratePct: rest.ratePct ?? calc.ratePct, ...(submit ? { status: 'SUBMITTED', submittedAt: now, lender: 'ATHENA finance desk' } : {}), timeline: timeline as unknown as Prisma.InputJsonValue } });
-    if (submit) await noteAdmins('A car finance pre-approval was submitted', `${updated.referenceCode}: $${updated.amount.toLocaleString('en-AU')} over ${updated.termMonths} months, readiness ${updated.readinessScore}.`, '/dashboard/cars/admin', { kind: 'CAR_FINANCE_SUBMITTED', id: updated.id });
+    if (submit) timeline.push({ at: now.toISOString(), status: 'SUBMITTED', note: ENQUIRY_NOTE });
+    const updated = await prisma.carFinanceApplication.update({ where: { id: a.id }, data: { ...rest, ...calc, ratePct: rest.ratePct ?? calc.ratePct, ...(submit ? { status: 'SUBMITTED', submittedAt: now } : {}), timeline: timeline as unknown as Prisma.InputJsonValue } });
+    if (submit) await noteAdmins('A car finance enquiry was registered', `${updated.referenceCode}: $${updated.amount.toLocaleString('en-AU')} over ${updated.termMonths} months, readiness ${updated.readinessScore}. ATHENA's own estimate; no lender has seen it.`, '/dashboard/cars/admin', { kind: 'CAR_FINANCE_SUBMITTED', id: updated.id });
     ok(res, applicationCard(updated));
   } catch (error) { next(error); }
 });
@@ -1785,21 +1818,40 @@ router.patch('/admin/listings/:id', authenticate, requireRole('ADMIN'), async (r
   } catch (error) { next(error); }
 });
 
+/**
+ * What an admin may still do to a finance enquiry: say that a person has
+ * read it, and close it with a note. That is the whole of it.
+ *
+ * PRE_APPROVED and DECLINED are deliberately not accepted here any more,
+ * and neither are lender, ratePct, amount or expiresInDays. Every one of
+ * those was a credit decision dressed as an admin dropdown — an amount, a
+ * rate, a named lender and a validity period is the exact shape of a real
+ * pre-approval, and it was issued by someone with no licence, no bureau
+ * check and no lender. The two enum values survive in the schema only so
+ * that rows written before this change can still be read and retracted;
+ * see retractFinancePreApprovals in automotive-reminders.service.
+ *
+ * The request is answered with an explanation rather than a bare
+ * validation error, because the admin page was built around the old shape
+ * and whoever hits this deserves to know why it went.
+ */
+const CLOSED_DECISIONS = new Set(['PRE_APPROVED', 'DECLINED', 'APPROVED']);
+
 router.patch('/admin/finance/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const a = await prisma.carFinanceApplication.findUnique({ where: { id: req.params.id } });
-    if (!a) throw new ApiError(404, 'Application not found');
-    const data = parse(z.object({ status: z.enum(['IN_REVIEW', 'PRE_APPROVED', 'DECLINED']), lender: z.string().trim().max(80).optional(), decisionNote: z.string().trim().max(2000).optional(), expiresInDays: z.coerce.number().int().min(7).max(180).optional(), ratePct: z.coerce.number().min(0).max(40).optional(), amount: money.optional() }), req.body);
+    if (!a) throw new ApiError(404, 'Enquiry not found');
+    const asked = typeof req.body?.status === 'string' ? req.body.status : '';
+    if (CLOSED_DECISIONS.has(asked)) throw new ApiError(400, 'ATHENA cannot approve or decline credit: it holds no Australian Credit Licence and no lender has seen this. Mark it read, or close it with a note explaining what she can do next.');
+    const data = parse(z.object({ status: z.enum(['IN_REVIEW', 'WITHDRAWN']), decisionNote: z.string().trim().max(2000).optional() }), req.body);
     const now = new Date();
-    const timeline = [...(Array.isArray(a.timeline) ? (a.timeline as unknown[]) : []), { at: now.toISOString(), status: data.status, note: data.decisionNote ?? (data.status === 'IN_REVIEW' ? 'Being read by the desk' : data.status === 'PRE_APPROVED' ? 'Pre-approved' : 'Declined') }];
-    const updated = await prisma.carFinanceApplication.update({ where: { id: a.id }, data: { status: data.status, lender: data.lender ?? a.lender, decisionNote: data.decisionNote, ratePct: data.ratePct, amount: data.amount, ...(data.status !== 'IN_REVIEW' ? { decisionAt: now } : {}), ...(data.status === 'PRE_APPROVED' ? { expiresAt: new Date(now.getTime() + (data.expiresInDays ?? 60) * 86400000) } : {}), timeline: timeline as unknown as Prisma.InputJsonValue } });
-    // A pre-approval with a lender is what the finance partnership pays for; the fee is owed when the loan settles, which the admin confirms on the ledger.
-    if (data.status === 'PRE_APPROVED') {
-      const existing = await prisma.carReferral.findFirst({ where: { kind: 'FINANCE', referenceId: a.id } });
-      if (!existing) { const f = referralFee('FINANCE', updated.amount); await prisma.carReferral.create({ data: { kind: 'FINANCE', userId: a.userId, referenceId: a.id, partner: data.lender ?? a.lender ?? null, basisAmount: updated.amount, feePercent: f.percent, fee: f.fee, note: `${updated.referenceCode}: pre-approved; the fee is owed once the loan settles` } }); }
-    }
-    const words = data.status === 'PRE_APPROVED' ? `Pre-approved for $${updated.amount.toLocaleString('en-AU')}${data.lender ? ` with ${data.lender}` : ''}. Good for ${data.expiresInDays ?? 60} days.` : data.status === 'DECLINED' ? `Not this time.${data.decisionNote ? ` ${data.decisionNote.slice(0, 200)}` : ''}` : 'The desk is reading your application.';
-    await note(a.userId, `Your car finance application: ${data.status.toLowerCase().replace('_', ' ')}`, words, '/dashboard/cars/finance', { kind: 'CAR_FINANCE_STATUS', id: a.id });
+    const closing = data.status === 'WITHDRAWN';
+    const timeline = [...(Array.isArray(a.timeline) ? (a.timeline as unknown[]) : []), { at: now.toISOString(), status: data.status, note: data.decisionNote ?? (closing ? 'Closed by ATHENA' : 'Read by someone at ATHENA') }];
+    const updated = await prisma.carFinanceApplication.update({ where: { id: a.id }, data: { status: data.status, decisionNote: data.decisionNote, ...(closing ? { decisionAt: now } : {}), timeline: timeline as unknown as Prisma.InputJsonValue } });
+    const words = closing
+      ? `We have closed it.${data.decisionNote ? ` ${data.decisionNote.slice(0, 200)}` : ''} Your estimate is still on the page, and a licensed broker or lender is who to take it to.`
+      : 'Someone at ATHENA has read it. This is not a credit assessment and no lender has seen it; the numbers on the page are ATHENA’s own estimate.';
+    await note(a.userId, closing ? 'Your car finance enquiry has been closed' : 'Your car finance enquiry has been read', words, '/dashboard/cars/finance', { kind: 'CAR_FINANCE_STATUS', id: a.id });
     ok(res, applicationCard(updated));
   } catch (error) { next(error); }
 });

@@ -201,7 +201,7 @@ export const FINANCE_GLOSSARY = [
   { term: 'Balloon (residual)', plain: 'A lump sum left at the end, so the monthly repayments are smaller. You still owe it, and by then the car is worth less. Say no unless you have a plan for it.' },
   { term: 'Fixed and variable', plain: 'Fixed means the repayment never changes. Most car loans are fixed; check the fee for paying it out early.' },
   { term: 'Establishment and monthly fees', plain: 'A fee to set the loan up and sometimes one every month. Small numbers that add up over five years; the comparison rate captures them.' },
-  { term: 'Pre-approval', plain: 'A lender agrees in principle to an amount before you have chosen the car, usually good for 60 to 90 days. It lets you negotiate like a cash buyer.' },
+  { term: 'Pre-approval', plain: 'A lender agrees in principle to an amount before you have chosen the car, usually good for 60 to 90 days. It lets you negotiate like a cash buyer. Only a lender or a licensed credit broker can give you one, and it follows a credit check; ATHENA is neither and cannot. What ATHENA gives you is its own estimate of what you could carry, which is a different thing and worth having before you go.' },
   { term: 'Dealer finance', plain: 'Arranged at the dealership through a lender the dealer works with. Convenient, sometimes competitive, often not; bring a pre-approval to compare against.' },
   { term: 'Novated lease', plain: 'Your employer pays the lease from your salary before tax. Can suit a higher income and a new car, especially an electric one under the FBT exemption; ask a tax agent.' },
   { term: 'Loan-to-value (LVR)', plain: 'The loan as a share of the car\'s value. Over 100 percent (fees rolled in, no deposit) means owing more than the car is worth for the first years.' },
@@ -299,11 +299,19 @@ export const FLEET_PROGRAMME = {
  * What ATHENA is paid when it introduces a member to a partner, as the
  * blueprint sets it out. The member does not pay these; the partner does,
  * and the figures are published so the introduction is never a secret.
+ *
+ * This is a published rate card, not a record of money coming in. Finance
+ * and insurance have no partner signed, so nothing is charged on either:
+ * the finance line in particular used to say a lender paid "after a
+ * pre-approval arranged here", which described both a lender and a
+ * pre-approval that do not exist. A fee is only ever written to the ledger
+ * for an introduction that really happened, by hand, with the partner
+ * named.
  */
 export const REFERRAL_FEES = {
   dealerSale: { percent: 1, min: 200, max: 500, words: 'A dealership pays between $200 and $500 when a test drive booked here becomes a sale.' },
-  finance: { percent: 1, words: 'A lender pays about one percent of a loan that settles after a pre-approval arranged here.' },
-  insurance: { percent: 15, words: 'An insurer pays a share of the first year\'s premium, around fifteen percent, for a policy taken through an introduction here.' },
+  finance: { percent: 1, words: 'If ATHENA ever introduces you to a lender, that lender would pay about one percent of a loan that settles. No lender is on the panel today, ATHENA is not a licensed credit broker, and nothing is charged on finance.' },
+  insurance: { percent: 15, words: 'If ATHENA ever introduces you to an insurer, that insurer would pay a share of the first year\'s premium, around fifteen percent. No insurer is on the panel today; the estimates here come from no insurer\'s rates and earn nothing.' },
   warranty: { percent: 10, words: 'A warranty provider pays a share of the price of an extended warranty sold through an introduction here.' },
   parts: { percent: 5, words: 'A parts supplier pays a share of the parts ordered through a workshop booking here.' },
   fleet: { percent: 0, words: 'A fleet programme is paid from the workshop\'s booking commission; nothing extra.' },
