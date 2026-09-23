@@ -150,9 +150,26 @@ export interface RankedItem {
   explanation: string;
 }
 
+/**
+ * The vocabulary the Python service will accept for a feed item. It is a closed
+ * pydantic enum over there (`FeedItemType` in ml/src/api/routers/feed.py), so a
+ * value outside this union is not "unknown to the model", it is a 422 that
+ * fails the whole batch. Typing it here rather than as `string` is what stops
+ * another of this platform's vocabularies from being posted through by accident.
+ */
+export type FeedItemType =
+  | 'post'
+  | 'video'
+  | 'job'
+  | 'course'
+  | 'ad'
+  | 'mentor'
+  | 'event'
+  | 'story';
+
 export interface FeedCandidate {
   id: string;
-  item_type: string;
+  item_type: FeedItemType;
   author_id: string;
   created_at: string;
   view_count?: number;
@@ -166,11 +183,32 @@ export interface FeedCandidate {
 
 export interface FeedItem {
   id: string;
-  item_type: string;
+  item_type: FeedItemType;
   score: number;
   position: number;
   reason: string;
   is_sponsored: boolean;
+}
+
+/**
+ * A refusal the ML service itself sent back, as opposed to a socket that never
+ * connected or a request that timed out. `status` is what lets a caller tell
+ * the two apart: a 4xx means the service read the request and rejected it, so
+ * the request is what has to change, while a 5xx or a transport failure is
+ * worth waiting out.
+ */
+export class MlServiceError extends Error {
+  readonly status: number;
+  readonly endpoint: string;
+  readonly detail: unknown;
+
+  constructor(message: string, status: number, endpoint: string, detail?: unknown) {
+    super(message);
+    this.name = 'MlServiceError';
+    this.status = status;
+    this.endpoint = endpoint;
+    this.detail = detail;
+  }
 }
 
 // ===========================================
@@ -211,9 +249,13 @@ class MLServiceClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({})) as { detail?: string; message?: string };
-        throw new Error(
-          error.detail || error.message || `ML Service error: ${response.status}`
+        const body = await response.json().catch(() => ({})) as { detail?: unknown; message?: unknown };
+        const reported = typeof body.detail === 'string' ? body.detail : typeof body.message === 'string' ? body.message : null;
+        throw new MlServiceError(
+          reported || `ML Service error: ${response.status}`,
+          response.status,
+          endpoint,
+          body.detail ?? body.message
         );
       }
 
@@ -239,6 +281,23 @@ class MLServiceClient {
         return await this.fetch<T>(endpoint, options);
       } catch (error: any) {
         lastError = error;
+
+        // A 4xx is the service telling us the request itself is wrong: a body
+        // that does not match its schema, or a missing shared key. Sending the
+        // identical body twice more cannot change the answer, it only adds the
+        // back-off delays to whatever the caller is waiting on — which is how a
+        // rejected feed batch came to cost about three seconds on every feed
+        // load. Give up at once, and say so at error level, because a contract
+        // that has drifted apart is a defect and not weather.
+        if (error instanceof MlServiceError && error.status >= 400 && error.status < 500) {
+          logger.error('ML Service rejected the request; the Node and Python contracts have drifted apart', {
+            endpoint,
+            status: error.status,
+            detail: error.detail ?? error.message,
+          });
+          throw error;
+        }
+
         logger.warn(`ML Service request failed (attempt ${i + 1}/${attempts})`, {
           endpoint,
           error: error.message,

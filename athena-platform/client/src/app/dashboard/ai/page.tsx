@@ -46,7 +46,7 @@ const tools = [
   {
     id: 'salary-equity',
     name: 'SalaryEquity',
-    description: 'Anonymous pay gap detection and market salary analysis',
+    description: 'Pay gap detection and market salary analysis',
     icon: DollarSign,
     href: '/dashboard/ai/salary',
     color: 'bg-emerald-500',

@@ -9,7 +9,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { mlService } from '../ml.service';
 import { logger } from '../../utils/logger';
-import { rerankWithMl, toFeedCandidate, mlRankingEnabled } from '../feed-ml.service';
+import { rerankWithMl, toFeedCandidate, mlRankingEnabled, feedItemTypeFor } from '../feed-ml.service';
 
 const ml: any = mlService;
 
@@ -47,8 +47,8 @@ describe('ML feed ranking', () => {
   it('re-orders by the model’s positions, keeps what it did not score after, and carries its reasons', async () => {
     ml.generateFeed.mockResolvedValue({
       feed_items: [
-        { id: 'c', item_type: 'text', score: 0.9, position: 0, reason: 'Founders you follow are talking about this', is_sponsored: false },
-        { id: 'a', item_type: 'text', score: 0.7, position: 1, reason: '', is_sponsored: false },
+        { id: 'c', item_type: 'post', score: 0.9, position: 0, reason: 'Founders you follow are talking about this', is_sponsored: false },
+        { id: 'a', item_type: 'post', score: 0.7, position: 1, reason: '', is_sponsored: false },
       ],
     });
 
@@ -60,7 +60,7 @@ describe('ML feed ranking', () => {
     expect(result.reasons.has('a')).toBe(false);
     const [context, candidates] = ml.generateFeed.mock.calls[0];
     expect(context).toEqual({ user_id: 'u1', persona: 'FOUNDER' });
-    expect(candidates[0]).toMatchObject({ id: 'a', item_type: 'text', author_id: 'author-a', like_count: 30, tags: ['founders'] });
+    expect(candidates[0]).toMatchObject({ id: 'a', item_type: 'post', author_id: 'author-a', like_count: 30, tags: ['founders'] });
   });
 
   it('a failing model leaves the feed exactly as it was, with a warning', async () => {
@@ -84,5 +84,46 @@ describe('ML feed ranking', () => {
       tags: [],
       is_sponsored: false,
     });
+  });
+
+  // Every PostType in the schema has to land on a word the model's pydantic
+  // enum accepts. It did not before: lowercasing the Prisma value sent 'text'
+  // and 'job_share', one rejected candidate failed the whole batch, and the
+  // ranker silently never ran on any feed that was not purely video.
+  it('translates every post type into a word the model accepts', () => {
+    const MODEL_VOCABULARY = ['post', 'video', 'job', 'course', 'ad', 'mentor', 'event', 'story'];
+    const POST_TYPES = ['TEXT', 'IMAGE', 'VIDEO', 'ARTICLE', 'JOB_SHARE', 'COURSE_SHARE', 'POLL', 'WIN'];
+
+    for (const type of POST_TYPES) {
+      expect(MODEL_VOCABULARY).toContain(feedItemTypeFor(type));
+    }
+
+    expect(feedItemTypeFor('TEXT')).toBe('post');
+    expect(feedItemTypeFor('VIDEO')).toBe('video');
+    expect(feedItemTypeFor('JOB_SHARE')).toBe('job');
+    expect(feedItemTypeFor('COURSE_SHARE')).toBe('course');
+    // A type the schema gains later still has to produce a valid word rather
+    // than losing the batch.
+    expect(feedItemTypeFor('SOMETHING_NEW')).toBe('post');
+    expect(feedItemTypeFor(null)).toBe('post');
+  });
+
+  it('a refused batch is logged as an error, not swallowed as a warning', async () => {
+    ml.generateFeed.mockRejectedValue(
+      Object.assign(new Error('ML Service error: 422'), {
+        status: 422,
+        detail: [{ loc: ['body', 'candidates', 0, 'item_type'], msg: 'Input should be a valid enumeration member' }],
+      })
+    );
+
+    const result = await rerankWithMl(POSTS, { userId: 'u1' });
+
+    expect(result.applied).toBe(false);
+    expect(result.posts).toBe(POSTS);
+    expect(logger.error).toHaveBeenCalledWith(
+      'ML feed ranking refused the candidates; engagement order kept',
+      expect.objectContaining({ status: 422, itemTypes: ['post'] })
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });

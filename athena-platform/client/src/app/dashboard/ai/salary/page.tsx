@@ -112,7 +112,7 @@ export default function SalaryEquityPage() {
         gender: contributeForm.gender || undefined,
       });
 
-      setSuccess('Thank you! Your anonymous salary data has been submitted.');
+      setSuccess('Thank you. Your salary data has been added to the pay-gap pool.');
       setShowContribute(false);
       setContributeForm({
         jobTitle: '',
@@ -211,7 +211,7 @@ export default function SalaryEquityPage() {
               Help close the pay gap
             </h3>
             <p className="text-sm text-purple-600 dark:text-purple-400">
-              Anonymously contribute your salary data to help other women negotiate fair pay.
+              Contribute your salary data to help other women negotiate fair pay.
             </p>
           </div>
           <button
@@ -273,12 +273,29 @@ export default function SalaryEquityPage() {
                 <option value="PREFER_NOT">Prefer not to say</option>
               </select>
             </div>
+            {/*
+              This button used to say "Submit Anonymously" and the copy above
+              promised anonymity, while the handler behind it
+              (POST /api/ai-algorithms/salary-equity/submit) writes the signed-in
+              member's id onto the row alongside her gender, employer, city and
+              base salary. On a platform where some members are leaving violent
+              partners, a false anonymity promise is the kind of thing somebody
+              relies on before typing her employer's name. Until the server stops
+              linking the row — see the handoff on ai-algorithms.routes.ts — the
+              page says exactly what happens instead.
+            */}
+            <p className="mt-4 text-xs text-purple-700 dark:text-purple-300 leading-relaxed">
+              What happens to this: your entry is saved against your ATHENA account, so it is not
+              anonymous to us. Other members never see your row — a role is only ever reported as
+              a median and a salary band once at least five people have contributed to it, and a
+              gender gap only once at least three women and three men have.
+            </p>
             <button
               onClick={handleContribute}
               disabled={contributing}
               className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50"
             >
-              {contributing ? 'Submitting...' : 'Submit Anonymously'}
+              {contributing ? 'Submitting...' : 'Contribute my salary'}
             </button>
           </div>
         )}
