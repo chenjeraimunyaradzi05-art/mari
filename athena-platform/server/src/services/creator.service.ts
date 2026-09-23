@@ -9,6 +9,12 @@ import Stripe from 'stripe';
 import { getStripe } from '../utils/stripe';
 import { ApiError } from '../middleware/errorHandler';
 import { sendNotification } from './socket.service';
+import {
+  createConnectedAccount,
+  refreshConnectedAccount,
+  resolveConnectedAccountId,
+} from './stripe-connect.service';
+import { recordFailure } from '../utils/ops-metrics';
 
 // getStripe() is called at each use rather than once into a module constant.
 // Capturing it at import time froze whatever client could be built the moment
@@ -100,6 +106,15 @@ export const GIFT_TYPES = {
 // 1 gift point = 0.01 units of local currency
 const GIFT_POINT_VALUE = 0.01;
 
+/** The smallest payout the platform will send, in the creator's currency. */
+const MINIMUM_PAYOUT = 50;
+
+/** The same minimum expressed in the points the balance is actually held in. */
+const MINIMUM_PAYOUT_POINTS = Math.round(MINIMUM_PAYOUT / GIFT_POINT_VALUE);
+
+/** Statuses a payout can still move out of. Anything else is settled history. */
+const OPEN_PAYOUT_STATUSES = ['PENDING', 'PROCESSING'];
+
 const SUPPORTED_GIFT_CURRENCIES = new Set([
   'AUD',
   'USD',
@@ -172,39 +187,51 @@ export async function enableCreatorMode(userId: string, stripeAccountId?: string
   });
 
   if (existing) {
-    throw new Error('Creator profile already exists');
+    throw new ApiError(409, 'Creator profile already exists');
   }
 
-  // Create Stripe Connect account if not provided
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+
+  if (!user) throw new ApiError(404, 'User not found');
+
+  // The connected account comes from the shared Connect service rather than a
+  // second accounts.create of this module's own. Creator mode, mentor
+  // monetisation and the payments page each used to mint their own Express
+  // account for the same woman, and whichever one a screen happened to read
+  // showed a balance the other two were holding.
   let accountId = stripeAccountId;
   if (!accountId) {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { email: true, firstName: true, lastName: true },
-    });
-
-    if (!user) throw new Error('User not found');
-
-    const account = await getStripe().accounts.create({
-      type: 'express',
+    const created = await createConnectedAccount({
+      userId,
       email: user.email,
-      capabilities: {
-        transfers: { requested: true },
-      },
-      business_profile: {
-        name: `${user.firstName} ${user.lastName}`,
-        product_description: 'Content creator on ATHENA platform',
-      },
+      // 'AU' as the payments page already does: Stripe wants an ISO country
+      // code and `User.country` holds a display name ("Australia"), so it is
+      // not the field to read. ATHENA's Connect accounts are Australian.
+      country: 'AU',
+      type: 'creator',
     });
-    accountId = account.id;
+    accountId = created.accountId;
   }
 
-  // Create creator profile
+  // isMonetized is left to the account's real state. It used to be set true in
+  // this same statement, on an Express account seconds old that Stripe had
+  // verified nothing about, so the flag meaning "she can be paid" was true from
+  // the first moment and never said otherwise. createConnectedAccount has just
+  // written the honest value onto the user; the profile picks it up from there,
+  // and the account.updated webhook keeps it current afterwards.
+  const connectState = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { stripeConnectStatus: true },
+  });
+
   const creatorProfile = await prisma.creatorProfile.create({
     data: {
       userId,
       stripeAccountId: accountId,
-      isMonetized: true,
+      isMonetized: connectState?.stripeConnectStatus === 'ACTIVE',
     },
   });
 
@@ -217,6 +244,30 @@ export async function enableCreatorMode(userId: string, stripeAccountId?: string
   logger.info('Creator mode enabled', { userId, stripeAccountId: accountId });
 
   return creatorProfile;
+}
+
+/**
+ * Brings a creator's monetisation flag back in step with Stripe.
+ *
+ * Onboarding finishes on Stripe's site and returns her to the creator
+ * dashboard, which is the first moment this side of the platform can find out
+ * whether her account came back usable. The `account.updated` webhook is the
+ * authoritative answer and arrives whenever Stripe decides; this is the cheap
+ * one that runs while she is looking at the screen, and only while she is not
+ * monetised yet, so a monetised creator never pays for the call.
+ */
+export async function refreshCreatorMonetization(userId: string): Promise<void> {
+  const profile = await prisma.creatorProfile.findUnique({
+    where: { userId },
+    select: { isMonetized: true },
+  });
+
+  if (!profile || profile.isMonetized) return;
+
+  const accountId = await resolveConnectedAccountId(userId);
+  if (!accountId) return;
+
+  await refreshConnectedAccount(userId, accountId);
 }
 
 export function getCreatorTier(followerCount: number): CreatorTier {
@@ -249,7 +300,9 @@ export async function sendGift(
     throw new Error('Receiver is not a monetized creator');
   }
 
-  // Get sender's gift balance
+  // An early exit so an obviously empty balance does not do the work below. It
+  // is not the guard: two requests can both read enough points here and both
+  // proceed. The guard is the conditional debit inside the transaction.
   const sender = await prisma.user.findUnique({
     where: { id: senderId },
     select: { giftBalance: true, displayName: true },
@@ -264,10 +317,25 @@ export async function sendGift(
   const creatorShare = Math.floor(gift.value * (tier.revShare / 100));
   const platformShare = gift.value - creatorShare;
 
-  // Perform transaction
-  const [transaction] = await prisma.$transaction([
-    // Create gift transaction record
-    prisma.giftTransaction.create({
+  // The interactive form, so a refused debit rolls back the gift record and the
+  // creator's earnings rather than recording a gift nobody paid for. The array
+  // form this replaced could not do that: the decrement was unconditional, so
+  // two concurrent gifts both took the points, the balance went negative, and
+  // the overspend arrived in the creator's pendingPayout — from where it leaves
+  // as a real Stripe transfer. Gift points are bought with money, so that was a
+  // cash-loss path, not a counter bug. Same shape as sendLiveGift in
+  // livestream.service.ts, which had the identical defect.
+  const transaction = await prisma.$transaction(async (tx) => {
+    const debit = await tx.user.updateMany({
+      where: { id: senderId, giftBalance: { gte: gift.value } },
+      data: { giftBalance: { decrement: gift.value } },
+    });
+
+    if (debit.count === 0) {
+      throw new Error('Insufficient gift balance');
+    }
+
+    const created = await tx.giftTransaction.create({
       data: {
         senderId,
         receiverId,
@@ -277,21 +345,18 @@ export async function sendGift(
         platformShare,
         message,
       },
-    }),
-    // Deduct from sender
-    prisma.user.update({
-      where: { id: senderId },
-      data: { giftBalance: { decrement: gift.value } },
-    }),
-    // Add to creator's earnings
-    prisma.creatorProfile.update({
+    });
+
+    await tx.creatorProfile.update({
       where: { userId: receiverId },
       data: {
         totalEarnings: { increment: creatorShare },
         pendingPayout: { increment: creatorShare },
       },
-    }),
-  ]);
+    });
+
+    return created;
+  });
 
   logger.info('Gift sent', {
     senderId,
@@ -610,59 +675,122 @@ export async function getCreatorAnalytics(userId: string, days = 30) {
 // PAYOUTS
 // ==========================================
 
+/**
+ * Pays a creator the balance her supporters' gifts have built up.
+ *
+ * The order of the three steps here is the whole safety of it, and it used to
+ * run the other way round: read the balance, send the money at Stripe, then
+ * write the row and set pendingPayout to the literal 0. Two requests arriving
+ * together both read the same balance, both passed the minimum check and both
+ * transferred, because nothing had been claimed in the database yet and the
+ * Stripe call carried no key that could collapse them. A gift that landed
+ * while the transfer was in flight was then destroyed by the 0, silently,
+ * because the payout row records only what was paid.
+ *
+ * So: claim the points first with a conditional decrement, which is the
+ * concurrency guard — the loser of the race matches no row, decrements nothing
+ * and is told her balance is below the minimum, which by then it is. Only then
+ * call Stripe, keyed on the payout row's own id so a retry, a crash or a
+ * replay can never settle twice. If Stripe refuses, put the points back and
+ * mark the row FAILED, because a refused transfer must not eat her balance.
+ */
 export async function requestPayout(userId: string) {
   const profile = await prisma.creatorProfile.findUnique({
     where: { userId },
   });
 
   if (!profile) {
-    throw new Error('Creator profile not found');
+    throw new ApiError(404, 'Creator profile not found');
   }
 
-  const minPayout = 50; // $50 minimum
-  const pendingAmount = profile.pendingPayout * GIFT_POINT_VALUE;
+  const points = profile.pendingPayout;
+  const pendingAmount = points * GIFT_POINT_VALUE;
 
-  if (pendingAmount < minPayout) {
-    throw new Error(`Minimum payout is $${minPayout}. Current pending: $${pendingAmount.toFixed(2)}`);
+  if (points < MINIMUM_PAYOUT_POINTS) {
+    throw new ApiError(
+      400,
+      `Minimum payout is $${MINIMUM_PAYOUT}. Current pending: $${pendingAmount.toFixed(2)}`
+    );
   }
 
-  if (!profile.stripeAccountId) {
-    throw new Error('Stripe account not connected');
+  const destination = await resolveConnectedAccountId(userId);
+  if (!destination) {
+    throw new ApiError(400, 'Stripe account not connected');
   }
 
   const currency = await resolveUserCurrency(userId);
 
-  // Create payout via Stripe
-  const transfer = await getStripe().transfers.create({
-    amount: Math.floor(pendingAmount * 100), // Convert to cents
-    currency: currency.toLowerCase(),
-    destination: profile.stripeAccountId,
-    metadata: {
-      userId,
-      type: 'creator_payout',
-      currency,
-    },
-  });
+  const payout = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.creatorProfile.updateMany({
+      // `gte: points` and `decrement: points` rather than a set to zero: a gift
+      // credited between the read above and this line raises the balance, and
+      // decrementing takes only what this payout is actually sending, so the
+      // new gift survives to the next payout instead of vanishing.
+      where: { userId, pendingPayout: { gte: points } },
+      data: { pendingPayout: { decrement: points } },
+    });
 
-  // Record payout and reset pending
-  await prisma.$transaction([
-    prisma.creatorPayout.create({
+    if (claimed.count !== 1) return null;
+
+    return tx.creatorPayout.create({
       data: {
         creatorProfileId: profile.id,
         amount: pendingAmount,
-        stripeTransferId: transfer.id,
         status: 'PENDING',
       },
-    }),
-    prisma.creatorProfile.update({
-      where: { userId },
-      data: { pendingPayout: 0 },
-    }),
-  ]);
+    });
+  });
+
+  if (!payout) {
+    // Nothing was decremented, so nothing is owed back. Either another request
+    // claimed this balance a moment ago or a gift was reversed underneath it;
+    // in both cases the honest answer is the balance she has now.
+    throw new ApiError(
+      409,
+      'This balance is already being paid out. Check your payout history in a moment.'
+    );
+  }
+
+  let transfer: Stripe.Transfer;
+  try {
+    transfer = await getStripe().transfers.create(
+      {
+        amount: Math.floor(pendingAmount * 100), // Convert to cents
+        currency: currency.toLowerCase(),
+        destination,
+        metadata: {
+          userId,
+          type: 'creator_payout',
+          payoutId: payout.id,
+          currency,
+        },
+      },
+      // Derived from the row, not generated per call. The Stripe SDK attaches a
+      // fresh random key to every POST, which dedupes one request's own network
+      // retries and nothing at all across two invocations of this function.
+      { idempotencyKey: `creator-payout-${payout.id}` }
+    );
+  } catch (error) {
+    await creditBackFailedPayout(payout.id, userId, points);
+    recordFailure('creator.payout.transfer', error);
+    logger.error('Creator payout transfer was refused; the balance has been restored', {
+      userId,
+      payoutId: payout.id,
+      amount: pendingAmount,
+      error: (error as Error).message,
+    });
+    throw new ApiError(502, 'The payout could not be sent. Your balance is unchanged; please try again.');
+  }
+
+  await prisma.creatorPayout.update({
+    where: { id: payout.id },
+    data: { stripeTransferId: transfer.id },
+  });
 
   logger.info('Payout requested', { userId, amount: pendingAmount, transferId: transfer.id });
 
   return {
+    payoutId: payout.id,
     amount: pendingAmount,
     transferId: transfer.id,
     status: 'PENDING',
@@ -670,17 +798,116 @@ export async function requestPayout(userId: string) {
   };
 }
 
-export async function generateStripeOnboardingLink(userId: string) {
-  const profile = await prisma.creatorProfile.findUnique({
-    where: { userId },
+/**
+ * Returns the points a refused or reversed payout was carrying.
+ *
+ * Guarded on the row still being open so that a Stripe failure and a later
+ * `transfer.failed` webhook for the same payout credit her once between them,
+ * not twice.
+ */
+async function creditBackFailedPayout(
+  payoutId: string,
+  userId: string,
+  points: number
+): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const closed = await tx.creatorPayout.updateMany({
+      where: { id: payoutId, status: { in: OPEN_PAYOUT_STATUSES } },
+      data: { status: 'FAILED' },
+    });
+
+    if (closed.count !== 1) return false;
+
+    await tx.creatorProfile.update({
+      where: { userId },
+      data: { pendingPayout: { increment: points } },
+    });
+
+    return true;
+  });
+}
+
+/**
+ * A payout Stripe has confirmed reached the creator's bank.
+ *
+ * Both columns are written together on purpose: the annual earnings statement
+ * filters on `status: 'COMPLETED'` AND a `completedAt` inside the financial
+ * year, so a row stamped COMPLETED with a null `completedAt` is still invisible
+ * to her — which is how every payout on the platform read as $0 paid out.
+ *
+ * The caller is the Stripe webhook, which finds the row by
+ * `CreatorPayout.stripeTransferId`. Returns false when no open payout carries
+ * that transfer, so a replayed event can be counted as ignored.
+ */
+export async function settleCreatorPayout(stripeTransferId: string, completedAt: Date): Promise<boolean> {
+  const settled = await prisma.creatorPayout.updateMany({
+    where: { stripeTransferId, status: { in: OPEN_PAYOUT_STATUSES } },
+    data: { status: 'COMPLETED', completedAt },
   });
 
-  if (!profile || !profile.stripeAccountId) {
-    throw new Error('Creator profile or Stripe account not found. Enable creator mode first.');
+  if (settled.count === 0) return false;
+
+  logger.info('Creator payout settled', { stripeTransferId, completedAt });
+  return true;
+}
+
+/**
+ * A payout Stripe failed or reversed after it had been sent.
+ *
+ * The points were claimed out of her balance before the transfer went out, so
+ * money that came back has to go back onto the balance or it is simply gone —
+ * the platform would have no record of owing it and she would have no way to
+ * ask for it again.
+ *
+ * The caller is the Stripe webhook, which finds the row by
+ * `CreatorPayout.stripeTransferId`.
+ */
+export async function reverseCreatorPayout(stripeTransferId: string, reason: 'FAILED' | 'REVERSED' = 'FAILED'): Promise<boolean> {
+  const payout = await prisma.creatorPayout.findFirst({
+    where: { stripeTransferId },
+    select: { id: true, amount: true, creatorProfile: { select: { userId: true } } },
+  });
+
+  if (!payout) {
+    logger.warn('Stripe reported a transfer no creator payout row claims', { stripeTransferId });
+    return false;
+  }
+
+  // Back into the unit the balance is actually kept in. The row stores dollars;
+  // pendingPayout is whole gift points at a cent each.
+  const points = Math.round(payout.amount / GIFT_POINT_VALUE);
+  const credited = await creditBackFailedPayout(payout.id, payout.creatorProfile.userId, points);
+
+  if (!credited) return false;
+
+  logger.error('Creator payout came back from Stripe; the balance has been restored', {
+    stripeTransferId,
+    payoutId: payout.id,
+    amount: payout.amount,
+    reason,
+  });
+  recordFailure('creator.payout.transfer', new Error(`Transfer ${stripeTransferId} ${reason.toLowerCase()}`));
+
+  await sendNotification({
+    userId: payout.creatorProfile.userId,
+    type: 'SYSTEM',
+    title: 'Your payout did not go through',
+    message: `The $${payout.amount.toFixed(2)} payout was returned by the bank and is back in your balance. Check your payout details before trying again.`,
+    link: '/dashboard/creator',
+  });
+
+  return true;
+}
+
+export async function generateStripeOnboardingLink(userId: string) {
+  const accountId = await resolveConnectedAccountId(userId);
+
+  if (!accountId) {
+    throw new ApiError(400, 'Creator profile or Stripe account not found. Enable creator mode first.');
   }
 
   const accountLink = await getStripe().accountLinks.create({
-    account: profile.stripeAccountId,
+    account: accountId,
     refresh_url: `${process.env.CLIENT_URL}/dashboard/creator/onboarding-refresh`,
     return_url: `${process.env.CLIENT_URL}/dashboard/creator`,
     type: 'account_onboarding',
@@ -690,20 +917,18 @@ export async function generateStripeOnboardingLink(userId: string) {
 }
 
 export async function generateStripeLoginLink(userId: string) {
-  const profile = await prisma.creatorProfile.findUnique({
-    where: { userId },
-  });
+  const accountId = await resolveConnectedAccountId(userId);
 
-  if (!profile || !profile.stripeAccountId) {
-    throw new Error('Creator profile or Stripe account not found.');
+  if (!accountId) {
+    throw new ApiError(400, 'Creator profile or Stripe account not found.');
   }
 
   try {
-    const loginLink = await getStripe().accounts.createLoginLink(profile.stripeAccountId);
+    const loginLink = await getStripe().accounts.createLoginLink(accountId);
     return loginLink.url;
   } catch (error: any) {
     if (error.code === 'account_invalid') {
-       throw new Error('Please complete onboarding before accessing the dashboard.');
+       throw new ApiError(400, 'Please complete onboarding before accessing the dashboard.');
     }
     throw error;
   }

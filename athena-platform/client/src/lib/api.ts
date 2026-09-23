@@ -122,7 +122,12 @@ export const authApi = {
     inviteCode?: string;
   }) => api.post('/auth/facebook', data),
 
-  login: (data: { email: string; password: string }) =>
+  // twoFactorCode is optional because the first request of a sign-in never has
+  // one: the server answers 401 "Two-factor code required", and the form asks
+  // for it then. Leaving it off the type is how every staff account came to be
+  // locked out of the web app — staff two-factor is mandatory in production, the
+  // server has always accepted the field, and the client had no way to send it.
+  login: (data: { email: string; password: string; twoFactorCode?: string }) =>
     api.post('/auth/login', data),
 
   logout: () => api.post('/auth/logout'),
@@ -427,6 +432,17 @@ export const mentorApi = {
   become: (data: MentorProfileInput) => api.post('/mentors/me', data),
 
   updateProfile: (data: MentorProfileInput) => api.post('/mentors/me', data),
+
+  // Payouts. These three have existed on the server since mentoring shipped and
+  // nothing ever called them, so MentorProfile.stripeAccountId was never set and
+  // every paid booking failed with "Mentor is not enabled for payments" — the
+  // flagship money flow could not complete for a single mentor. Same shape as
+  // the creator equivalents below.
+  enable: () => api.post('/mentors/enable'),
+
+  onboard: () => api.post('/mentors/onboard'),
+
+  getStripeLoginLink: () => api.post('/mentors/stripe-login'),
 
   bookSession: (data: {
     mentorId: string;
@@ -1576,7 +1592,11 @@ export const connectApi = {
   setDefaultPayoutMethod: (methodId: string) =>
     api.post(`/connect/payout-methods/${methodId}/default`),
 
-  requestPayout: (data: { amount: number; currency?: string; connectedAccountId: string }) =>
+  // No connectedAccountId: the server resolves the destination from the session
+  // and ignores anything the body says, because accepting it from the request
+  // let any signed-in account name someone else's connected account and move
+  // money out of it. Requiring it here only invited callers to send it.
+  requestPayout: (data: { amount: number; currency?: string }) =>
     api.post('/connect/payout', data),
 };
 

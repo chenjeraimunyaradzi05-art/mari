@@ -9,6 +9,7 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import * as creatorService from '../services/creator.service';
 import { prisma } from '../utils/prisma';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -22,8 +23,18 @@ const router = Router();
  */
 router.get('/profile', authenticate, async (req: AuthRequest, res, next) => {
   try {
+    // Stripe onboarding finishes on Stripe's site and returns her here, so this
+    // is the first moment the platform can find out whether her account came
+    // back usable. It costs one Stripe lookup and only while she is not
+    // monetised yet; once she is, this does nothing. The account.updated
+    // webhook is what hears about a verification that finishes later. Best
+    // effort, because a Stripe outage must not take her whole dashboard down.
+    await bestEffort('creator.refresh-monetization', () =>
+      creatorService.refreshCreatorMonetization(req.user!.id)
+    );
+
     const profile = await creatorService.getCreatorProfile(req.user!.id);
-    
+
     res.json({
       success: true,
       data: profile,

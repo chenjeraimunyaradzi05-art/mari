@@ -57,8 +57,21 @@ export async function buildEarningsStatement(userId: string, endYear?: number, n
     prisma.mentorSession.findMany({ where: { mentorProfile: { userId }, paymentCapturedAt: range }, select: { sessionAmount: true, platformFee: true, mentorPayout: true } }),
     prisma.creatorProfile.findUnique({ where: { userId }, select: { id: true } }),
   ]);
+  // Dated by `completedAt`, which is when the money actually reached her bank.
+  // The `completedAt: null` arm is for rows settled before the platform started
+  // stamping that column, and for any an operator has closed out by hand: a
+  // payout with no settlement date is dated by when it was requested, because
+  // silently leaving real money off her statement is worse than dating it a few
+  // days early.
   const payouts = creatorProfile
-    ? await prisma.creatorPayout.findMany({ where: { creatorProfileId: creatorProfile.id, status: 'COMPLETED', completedAt: range }, select: { amount: true } })
+    ? await prisma.creatorPayout.findMany({
+        where: {
+          creatorProfileId: creatorProfile.id,
+          status: 'COMPLETED',
+          OR: [{ completedAt: range }, { completedAt: null, createdAt: range }],
+        },
+        select: { amount: true },
+      })
     : [];
 
   const giftGross = gifts.reduce((s, g) => s + g.giftValue, 0) * POINT_VALUE_AUD;

@@ -159,10 +159,22 @@ export default function CreatorDashboardPage() {
   const requestPayout = async () => {
     setRequestingPayout(true);
     try {
-      await api.post('/creator/payouts/request');
+      const response = await api.post('/creator/payouts/request');
+      const paid = Number(response.data?.data?.amount) || 0;
       toast.success('Payout requested. It reaches your account in 3 to 5 business days.');
-      // The pending balance has moved to Stripe; show that without a refetch.
-      setStats((current) => (current ? { ...current, pendingEarnings: 0, availableForPayout: 0 } : current));
+      // Subtracted, not zeroed. The server now pays out exactly the balance it
+      // claimed and leaves anything credited since — a gift that landed while
+      // the request was in flight is still hers — so showing zero here would
+      // tell her money she still has is gone until the next refresh.
+      setStats((current) =>
+        current
+          ? {
+              ...current,
+              pendingEarnings: Math.max(0, current.pendingEarnings - paid),
+              availableForPayout: Math.max(0, current.availableForPayout - paid),
+            }
+          : current
+      );
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'The payout could not be requested.');
     } finally {

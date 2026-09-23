@@ -119,8 +119,35 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
     orderBy: { createdAt: 'asc' },
   });
 
+  // Mentor sessions booked before mentoring moved onto the shared escrow path
+  // hold real money against a PaymentIntent with no EscrowPayment row behind
+  // it, so the query above cannot see them: a session booked a fortnight out
+  // had its authorisation lapse in silence and the mentor was never paid. New
+  // bookings write a row and are already in `held`, so anything whose intent
+  // appears there is skipped rather than counted twice.
+  const heldIntentIds = new Set(held.map(h => h.paymentIntentId).filter((id): id is string => Boolean(id)));
+
+  const unledgeredSessions = (
+    await prisma.mentorSession.findMany({
+      where: {
+        paymentStatus: { in: ['PENDING', 'AUTHORIZED'] },
+        status: { notIn: ['CANCELED', 'COMPLETED'] },
+        stripePaymentIntentId: { not: null },
+        createdAt: { lte: warnFrom },
+      },
+      select: {
+        id: true,
+        stripePaymentIntentId: true,
+        sessionAmount: true,
+        currency: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+  ).filter(session => !heldIntentIds.has(session.stripePaymentIntentId!));
+
   const result: EscrowExpirySweep = {
-    checked: held.length,
+    checked: held.length + unledgeredSessions.length,
     expiringSoon: 0,
     captured: 0,
     failed: 0,
@@ -183,6 +210,33 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
         error: (error as Error).message,
       });
     }
+  }
+
+  for (const session of unledgeredSessions) {
+    if (session.createdAt <= lapsesAt) {
+      result.alreadyLapsed += 1;
+      logger.error('Mentor session hold has outlived its authorisation', {
+        sessionId: session.id,
+        heldSince: session.createdAt,
+        amount: Number(session.sessionAmount),
+        currency: session.currency,
+      });
+      continue;
+    }
+
+    result.expiringSoon += 1;
+    // Warned about, never captured early, even when ESCROW_CAPTURE_BEFORE_EXPIRY
+    // is on. Capturing here would mean calling Stripe directly against a hold
+    // the platform has no ledger row for, so nothing would record that the
+    // money had been taken — the money would move and the session, the
+    // statement and the earnings screen would all still say it had not.
+    logger.warn('Mentor session hold is close to expiring', {
+      sessionId: session.id,
+      heldSince: session.createdAt,
+      amount: Number(session.sessionAmount),
+      currency: session.currency,
+      capturingEarly: false,
+    });
   }
 
   // A gauge, written on every sweep including the sweeps that find none, so the

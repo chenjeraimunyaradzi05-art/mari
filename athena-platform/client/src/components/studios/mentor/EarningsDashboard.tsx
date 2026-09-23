@@ -13,10 +13,10 @@
  * - Withdrawal options
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { connectApi } from '@/lib/api';
+import { connectApi, mentorApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   DollarSign,
@@ -28,6 +28,9 @@ import {
   ArrowDownRight,
   Clock,
   AlertCircle,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
   Users,
   Video,
   BookOpen,
@@ -439,10 +442,34 @@ function WithdrawDialog({
   payoutMethods: PayoutMethod[];
 }) {
   const [amount, setAmount] = useState('');
+  const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
   const canWithdraw = availableBalance > 0 && payoutMethods.length > 0;
 
+  // "Confirm Withdrawal" had no onClick. The dialog opened, took an amount,
+  // validated it, and did nothing at all — the same defect as the missing
+  // "Connect payouts" control it sits beside, on the same screen.
+  const requested = Number.parseFloat(amount);
+  const amountIsUsable =
+    Number.isFinite(requested) && requested > 0 && requested <= availableBalance;
+
+  const withdraw = useMutation({
+    mutationFn: () => connectApi.requestPayout({ amount: requested }),
+    onSuccess: () => {
+      // Stripe pays out on its own schedule, so this does not claim the money
+      // has landed — only that it is on its way.
+      toast.success('Your withdrawal is on its way to your bank');
+      setAmount('');
+      setOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['connect', 'earnings'] });
+    },
+    onError: (error) => {
+      toast.error(readErrorMessage(error, 'Could not start that withdrawal'));
+    },
+  });
+
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button disabled={!canWithdraw}>
           <DollarSign className="h-4 w-4 mr-2" />
@@ -528,8 +555,11 @@ function WithdrawDialog({
 
         <DialogFooter>
           <DialogClose className={buttonVariants({ variant: 'outline' })}>Cancel</DialogClose>
-          <Button disabled={!canWithdraw || !amount || parseFloat(amount) <= 0}>
-            Confirm Withdrawal
+          <Button
+            disabled={!canWithdraw || !amountIsUsable || withdraw.isPending}
+            onClick={() => withdraw.mutate()}
+          >
+            {withdraw.isPending ? 'Sending…' : 'Confirm Withdrawal'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -583,6 +613,20 @@ interface EarningsResponse {
   }[];
 }
 
+/** What `GET /api/connect/account` reports back from Stripe. */
+interface ConnectAccountStatus {
+  isOnboarded: boolean;
+  payoutsEnabled: boolean;
+  chargesEnabled: boolean;
+  requirements?: string[];
+}
+
+const readErrorMessage = (error: unknown, fallback: string) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback;
+
+const errorStatus = (error: unknown) =>
+  (error as { response?: { status?: number } })?.response?.status;
+
 export function EarningsDashboard({ className }: { className?: string }) {
   const queryClient = useQueryClient();
 
@@ -605,6 +649,18 @@ export function EarningsDashboard({ className }: { className?: string }) {
     retry: false,
   });
 
+  // Whether Stripe will actually pay this woman. Everything below — the
+  // Connect payouts button, the Add Method button, the schedule copy — reads
+  // from this rather than guessing, because the difference between "no account
+  // yet", "half onboarded" and "paid out on Thursdays" is the whole story.
+  const accountQuery = useQuery({
+    queryKey: ['connect', 'account'],
+    queryFn: async () => {
+      const { data } = await connectApi.getAccount();
+      return data.data as ConnectAccountStatus;
+    },
+  });
+
   const setDefault = useMutation({
     mutationFn: (methodId: string) => connectApi.setDefaultPayoutMethod(methodId),
     onSuccess: () => {
@@ -612,15 +668,116 @@ export function EarningsDashboard({ className }: { className?: string }) {
       toast.success('Default payout method updated');
     },
     onError: (error: unknown) => {
-      const message =
-        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-        'Could not update the default payout method';
-      toast.error(message);
+      toast.error(readErrorMessage(error, 'Could not update the default payout method'));
     },
   });
 
+  // Connecting payouts. This is the control the product has been pointing
+  // mentors at since mentoring shipped: "Paid sessions need payouts connected
+  // from the mentor dashboard" on become-mentor, and a hard-disabled button
+  // here. Because nothing ever called POST /mentors/enable, the only writer of
+  // MentorProfile.stripeAccountId, that column was null for every mentor on
+  // the platform — and mentor.service.ts refuses to take a payment without it,
+  // so not one paid booking could complete for anybody.
+  const startPayouts = useMutation({
+    mutationFn: async () => {
+      try {
+        // The mentor door first: it mirrors the connected account onto the
+        // mentor profile, which is what the booking gate reads.
+        await mentorApi.enable();
+      } catch (error) {
+        // A member who earns here without a mentor profile (404) still needs an
+        // account; she gets the shared Connect one instead.
+        if (errorStatus(error) !== 404) throw error;
+        await connectApi.createAccount();
+      }
+
+      const { data } = await mentorApi.onboard();
+      const url = data?.url as string | undefined;
+      if (!url) throw new Error('Stripe did not return an onboarding link');
+      return url;
+    },
+    onSuccess: (url) => {
+      // Stripe hosts the identity and bank-account steps; it returns to
+      // /dashboard/earnings when she is done.
+      window.location.href = url;
+    },
+    onError: (error: unknown) => {
+      toast.error(readErrorMessage(error, 'Could not start payout setup'));
+    },
+  });
+
+  const openStripeDashboard = useMutation({
+    mutationFn: async () => {
+      const { data } = await mentorApi.getStripeLoginLink();
+      const url = data?.url as string | undefined;
+      if (!url) throw new Error('Stripe did not return a dashboard link');
+      return url;
+    },
+    onSuccess: (url) => {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    },
+    onError: (error: unknown) => {
+      toast.error(readErrorMessage(error, 'Could not open your Stripe dashboard'));
+    },
+  });
+
+  // Stripe sends her back here with ?payouts=complete when onboarding finishes
+  // and ?payouts=refresh when the link expired mid-flow. The status she sees
+  // has to be re-read from Stripe at that moment, not served from the cache
+  // she left with. Read from the URL rather than useSearchParams so this
+  // component does not drag a Suspense boundary into the page that mounts it.
+  useEffect(() => {
+    const outcome = new URLSearchParams(window.location.search).get('payouts');
+    if (!outcome) return;
+
+    queryClient.invalidateQueries({ queryKey: ['connect', 'account'] });
+    queryClient.invalidateQueries({ queryKey: ['connect', 'payout-methods'] });
+
+    if (outcome === 'complete') {
+      toast.success('Thanks — we are checking your payout details with Stripe');
+    } else if (outcome === 'refresh') {
+      toast('That payout setup link expired. Start it again when you are ready.');
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('payouts');
+    window.history.replaceState({}, '', url.toString());
+  }, [queryClient]);
+
   const earnings = earningsQuery.data;
   const payoutMethods = payoutMethodsQuery.data ?? [];
+  const account = accountQuery.data;
+  const payoutsEnabled = account?.payoutsEnabled ?? false;
+  const onboardingStarted = account?.isOnboarded ?? false;
+  const outstandingRequirements = account?.requirements ?? [];
+  const connecting = startPayouts.isPending;
+
+  // One control, three states: she has not started, she started and Stripe
+  // still wants something, or she is being paid.
+  const payoutsControl = payoutsEnabled ? (
+    <Button
+      variant="outline"
+      onClick={() => openStripeDashboard.mutate()}
+      disabled={openStripeDashboard.isPending}
+    >
+      {openStripeDashboard.isPending ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <ExternalLink className="mr-2 h-4 w-4" />
+      )}
+      Manage payouts
+    </Button>
+  ) : (
+    <Button onClick={() => startPayouts.mutate()} disabled={connecting}>
+      {connecting ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <Building2 className="mr-2 h-4 w-4" />
+      )}
+      {onboardingStarted ? 'Finish payout setup' : 'Connect payouts'}
+    </Button>
+  );
 
   const totalEarnings = fromMinorUnits(earnings?.totalEarnings ?? 0);
   const pendingBalance = fromMinorUnits(earnings?.pendingPayouts ?? 0);
@@ -697,6 +854,51 @@ export function EarningsDashboard({ className }: { className?: string }) {
         </div>
       </div>
 
+      {/* Payouts status. Until this existed a mentor could set an hourly rate,
+          be listed as bookable, and never learn that every booking she was
+          offered would fail at the payment step. */}
+      {!accountQuery.isLoading && (
+        <Card
+          className={cn(
+            'border-l-4',
+            payoutsEnabled ? 'border-l-emerald-500' : 'border-l-amber-500'
+          )}
+        >
+          <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              {payoutsEnabled ? (
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              )}
+              <div className="space-y-1">
+                <p className="font-medium">
+                  {payoutsEnabled
+                    ? 'Your payouts are connected'
+                    : onboardingStarted
+                      ? 'Stripe still needs a few details'
+                      : 'Connect payouts to take paid sessions'}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {payoutsEnabled
+                    ? 'Session payments are held until the session is done, then paid to your account.'
+                    : 'Mentees cannot pay for a session with you until this is finished. It takes a few minutes with Stripe, and you will need your bank details and photo ID.'}
+                </p>
+                {!payoutsEnabled && outstandingRequirements.length > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Outstanding: {outstandingRequirements.slice(0, 4).join(', ')}
+                    {outstandingRequirements.length > 4
+                      ? ` and ${outstandingRequirements.length - 4} more`
+                      : ''}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="shrink-0">{payoutsControl}</div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Stats */}
       <div className="grid md:grid-cols-4 gap-4">
         <StatCard
@@ -744,9 +946,7 @@ export function EarningsDashboard({ className }: { className?: string }) {
                   <CardTitle>Payout Methods</CardTitle>
                   <CardDescription>Manage how you receive your earnings</CardDescription>
                 </div>
-                <Button variant="outline" disabled title="Payout method onboarding is not connected yet">
-                  Add Method
-                </Button>
+                {payoutsControl}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -760,9 +960,9 @@ export function EarningsDashboard({ className }: { className?: string }) {
                 ))
               ) : (
                 <div className="py-10 text-center text-sm text-muted-foreground">
-                  {payoutMethodsQuery.isError
-                    ? 'Connect a payout account to add a payout method.'
-                    : 'No payout methods are connected yet.'}
+                  {payoutsEnabled
+                    ? 'No payout methods are connected yet. Add a bank account in your Stripe dashboard and it will appear here.'
+                    : 'Connect payouts first, and the bank account you give Stripe will appear here.'}
                 </div>
               )}
 
@@ -772,7 +972,9 @@ export function EarningsDashboard({ className }: { className?: string }) {
                 <h3 className="font-medium">Payout Schedule</h3>
                 <div className="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
                   <p className="text-sm text-muted-foreground">
-                    Payout scheduling will appear once Stripe Connect onboarding and payout methods are connected.
+                    {payoutsEnabled
+                      ? 'Stripe holds each session payment until the session is marked complete, then pays it out on your account’s schedule. You can change that schedule from your Stripe dashboard.'
+                      : 'Your payout schedule is set with Stripe once payouts are connected.'}
                   </p>
                 </div>
               </div>

@@ -3,6 +3,9 @@ jest.mock('../../utils/prisma', () => ({
     escrowPayment: {
       findMany: jest.fn(),
     },
+    mentorSession: {
+      findMany: jest.fn(async () => []),
+    },
     user: {
       findMany: jest.fn(async () => []),
     },
@@ -111,6 +114,63 @@ describe('Escrow holds approaching the end of their authorisation', () => {
 
     expect(captureMock).not.toHaveBeenCalled();
     expect(result.expiringSoon).toBe(1);
+  });
+
+  // Mentor sessions booked before mentoring moved onto the shared escrow path
+  // hold real money with no EscrowPayment row behind them. They were invisible
+  // to this sweep, so a session booked a fortnight out lost its authorisation
+  // in silence and the mentor was never paid.
+  describe('mentor sessions with no escrow row', () => {
+    const session = (overrides: Record<string, unknown> = {}) => ({
+      id: 'session-1',
+      stripePaymentIntentId: 'pi_session_1',
+      sessionAmount: 180,
+      currency: 'AUD',
+      createdAt: daysAgo(6),
+      ...overrides,
+    });
+
+    it('warns about one whose authorisation is about to lapse', async () => {
+      prismaAny.escrowPayment.findMany.mockResolvedValue([]);
+      prismaAny.mentorSession.findMany.mockResolvedValue([session()]);
+
+      const result = await runEscrowExpirySweep(NOW);
+
+      expect(result.checked).toBe(1);
+      expect(result.expiringSoon).toBe(1);
+      expect(warnMock).toHaveBeenCalled();
+    });
+
+    it('reports one that has already lapsed as an error', async () => {
+      prismaAny.escrowPayment.findMany.mockResolvedValue([]);
+      prismaAny.mentorSession.findMany.mockResolvedValue([session({ createdAt: daysAgo(9) })]);
+
+      const result = await runEscrowExpirySweep(NOW);
+
+      expect(result.alreadyLapsed).toBe(1);
+      expect(errorMock).toHaveBeenCalled();
+    });
+
+    it('never captures one early, because nothing would record that the money moved', async () => {
+      process.env.ESCROW_CAPTURE_BEFORE_EXPIRY = 'true';
+      prismaAny.escrowPayment.findMany.mockResolvedValue([]);
+      prismaAny.mentorSession.findMany.mockResolvedValue([session()]);
+
+      const result = await runEscrowExpirySweep(NOW);
+
+      expect(captureMock).not.toHaveBeenCalled();
+      expect(result.captured).toBe(0);
+    });
+
+    it('counts a session that does have an escrow row only once', async () => {
+      prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ paymentIntentId: 'pi_session_1' })]);
+      prismaAny.mentorSession.findMany.mockResolvedValue([session()]);
+
+      const result = await runEscrowExpirySweep(NOW);
+
+      expect(result.checked).toBe(1);
+      expect(result.expiringSoon).toBe(1);
+    });
   });
 
   it('tells administrators when holds have been lost', async () => {
