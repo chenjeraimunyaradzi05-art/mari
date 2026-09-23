@@ -16,7 +16,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList } from '../../navigation/AppNavigator';
-import { Persona } from '@shared/src';
+import { Persona } from '../../constants/shared';
 
 type RegisterScreenProps = {
   navigation: NativeStackNavigationProp<AuthStackParamList, 'Register'>;

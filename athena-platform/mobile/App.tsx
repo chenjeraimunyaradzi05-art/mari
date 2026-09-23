@@ -27,7 +27,12 @@ const PLAN_PATHS: Record<string, string> = {
 export default function App() {
   useEffect(() => {
     track('app_open');
-    syncPushToken();
+    // Deliberately not awaited: registering for push must never hold up the
+    // first render, and syncPushToken swallows its own failures for exactly
+    // that reason. It used to be able to reject here — a build with no EAS
+    // project id threw on every cold start — which surfaced as an unhandled
+    // rejection nobody could act on.
+    void syncPushToken();
 
     const unsubscribe = startOfflineSync(async (action) => {
       if (action.type === 'api') {

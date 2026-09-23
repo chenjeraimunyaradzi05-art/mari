@@ -8,7 +8,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } fr
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { APPLICATION_STATUS_DISPLAY } from '@shared/src/utils';
+import { APPLICATION_STATUS_DISPLAY } from '../constants/shared';
 import { userApi, unwrapApiData, type JobApplication } from '../services/api';
 import { ApplicationSkeleton } from '../components/Skeleton';
 import { LoadingError } from '../components/ErrorBoundary';

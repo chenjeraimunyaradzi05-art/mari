@@ -60,6 +60,13 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # The mobile package has test suites covering the safety screen and the
+      # panic alert, and CI ran none of them — the job only type-checked. A
+      # screen that tells a woman her protections are off when they are on is
+      # exactly the kind of regression a type check cannot see.
+      - name: Unit tests
+        run: npm test
+
       # The same static walk the server and web run: every api.<verb>('/path')
       # under mobile/src must match a route the server mounts. It needs no
       # server dependencies, only its source tree, which the checkout has.

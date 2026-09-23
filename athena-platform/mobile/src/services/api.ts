@@ -48,6 +48,15 @@ export const setRefreshToken = (token: string | null) => {
   refreshToken = token;
 };
 
+/**
+ * The access token this app is currently using, for the one caller that needs
+ * it outside an axios request: the socket handshake. The socket client asks
+ * for it on every connection attempt rather than holding a copy, because the
+ * response interceptor above rotates the token on a 401 and a reconnect with
+ * the token from an hour ago is refused by the server's socket middleware.
+ */
+export const getAuthToken = (): string | null => authToken;
+
 export const setAuthTokens = (accessToken: string | null, newRefreshToken: string | null) => {
   setAuthToken(accessToken);
   setRefreshToken(newRefreshToken);
@@ -301,7 +310,11 @@ export interface SafetySettings {
   activityLogEnabled: boolean;
   disguisedAppIcon: boolean;
   notificationsSafe: boolean;
-  emergencyContacts: Array<{ id: string; name: string; phone: string; relationship: string; notifyOnPanic?: boolean }>;
+  // email is optional here because contacts saved before the form required
+  // one still come back without it, and the safety screen has to be able to
+  // tell the member that those contacts cannot be reached. The panic alert is
+  // an email and nothing else (server/src/services/dv-safe.service.ts).
+  emergencyContacts: Array<{ id: string; name: string; phone: string; email?: string; relationship: string; notifyOnPanic?: boolean }>;
 }
 
 export interface Mentor {
@@ -343,7 +356,12 @@ export const safetyApi = {
   update: (updates: Partial<Omit<SafetySettings, 'emergencyContacts'>>) => api.put('/safety/dv/settings', updates),
   enableSafeMode: () => api.post('/safety/dv/safe-mode'),
   panic: () => api.post('/safety/dv/panic'),
-  addContact: (contact: { name: string; phone: string; relationship: string; email?: string; notifyOnPanic?: boolean }) =>
+  // email is required here, although the server will take a contact without
+  // one: the panic alert is an email and nothing else, so a contact saved
+  // without an address is a contact the button can never reach. The screen
+  // used to send name, phone and relationship only, which made every contact
+  // added on a phone permanently unreachable.
+  addContact: (contact: { name: string; phone: string; email: string; relationship: string; notifyOnPanic?: boolean }) =>
     api.post('/safety/dv/emergency-contacts', contact),
   removeContact: (contactId: string) => api.delete(`/safety/dv/emergency-contacts/${contactId}`),
 };

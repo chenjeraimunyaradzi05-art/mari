@@ -63,9 +63,12 @@ export function NotificationsScreen() {
   useEffect(() => {
     fetchNotifications();
 
-    // Listen for new notifications
-    const unsubscribe = socketService.on('notification:new', (notification: Notification) => {
-      setNotifications((prev) => [notification, ...prev]);
+    // Listen for new notifications. The name is the server's: createNotification
+    // emits 'notifications:new' to both the member's room and her notification
+    // room. This screen listened for 'notification:new', singular, which the
+    // server has never emitted, so the list only ever grew on a refresh.
+    const unsubscribe = socketService.on<Notification>('notifications:new', (notification) => {
+      setNotifications((prev) => (prev.some((n) => n.id === notification.id) ? prev : [notification, ...prev]));
       setUnreadCount((n) => n + 1);
     });
 

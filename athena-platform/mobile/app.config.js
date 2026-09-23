@@ -12,6 +12,13 @@
  *   WEB_URL   the web app, for the "opens on the web" links. Defaults to the
  *             API origin without its "api." label, which is how the web's own
  *             runtime-config derives it.
+ *   EAS_PROJECT_ID
+ *             the UUID of the Expo project this app belongs to, which is what
+ *             expo-notifications mints a push token against. It is created by
+ *             `eas init` on the account that owns the app and cannot be
+ *             written here in advance; until it is set, the app registers no
+ *             push token and says so in the log rather than throwing. See
+ *             mobile/EAS-SETUP.md.
  *
  * There used to be a default of https://api.athena.app here, and the same
  * default in eas.json and the web's runtime-config. ATHENA does not own that
@@ -40,9 +47,32 @@ function webUrlFrom(apiUrl, explicit) {
   return apiUrl.replace(/\/api$/, '').replace('://api.', '://').replace('://staging-api.', '://staging.');
 }
 
+/**
+ * A missing project id is not a broken build — the app runs, it simply has no
+ * push notifications — so unlike API_URL this does not throw. It is validated
+ * rather than passed through: an empty variable or a leftover placeholder
+ * would otherwise reach getExpoPushTokenAsync and fail there, at launch, in
+ * front of a member.
+ */
+const EAS_PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function easProjectIdFrom(config) {
+  const candidate = String(process.env.EAS_PROJECT_ID || config.extra?.eas?.projectId || '').trim();
+  if (!candidate) return null;
+  if (!EAS_PROJECT_ID_PATTERN.test(candidate)) {
+    console.warn(
+      `[app.config] EAS_PROJECT_ID is "${candidate}", which is not the UUID EAS issues, so this build is treated as having no ` +
+        'Expo project: push notifications will not register. Run `eas init` in mobile/ and use the id it prints.'
+    );
+    return null;
+  }
+  return candidate;
+}
+
 module.exports = ({ config }) => {
   const apiUrl = apiUrlFrom(process.env.API_URL);
   const webUrl = webUrlFrom(apiUrl, process.env.WEB_URL);
+  const easProjectId = easProjectIdFrom(config);
 
   return {
     ...config,
@@ -51,6 +81,10 @@ module.exports = ({ config }) => {
       apiUrl,
       webUrl,
       appVariant: process.env.APP_VARIANT || 'development',
+      // Only present when there is a real one. Expo reads the push project
+      // from extra.eas.projectId, and an `eas: { projectId: undefined }` here
+      // would read as a configured project with no id.
+      ...(easProjectId ? { eas: { ...(config.extra?.eas || {}), projectId: easProjectId } } : {}),
     },
   };
 };

@@ -7,6 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import { api, setAuthTokens, unwrapApiData } from '../services/api';
 import { resolvePreferences, setLocalPreferences } from '../utils/preferences';
 import { syncPushToken, unsyncPushToken } from '../services/pushNotifications';
+import { socketService } from '../services/socket';
 
 interface User {
   id: string;
@@ -70,6 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const response = await api.get('/auth/me');
         const userData = unwrapApiData<User>(response.data);
         setUser(userData);
+        // A session restored at launch is a signed-in member: she gets the
+        // same live connection a fresh sign-in does. Without this the socket
+        // client had no caller at all and the app only ever saw new messages
+        // on a pull-to-refresh.
+        socketService.connect();
         const preferences = await resolvePreferences({
           preferredLocale: userData?.preferredLocale,
           preferredCurrency: userData?.preferredCurrency,
@@ -110,8 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setAuthTokens(accessToken, refreshToken || null);
     setUser(userData);
-    // A fresh sign-in registers this phone for push straight away.
+    // A fresh sign-in registers this phone for push straight away, and opens
+    // the real-time connection. Both are after setAuthTokens: the socket
+    // handshake reads the access token from the API layer.
     void syncPushToken();
+    socketService.connect();
     const preferences = await resolvePreferences({
       preferredLocale: userData?.preferredLocale,
       preferredCurrency: userData?.preferredCurrency,
@@ -145,8 +154,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setAuthTokens(accessToken, refreshToken || null);
     setUser(userData);
-    // A fresh sign-in registers this phone for push straight away.
+    // A fresh sign-in registers this phone for push straight away, and opens
+    // the real-time connection.
     void syncPushToken();
+    socketService.connect();
     const preferences = await resolvePreferences({
       preferredLocale: userData?.preferredLocale,
       preferredCurrency: userData?.preferredCurrency,
@@ -158,6 +169,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    // Before anything else: the live connection carries this member's
+    // messages and presence, and the next person to hold this phone must not
+    // be sitting on it.
+    socketService.disconnect();
     try {
       // While still signed in: this device stops receiving this member's push.
       await unsyncPushToken();

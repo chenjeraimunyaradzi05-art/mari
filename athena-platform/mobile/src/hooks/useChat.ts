@@ -220,15 +220,19 @@ export function useMarkAsRead() {
     }: {
       conversationId: string;
       messageIds: string[];
+      // The socket read receipt is keyed on the other member, not the thread:
+      // the server derives the conversation from the pair of ids. Carried here
+      // so this unwired hook still names what the real socket API needs.
+      otherUserId: string;
     }) => {
       await api.post(`/conversations/${conversationId}/read`, { messageIds });
       return { conversationId, messageIds };
     },
-    onMutate: ({ conversationId, messageIds }) => {
+    onMutate: ({ conversationId, messageIds, otherUserId }) => {
       markAsReadLocal(conversationId, messageIds);
-      
+
       // Emit socket event for real-time sync
-      socketService.markMessagesRead(conversationId, messageIds);
+      socketService.markMessagesRead(otherUserId);
     },
   });
 }
@@ -240,15 +244,19 @@ export function useSendTyping() {
   return useMutation({
     mutationFn: async ({
       conversationId,
+      receiverId,
       isTyping,
     }: {
       conversationId: string;
+      // As above: the server routes a typing indicator to the room it derives
+      // from the two member ids, so it needs the person being typed to.
+      receiverId: string;
       isTyping: boolean;
     }) => {
       if (isTyping) {
-        socketService.startTyping(conversationId);
+        socketService.startTyping(receiverId, conversationId);
       } else {
-        socketService.stopTyping(conversationId);
+        socketService.stopTyping(receiverId, conversationId);
       }
     },
   });

@@ -12,33 +12,58 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { messagesApi } from '../services/api';
+import { messagesApi, unwrapApiData } from '../services/api';
 import { queueOfflineAction } from '../services/offlineSync';
+import { socketService } from '../services/socket';
+import { useAuth } from '../context/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 interface MessageItem {
   id: string;
   senderId: string;
+  conversationId?: string;
   content: string;
   createdAt: string;
 }
 
 export function ChatDetailScreen({ route }: Props) {
   const { conversationId, participantName } = route.params;
+  const { user } = useAuth();
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const listRef = useRef<FlatList<MessageItem>>(null);
 
   const loadMessages = async () => {
-    const response = await messagesApi.getMessages(conversationId);
-    setMessages(response.data?.data || response.data?.messages || []);
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    try {
+      const response = await messagesApi.getMessages(conversationId);
+      const thread = unwrapApiData<MessageItem[]>(response.data);
+      setMessages(Array.isArray(thread) ? thread : []);
+      setLoadError(null);
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    } catch (error: any) {
+      // Left unhandled this rejected into nothing and the thread simply stayed
+      // empty, which reads as "no messages" rather than "not loaded".
+      setLoadError(error?.response?.data?.message || 'This conversation could not be loaded. Check your connection and try again.');
+    }
   };
 
   useEffect(() => {
-    loadMessages();
+    void loadMessages();
+  }, [conversationId]);
+
+  // Live arrivals. The server emits 'messages:new' to the recipient's own
+  // room, so a message reaches this screen whether or not it is in the
+  // conversation room; the id check keeps a message meant for another thread
+  // out, and the de-duplication covers the message arriving twice when the
+  // room and the personal room both deliver it.
+  useEffect(() => {
+    return socketService.on<MessageItem>('messages:new', (message) => {
+      if (!message?.id || message.conversationId !== conversationId) return;
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+    });
   }, [conversationId]);
 
   const handleSend = async () => {
@@ -64,7 +89,11 @@ export function ChatDetailScreen({ route }: Props) {
   };
 
   const renderItem = ({ item }: { item: MessageItem }) => {
-    const isMe = item.senderId === 'me';
+    // The sender id is compared against the signed-in member. It used to be
+    // compared against the literal string 'me', which no message has ever
+    // carried, so every message she sent was drawn as though it had come from
+    // the other person.
+    const isMe = Boolean(user?.id) && item.senderId === user?.id;
     return (
       <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
         <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{item.content}</Text>
@@ -89,6 +118,7 @@ export function ChatDetailScreen({ route }: Props) {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        ListEmptyComponent={loadError ? <Text style={styles.loadError}>{loadError}</Text> : null}
       />
       <View style={styles.inputRow}>
         <TextInput
@@ -134,6 +164,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 4,
   },
+  loadError: { color: '#b45309', fontSize: 13, textAlign: 'center', paddingHorizontal: 24, paddingVertical: 32 },
   bubbleText: { fontSize: 15, color: '#111827' },
   bubbleTextMe: { color: '#fff' },
   timestamp: { marginTop: 6, fontSize: 10, color: '#9ca3af' },
