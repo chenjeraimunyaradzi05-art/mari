@@ -27,6 +27,13 @@ type DVService = {
   available24x7: boolean;
   state?: string;
   isNational: boolean;
+  /**
+   * 'catalogue' is a service ATHENA staff entered and stand behind.
+   * 'built-in' is one of the nationally published numbers the server always
+   * sends, so this page is never empty. The distinction is shown, because a
+   * woman deserves to know which of these ATHENA has actually checked.
+   */
+  source?: 'catalogue' | 'built-in';
 };
 
 const serviceTypeLabels: Record<string, string> = {
@@ -38,9 +45,81 @@ const serviceTypeLabels: Record<string, string> = {
   CHILDREN: 'Children Services',
 };
 
+/**
+ * One support service, however it got here. Written once so the built-in
+ * national numbers are as easy to call as anything staff entered — the only
+ * difference between them is the label saying which is which.
+ */
+function ServiceCard({ service }: { service: DVService }) {
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
+      <div className="flex items-start justify-between mb-2">
+        <span className="text-xs font-medium text-red-600">
+          {serviceTypeLabels[service.type] || service.type}
+        </span>
+        <div className="flex items-center gap-2">
+          {service.available24x7 && (
+            <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full">24/7</span>
+          )}
+          {service.isNational && (
+            <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 px-2 py-1 rounded-full">
+              National
+            </span>
+          )}
+          {service.state && !service.isNational && (
+            <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 px-2 py-1 rounded-full">
+              {service.state}
+            </span>
+          )}
+          {service.source === 'built-in' && (
+            <span
+              title="A publicly published crisis line that ATHENA always shows. It is not a local service ATHENA staff have checked."
+              className="text-xs bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200 px-2 py-1 rounded-full"
+            >
+              Published line
+            </span>
+          )}
+        </div>
+      </div>
+
+      <h3 className="font-semibold text-slate-900 dark:text-white">{service.name}</h3>
+
+      {service.description && (
+        <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">{service.description}</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3 mt-4">
+        {service.phone && (
+          <a
+            href={`tel:${service.phone.replace(/\s/g, '')}`}
+            className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 hover:underline"
+          >
+            <Phone className="w-4 h-4" /> {service.phone}
+          </a>
+        )}
+        {service.website && (
+          <a
+            href={safeHref(service.website)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+          >
+            Visit website
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SafetyPage() {
   const [safetyPlan, setSafetyPlan] = useState<SafetyPlan | null>(null);
   const [services, setServices] = useState<DVService[]>([]);
+  // The nationally published numbers the server always sends. They are held
+  // separately from `services` so the type filter above narrows only what
+  // staff entered: filtering to Housing must never take the crisis lines off
+  // a page someone opened because she is frightened.
+  const [fallback, setFallback] = useState<DVService[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showPlanForm, setShowPlanForm] = useState(false);
@@ -62,6 +141,7 @@ export default function SafetyPage() {
       ]);
       setSafetyPlan(planRes.data?.data || null);
       setServices(servicesRes.data?.data || []);
+      setFallback(servicesRes.data?.fallback || []);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load data');
@@ -277,62 +357,44 @@ export default function SafetyPage() {
               </select>
             </div>
 
-            {services.length === 0 ? (
-              <p className="text-sm text-slate-500">No services found.</p>
-            ) : (
+            {services.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {services.map((service) => (
-                  <div
-                    key={service.id}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <span className="text-xs font-medium text-red-600">
-                        {serviceTypeLabels[service.type] || service.type}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {service.available24x7 && (
-                          <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full">
-                            24/7
-                          </span>
-                        )}
-                        {service.isNational && (
-                          <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 px-2 py-1 rounded-full">
-                            National
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <h3 className="font-semibold text-slate-900 dark:text-white">{service.name}</h3>
-
-                    {service.description && (
-                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">{service.description}</p>
-                    )}
-
-                    <div className="flex flex-wrap gap-3 mt-4">
-                      {service.phone && (
-                        <a
-                          href={`tel:${service.phone.replace(/\s/g, '')}`}
-                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:underline"
-                        >
-                          <Phone className="w-4 h-4" /> {service.phone}
-                        </a>
-                      )}
-                      {service.website && (
-                        <a
-                          href={safeHref(service.website)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
-                        >
-                          Visit website
-                        </a>
-                      )}
-                    </div>
-                  </div>
+                  <ServiceCard key={service.id} service={service} />
                 ))}
               </div>
+            )}
+
+            {/*
+              Never an empty list. A woman opens this page because something
+              is wrong at home, and "No services found" is the last thing she
+              should read. The local directory is filled in by staff and may
+              well be empty; the national lines below are always here, and are
+              shown as what they are rather than dressed up as local services
+              ATHENA has checked.
+            */}
+            {fallback.length > 0 && (
+              <div className={services.length > 0 ? 'mt-6' : ''}>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {services.length === 0 ? 'Who you can call right now' : 'Always available'}
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-4">
+                  {services.length === 0
+                    ? 'ATHENA has no checked local services to show here yet. These lines are open now, and the people who answer them do this every day.'
+                    : 'These lines are open whatever else is listed above.'}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {fallback.map((service) => (
+                    <ServiceCard key={service.id} service={service} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {services.length === 0 && fallback.length === 0 && (
+              <p className="text-sm text-slate-500">
+                The service list could not be loaded. Call 000 if you are in immediate danger, or 1800RESPECT on 1800 737 732.
+              </p>
             )}
           </section>
         </>

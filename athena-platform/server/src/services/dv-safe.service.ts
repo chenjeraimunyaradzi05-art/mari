@@ -20,6 +20,7 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { bestEffort } from '../utils/best-effort';
 import { sendEmail } from '../utils/email';
+import { isSmsConfigured, sendSms } from './dv-sms.service';
 import { ApiError } from '../middleware/errorHandler';
 import { blockUser as platformBlockUser } from '../utils/safety-store';
 
@@ -377,25 +378,88 @@ export async function deleteSafeChat(userId: string, chatId: string, pin?: strin
 
 // ---------------------------------------------------------------- panic
 
+/**
+ * What actually happened when she pressed the button. This used to be a bare
+ * `success: true`, returned even when the loop above had reached nobody at
+ * all, and the phone app drew "Your contacts were told" over it. A woman who
+ * set this up on her phone — where the contact form asks for a phone number
+ * and never for an email — was told help had been alerted when no message had
+ * gone anywhere. Nothing may report success unless somebody was reached.
+ */
+export type PanicOutcome =
+  /** Every contact who asked to be told got the alert. */
+  | 'ALERTED'
+  /** Some got it and some did not; `unreachableContacts` names the rest. */
+  | 'PARTIALLY_ALERTED'
+  /** There were contacts to tell and not one of them could be reached. */
+  | 'NOBODY_REACHED'
+  /** Nobody is set to be told, so there was never anything to send. */
+  | 'NO_CONTACTS';
+
 export interface PanicResult {
+  /**
+   * True only when at least one contact was actually reached. A client that
+   * reads nothing else still cannot draw a success over a total failure.
+   */
   success: boolean;
-  /** Contacts reached by email. */
+  outcome: PanicOutcome;
+  /** How many contacts a message actually reached. */
+  reachedCount: number;
+  /** How many asked to be told and could not be reached. */
+  unreachableCount: number;
+  /** How many were set to be told in the first place. */
+  contactCount: number;
+  /** The names of the contacts a message reached. */
   notifiedContacts: string[];
-  /** Contacts who asked to be told but have no email on file; SMS is not available. */
+  /** The names of the contacts nothing reached — she has to ring these herself. */
   unreachableContacts: string[];
-  smsAvailable: false;
+  /** Whether this deployment has a text-message channel at all. */
+  smsAvailable: boolean;
+  /**
+   * The sentence to show her, written here so every client tells her the same
+   * true thing rather than inventing its own from a field it half understands.
+   */
+  message: string;
   timestamp: Date;
 }
 
+/** The sentence a member reads after pressing the button. */
+function panicMessage(outcome: PanicOutcome, reached: string[], unreachable: string[]): string {
+  const list = (names: string[]) => names.join(', ');
+  switch (outcome) {
+    case 'NO_CONTACTS':
+      return 'Nothing was sent: none of your emergency contacts is set to be told. If you are in danger right now, call 000.';
+    case 'NOBODY_REACHED':
+      return `No message could be delivered to ${list(unreachable)}. Please ring them yourself, and call 000 if you are in danger right now.`;
+    case 'PARTIALLY_ALERTED':
+      return `${list(reached)} ${reached.length === 1 ? 'was' : 'were'} told. Nothing reached ${list(unreachable)} — please ring them yourself. If you are in danger right now, call 000.`;
+    case 'ALERTED':
+    default:
+      return `${list(reached)} ${reached.length === 1 ? 'has' : 'have'} been told and asked to reach you now. If you are in danger right now, call 000.`;
+  }
+}
+
 /**
- * Tells the member's emergency contacts. Email is the only channel this
- * platform has; a contact with a phone number only is reported back as not
- * reached, so the member knows to call. The alert itself is recorded.
+ * Tells the member's emergency contacts, and reports honestly on who was
+ * actually reached.
+ *
+ * Email was once the only channel, which meant the phone app — whose contact
+ * form collects a name, a number and a relationship and no email at all —
+ * could never reach anybody. A contact is now tried on every channel her
+ * record supports: an email if she gave one, a text message if she gave a
+ * number and this deployment has SMS configured. Both are attempted rather
+ * than one as a fallback, because in an emergency a duplicate message is a
+ * cost worth paying and a missed one is not.
+ *
+ * A contact nothing could reach comes back by name in `unreachableContacts`,
+ * so the member is told to ring that person herself instead of believing it
+ * was handled. The alert itself is recorded either way.
  */
 export async function triggerPanicButton(userId: string): Promise<PanicResult> {
   const profile = await profileFor(userId);
   const contacts = contactsOf(profile.emergencyContacts).filter((c) => c.notifyOnPanic);
   const timestamp = new Date();
+  const smsAvailable = isSmsConfigured();
 
   const member = await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, displayName: true } });
   const memberName = member?.displayName?.trim() || member?.firstName?.trim() || 'Someone you know';
@@ -404,31 +468,59 @@ export async function triggerPanicButton(userId: string): Promise<PanicResult> {
   const notified: string[] = [];
   const unreachable: string[] = [];
   for (const contact of contacts) {
-    if (!contact.email) {
-      unreachable.push(contact.name);
-      continue;
+    let reached = false;
+
+    if (contact.email) {
+      try {
+        reached = await sendEmail({
+          to: contact.email,
+          subject: `Safety alert from ${memberName}`,
+          text: `${contact.name},\n\n${memberName} has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.\n\nPlease try to reach them now. If you believe they are in immediate danger, call 000 (Australia) or your local emergency number.\n\nATHENA`,
+          html: `<p>${contact.name},</p><p><strong>${memberName}</strong> has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.</p><p>Please try to reach them now. If you believe they are in immediate danger, call <strong>000</strong> (Australia) or your local emergency number.</p><p>ATHENA</p>`,
+        });
+      } catch (error) {
+        logger.error('Panic alert email failed', { userId, error: error instanceof Error ? error.message : String(error) });
+      }
     }
-    try {
-      const sent = await sendEmail({
-        to: contact.email,
-        subject: `Safety alert from ${memberName}`,
-        text: `${contact.name},\n\n${memberName} has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.\n\nPlease try to reach them now. If you believe they are in immediate danger, call 000 (Australia) or your local emergency number.\n\nATHENA`,
-        html: `<p>${contact.name},</p><p><strong>${memberName}</strong> has pressed the safety alert button in ATHENA at ${when} (Brisbane time) and asked for you to be told.</p><p>Please try to reach them now. If you believe they are in immediate danger, call <strong>000</strong> (Australia) or your local emergency number.</p><p>ATHENA</p>`,
-      });
-      if (sent) notified.push(contact.name);
-      else unreachable.push(contact.name);
-    } catch (error) {
-      logger.error('Panic alert email failed', { userId, contact: contact.name, error: error instanceof Error ? error.message : String(error) });
-      unreachable.push(contact.name);
+
+    // The text message is short on purpose: it has to be readable on a locked
+    // screen, and the one thing it must carry is who and what to do next.
+    if (smsAvailable && contact.phone) {
+      const sms = await sendSms(
+        contact.phone,
+        `${memberName} has pressed the safety alert button in ATHENA at ${when} and asked for you to be told. Please try to reach them now. If they are in immediate danger, call 000.`
+      );
+      reached = reached || sms.sent;
     }
+
+    (reached ? notified : unreachable).push(contact.name);
   }
 
+  const outcome: PanicOutcome =
+    contacts.length === 0 ? 'NO_CONTACTS'
+      : notified.length === 0 ? 'NOBODY_REACHED'
+        : unreachable.length === 0 ? 'ALERTED'
+          : 'PARTIALLY_ALERTED';
+
+  // Recorded whatever the outcome. An alert that reached nobody is the one
+  // most worth having on the record, not the one to leave off it.
   await prisma.dvPanicAlert.create({
     data: { profileId: profile.id, triggeredAt: timestamp, notifiedContacts: notified as unknown as Prisma.InputJsonValue },
   });
-  logger.warn('PANIC BUTTON TRIGGERED', { userId, timestamp, notified: notified.length, unreachable: unreachable.length });
+  logger.warn('PANIC BUTTON TRIGGERED', { userId, timestamp, outcome, notified: notified.length, unreachable: unreachable.length, smsAvailable });
 
-  return { success: true, notifiedContacts: notified, unreachableContacts: unreachable, smsAvailable: false, timestamp };
+  return {
+    success: notified.length > 0,
+    outcome,
+    reachedCount: notified.length,
+    unreachableCount: unreachable.length,
+    contactCount: contacts.length,
+    notifiedContacts: notified,
+    unreachableContacts: unreachable,
+    smsAvailable,
+    message: panicMessage(outcome, notified, unreachable),
+    timestamp,
+  };
 }
 
 // ---------------------------------------------------------------- contacts and blocks
@@ -541,6 +633,93 @@ export async function clearActivityTraces(userId: string): Promise<boolean> {
 
 // ---------------------------------------------------------------- resources
 
+/**
+ * The shape the DV support directory is rendered in: the same fields as a
+ * DVSupportService row, plus where the entry came from.
+ */
+export interface DVSupportServiceView {
+  id: string;
+  name: string;
+  /** CRISIS, LEGAL, FINANCIAL, HOUSING, COUNSELING or CHILDREN. */
+  type: string;
+  phone?: string;
+  website?: string;
+  description?: string;
+  available24x7: boolean;
+  state?: string;
+  isNational: boolean;
+  /**
+   * 'catalogue' for a service ATHENA staff entered and stand behind;
+   * 'built-in' for one of the national numbers below. The page labels them
+   * differently, because a woman deserves to know which of these ATHENA has
+   * actually checked.
+   */
+  source: 'catalogue' | 'built-in';
+}
+
+/**
+ * The nationally published lines, carried in the code so the DV support page
+ * is never empty.
+ *
+ * The DVSupportService table ships with nothing in it, which is the right
+ * default — a catalogue of local services nobody has verified should not
+ * exist until staff have verified them. But it meant a woman who opened the
+ * DV survivor support page in danger was shown "No services found", and "no
+ * help available" is the worst possible thing to put in front of her. These
+ * three are not invented and not local: they are the numbers published
+ * nationally for exactly this, so they can be stated without anyone having
+ * checked a particular office's opening hours.
+ *
+ * They are a fallback and nothing more. The moment staff enter a real local
+ * service of the same kind, that entry leads and these sit beneath it.
+ *
+ * BEFORE LAUNCH: check all three against the currently published numbers
+ * (triplezero.gov.au, 1800respect.org.au, dvconnect.org). A crisis line that
+ * has changed number is worse than no crisis line, and nothing in this
+ * repository will notice on its own if one of them moves.
+ */
+export const BUILT_IN_DV_SERVICES: readonly DVSupportServiceView[] = [
+  {
+    id: 'built-in-000',
+    name: 'Emergency — 000',
+    type: 'CRISIS',
+    phone: '000',
+    website: 'https://www.triplezero.gov.au',
+    description: 'Police, fire and ambulance. Call if you are in immediate danger, or if you are not sure.',
+    available24x7: true,
+    isNational: true,
+    source: 'built-in',
+  },
+  {
+    id: 'built-in-1800respect',
+    name: '1800RESPECT',
+    type: 'CRISIS',
+    phone: '1800 737 732',
+    website: 'https://www.1800respect.org.au',
+    description: 'The national sexual assault, domestic and family violence counselling line. Someone will talk it through with you, whether or not you want to leave.',
+    available24x7: true,
+    isNational: true,
+    source: 'built-in',
+  },
+  {
+    id: 'built-in-dvconnect-womensline',
+    name: 'DVConnect Womensline',
+    type: 'CRISIS',
+    phone: '1800 811 811',
+    website: 'https://www.dvconnect.org',
+    description: "Queensland's domestic and family violence line for women, including emergency transport and refuge.",
+    available24x7: true,
+    state: 'QLD',
+    isNational: false,
+    source: 'built-in',
+  },
+];
+
+/**
+ * The support lines shown in the Safety Centre, by region. Same standing as
+ * BUILT_IN_DV_SERVICES above and the same obligation: check every number
+ * against the currently published one before launch.
+ */
 export function getDVResources(region: string = 'AU'): DVResource[] {
   const resources: Record<string, DVResource[]> = {
     AU: [
@@ -631,4 +810,5 @@ export default {
   safeNotificationFor,
   clearActivityTraces,
   getDVResources,
+  BUILT_IN_DV_SERVICES,
 };

@@ -7,6 +7,14 @@
  * content, suspend, ban, or escalate to the authorities. The routes have
  * existed since the moderation work; this is the first screen that reaches
  * them. Open to admins and moderators.
+ *
+ * Above the reports sits the safety queue, and it sits there deliberately.
+ * A member writing about suicide in a wellness forum, or an account whose
+ * safety score has fallen into critical territory, raises an AdminFlag — and
+ * until this screen read them, nothing on the platform did. Those rows were
+ * written and never looked at. They are now the first thing a moderator sees
+ * when she opens this page, ahead of every rude comment, and an admin who is
+ * told about one is linked straight to #safety-concerns.
  */
 
 import { useState } from 'react';
@@ -14,7 +22,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertTriangle, ArrowLeft, Loader2, ShieldAlert, UserCheck, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, HeartPulse, Loader2, ShieldAlert, UserCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
@@ -36,6 +44,31 @@ type Report = {
   reportedUser: Person;
 };
 type Related = { id: string; reason: string; status: string; action: string | null; createdAt: string };
+
+/**
+ * A safety flag. SAFETY_CONCERN comes from crisis language in a wellness
+ * forum post; SAFETY_CRITICAL from a safety score falling below 25. Both are
+ * raised HIGH, which is what `isUrgent` reflects — the server sorts on it so
+ * one can never be pushed off the page by newer, smaller flags.
+ */
+type SafetyFlag = {
+  id: string;
+  type: string;
+  severity: string;
+  isUrgent: boolean;
+  reason: string | null;
+  notes: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  member: Person | null;
+  raisedBy: Person | null;
+  raisedBySystem: boolean;
+};
+
+const FLAG_LABELS: Record<string, string> = {
+  SAFETY_CONCERN: 'Crisis language in a wellness post',
+  SAFETY_CRITICAL: 'Safety score in critical territory',
+};
 
 const ACTIONS: Array<{ value: string; label: string; tone: string; help: string }> = [
   { value: 'dismiss', label: 'Dismiss', tone: 'btn-outline', help: 'Nothing here breaks the guidelines.' },
@@ -69,6 +102,30 @@ export default function ModerationQueuePage() {
   const [assigned, setAssigned] = useState<'all' | 'me' | 'unclaimed'>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const [closingFlagId, setClosingFlagId] = useState<string | null>(null);
+  const [flagNote, setFlagNote] = useState('');
+
+  const flags = useQuery({
+    queryKey: ['admin-safety-flags'],
+    queryFn: () => api.get('/safety/moderation/flags', { params: { limit: 50 } }),
+    select: (response) => ({
+      flags: (Array.isArray(response.data?.flags) ? response.data.flags : []) as SafetyFlag[],
+      openCount: Number(response.data?.openCount ?? 0),
+      urgentCount: Number(response.data?.urgentCount ?? 0),
+    }),
+  });
+
+  const closeFlag = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) =>
+      api.post(`/safety/moderation/flags/${id}/resolve`, note ? { notes: note } : {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-safety-flags'] });
+      setClosingFlagId(null);
+      setFlagNote('');
+      toast.success('Flag closed');
+    },
+    onError: (error) => toast.error(errorMessage(error) || 'Could not close that flag'),
+  });
 
   const queue = useQuery({
     queryKey: ['admin-reports', status, assigned],
@@ -149,6 +206,127 @@ export default function ModerationQueuePage() {
           </select>
         </div>
       </div>
+
+      {/*
+        Above the reports, always, and never collapsed behind a filter. These
+        are the rows the platform used to write and never read: somebody
+        saying she wants to die, or an account that has fallen off the safety
+        scale. If one is open it is the first thing on this page.
+      */}
+      <section id="safety-concerns" className="mb-8 scroll-mt-6">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
+            <HeartPulse className="h-5 w-5 text-rose-600" /> Safety concerns
+          </h2>
+          {flags.data && flags.data.openCount > 0 && (
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              {flags.data.openCount} open{flags.data.urgentCount > 0 ? ` · ${flags.data.urgentCount} urgent` : ''}
+            </p>
+          )}
+        </div>
+
+        {flags.isLoading ? (
+          <div className="flex justify-center rounded-xl border border-rose-200 bg-rose-50/50 py-8 dark:border-rose-900/40 dark:bg-rose-950/20">
+            <Loader2 className="h-5 w-5 animate-spin text-rose-400" />
+          </div>
+        ) : flags.isError ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900">
+            The safety queue could not be loaded. Do not read that as nothing being there — refresh, and tell an
+            administrator if it keeps failing.
+          </div>
+        ) : flags.data && flags.data.flags.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900">
+            Nothing open. Crisis language in a wellness forum post, and a safety score falling below 25, both arrive here.
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {(flags.data?.flags ?? []).map((flag) => (
+              <li
+                key={flag.id}
+                className={cn(
+                  'rounded-xl border p-4',
+                  flag.isUrgent
+                    ? 'border-rose-300 bg-rose-50 dark:border-rose-900/60 dark:bg-rose-950/30'
+                    : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide',
+                      flag.isUrgent ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                    )}
+                  >
+                    {flag.severity}
+                  </span>
+                  <span className="font-medium text-slate-900 dark:text-white">{FLAG_LABELS[flag.type] ?? flag.type}</span>
+                  <span className="text-xs text-slate-500">
+                    {formatDistanceToNow(new Date(flag.createdAt), { addSuffix: true })}
+                    {flag.raisedBySystem ? ' · raised automatically' : ''}
+                  </span>
+                </div>
+
+                <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">
+                  {flag.member ? (
+                    <Link href={`/profile/${flag.member.id}`} className="font-medium hover:underline">
+                      {nameOf(flag.member)}
+                    </Link>
+                  ) : (
+                    <span className="font-medium">Account no longer on the platform</span>
+                  )}
+                  {flag.reason ? ` — ${flag.reason}` : ''}
+                </p>
+                {flag.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{flag.notes}</p>}
+
+                {closingFlagId === flag.id ? (
+                  <div className="mt-3 space-y-2">
+                    <textarea
+                      value={flagNote}
+                      onChange={(e) => setFlagNote(e.target.value)}
+                      rows={2}
+                      maxLength={2000}
+                      placeholder="What you did about it (who you contacted, what you found)"
+                      aria-label="What you did about this safety concern"
+                      className="input w-full text-sm"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={closeFlag.isPending}
+                        onClick={() => closeFlag.mutate({ id: flag.id, note: flagNote.trim() })}
+                        className="btn-primary px-3 py-1.5 text-sm"
+                      >
+                        Close this flag
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClosingFlagId(null);
+                          setFlagNote('');
+                        }}
+                        className="text-sm text-slate-500 hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClosingFlagId(flag.id);
+                      setFlagNote('');
+                    }}
+                    className="mt-3 text-sm font-medium text-slate-700 hover:underline dark:text-slate-200"
+                  >
+                    I have handled this
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <div className={cn('grid gap-6', selectedId ? 'lg:grid-cols-[minmax(0,1fr)_420px]' : 'grid-cols-1')}>
         <div>

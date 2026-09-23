@@ -1,120 +1,298 @@
 """
 Model Loader Service
 ====================
-Handles loading and managing ML models for the API.
+Loads the trained artefacts this API's model-backed endpoints need, and is
+explicit about the ones that are not there.
+
+Exactly one endpoint family in this service reads a model at all: Career Compass
+(``/api/v1/career-compass/*``) calls ``get_model("career_compass")``. The other
+five routers — mentor match, safety score, income stream, ranker and feed —
+compute their answers from the request itself and have no artefact to be
+missing. That distinction is the whole point of this file, because it used to be
+absent: the loader demanded an artefact for all six names and raised on the
+first one it could not find. No artefact of any kind exists in this tree, so the
+raise fired on every production boot and took the five endpoints that need
+nothing at all down with the one that does — including the feed ranker, which is
+the only consumer the Node API actually has. Meanwhile the Node side listed
+``ML_SERVICE_URL`` as a required production launch check, so the platform could
+not report itself ready without pointing at a service that could not start.
+
+So a missing artefact no longer stops the service from starting, unless an
+operator asks for that with ``ATHENA_REQUIRE_MODEL_ARTIFACTS=true`` — the right
+setting once real artefacts exist and their disappearance should be an outage
+rather than a quiet downgrade. Without it the service starts, ``/health``
+reports ``degraded`` and names every model that is missing, ``/ready`` refuses,
+and each endpoint that needs an absent model answers 503 carrying the same text.
+``docs/runbooks/ML-SERVICE.md`` records what producing a real artefact would
+actually take.
+
+There are no synthetic stand-ins any more. This module used to fit a
+``RandomForestRegressor`` on ``np.random.rand(100, 9)`` outside production and
+serve its output as a career growth score. A number drawn from noise and
+labelled a forecast is worse than no number, because a developer reading the
+response had no way to tell the two apart — and the switch that was supposed to
+keep it out of production was an environment-variable default. A 503 that says
+"there is no trained model" is the honest answer, and it is now the only one.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import joblib
 
 
-PRODUCTION_ENV_NAMES = {"production", "prod"}
+#: Model name -> artefact path, relative to whichever model directory is in use.
+MODEL_ARTIFACTS: Dict[str, str] = {
+    "career_compass": "career_compass/model.joblib",
+    "mentor_match": "mentor_match/model.joblib",
+    "safety_score": "safety_score/model.joblib",
+    "income_stream": "income_stream/model.joblib",
+    "light_ranker": "light_ranker/model.joblib",
+    "heavy_ranker": "heavy_ranker/model.joblib",
+}
+
+#: Model name -> what stops working while it is missing. A name absent from this
+#: map is declared above but read by nothing, so its absence costs the platform
+#: nothing and must never be reported as though it did.
+MODEL_CONSUMERS: Dict[str, str] = {
+    "career_compass": (
+        "POST /api/v1/career-compass/predict, POST /api/v1/career-compass/batch-predict "
+        "and GET /api/v1/career-compass/feature-importance"
+    ),
+}
+
+#: Model name -> the command that would produce its artefact, for the three that
+#: have a training script at all. ``mentor_match``, ``safety_score`` and
+#: ``income_stream`` have none: ``src/algorithms/`` holds an empty directory for
+#: each, which is why they are named here by their absence rather than a command.
+TRAINING_COMMANDS: Dict[str, str] = {
+    "career_compass": "python -m src.algorithms.career_compass.train --output-dir artifacts/career_compass",
+    "light_ranker": "python -m src.algorithms.light_ranker.train --output-dir artifacts/light_ranker",
+    "heavy_ranker": "python -m src.algorithms.heavy_ranker.train --output-dir artifacts/heavy_ranker",
+}
+
+
+class MissingModelArtifacts(RuntimeError):
+    """
+    Raised at startup when a model some endpoint reads has no artefact and the
+    operator has asked for strict startup.
+
+    Carries the machine-readable list as well as the message, so a caller that
+    wants to report rather than crash does not have to parse prose back out of
+    an exception string.
+    """
+
+    def __init__(self, message: str, missing: List[str]) -> None:
+        super().__init__(message)
+        self.missing = list(missing)
+
+
+def _model_directories() -> List[Path]:
+    """
+    Every directory an artefact might be in, in the order they are searched.
+
+    ``MODEL_PATH`` is what docker-compose sets and is therefore authoritative
+    when present. ``artifacts/`` is where all three training scripts write by
+    default, and it was never searched — so an engineer could run a trainer,
+    watch it report success, and still be told the model was missing. Searching
+    both is cheaper than explaining that to the next person.
+    """
+    directories: List[Path] = []
+    configured = os.getenv("MODEL_PATH")
+    if configured:
+        directories.append(Path(configured))
+    else:
+        directories.append(Path("models"))
+
+    for fallback in (Path("artifacts"), Path("ml/artifacts")):
+        if fallback not in directories:
+            directories.append(fallback)
+
+    return directories
+
+
+def _require_artifacts() -> bool:
+    """
+    Whether a missing artefact should stop the service from starting.
+
+    Off by default, in every environment. A service that refuses to boot is only
+    useful when somebody is watching for it; refusing to boot over artefacts
+    that have never existed in this repository just meant nobody could run the
+    five endpoints that need no artefact at all.
+    """
+    return (os.getenv("ATHENA_REQUIRE_MODEL_ARTIFACTS") or "").lower() in {"1", "true", "yes", "on"}
+
+
+def _environment_name() -> str:
+    return (
+        os.getenv("ATHENA_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("NODE_ENV")
+        or "development"
+    ).lower()
 
 
 class ModelLoader:
     """Singleton model loader for ML models."""
-    
+
     _instance: Optional["ModelLoader"] = None
     _models: Dict[str, Any] = {}
     _status: Dict[str, bool] = {}
-    _ready: bool = False
-    
+    _searched: List[str] = []
+    _load_errors: Dict[str, str] = {}
+
     def __new__(cls) -> "ModelLoader":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     async def load_all_models(self) -> None:
-        """Load all required models on startup."""
-        model_configs = {
-            "career_compass": "career_compass/model.joblib",
-            "mentor_match": "mentor_match/model.joblib",
-            "safety_score": "safety_score/model.joblib",
-            "income_stream": "income_stream/model.joblib",
-            "light_ranker": "light_ranker/model.joblib",
-            "heavy_ranker": "heavy_ranker/model.joblib",
-        }
-        
-        base_path = Path(os.getenv("MODEL_PATH", "models"))
-        allow_placeholders = self._allow_placeholder_models()
-        missing_required_models = []
-        
-        for name, rel_path in model_configs.items():
-            try:
-                model_path = base_path / rel_path
-                if model_path.exists():
-                    self._models[name] = joblib.load(model_path)
-                    self._status[name] = True
-                    print(f"  ✓ Loaded {name}")
-                elif allow_placeholders:
-                    self._models[name] = self._create_placeholder_model(name)
-                    self._status[name] = True
-                    print(f"  ⚠ Using development placeholder for {name}")
-                else:
-                    self._status[name] = False
-                    missing_required_models.append(str(model_path))
-                    print(f"  ✗ Missing required model artifact for {name}: {model_path}")
-            except Exception as e:
-                print(f"  ✗ Failed to load {name}: {e}")
+        """
+        Load every artefact that is present, and account for every one that is
+        not.
+
+        Never raises for a model nothing reads, whatever the environment. Raises
+        ``MissingModelArtifacts`` only when a model an endpoint reads is absent
+        *and* ``ATHENA_REQUIRE_MODEL_ARTIFACTS`` is on, and then with a message
+        that names the model, every path that was searched for it, what stops
+        working without it, and the command that would produce it.
+        """
+        directories = _model_directories()
+        self._searched = [str(directory.resolve()) for directory in directories]
+        self._load_errors = {}
+
+        for name, relative_path in MODEL_ARTIFACTS.items():
+            artifact = self._find_artifact(relative_path, directories)
+
+            if artifact is None:
                 self._status[name] = False
-        
-        self._ready = self.is_ready()
+                if name in MODEL_CONSUMERS:
+                    print(f"  ✗ No artefact for {name}: {MODEL_CONSUMERS[name]} will answer 503")
+                else:
+                    print(f"  – No artefact for {name}; nothing in this service reads it, so nothing is affected")
+                continue
 
-        if missing_required_models:
-            raise RuntimeError(
-                "Missing ML model artifacts in production mode: "
-                + ", ".join(missing_required_models)
-            )
+            try:
+                self._models[name] = joblib.load(artifact)
+                self._status[name] = True
+                print(f"  ✓ Loaded {name} from {artifact}")
+            except Exception as error:  # noqa: BLE001 - the reason has to reach /health intact
+                self._status[name] = False
+                self._load_errors[name] = f"{type(error).__name__}: {error}"
+                print(f"  ✗ Found {artifact} for {name} but could not load it: {error}")
 
-    def _allow_placeholder_models(self) -> bool:
-        """Allow synthetic placeholder models only outside production by default."""
-        explicit = os.getenv("ATHENA_ALLOW_PLACEHOLDER_MODELS")
-        if explicit is not None:
-            return explicit.lower() in {"1", "true", "yes", "on"}
+        missing = self.missing_consumed_models()
+        if missing:
+            message = self.describe_missing(missing)
+            if _require_artifacts():
+                raise MissingModelArtifacts(message, missing)
+            print(message)
 
-        env_name = (
-            os.getenv("ATHENA_ENV")
-            or os.getenv("ENVIRONMENT")
-            or os.getenv("APP_ENV")
-            or os.getenv("NODE_ENV")
-            or "development"
-        ).lower()
+    def _find_artifact(self, relative_path: str, directories: List[Path]) -> Optional[Path]:
+        for directory in directories:
+            candidate = directory / relative_path
+            if candidate.exists():
+                return candidate
+        return None
 
-        return env_name not in PRODUCTION_ENV_NAMES
-    
-    def _create_placeholder_model(self, name: str) -> Any:
-        """Create a placeholder model for development."""
-        from sklearn.ensemble import RandomForestRegressor
-        import numpy as np
-        
-        # Create a simple trained model
-        model = RandomForestRegressor(n_estimators=10, random_state=42)
-        X = np.random.rand(100, 9)
-        y = np.random.rand(100) * 100
-        model.fit(X, y)
-        
-        return model
-    
+    def missing_consumed_models(self) -> List[str]:
+        """The models some endpoint reads and that are not loaded, in declaration order."""
+        return [name for name in MODEL_ARTIFACTS if name in MODEL_CONSUMERS and not self._status.get(name, False)]
+
+    def describe_missing(self, missing: Optional[List[str]] = None) -> str:
+        """
+        The full, actionable account of what is missing.
+
+        Used verbatim in three places — the startup log, the startup exception
+        and the 503 body of every endpoint that needs an absent model — so that
+        an operator who sees one of them has already seen all of it. The message
+        this replaced was the single line "Missing ML model artifacts in
+        production mode:" followed by six paths, which told a reader that
+        something was wrong and nothing about what to do next.
+        """
+        names = self.missing_consumed_models() if missing is None else missing
+        if not names:
+            return "Every model an endpoint reads is loaded."
+
+        lines = [
+            f"No trained model artefact is available for: {', '.join(names)}.",
+            f"Searched, in order: {', '.join(self._searched) or 'nothing (models have not been loaded yet)'}.",
+            "",
+        ]
+
+        for name in names:
+            lines.append(f"{name}:")
+            lines.append(f"  needed by   {MODEL_CONSUMERS.get(name, 'nothing in this service')}")
+            lines.append(f"  expected at <model directory>/{MODEL_ARTIFACTS[name]}")
+            if name in self._load_errors:
+                lines.append(f"  found but unreadable: {self._load_errors[name]}")
+            command = TRAINING_COMMANDS.get(name)
+            if command:
+                lines.append(f"  produced by {command} (run from the ml/ directory)")
+            else:
+                lines.append("  produced by nothing in this repository: src/algorithms/ has no trainer for it")
+            lines.append("")
+
+        lines.append(
+            "ATHENA_REQUIRE_MODEL_ARTIFACTS is on, so this stops the service from starting."
+            if _require_artifacts()
+            else "Those endpoints answer 503 until an artefact exists; the rest of the service is unaffected."
+        )
+        lines.append(
+            "Point MODEL_PATH at a directory that holds the artefact, or read "
+            "docs/runbooks/ML-SERVICE.md, which records what turning this service on would "
+            "actually require."
+        )
+        return "\n".join(lines)
+
     def get_model(self, name: str) -> Optional[Any]:
         """Get a loaded model by name."""
         return self._models.get(name)
-    
+
     def get_status(self) -> Dict[str, bool]:
         """Get loading status of all models."""
         return self._status.copy()
-    
+
+    def get_report(self) -> Dict[str, Any]:
+        """
+        What ``/health`` publishes about the models.
+
+        Separates "missing and nothing reads it" from "missing and an endpoint
+        needs it", because reporting six missing artefacts with equal weight is
+        how the real one — career_compass — stayed invisible among five that do
+        not matter.
+        """
+        missing = self.missing_consumed_models()
+        return {
+            "loaded": self.get_status(),
+            "searched": list(self._searched),
+            "missing_consumed": missing,
+            "unread_declared": [
+                name for name in MODEL_ARTIFACTS if name not in MODEL_CONSUMERS and not self._status.get(name, False)
+            ],
+            "environment": _environment_name(),
+            "strict_startup": _require_artifacts(),
+            "detail": self.describe_missing(missing) if missing else None,
+        }
+
     def is_ready(self) -> bool:
-        """Check if all critical models are loaded."""
-        critical_models = ["career_compass"]
-        return all(self._status.get(m, False) for m in critical_models)
-    
+        """
+        Whether every endpoint in this service can answer.
+
+        False while a model some endpoint reads is absent, even though the other
+        five routers are perfectly able to serve — ``/ready`` is a promise about
+        the whole surface, and the endpoints that still work are reported one by
+        one in ``/health``.
+        """
+        return not self.missing_consumed_models()
+
     async def cleanup(self) -> None:
         """Cleanup resources on shutdown."""
         self._models.clear()
         self._status.clear()
-        self._ready = False
+        self._searched = []
+        self._load_errors = {}

@@ -739,7 +739,28 @@ router.post('/forums/:slug/posts', authenticate, async (req: AuthRequest, res: R
     const post = await prisma.wellnessPost.create({ data: { forumId: forum.id, authorId: req.user!.id, isAnonymous: data.isAnonymous ?? settings.anonymousByDefault, title: data.title.trim(), body: data.body.trim(), contentWarning: normaliseWarning(data.contentWarning), crisisFlagged: crisis.flagged }, select: postSelect });
     await prisma.wellnessForum.update({ where: { id: forum.id }, data: { postCount: { increment: 1 } } });
     if (crisis.flagged) {
-      await prisma.adminFlag.create({ data: { userId: req.user!.id, type: 'SAFETY_CONCERN', severity: 'HIGH', flaggedById: req.user!.id, reason: 'Language about suicide or self-harm in a wellness forum post; the crisis lines were shown to the author', notes: `Post ${post.id}` } }).catch((err) => logger.warn('Could not raise a safety flag', { error: (err as Error).message }));
+      // Raising the flag used to be the whole of the response. AdminFlag had
+      // no reader anywhere — no route, no page, no worker — so a woman writing
+      // that she wanted to die produced a HIGH-severity row nobody would ever
+      // open. It is now a queue staff work (GET /api/safety/moderation/flags,
+      // shown above the report queue at /admin/moderation), and raising one
+      // tells the admins, the way every other urgent queue here does.
+      //
+      // Still best effort, and still after the post is saved: her post going
+      // up is not allowed to depend on any of this, and a flag that could not
+      // be written has to land in the log rather than disappear.
+      await bestEffort('wellness crisis safety flag', async () => {
+        const flag = await prisma.adminFlag.create({ data: { userId: req.user!.id, type: 'SAFETY_CONCERN', severity: 'HIGH', flaggedById: req.user!.id, reason: 'Language about suicide or self-harm in a wellness forum post; the crisis lines were shown to the author', notes: `Post ${post.id}` } });
+        // Nothing she wrote, and no name, goes into the notification: it lands
+        // in every admin's inbox, while the post and the account sit behind
+        // the staff role in the queue.
+        await notifyAdmins({
+          title: 'A safety concern needs a person now',
+          message: 'A wellness forum post used language about suicide or self-harm. The crisis lines were shown to the author. It is waiting at the top of the safety queue.',
+          link: '/admin/moderation#safety-concerns',
+          data: { flagId: flag.id, flagType: 'SAFETY_CONCERN', severity: 'HIGH' },
+        });
+      });
     }
     ok(res, { post: presentPost(post, req.user!.id, true, new Set()), crisis: crisis.flagged ? { flagged: true, message: 'It sounds like things are very hard right now. Your post is up, and these lines are staffed this minute.', lines: CRISIS_LINES.slice(0, 5) } : { flagged: false } }, 201);
   } catch (error) { next(error); }

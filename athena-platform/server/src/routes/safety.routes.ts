@@ -1,7 +1,11 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import { AuditAction, Prisma } from '@prisma/client';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { requireRole } from '../middleware/roles';
 import { ApiError } from '../middleware/errorHandler';
+import { logAudit } from '../utils/audit';
+import { bestEffort } from '../utils/best-effort';
 import { evaluateSafetyScore } from '../services/moderation.service';
 import { handleUserBlock, handleUserReport } from '../services/safety-score.service';
 import { recordSafetyReport, recordUserBlock } from '../services/trust.service';
@@ -420,6 +424,199 @@ router.patch(
       }
 
       res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// SAFETY FLAGS — the staff queue
+// ===========================================
+/**
+ * AdminFlag had two writers and no reader at all.
+ *
+ * When a member writes about suicide or self-harm in a wellness forum, the
+ * forum raises a HIGH-severity SAFETY_CONCERN flag. When a member's safety
+ * score falls below 25, safety-score.service raises a HIGH-severity
+ * SAFETY_CRITICAL one. Nothing on this platform ever read either: no route,
+ * no page, no worker. The most urgent thing ATHENA can detect about a member
+ * became a database row no human would ever open. A woman writing that she
+ * wanted to die produced a row and silence.
+ *
+ * These two routes are that reader, and the moderation queue at
+ * /admin/moderation is where staff work them — above the content reports,
+ * because a woman in danger outranks a rude comment. Raising a flag now also
+ * notifies the admins, the same way every other queue on this platform tells
+ * somebody there is something waiting.
+ *
+ * They live in this file, under /api/safety, rather than beside the report
+ * queue in admin.routes.ts, because that router is not this change's to edit.
+ * They are guarded individually, like the /api/admin routers that guard
+ * themselves: authenticate, then staff role, which also enforces the staff
+ * second factor.
+ */
+
+/** Severities that jump the queue. Everything else sorts under them. */
+const URGENT_FLAG_SEVERITIES = ['CRITICAL', 'HIGH'];
+
+const FLAG_PERSON_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  displayName: true,
+  email: true,
+  isSuspended: true,
+} as const;
+
+type FlagRow = {
+  id: string;
+  userId: string;
+  type: string;
+  reason: string | null;
+  severity: string;
+  flaggedById: string;
+  notes: string | null;
+  resolvedAt: Date | null;
+  resolvedById: string | null;
+  createdAt: Date;
+};
+
+router.get(
+  '/moderation/flags',
+  authenticate,
+  requireRole('MODERATOR', 'ADMIN'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const status = String(req.query.status ?? 'open').toLowerCase();
+      const requested = Number.parseInt(String(req.query.limit ?? '50'), 10);
+      const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
+
+      const where: Prisma.AdminFlagWhereInput =
+        status === 'resolved' ? { resolvedAt: { not: null } } : status === 'all' ? {} : { resolvedAt: null };
+
+      // Two queries rather than one ordered query, because severity is a
+      // string column and ordering by it alphabetically puts LOW above
+      // MEDIUM. Fetching the urgent ones first and filling the rest of the
+      // page underneath guarantees that no HIGH-severity safety concern can
+      // ever be pushed off the first page by a pile of newer minor flags —
+      // which is the whole reason this queue exists.
+      const urgent = await prisma.adminFlag.findMany({
+        where: { ...where, severity: { in: URGENT_FLAG_SEVERITIES } },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
+      const rest =
+        urgent.length < limit
+          ? await prisma.adminFlag.findMany({
+              where: { ...where, severity: { notIn: URGENT_FLAG_SEVERITIES } },
+              orderBy: { createdAt: 'desc' },
+              take: limit - urgent.length,
+            })
+          : [];
+
+      const rows = [...urgent, ...rest] as FlagRow[];
+
+      // AdminFlag carries ids, not relations, so the accounts are read in one
+      // go. 'system' is not a user id — the safety-score service raises its
+      // flags under that name — so it simply finds nothing and is presented
+      // as the platform itself.
+      const ids = Array.from(
+        new Set(rows.flatMap((row) => [row.userId, row.flaggedById, row.resolvedById ?? '']).filter(Boolean))
+      );
+      const people = ids.length
+        ? await prisma.user.findMany({ where: { id: { in: ids } }, select: FLAG_PERSON_SELECT })
+        : [];
+      const byId = new Map(people.map((person) => [person.id, person]));
+
+      const [openCount, urgentCount, total] = await Promise.all([
+        prisma.adminFlag.count({ where: { resolvedAt: null } }),
+        prisma.adminFlag.count({ where: { resolvedAt: null, severity: { in: URGENT_FLAG_SEVERITIES } } }),
+        prisma.adminFlag.count({ where }),
+      ]);
+
+      res.json({
+        flags: rows.map((row) => ({
+          id: row.id,
+          type: row.type,
+          severity: row.severity,
+          isUrgent: URGENT_FLAG_SEVERITIES.includes(row.severity),
+          reason: row.reason,
+          notes: row.notes,
+          createdAt: row.createdAt,
+          resolvedAt: row.resolvedAt,
+          member: byId.get(row.userId) ?? null,
+          raisedBy: byId.get(row.flaggedById) ?? null,
+          raisedBySystem: !byId.has(row.flaggedById),
+          resolvedBy: row.resolvedById ? byId.get(row.resolvedById) ?? null : null,
+        })),
+        openCount,
+        urgentCount,
+        total,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post(
+  '/moderation/flags/:id/resolve',
+  authenticate,
+  requireRole('MODERATOR', 'ADMIN'),
+  [body('notes').optional().isString().isLength({ max: 2000 })],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
+      const existing = (await prisma.adminFlag.findUnique({ where: { id: req.params.id } })) as FlagRow | null;
+      if (!existing) {
+        throw new ApiError(404, 'Safety flag not found');
+      }
+      if (existing.resolvedAt) {
+        throw new ApiError(409, 'That flag has already been closed');
+      }
+
+      const note = typeof req.body?.notes === 'string' ? req.body.notes.trim() : '';
+      const resolved = await prisma.adminFlag.update({
+        where: { id: existing.id },
+        data: {
+          resolvedAt: new Date(),
+          resolvedById: req.user!.id,
+          isActive: false,
+          // Appended rather than replaced: the original note says which post
+          // or which score raised the flag, and losing it would leave the row
+          // unreadable a month later.
+          ...(note ? { notes: existing.notes ? `${existing.notes}\n\nClosed by staff: ${note}` : `Closed by staff: ${note}` } : {}),
+        },
+      });
+
+      // Who closed a safety concern about a member, and when. On a platform
+      // holding domestic violence records "a moderator did this" is not an
+      // answer anybody can give a regulator. The change is already committed,
+      // so the row is best effort rather than a reason to fail the response.
+      await bestEffort(
+        'safety flag resolution audit row',
+        logAudit({
+          action: AuditAction.DATA_ACCESS,
+          actorUserId: req.user!.id,
+          targetUserId: existing.userId,
+          ipAddress: req.ip ?? null,
+          userAgent: req.get('user-agent') || null,
+          metadata: {
+            adminAction: 'SAFETY_FLAG_RESOLVED',
+            resourceType: 'AdminFlag',
+            resourceId: existing.id,
+            flagType: existing.type,
+            severity: existing.severity,
+          },
+        })
+      );
+
+      res.json({ success: true, flag: { id: resolved.id, resolvedAt: resolved.resolvedAt } });
     } catch (error) {
       next(error);
     }

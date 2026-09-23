@@ -6,6 +6,8 @@
 
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
+import { notifyAdmins } from './admin-notify.service';
 import { NotificationService } from './notification.service';
 
 const notificationService = new NotificationService();
@@ -314,8 +316,15 @@ export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' |
   
   // Check if critical threshold reached
   if (newScore < 25 && oldScore >= 25) {
-    // User crossed into critical territory - flag for review
-    await prisma.adminFlag.create({
+    // User crossed into critical territory - flag for review.
+    //
+    // The flag used to be the whole of it. AdminFlag had no reader anywhere on
+    // the platform, so "flag for review" meant writing a row and hoping: no
+    // route read the table, no page showed it, nobody was told. It is now a
+    // queue staff work (GET /api/safety/moderation/flags, rendered above the
+    // report queue at /admin/moderation) and raising one tells them, the same
+    // way every other queue here announces that something is waiting.
+    const flag = await prisma.adminFlag.create({
       data: {
         userId: incident.userId,
         type: 'SAFETY_CRITICAL',
@@ -324,8 +333,22 @@ export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' |
         flaggedById: 'system',
       },
     });
-    
-    logger.warn('User safety score critical', { userId: incident.userId, newScore });
+
+    // Best effort, and deliberately after the flag: the row is the record and
+    // must not be lost because an admin's notification could not be written.
+    // The notification names no member — it travels to every admin's inbox,
+    // and the account it is about belongs behind the staff role in the queue.
+    await bestEffort(
+      'safety-critical admin notification',
+      notifyAdmins({
+        title: 'A member has crossed the safety threshold',
+        message: 'An account’s safety score has fallen into critical territory and is waiting in the safety queue.',
+        link: '/admin/moderation#safety-concerns',
+        data: { flagId: flag.id, flagType: 'SAFETY_CRITICAL', severity: 'HIGH' },
+      })
+    );
+
+    logger.warn('User safety score critical', { userId: incident.userId, newScore, flagId: flag.id });
   }
 }
 

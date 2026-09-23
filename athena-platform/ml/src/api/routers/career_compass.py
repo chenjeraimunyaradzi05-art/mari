@@ -88,9 +88,14 @@ async def predict_career_growth(profile: CareerProfile):
     try:
         model = model_loader.get_model("career_compass")
         if model is None:
+            # The same account the startup log and /health carry, rather than
+            # five words. This is the endpoint a caller is most likely to meet
+            # first, and "Career Compass model not loaded" left them with no way
+            # to find out whether that was a deployment mistake or the permanent
+            # state of a service that has never had a trained artefact.
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Career Compass model not loaded"
+                detail=model_loader.describe_missing(["career_compass"])
             )
         
         # Prepare features for prediction
@@ -156,7 +161,7 @@ async def get_feature_importance():
     if model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded"
+            detail=model_loader.describe_missing(["career_compass"])
         )
     
     feature_names = [

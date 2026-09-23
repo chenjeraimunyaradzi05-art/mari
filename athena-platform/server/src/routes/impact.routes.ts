@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { BUILT_IN_DV_SERVICES } from '../services/dv-safe.service';
 
 const router = Router();
 
@@ -187,7 +188,27 @@ router.get('/partners/:id', async (req: Request, res: Response, next: NextFuncti
 // DV SUPPORT SERVICES
 // ===========================================
 
-// GET /api/impact/dv-services - List DV support services
+/**
+ * GET /api/impact/dv-services — the DV support directory.
+ *
+ * The catalogue is what staff have entered and checked, and it ships empty,
+ * which is correct: nobody should publish a local refuge's number that nobody
+ * has verified. But the page that renders this is the DV survivor support
+ * page, and an empty answer there read as "no help available" to a woman in
+ * danger. So the reply always carries `fallback` — the nationally published
+ * numbers held in dv-safe.service — whatever the catalogue holds and whatever
+ * filter was asked for, and says in `usingFallback` whether the catalogue had
+ * anything to show. A local service staff have entered supersedes the
+ * fallback in the page's ordering; it never removes it.
+ *
+ * The `take` is a ceiling, not a page. This is a directory of verified local
+ * services, so it is tens of rows rather than thousands, and a woman reading
+ * it should get the whole of it rather than a first page she has to ask for
+ * more of. If it ever grows past this, it needs paging and a search, not a
+ * bigger number.
+ */
+const DV_SERVICE_LIMIT = 200;
+
 router.get('/dv-services', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { state, type, national } = req.query;
@@ -200,9 +221,25 @@ router.get('/dv-services', async (req: Request, res: Response, next: NextFunctio
     const services = await prisma.dVSupportService.findMany({
       where,
       orderBy: [{ isNational: 'desc' }, { name: 'asc' }],
+      take: DV_SERVICE_LIMIT,
     });
 
-    res.json({ success: true, data: services });
+    // A staff-entered service on the same number is the same service, better
+    // checked, so the built-in copy of it drops out rather than appearing
+    // twice under two labels.
+    const catalogueNumbers = new Set(
+      services.map((service) => (service.phone ?? '').replace(/\D/g, '')).filter(Boolean)
+    );
+    const fallback = BUILT_IN_DV_SERVICES.filter(
+      (service) => !catalogueNumbers.has((service.phone ?? '').replace(/\D/g, ''))
+    );
+
+    res.json({
+      success: true,
+      data: services.map((service) => ({ ...service, source: 'catalogue' as const })),
+      fallback,
+      usingFallback: services.length === 0,
+    });
   } catch (error) {
     next(error);
   }

@@ -197,6 +197,31 @@ export interface FeedItem {
  * the request is what has to change, while a 5xx or a transport failure is
  * worth waiting out.
  */
+/**
+ * What the last health probe found, in enough detail for /health/detailed to
+ * print it.
+ *
+ * `reachable` and `ready` are two different questions and used to be one. The
+ * Python service answered /health with the literal string "healthy" whatever
+ * its model status was, so this client reported a service that had loaded
+ * nothing as fully ready; `models` is the map that service publishes, and
+ * `ready` now follows what it says rather than the word next to it.
+ */
+export interface MlServiceHealth {
+  /** An operator has set ML_SERVICE_URL. Without it there is no deployment to ask about. */
+  configured: boolean;
+  url: string;
+  /** The service answered at all. */
+  reachable: boolean;
+  /** The service answered and reported itself able to serve every endpoint. */
+  ready: boolean;
+  /** Per-model load status as the service reports it, or null if it did not answer. */
+  models: Record<string, boolean> | null;
+  checkedAt: string | null;
+  /** Why the last probe failed, when it did. */
+  error: string | null;
+}
+
 export class MlServiceError extends Error {
   readonly status: number;
   readonly endpoint: string;
@@ -221,10 +246,26 @@ class MLServiceClient {
   private isHealthy: boolean = false;
   private lastHealthCheck: number = 0;
   private healthCheckInterval: number = 30000; // 30 seconds
+  private lastModels: Record<string, boolean> | null = null;
+  private lastError: string | null = null;
 
   constructor() {
     this.baseUrl = ML_SERVICE_URL;
     this.timeout = ML_SERVICE_TIMEOUT;
+  }
+
+  /**
+   * Whether anyone has actually deployed this dependency.
+   *
+   * ML_SERVICE_URL falls back to http://localhost:8000 above so a developer can
+   * run the Python service alongside the API without configuring anything. That
+   * default is a convenience and never a deployment: read at call time, like
+   * feed-ml.service's mlRankingEnabled(), so that a health check and a test can
+   * both tell "nobody configured this" from "it is configured and down" instead
+   * of reporting a dependency nobody chose to run as a broken one.
+   */
+  isConfigured(): boolean {
+    return Boolean(process.env.ML_SERVICE_URL);
   }
 
   private async fetch<T>(
@@ -320,12 +361,23 @@ class MLServiceClient {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const response = await this.fetch<{ status: string }>('/health');
+      const response = await this.fetch<{ status: string; models_loaded?: Record<string, boolean> }>('/health');
+      // "healthy" is the only word that means every endpoint over there can
+      // answer. The service also says "degraded", which it uses when it started
+      // without a model artefact some endpoint needs — it is alive and most of
+      // its routers work, but treating that as ready is how a deployment with
+      // nothing loaded came to look identical to one serving real predictions.
       this.isHealthy = response.status === 'healthy';
+      this.lastModels =
+        response.models_loaded && typeof response.models_loaded === 'object' ? response.models_loaded : null;
+      this.lastError = null;
       this.lastHealthCheck = Date.now();
       return this.isHealthy;
     } catch (error) {
       this.isHealthy = false;
+      this.lastModels = null;
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.lastHealthCheck = Date.now();
       return false;
     }
   }
@@ -336,6 +388,41 @@ class MLServiceClient {
       return this.isHealthy;
     }
     return this.checkHealth();
+  }
+
+  /**
+   * The same probe isReady() makes, with everything it learned kept rather than
+   * reduced to a boolean. /health/detailed needs the detail: "degraded because
+   * career_compass has no artefact" and "the host does not resolve" are both
+   * `false` from isReady(), and an operator cannot act on either without being
+   * told which one it is.
+   */
+  async describeHealth(): Promise<MlServiceHealth> {
+    const configured = this.isConfigured();
+    if (!configured) {
+      return {
+        configured: false,
+        url: this.baseUrl,
+        reachable: false,
+        ready: false,
+        models: null,
+        checkedAt: null,
+        error: null,
+      };
+    }
+
+    const ready = await this.isReady();
+    return {
+      configured: true,
+      url: this.baseUrl,
+      // A refusal is still an answer: the service is reachable whenever the
+      // last probe came back without a transport error, whatever it said.
+      reachable: ready || this.lastError === null,
+      ready,
+      models: this.lastModels,
+      checkedAt: this.lastHealthCheck ? new Date(this.lastHealthCheck).toISOString() : null,
+      error: this.lastError,
+    };
   }
 
   // ===========================================

@@ -9,6 +9,7 @@ import { prisma } from '../utils/prisma';
 import { getRedisClient } from '../utils/cache';
 import { getOpenSearchClient } from '../utils/opensearch';
 import { mlService } from '../services/ml.service';
+import { mlRankingStats } from '../services/feed-ml.service';
 // Queue utils are dynamically imported to avoid Redis connection when workers disabled
 // import { getAllQueueStats } from '../utils/queue';
 import { isTextModerationConfigured } from '../services/moderation.service';
@@ -341,7 +342,26 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     envCheck('AWS_SECRET_ACCESS_KEY', 'media', production, 'AWS secret key is not configured'),
     envCheck('VIDEO_PROCESSOR_URL', 'media', production && !videoSimulationAllowed, 'Production video processor is not configured'),
     anyEnvCheck('AI_PROVIDER_KEY', ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'], 'ai', production, 'AI provider key is not configured'),
-    envCheck('ML_SERVICE_URL', 'ai', production, 'ML service URL is not configured'),
+    // Reported, never required — and it used to be the reason this endpoint
+    // could not return "ready" at all. The Python ML service has no trained
+    // model artefact anywhere in this repository, three of its six algorithm
+    // directories are empty, and its loader refused to start without artefacts
+    // it could never find. So production readiness demanded the URL of a
+    // service that could not boot, and /health/launch-readiness answered 503
+    // for a reason nobody could fix by configuring anything.
+    //
+    // The one real consumer is the feed re-ranker, which keeps the engagement
+    // order when the service is absent, so nothing a member sees depends on it.
+    // Demoting the check is not making the failure quieter: the answer is still
+    // published on every call, /health/detailed reports whether the service is
+    // reachable and which models it has loaded, and docs/runbooks/ML-SERVICE.md
+    // records what turning it on would require.
+    envCheck(
+      'ML_SERVICE_URL',
+      'ai',
+      false,
+      'ML service is not configured: the feed ranks by engagement only. Optional — see docs/runbooks/ML-SERVICE.md'
+    ),
     envCheck('OPENSEARCH_NODE', 'search', openSearchEnabled, 'OpenSearch is enabled but OPENSEARCH_NODE is not configured'),
     envCheck('REDIS_URL', 'workers', production || workersEnabled, 'Redis is required for production queues/workers'),
     envCheck(
@@ -462,20 +482,64 @@ async function checkOpenSearch(): Promise<ComponentHealth> {
   }
 }
 
+/**
+ * The Python ML service, which is optional everywhere.
+ *
+ * Two things were wrong here. The client defaults to http://localhost:8000 when
+ * ML_SERVICE_URL is unset, so a deployment that had deliberately not deployed
+ * an ML service was reported as one whose ML service was broken — the same
+ * mistake checkRedis above already had to fix. And "ML service not ready" was
+ * the entire message, which covers a host that does not resolve, a timeout, and
+ * a service that is running perfectly but has no trained model artefact. Those
+ * need three different actions from whoever is reading.
+ *
+ * Never 'down', for the same reason checkMoneyPaths never is: this report is
+ * read by monitoring that can take an instance out of rotation, and no member
+ * request fails because the ranker is absent.
+ */
 async function checkMLService(): Promise<ComponentHealth> {
   const start = Date.now();
+  const ranking = mlRankingStats();
+
   try {
-    const isReady = await mlService.isReady();
+    const health = await mlService.describeHealth();
+
+    if (!health.configured) {
+      return {
+        status: 'degraded',
+        message:
+          'ML_SERVICE_URL is not set: the feed ranks by engagement only. Optional — see docs/runbooks/ML-SERVICE.md',
+        details: { feedRanking: ranking },
+      };
+    }
+
+    const message = health.ready
+      ? undefined
+      : health.reachable
+      ? 'ML service is reachable but reports itself degraded: it is missing a trained model artefact some endpoint needs. Its /health says which.'
+      : `ML service did not answer: ${health.error || 'no response'}`;
+
     return {
-      status: isReady ? 'up' : 'degraded',
+      status: health.ready ? 'up' : 'degraded',
       latency: Date.now() - start,
-      message: isReady ? undefined : 'ML service not ready',
+      message,
+      details: {
+        url: health.url,
+        reachable: health.reachable,
+        models: health.models,
+        checkedAt: health.checkedAt,
+        // How often the one real consumer has actually been able to use it.
+        // A ranker that is configured and has applied zero times out of
+        // thousands of feeds is the failure this check exists to surface.
+        feedRanking: ranking,
+      },
     };
   } catch (error: any) {
     return {
-      status: 'down',
+      status: 'degraded',
       latency: Date.now() - start,
-      message: error.message,
+      message: `ML service health probe failed: ${error.message}`,
+      details: { feedRanking: ranking },
     };
   }
 }

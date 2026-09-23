@@ -12,6 +12,10 @@ jest.mock('../../utils/prisma', () => ({
 }));
 
 jest.mock('../../utils/email', () => ({ sendEmail: jest.fn(async () => true) }));
+jest.mock('../dv-sms.service', () => ({
+  isSmsConfigured: jest.fn(() => false),
+  sendSms: jest.fn(async () => ({ sent: false, reason: 'not-configured' })),
+}));
 jest.mock('../../utils/safety-store', () => ({ blockUser: jest.fn(async () => ({ created: true })) }));
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -19,6 +23,7 @@ jest.mock('../../utils/logger', () => ({
 
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { sendEmail } from '../../utils/email';
+import { isSmsConfigured, sendSms } from '../dv-sms.service';
 import { blockUser as platformBlock } from '../../utils/safety-store';
 import dvSafe, { decryptMessage } from '../dv-safe.service';
 
@@ -158,6 +163,9 @@ describe('Panic button', () => {
     jest.clearAllMocks();
     prisma.user.findUnique.mockResolvedValue({ firstName: 'Sarah', displayName: null });
     prisma.dvPanicAlert.create.mockResolvedValue({});
+    (sendEmail as any).mockResolvedValue(true);
+    (isSmsConfigured as any).mockReturnValue(false);
+    (sendSms as any).mockResolvedValue({ sent: false, reason: 'not-configured' });
   });
 
   it('emails the contacts who asked to be told and have an email, reports the rest as unreachable, and records the alert', async () => {
@@ -178,8 +186,97 @@ describe('Panic button', () => {
     expect(mail.to).toBe('mum@example.com');
     expect(mail.subject).toBe('Safety alert from Sarah');
     expect(mail.text).toContain('000');
-    expect(result).toMatchObject({ success: true, notifiedContacts: ['Mum'], unreachableContacts: ['Jo'], smsAvailable: false });
+    expect(result).toMatchObject({
+      success: true,
+      outcome: 'PARTIALLY_ALERTED',
+      reachedCount: 1,
+      unreachableCount: 1,
+      contactCount: 2,
+      notifiedContacts: ['Mum'],
+      unreachableContacts: ['Jo'],
+      smsAvailable: false,
+    });
+    expect(result.message).toContain('Jo');
     expect(prisma.dvPanicAlert.create.mock.calls[0][0].data).toMatchObject({ profileId: 'prof-1', notifiedContacts: ['Mum'] });
+  });
+
+  // The whole of this used to be `return { success: true, ... }`, sent even
+  // when the loop above had reached nobody. The phone app drew "Your contacts
+  // were told" over it. Nothing may say success when nothing was delivered.
+  it('an alert that reached nobody is a failure, and says who to ring instead', async () => {
+    (sendEmail as any).mockResolvedValue(false);
+    prisma.dvSafetyProfile.upsert.mockResolvedValue(
+      profile({
+        emergencyContacts: [
+          { id: 'a', name: 'Mum', phone: '0400 000 000', email: 'mum@example.com', relationship: 'Mother', notifyOnPanic: true },
+          { id: 'b', name: 'Jo', phone: '0400 000 001', relationship: 'Friend', notifyOnPanic: true },
+        ],
+      })
+    );
+
+    const result = await dvSafe.triggerPanicButton('u1');
+
+    expect(result.success).toBe(false);
+    expect(result).toMatchObject({ outcome: 'NOBODY_REACHED', reachedCount: 0, unreachableCount: 2, notifiedContacts: [] });
+    expect(result.message).toContain('Mum');
+    expect(result.message).toContain('Jo');
+    expect(result.message).toContain('000');
+    // Still recorded: the alert that reached nobody is the one most worth
+    // having on the record.
+    expect(prisma.dvPanicAlert.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('having nobody set to be told is its own outcome, not a success', async () => {
+    prisma.dvSafetyProfile.upsert.mockResolvedValue(profile({ emergencyContacts: [] }));
+
+    const result = await dvSafe.triggerPanicButton('u1');
+
+    expect(result.success).toBe(false);
+    expect(result).toMatchObject({ outcome: 'NO_CONTACTS', contactCount: 0, reachedCount: 0 });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  // The emergency-contact form on the phone asks for a name, a number and a
+  // relationship, and never for an email. Without a text channel every
+  // contact added there is permanently unreachable.
+  it('reaches a contact who only ever gave a phone number, once SMS is configured', async () => {
+    (isSmsConfigured as any).mockReturnValue(true);
+    (sendSms as any).mockResolvedValue({ sent: true });
+    prisma.dvSafetyProfile.upsert.mockResolvedValue(
+      profile({
+        emergencyContacts: [{ id: 'b', name: 'Jo', phone: '0400 000 001', relationship: 'Friend', notifyOnPanic: true }],
+      })
+    );
+
+    const result = await dvSafe.triggerPanicButton('u1');
+
+    expect(sendSms).toHaveBeenCalledTimes(1);
+    expect((sendSms as any).mock.calls[0][0]).toBe('0400 000 001');
+    expect((sendSms as any).mock.calls[0][1]).toContain('000');
+    expect(result).toMatchObject({ success: true, outcome: 'ALERTED', reachedCount: 1, notifiedContacts: ['Jo'], smsAvailable: true });
+  });
+
+  it('does not claim a text channel this deployment has not got', async () => {
+    prisma.dvSafetyProfile.upsert.mockResolvedValue(
+      profile({
+        emergencyContacts: [{ id: 'b', name: 'Jo', phone: '0400 000 001', relationship: 'Friend', notifyOnPanic: true }],
+      })
+    );
+
+    const result = await dvSafe.triggerPanicButton('u1');
+
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: false, outcome: 'NOBODY_REACHED', smsAvailable: false, unreachableContacts: ['Jo'] });
+  });
+});
+
+describe('The built-in DV numbers', () => {
+  it('carries the national lines so the support page can never be empty', () => {
+    const numbers = dvSafe.BUILT_IN_DV_SERVICES.map((service) => service.phone);
+    expect(numbers).toEqual(['000', '1800 737 732', '1800 811 811']);
+    // Every one is marked as built in, so no page can present one as a local
+    // service ATHENA staff have checked.
+    expect(dvSafe.BUILT_IN_DV_SERVICES.every((service) => service.source === 'built-in')).toBe(true);
   });
 });
 

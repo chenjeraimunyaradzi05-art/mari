@@ -35,10 +35,20 @@ model_loader = ModelLoader()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load ML models on startup, cleanup on shutdown."""
+    """
+    Load what artefacts exist on startup, clean up on shutdown.
+
+    This used to print "✅ ML models loaded successfully" unconditionally, on a
+    line that could only ever be reached because the loader had raised on
+    anything else. Now that a missing artefact is a reported state rather than a
+    crash, the line has to say which of the two happened.
+    """
     print("🚀 Loading ML models...")
     await model_loader.load_all_models()
-    print("✅ ML models loaded successfully")
+    if model_loader.is_ready():
+        print("✅ Every model an endpoint reads is loaded")
+    else:
+        print("⚠ Starting without every model: /health says which, and the endpoints that need them answer 503")
     yield
     print("🛑 Shutting down ML service...")
     await model_loader.cleanup()
@@ -108,26 +118,43 @@ class HealthResponse(BaseModel):
     service: str = "athena-ml"
     version: str = "1.0.0"
     models_loaded: Dict[str, bool]
+    models: Dict[str, Any]
     timestamp: float
 
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health_check():
-    """Health check endpoint for container orchestration."""
+    """
+    Health check endpoint for container orchestration.
+
+    ``status`` used to be the literal string "healthy" with no condition
+    attached, while ``models_loaded`` sat beside it reporting false for every
+    model. The Node API reads this endpoint and treats "healthy" as ready, so a
+    service running with nothing loaded looked identical to one serving real
+    predictions. It is now "degraded" whenever a model some endpoint reads is
+    missing, and ``models`` carries the whole account — what was searched, what
+    is absent, and what that costs.
+
+    Still HTTP 200 when degraded, deliberately: the container is alive and the
+    five routers that need no artefact are answering normally. ``/ready`` is
+    where a probe that should pull this instance out of rotation looks.
+    """
+    report = model_loader.get_report()
     return HealthResponse(
-        status="healthy",
+        status="healthy" if model_loader.is_ready() else "degraded",
         models_loaded=model_loader.get_status(),
+        models=report,
         timestamp=time.time(),
     )
 
 
 @app.get("/ready", tags=["System"])
 async def readiness_check():
-    """Readiness probe - checks if all models are loaded."""
+    """Readiness probe - refuses while a model some endpoint reads is missing."""
     if not model_loader.is_ready():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Models not yet loaded",
+            detail=model_loader.describe_missing(),
         )
     return {"status": "ready"}
 

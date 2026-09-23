@@ -192,7 +192,7 @@ export default function SafetyPage() {
   });
 
   // ---- alert
-  const [alertResult, setAlertResult] = useState<{ notifiedContacts: string[]; unreachableContacts: string[]; timestamp: string } | null>(null);
+  const [alertResult, setAlertResult] = useState<{ success: boolean; outcome: 'ALERTED' | 'PARTIALLY_ALERTED' | 'NOBODY_REACHED' | 'NO_CONTACTS'; message: string; notifiedContacts: string[]; unreachableContacts: string[]; timestamp: string } | null>(null);
   const panic = useMutation({
     mutationFn: dvSafeApi.panic,
     onSuccess: (response) => setAlertResult(response.data),
@@ -608,9 +608,12 @@ export default function SafetyPage() {
                 </button>
               </div>
               {alertResult && (
-                <p className="mt-3 text-sm text-rose-900 dark:text-rose-100" role="status">
-                  {alertResult.notifiedContacts.length > 0 ? `Emailed ${alertResult.notifiedContacts.join(', ')}.` : 'Nobody could be emailed.'}{' '}
-                  {alertResult.unreachableContacts.length > 0 && `Could not reach ${alertResult.unreachableContacts.join(', ')} (no email on file): call them.`}
+                <p className={alertResult.success ? "mt-3 text-sm text-rose-900 dark:text-rose-100" : "mt-3 rounded-md bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-900 dark:bg-rose-900/40 dark:text-rose-100"} role="status">
+                  {/* The server's own words. It knows whether anybody was actually
+                      reached; this page used to decide that from the length of a list
+                      and could say 'Emailed ...' over a send that silently failed. */}
+                  {alertResult.message}{' '}
+                  {alertResult.unreachableContacts.length > 0 && `Could not reach ${alertResult.unreachableContacts.join(', ')}: call them.`}
                 </p>
               )}
             </div>
