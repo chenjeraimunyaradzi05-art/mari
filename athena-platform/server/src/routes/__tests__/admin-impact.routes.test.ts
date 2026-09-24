@@ -111,6 +111,35 @@ describe('Admin impact catalogues', () => {
     await request(app).post('/api/admin/impact/dv-services').send({ name: 'Bad link', type: 'LEGAL', isNational: true, website: 'javascript:alert(1)' }).expect(400);
   });
 
+  // Entering a service is somebody having just looked at it. Without this the
+  // directory could never say how old any of it was, and a crisis number that
+  // has changed is worse than no number, because she rings it when she needs it.
+  it('stamps when a service was last checked, on entry and on every edit', async () => {
+    await request(app)
+      .post('/api/admin/impact/dv-services')
+      .send({ name: 'DVConnect Womensline', type: 'CRISIS', phone: '1800 811 811', state: 'QLD' })
+      .expect(201);
+    expect(prisma.dVSupportService.create.mock.calls[0][0].data.lastCheckedAt).toBeInstanceOf(Date);
+
+    prisma.dVSupportService.findUnique.mockResolvedValue({ id: 's1', state: 'QLD', isNational: false });
+    prisma.dVSupportService.update.mockResolvedValue({ id: 's1' });
+    await request(app).patch('/api/admin/impact/dv-services/s1').send({ phone: '1800 811 812' }).expect(200);
+    expect(prisma.dVSupportService.update.mock.calls[0][0].data.lastCheckedAt).toBeInstanceOf(Date);
+  });
+
+  // A service that closes can be retired instead of deleted, so the record that
+  // ATHENA once listed it survives — that is a different fact from never having
+  // listed it, on a page like this one.
+  it('retires a service without losing the row', async () => {
+    prisma.dVSupportService.findUnique.mockResolvedValue({ id: 's1', state: 'QLD', isNational: false });
+    prisma.dVSupportService.update.mockResolvedValue({ id: 's1', isActive: false });
+
+    await request(app).patch('/api/admin/impact/dv-services/s1').send({ isActive: false }).expect(200);
+
+    expect(prisma.dVSupportService.update.mock.calls[0][0].data).toMatchObject({ isActive: false });
+    expect(prisma.dVSupportService.delete).not.toHaveBeenCalled();
+  });
+
   it('a community page with members cannot be removed', async () => {
     prisma.indigenousCommunityPage.findUnique.mockResolvedValue({ id: 'c1', _count: { members: 4, resources: 0 } });
     await request(app).delete('/api/admin/impact/indigenous/communities/c1').expect(409);

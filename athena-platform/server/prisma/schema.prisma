@@ -1024,6 +1024,13 @@ model AdminFlag {
   @@index([userId])
   @@index([type])
   @@index([isActive])
+  // The staff safety queue reads open flags by resolvedAt and pulls the urgent
+  // ones out by severity. Until there was a reader these rows were only ever
+  // written, so neither column was indexed; now that a HIGH SAFETY_CONCERN is
+  // something a moderator is meant to see quickly, both queries would have
+  // scanned the table, and got slower exactly as the platform grew.
+  @@index([resolvedAt])
+  @@index([severity, resolvedAt])
 }
 
 // ===========================================
@@ -5124,11 +5131,26 @@ model DVSupportService {
   state         String?
   isNational    Boolean @default(false)
 
-  createdAt DateTime @default(now())
+  // A service that closes, moves or changes its number could previously only be
+  // deleted, which loses the record that it was ever listed and who listed it.
+  // Retiring one is the ordinary case for a directory like this, and it has to
+  // leave a trace: this is a page a woman in danger reads, and "we used to list
+  // them" is a different fact from "we never did".
+  isActive Boolean @default(true)
+
+  // When a person last confirmed this entry against the service itself. Nothing
+  // recorded staleness, so an entry checked three years ago looked exactly like
+  // one checked this morning. A phone number that has changed is worse than no
+  // number at all, because she will ring it while she needs help.
+  lastCheckedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
 
   @@index([type])
   @@index([state])
   @@index([isNational])
+  @@index([isActive])
 }
 
 // Disability Support
@@ -5543,7 +5565,12 @@ model CreatorAnalytics {
   revenueBySource Json? // {ads: 200, sponsorships: 1000, tips: 50, ...}
 
   // Tier & eligibility
-  creatorTier String    @default("BRONZE") // BRONZE, SILVER, GOLD, PLATINUM
+  // The ladder in CREATOR_TIERS, which is what actually decides her revenue
+  // share. The default used to be "BRONZE", from a set of four metal names that
+  // existed nowhere else in the codebase: nothing defined a threshold for them
+  // and nothing ever moved a row off BRONZE, so every creator sat on a tier
+  // name the payout code had never heard of.
+  creatorTier String    @default("Emerging") // Emerging, Rising, Established, Partner
   isMonetized Boolean   @default(false)
   monetizedAt DateTime?
 

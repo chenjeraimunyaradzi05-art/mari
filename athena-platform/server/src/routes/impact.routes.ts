@@ -213,7 +213,10 @@ router.get('/dv-services', async (req: Request, res: Response, next: NextFunctio
   try {
     const { state, type, national } = req.query;
 
-    const where: Record<string, unknown> = {};
+    // A retired service keeps its row, so the record of having listed it
+    // survives, but it does not appear on the page a woman in danger is
+    // reading. Deleting was previously the only way to take one down.
+    const where: Record<string, unknown> = { isActive: true };
     if (state) where.state = state;
     if (type) where.type = type;
     if (national === 'true') where.isNational = true;

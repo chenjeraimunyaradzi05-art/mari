@@ -375,6 +375,9 @@ const dvServiceSchema = z
       .nullable()
       .optional(),
     isNational: z.boolean().optional(),
+    // Retiring a service rather than deleting it: the row stays, so the record
+    // of having listed it survives, and the public directory stops showing it.
+    isActive: z.boolean().optional(),
   })
   .strict();
 
@@ -398,7 +401,10 @@ router.post('/impact/dv-services', ...adminOnly, async (req: AuthRequest, res: R
   try {
     const body = parse(dvServiceSchema, req.body);
     checkCoverage(body.state, body.isNational);
-    const service = await prisma.dVSupportService.create({ data: body });
+    // Creating an entry is somebody having just looked at it, which is exactly
+    // what lastCheckedAt records. Nothing else sets it, so a directory of numbers
+    // a woman will ring in an emergency would otherwise never say how old it is.
+    const service = await prisma.dVSupportService.create({ data: { ...body, lastCheckedAt: new Date() } });
     logger.info('DV support service created', { serviceId: service.id, by: req.user!.id });
     res.status(201).json({ success: true, data: service });
   } catch (error) {
@@ -411,7 +417,7 @@ router.patch('/impact/dv-services/:id', ...adminOnly, async (req: AuthRequest, r
     const body = parse(dvServiceSchema.partial(), req.body);
     const existing = await mustExist(await prisma.dVSupportService.findUnique({ where: { id: idParam(req) } }), 'Service');
     checkCoverage(body.state === undefined ? existing.state : body.state, body.isNational === undefined ? existing.isNational : body.isNational);
-    const service = await prisma.dVSupportService.update({ where: { id: existing.id }, data: body });
+    const service = await prisma.dVSupportService.update({ where: { id: existing.id }, data: { ...body, lastCheckedAt: new Date() } });
     res.json({ success: true, data: service });
   } catch (error) {
     next(error);
@@ -574,6 +580,9 @@ const resourceSchema = z
     url: optionalUrl(),
     partnerOrg: optionalText(200),
     isNational: z.boolean().optional(),
+    // Retiring a service rather than deleting it: the row stays, so the record
+    // of having listed it survives, and the public directory stops showing it.
+    isActive: z.boolean().optional(),
   })
   .strict();
 
