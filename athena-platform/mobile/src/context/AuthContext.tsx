@@ -4,7 +4,7 @@
  */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { api, setAuthTokens, unwrapApiData } from '../services/api';
+import { api, onSessionExpired, setAuthTokens, unwrapApiData } from '../services/api';
 import { resolvePreferences, setLocalPreferences } from '../utils/preferences';
 import { syncPushToken, unsyncPushToken } from '../services/pushNotifications';
 import { socketService } from '../services/socket';
@@ -60,6 +60,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Check for existing auth on mount
   useEffect(() => {
     checkAuth();
+  }, []);
+
+  /**
+   * The API layer refreshes an expired access token behind the scenes, and
+   * when that refresh fails there is no session left to salvage. It used to
+   * clear only its own copy of the tokens, which left this context holding a
+   * `user` and the app rendering the signed-in navigator over an account it
+   * could no longer reach: every screen empty, every action failing, and no
+   * way back to the sign-in form short of force-quitting the app.
+   *
+   * Nothing here calls the server. The tokens it would authenticate with are
+   * exactly the ones that just stopped working, so /auth/logout and the
+   * push-token handover would both 401; the phone keeps its push registration
+   * until the next sign-in moves it, which is the same handover the server
+   * already performs.
+   */
+  useEffect(() => {
+    return onSessionExpired(() => {
+      socketService.disconnect();
+      setUser(null);
+      // Deliberately not awaited: React state is what puts the sign-in screen
+      // back, and the stored copies must go too or the next cold start would
+      // try the dead tokens again. A SecureStore that refuses the delete is
+      // not worth holding the sign-out open for — checkAuth clears them on
+      // the next launch when /auth/me fails.
+      void SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY).catch(() => undefined);
+      void SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY).catch(() => undefined);
+    });
   }, []);
 
   const checkAuth = async () => {

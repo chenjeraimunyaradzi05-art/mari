@@ -27,6 +27,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { videoApi, VideoPost, type VideoFeedKind } from '../services/api-extensions';
 import { unwrapApiData, webUrl } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const VIDEO_HEIGHT = SCREEN_HEIGHT - 80; // Account for tab bar
@@ -200,6 +201,10 @@ export function VideoFeedScreen() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
+  // A feed that failed to load drew the same "No videos yet — be the first to
+  // share!" card as a feed with nothing in it, so a dropped connection read as
+  // an empty platform and there was nothing to tap to try again.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 80,
@@ -228,8 +233,15 @@ export function VideoFeedScreen() {
       setVideos((prev) => (after ? [...prev, ...newVideos] : newVideos));
       setCursor(next);
       setHasMore(!!next);
-    } catch (error) {
-      console.error('Failed to fetch videos:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      // A page that failed to append is not the same as a first page that
+      // failed: the reels already on screen still play, so the failure is only
+      // worth a message when there is nothing behind it.
+      setHasMore(false);
+      if (!after) {
+        setLoadError(error?.response?.data?.message || 'Videos could not be loaded. Check your connection and try again.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -363,11 +375,17 @@ export function VideoFeedScreen() {
             ) : null
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="videocam-off-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>{emptyCopy.title}</Text>
-              <Text style={styles.emptySubtext}>{emptyCopy.sub}</Text>
-            </View>
+            loadError ? (
+              <View style={styles.emptyContainer}>
+                <LoadingError message={loadError} onRetry={handleRefresh} />
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="videocam-off-outline" size={64} color="#9ca3af" />
+                <Text style={styles.emptyText}>{emptyCopy.title}</Text>
+                <Text style={styles.emptySubtext}>{emptyCopy.sub}</Text>
+              </View>
+            )
           }
         />
       )}

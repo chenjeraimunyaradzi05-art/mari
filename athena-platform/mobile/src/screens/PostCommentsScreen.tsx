@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { postsApi, FeedPost, PostComment, unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 function CommentRow({ comment, depth = 0 }: { comment: PostComment; depth?: number }) {
   return (
@@ -32,13 +33,22 @@ export function PostCommentsScreen() {
   const [draft, setDraft] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  // A post that failed to load showed neither the post nor a reason: the
+  // header was blank and the list said "No comments yet", so a thread she had
+  // been sent to read looked like a thread nobody had answered.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const response = await postsApi.get(postId);
       setPost(unwrapApiData<FeedPost & { comments?: PostComment[] }>(response.data));
-    } catch (error) {
-      console.error('Failed to load post:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(
+        error?.response?.status === 404
+          ? 'This post is no longer available.'
+          : error?.response?.data?.message || 'This post could not be loaded. Check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -81,10 +91,20 @@ export function PostCommentsScreen() {
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="chatbubble-ellipses-outline" size={56} color="#ccc" />
-            <Text style={styles.emptyText}>{isLoading ? 'Loading…' : 'No comments yet'}</Text>
-          </View>
+          loadError ? (
+            <LoadingError
+              message={loadError}
+              onRetry={() => {
+                setIsLoading(true);
+                load();
+              }}
+            />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="chatbubble-ellipses-outline" size={56} color="#ccc" />
+              <Text style={styles.emptyText}>{isLoading ? 'Loading…' : 'No comments yet'}</Text>
+            </View>
+          )
         }
       />
       <View style={styles.composer}>

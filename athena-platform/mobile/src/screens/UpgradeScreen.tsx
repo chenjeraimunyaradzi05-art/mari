@@ -4,11 +4,12 @@
  * billing is not wired into this app, and the screen says so rather than
  * showing a button that goes nowhere.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { billingApi, WEB_URL, unwrapApiData } from '../services/api';
 import { getLocalPreferences } from '../utils/preferences';
+import { LoadingError } from '../components/ErrorBoundary';
 
 type Subscription = { tier?: string; status?: string; currentPeriodEnd?: string | null; cancelAtPeriodEnd?: boolean };
 type Pricing = { currency: string; subscriptionTiers: Record<string, number> };
@@ -26,20 +27,40 @@ const tierName = (tier?: string) => TIERS.find((t) => t.key === tier)?.name ?? (
 export function UpgradeScreen() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [pricing, setPricing] = useState<Pricing | null>(null);
+  // Both fetches used to be swallowed with .catch(() => null), and a null
+  // subscription is indistinguishable from not having one — so a member on a
+  // paid tier whose request failed was told in plain language that she was on
+  // the free membership, and the 'Manage my membership' link she needed to
+  // change what she is being charged disappeared with it. A screen about
+  // money does not get to guess.
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const prefs = (await getLocalPreferences().catch(() => null)) as { region?: string } | null;
+    const region = PRICING_REGION[prefs?.region ?? 'ANZ'] ?? 'AU';
+    const [subResult, priceResult] = await Promise.allSettled([billingApi.subscription(), billingApi.pricing(region)]);
+
+    if (subResult.status === 'fulfilled') {
+      setSubscription(unwrapApiData<Subscription>(subResult.value.data));
+      setSubscriptionError(null);
+    } else {
+      setSubscription(null);
+      setSubscriptionError('Your membership could not be loaded, so this screen cannot say which tier you are on.');
+    }
+
+    if (priceResult.status === 'fulfilled') {
+      setPricing(unwrapApiData<Pricing>(priceResult.value.data));
+      setPricingError(null);
+    } else {
+      setPricing(null);
+      setPricingError('Prices could not be loaded, so the amounts below are not shown.');
+    }
+  }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const prefs = (await getLocalPreferences().catch(() => null)) as { region?: string } | null;
-        const region = PRICING_REGION[prefs?.region ?? 'ANZ'] ?? 'AU';
-        const [subRes, priceRes] = await Promise.all([billingApi.subscription().catch(() => null), billingApi.pricing(region).catch(() => null)]);
-        if (subRes) setSubscription(unwrapApiData<Subscription>(subRes.data));
-        if (priceRes) setPricing(unwrapApiData<Pricing>(priceRes.data));
-      } catch (error) {
-        console.error('Failed to load membership:', error);
-      }
-    })();
-  }, []);
+    void load();
+  }, [load]);
 
   const price = (key: string) => {
     const amount = pricing?.subscriptionTiers?.[key];
@@ -55,6 +76,9 @@ export function UpgradeScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {subscriptionError ? (
+        <LoadingError message={subscriptionError} onRetry={() => void load()} />
+      ) : (
       <View style={styles.current}>
         <Ionicons name="sparkles-outline" size={22} color="#4338ca" />
         <View style={styles.currentText}>
@@ -69,6 +93,9 @@ export function UpgradeScreen() {
           )}
         </View>
       </View>
+      )}
+
+      {pricingError ? <Text style={styles.pricingError}>{pricingError}</Text> : null}
 
       {TIERS.map((tier) => (
         <View key={tier.key} style={[styles.card, currentTier === tier.key && styles.cardCurrent]}>
@@ -103,6 +130,7 @@ const styles = StyleSheet.create({
   currentText: { flex: 1 },
   currentTitle: { fontWeight: '600', color: '#312e81', fontSize: 16 },
   currentDetail: { color: '#4338ca', fontSize: 13, marginTop: 2 },
+  pricingError: { color: '#b45309', fontSize: 13, marginBottom: 12 },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#e5e5e5' },
   cardCurrent: { borderColor: '#6366f1' },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },

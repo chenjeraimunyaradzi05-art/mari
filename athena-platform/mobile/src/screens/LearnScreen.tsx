@@ -9,6 +9,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { coursesApi, Course, unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 type Enrolled = Course & { enrollment?: { id: string; progress?: number | null } };
 
@@ -25,6 +26,9 @@ export function LearnScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // A list that failed to load rendered the same card as a list with nothing
+  // in it, so a dropped connection read as "no courses match".
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -35,8 +39,9 @@ export function LearnScreen() {
       }
       const courses = unwrapApiData<Course[] | { courses?: Course[] }>(listRes.data);
       setCatalogue(Array.isArray(courses) ? courses : courses?.courses ?? []);
-    } catch (error) {
-      console.error('Failed to load courses:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.message || 'Courses could not be loaded. Check your connection and try again.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -128,10 +133,20 @@ export function LearnScreen() {
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="book-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>{isLoading ? 'Loading courses…' : 'No courses match'}</Text>
-          </View>
+          loadError ? (
+            <LoadingError
+              message={loadError}
+              onRetry={() => {
+                setIsRefreshing(true);
+                load();
+              }}
+            />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="book-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>{isLoading ? 'Loading courses…' : 'No courses match'}</Text>
+            </View>
+          )
         }
       />
     </View>

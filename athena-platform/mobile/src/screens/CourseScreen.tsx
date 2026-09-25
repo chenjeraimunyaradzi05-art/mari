@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { coursesApi, WEB_URL, unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 type Lesson = {
   id: string;
@@ -62,6 +63,11 @@ export function CourseScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // A course that failed to load left `course` null, and the screen's only
+  // answer to a null course was "This course is not available" — a statement
+  // about the course, made because of a statement about the network. Somebody
+  // part-way through a qualification was told her course had been withdrawn.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -80,8 +86,15 @@ export function CourseScreen() {
       setCourse({ ...detail, modules, progress });
       setCompleted(new Set(progress?.completedLessonIds ?? []));
       setCertificate(progress?.certificate ?? null);
-    } catch (error) {
-      console.error('Failed to load course:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      // A 404 really is "not available"; anything else is this phone, and
+      // saying so is the difference between a retry and giving up on a course.
+      setLoadError(
+        error?.response?.status === 404
+          ? 'This course is not available.'
+          : error?.response?.data?.message || 'This course could not be loaded. Check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -126,7 +139,17 @@ export function CourseScreen() {
   if (isLoading || !course) {
     return (
       <View style={styles.centered}>
-        {isLoading ? <ActivityIndicator color="#6366f1" /> : <Text style={styles.emptyText}>This course is not available.</Text>}
+        {isLoading ? (
+          <ActivityIndicator color="#6366f1" />
+        ) : (
+          <LoadingError
+            message={loadError ?? 'This course is not available.'}
+            onRetry={() => {
+              setIsLoading(true);
+              load();
+            }}
+          />
+        )}
       </View>
     );
   }

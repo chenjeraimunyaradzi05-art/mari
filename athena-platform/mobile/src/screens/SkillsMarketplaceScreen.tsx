@@ -35,6 +35,7 @@ import {
 } from '../services/api-extensions';
 import { unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 const PAGE_SIZE = 20;
 
@@ -113,6 +114,10 @@ export function SkillsMarketplaceScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  // "No services match — try another category" was shown for a failed request
+  // as well as an empty result, so a dropped connection read as an empty
+  // marketplace and pointed her at a filter that was never the problem.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     skillsMarketplaceApi
@@ -143,8 +148,14 @@ export function SkillsMarketplaceScreen() {
       setServices((prev) => (isRefresh || pageNum === 1 ? newItems : [...prev, ...newItems]));
       setHasMore(typeof pages === 'number' ? pageNum < pages : newItems.length === PAGE_SIZE);
       setPage(pageNum);
-    } catch (error) {
-      console.error('Failed to fetch services:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      // A later page that fails leaves the services already listed alone; only
+      // a first page that fails has nothing behind it to explain itself.
+      setHasMore(false);
+      if (isRefresh || pageNum === 1) {
+        setLoadError(error?.response?.data?.message || 'Services could not be loaded. Check your connection and try again.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -267,11 +278,15 @@ export function SkillsMarketplaceScreen() {
             ) : null
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="storefront-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>No services match</Text>
-              <Text style={styles.emptySubtext}>Try another category or clear your search.</Text>
-            </View>
+            loadError ? (
+              <LoadingError message={loadError} onRetry={handleRefresh} />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="storefront-outline" size={64} color="#9ca3af" />
+                <Text style={styles.emptyText}>No services match</Text>
+                <Text style={styles.emptySubtext}>Try another category or clear your search.</Text>
+              </View>
+            )
           }
         />
       )}

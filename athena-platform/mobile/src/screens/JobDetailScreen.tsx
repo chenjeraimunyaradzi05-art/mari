@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { jobsApi, userApi, unwrapApiData } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 interface JobDetail {
   id: string;
@@ -48,6 +49,10 @@ export function JobDetailScreen() {
   const [isSaved, setIsSaved] = useState(false);
   const [hasApplied, setHasApplied] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  // A failed fetch popped one alert and then left "Job not found" on screen —
+  // a claim that the job has been withdrawn, made because the phone lost
+  // signal, with nothing to tap to find out otherwise.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchJob();
@@ -69,9 +74,13 @@ export function JobDetailScreen() {
         const saved = unwrapApiData<Array<{ id: string }>>(savedRes.data);
         setIsSaved(Array.isArray(saved) && saved.some((s) => s.id === jobId));
       }
-    } catch (error) {
-      console.error('Failed to fetch job:', error);
-      Alert.alert('Error', 'Failed to load job details');
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(
+        error?.response?.status === 404
+          ? 'This job is no longer listed.'
+          : error?.response?.data?.message || 'This job could not be loaded. Check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -132,7 +141,13 @@ export function JobDetailScreen() {
   if (!job) {
     return (
       <View style={styles.centered}>
-        <Text>Job not found</Text>
+        <LoadingError
+          message={loadError ?? 'This job is no longer listed.'}
+          onRetry={() => {
+            setIsLoading(true);
+            fetchJob();
+          }}
+        />
       </View>
     );
   }

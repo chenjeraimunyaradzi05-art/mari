@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, TextInput, Alert, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { mentorsApi, Mentor, unwrapApiData } from '../services/api';
+import { LoadingError } from '../components/ErrorBoundary';
 
 type Session = { id: string; scheduledAt: string; status?: string; durationMinutes?: number; mentor?: { user?: { displayName?: string | null } } | null };
 
@@ -38,6 +39,9 @@ export function MentorsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [booking, setBooking] = useState<Mentor | null>(null);
   const [isBooking, setIsBooking] = useState(false);
+  // A list that failed to load rendered the same card as a list with nothing
+  // in it, so a dropped connection read as "no mentors match".
+  const [loadError, setLoadError] = useState<string | null>(null);
   const slots = comingSlots();
 
   const load = useCallback(async () => {
@@ -49,8 +53,9 @@ export function MentorsScreen() {
         const list = unwrapApiData<Session[] | { sessions?: Session[] }>(sessionRes.data);
         setSessions(Array.isArray(list) ? list : list?.sessions ?? []);
       }
-    } catch (error) {
-      console.error('Failed to load mentors:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.message || 'Mentors could not be loaded. Check your connection and try again.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -166,10 +171,20 @@ export function MentorsScreen() {
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="school-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>{isLoading ? 'Loading mentors…' : 'No mentors match'}</Text>
-          </View>
+          loadError ? (
+            <LoadingError
+              message={loadError}
+              onRetry={() => {
+                setIsRefreshing(true);
+                load();
+              }}
+            />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="school-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>{isLoading ? 'Loading mentors…' : 'No mentors match'}</Text>
+            </View>
+          )
         }
       />
     </View>

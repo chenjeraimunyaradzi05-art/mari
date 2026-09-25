@@ -20,6 +20,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { videoApi } from '../services/api-extensions';
 import { useAuth } from '../context/AuthContext';
+import { LoadingError } from '../components/ErrorBoundary';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'VideoComments'>;
 
@@ -43,6 +44,12 @@ export function VideoCommentsScreen({ route, navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // A failed load emptied the list and said "No comments yet — be the first to
+  // share your thoughts", so a thread with fifty comments in it looked
+  // abandoned; a failed comment was swallowed entirely and her words simply
+  // disappeared out of the box.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const headerTitle = useMemo(() => {
     if (title && title.trim().length > 0) return 'Comments';
@@ -58,8 +65,10 @@ export function VideoCommentsScreen({ route, navigation }: Props) {
       const response = await videoApi.getComments(videoId);
       const list = response.data?.data || response.data?.comments || [];
       setComments(list);
-    } catch (error) {
+      setLoadError(null);
+    } catch (error: any) {
       setComments([]);
+      setLoadError(error?.response?.data?.message || 'The comments could not be loaded. Check your connection and try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -78,6 +87,7 @@ export function VideoCommentsScreen({ route, navigation }: Props) {
   const handleSubmit = async () => {
     if (!newComment.trim() || isSubmitting) return;
     setIsSubmitting(true);
+    setSendError(null);
     try {
       const response = await videoApi.addComment(videoId, newComment.trim());
       const created = response.data?.data;
@@ -87,8 +97,10 @@ export function VideoCommentsScreen({ route, navigation }: Props) {
         await loadComments();
       }
       setNewComment('');
-    } catch (error) {
-      // Ignore; API layer logs errors
+    } catch (error: any) {
+      // The text stays in the box on purpose: clearing it and saying nothing is
+      // how a comment she wrote was lost without her ever being told.
+      setSendError(error?.response?.data?.message || 'That comment was not posted. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -144,14 +156,20 @@ export function VideoCommentsScreen({ route, navigation }: Props) {
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubble-ellipses-outline" size={60} color="#9ca3af" />
-              <Text style={styles.emptyTitle}>No comments yet</Text>
-              <Text style={styles.emptySubtitle}>Be the first to share your thoughts</Text>
-            </View>
+            loadError ? (
+              <LoadingError message={loadError} onRetry={handleRefresh} />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubble-ellipses-outline" size={60} color="#9ca3af" />
+                <Text style={styles.emptyTitle}>No comments yet</Text>
+                <Text style={styles.emptySubtitle}>Be the first to share your thoughts</Text>
+              </View>
+            )
           }
         />
       )}
+
+      {sendError ? <Text style={styles.sendError}>{sendError}</Text> : null}
 
       <View style={styles.inputRow}>
         <View style={styles.inputAvatar}>
@@ -178,6 +196,7 @@ export function VideoCommentsScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+  sendError: { color: '#b45309', fontSize: 12, paddingHorizontal: 16, paddingBottom: 6 },
   loadingContainer: {
     flex: 1,
     alignItems: 'center',

@@ -34,6 +34,7 @@ export function ChatDetailScreen({ route }: Props) {
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const listRef = useRef<FlatList<MessageItem>>(null);
 
   const loadMessages = async () => {
@@ -69,19 +70,42 @@ export function ChatDetailScreen({ route }: Props) {
   const handleSend = async () => {
     if (!newMessage.trim()) return;
     setIsSending(true);
+    setSendError(null);
     try {
       const response = await messagesApi.send(conversationId, newMessage.trim());
       const message = response.data?.data || response.data?.message;
       setMessages((prev) => [...prev, message]);
       setNewMessage('');
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-    } catch (error) {
+    } catch (error: any) {
+      // Only a send that never reached the server belongs in the offline
+      // queue. A send the server answered — she is blocked, the conversation
+      // is closed, the text was refused — is not going to come good on a
+      // reconnection, and queueing it meant replaying the same refusal on
+      // every reconnection for the life of the install.
+      //
+      // The queued path is the same one messagesApi.send uses. It used to be
+      // POST /messages/conversations/<id>, which the server has never served:
+      // the message went into the queue, 404ed on every retry and was kept
+      // because it had failed, so nothing she wrote offline was ever
+      // delivered and the queue only grew.
+      if (error?.response) {
+        setSendError(
+          error.response.data?.message || 'That message could not be sent. It has not been saved — please try again.'
+        );
+        return;
+      }
       await queueOfflineAction({
         id: `${Date.now()}`,
         createdAt: new Date().toISOString(),
         type: 'api',
-        payload: { method: 'post', url: `/messages/conversations/${conversationId}`, data: { content: newMessage.trim() } },
+        payload: {
+          method: 'post',
+          url: `/messages/conversations/${conversationId}/messages`,
+          data: { content: newMessage.trim() },
+        },
       });
+      setSendError('You are offline. This message will be sent when you are back on the network.');
       setNewMessage('');
     } finally {
       setIsSending(false);
@@ -120,6 +144,7 @@ export function ChatDetailScreen({ route }: Props) {
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         ListEmptyComponent={loadError ? <Text style={styles.loadError}>{loadError}</Text> : null}
       />
+      {sendError ? <Text style={styles.sendError}>{sendError}</Text> : null}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
@@ -131,6 +156,11 @@ export function ChatDetailScreen({ route }: Props) {
           style={[styles.sendButton, isSending && styles.sendButtonDisabled]}
           onPress={handleSend}
           disabled={isSending}
+          accessibilityRole="button"
+          // The button is an icon and nothing else, so without this a screen
+          // reader announced it as an unlabelled button — the one control on
+          // the thread that actually sends the message.
+          accessibilityLabel="Send message"
         >
           <Ionicons name="send" size={18} color="#fff" />
         </TouchableOpacity>
@@ -165,6 +195,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
   },
   loadError: { color: '#b45309', fontSize: 13, textAlign: 'center', paddingHorizontal: 24, paddingVertical: 32 },
+  sendError: { color: '#b45309', fontSize: 12, paddingHorizontal: 16, paddingBottom: 6 },
   bubbleText: { fontSize: 15, color: '#111827' },
   bubbleTextMe: { color: '#fff' },
   timestamp: { marginTop: 6, fontSize: 10, color: '#9ca3af' },

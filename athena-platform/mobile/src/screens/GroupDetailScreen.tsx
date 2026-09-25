@@ -9,6 +9,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { groupsApi, FeedPost, unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { PostCard } from '../components/PostCard';
+import { LoadingError } from '../components/ErrorBoundary';
 
 export function GroupDetailScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'GroupDetail'>>();
@@ -19,14 +20,19 @@ export function GroupDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
+  // A group whose posts failed to load said "Nothing posted here yet", which
+  // is a claim about the group rather than about this phone, and left her with
+  // nothing to tap but the composer.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const response = await groupsApi.posts(groupId);
       const data = unwrapApiData<FeedPost[] | { posts?: FeedPost[] }>(response.data);
       setPosts(Array.isArray(data) ? data : data?.posts ?? []);
-    } catch (error) {
-      console.error('Failed to load group posts:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.message || 'This group could not be loaded. Check your connection and try again.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -72,10 +78,20 @@ export function GroupDetailScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={<Text style={styles.title}>{name ?? 'Group'}</Text>}
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>{isLoading ? 'Loading…' : 'Nothing posted here yet'}</Text>
-          </View>
+          loadError ? (
+            <LoadingError
+              message={loadError}
+              onRetry={() => {
+                setIsRefreshing(true);
+                load();
+              }}
+            />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>{isLoading ? 'Loading…' : 'Nothing posted here yet'}</Text>
+            </View>
+          )
         }
       />
       <View style={styles.composer}>

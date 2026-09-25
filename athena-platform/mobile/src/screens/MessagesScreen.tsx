@@ -16,6 +16,7 @@ import { socketService } from '../services/socket';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 // A row of GET /messages/conversations, which answers { success, data: [...] }.
 interface Conversation {
@@ -51,14 +52,22 @@ export function MessagesScreen() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // A failed fetch used to leave the list empty behind the friendly "No
+  // messages yet" card, so a dropped connection was indistinguishable from
+  // nobody having written to her. On a phone the connection drops constantly,
+  // which made that the ordinary case rather than the rare one.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchConversations = useCallback(async () => {
     try {
       const response = await messagesApi.getConversations();
       const list = unwrapApiData<Conversation[]>(response.data);
       setConversations(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Failed to fetch conversations:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(
+        error?.response?.data?.message || 'Your conversations could not be loaded. Check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -163,13 +172,17 @@ export function MessagesScreen() {
         }
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>
-              When a mentor, a group or another member writes to you, the conversation will be here.
-            </Text>
-          </View>
+          loadError ? (
+            <LoadingError message={loadError} onRetry={onRefresh} />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No messages yet</Text>
+              <Text style={styles.emptySubtext}>
+                When a mentor, a group or another member writes to you, the conversation will be here.
+              </Text>
+            </View>
+          )
         }
       />
     </View>

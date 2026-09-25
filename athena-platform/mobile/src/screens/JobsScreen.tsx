@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { jobsApi, unwrapApiData, type JobSummary } from '../services/api';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 type Job = JobSummary;
 
@@ -25,6 +26,9 @@ export function JobsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // A list that failed to load rendered the same card as a list with nothing
+  // in it, so a dropped connection read as "there are no jobs".
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -32,8 +36,9 @@ export function JobsScreen() {
       // GET /jobs answers { success, data: [...], pagination }; the list is `data`.
       const list = unwrapApiData<Job[]>(response.data);
       setJobs(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Failed to fetch jobs:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.message || 'Jobs could not be loaded. Check your connection and try again.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -130,10 +135,14 @@ export function JobsScreen() {
           }
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <View style={styles.centered}>
-              <Ionicons name="briefcase-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>No jobs found</Text>
-            </View>
+            loadError ? (
+              <LoadingError message={loadError} onRetry={onRefresh} />
+            ) : (
+              <View style={styles.centered}>
+                <Ionicons name="briefcase-outline" size={64} color="#ccc" />
+                <Text style={styles.emptyText}>No jobs found</Text>
+              </View>
+            )
           }
         />
       )}

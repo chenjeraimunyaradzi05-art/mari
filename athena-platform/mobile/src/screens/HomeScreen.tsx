@@ -10,6 +10,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { postsApi, FeedPost, unwrapApiData } from '../services/api';
 import { PostCard } from '../components/PostCard';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 export function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -18,14 +19,18 @@ export function HomeScreen() {
   const [isPosting, setIsPosting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // A feed that failed to load looked exactly like a feed with nothing in it,
+  // down to the invitation to post the first one.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchPosts = useCallback(async () => {
     try {
       const response = await postsApi.list({ limit: 20 });
       const data = unwrapApiData<{ posts?: FeedPost[] } | FeedPost[]>(response.data);
       setPosts(Array.isArray(data) ? data : data?.posts ?? []);
-    } catch (error) {
-      console.error('Failed to fetch posts:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.message || 'The feed could not be loaded. Check your connection and try again.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -88,10 +93,14 @@ export function HomeScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={composer}
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="newspaper-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No posts yet. Yours could be the first.</Text>
-          </View>
+          loadError ? (
+            <LoadingError message={loadError} onRetry={onRefresh} />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="newspaper-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No posts yet. Yours could be the first.</Text>
+            </View>
+          )
         }
       />
     </View>

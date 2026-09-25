@@ -62,6 +62,43 @@ export const setAuthTokens = (accessToken: string | null, newRefreshToken: strin
   setRefreshToken(newRefreshToken);
 };
 
+/**
+ * Listeners for a session that cannot be recovered.
+ *
+ * Clearing the tokens below only empties this module: the copies in
+ * SecureStore survive, and AuthContext goes on holding a `user`, so the app
+ * kept rendering the signed-in navigator while every single request answered
+ * 401. The member saw her own app with nothing in it — no feed, no messages,
+ * no safety settings — and no sign-in screen to get back through, until she
+ * force-quit and reopened, at which point checkAuth finally threw the stale
+ * tokens away. This is the channel the interceptor uses to tell the rest of
+ * the app that the session is gone, so the sign-in screen appears at the
+ * moment the session ends rather than on the next cold start.
+ */
+type SessionExpiredListener = () => void;
+const sessionExpiredListeners = new Set<SessionExpiredListener>();
+
+export const onSessionExpired = (listener: SessionExpiredListener): (() => void) => {
+  sessionExpiredListeners.add(listener);
+  return () => {
+    sessionExpiredListeners.delete(listener);
+  };
+};
+
+const notifySessionExpired = () => {
+  // A copy, so a listener that unsubscribes itself while being called does
+  // not mutate the set mid-iteration.
+  for (const listener of Array.from(sessionExpiredListeners)) {
+    try {
+      listener();
+    } catch (error) {
+      // A listener that throws must not stop the others from hearing that
+      // the session ended; one of them is what signs her out.
+      console.warn('[API] A session-expired listener threw:', error instanceof Error ? error.message : error);
+    }
+  }
+};
+
 // Request interceptor for logging
 api.interceptors.request.use(
   (config) => {
@@ -113,7 +150,13 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
+        // The refresh is the last thing standing between her and a signed-out
+        // app, so when it fails the session really is over. Announce it before
+        // rejecting: the subscriber in AuthContext is what clears SecureStore,
+        // drops the socket and puts the sign-in screen back.
+        const wasSignedIn = Boolean(authToken || refreshToken);
         setAuthTokens(null, null);
+        if (wasSignedIn) notifySessionExpired();
         return Promise.reject(refreshError);
       }
     }

@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { channelApi, Channel, ChannelMessage } from '../services/api-extensions';
 import { unwrapApiData } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { LoadingError } from '../components/ErrorBoundary';
 
 const authorName = (m: ChannelMessage) => m.author?.displayName?.trim() || 'Member';
 
@@ -220,6 +221,11 @@ export function ChannelsScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showChannelList, setShowChannelList] = useState(true);
+  // Both lists drew their empty card whether the fetch succeeded or failed, so
+  // a dropped connection told her there were no channels and no messages in
+  // them — and invited her to create the channel she is already a member of.
+  const [channelsError, setChannelsError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   // Fetch channels
@@ -229,8 +235,9 @@ export function ChannelsScreen() {
       const response = await channelApi.getChannels({ limit: 50 });
       const list = unwrapApiData<Channel[]>(response.data);
       setChannels(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Failed to fetch channels:', error);
+      setChannelsError(null);
+    } catch (error: any) {
+      setChannelsError(error?.response?.data?.message || 'Channels could not be loaded. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -243,8 +250,12 @@ export function ChannelsScreen() {
       const response = await channelApi.getMessages(channelId, { limit: 50 });
       const list = unwrapApiData<ChannelMessage[]>(response.data);
       setMessages(Array.isArray(list) ? list.slice().reverse() : []);
-    } catch (error) {
-      console.error('Failed to fetch messages:', error);
+      setMessagesError(null);
+    } catch (error: any) {
+      // The thread is emptied with the error on purpose: leaving the previous
+      // channel's messages under this channel's header would read as its own.
+      setMessages([]);
+      setMessagesError(error?.response?.data?.message || 'These messages could not be loaded. Check your connection and try again.');
     } finally {
       setMessagesLoading(false);
     }
@@ -406,17 +417,21 @@ export function ChannelsScreen() {
           )}
           contentContainerStyle={styles.channelList}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>No channels yet</Text>
-              <TouchableOpacity
-                style={styles.emptyButton}
-                onPress={() => setShowCreateModal(true)}
-                accessibilityRole="button"
-              >
-                <Text style={styles.emptyButtonText}>Create your first channel</Text>
-              </TouchableOpacity>
-            </View>
+            channelsError ? (
+              <LoadingError message={channelsError} onRetry={fetchChannels} />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubbles-outline" size={64} color="#9ca3af" />
+                <Text style={styles.emptyText}>No channels yet</Text>
+                <TouchableOpacity
+                  style={styles.emptyButton}
+                  onPress={() => setShowCreateModal(true)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.emptyButtonText}>Create your first channel</Text>
+                </TouchableOpacity>
+              </View>
+            )
           }
         />
 
@@ -472,11 +487,15 @@ export function ChannelsScreen() {
           contentContainerStyle={styles.messagesList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={
-            <View style={styles.noMessages}>
-              <Text style={styles.noMessagesText}>
-                No messages yet. Start the conversation!
-              </Text>
-            </View>
+            messagesError ? (
+              <LoadingError message={messagesError} onRetry={() => fetchMessages(selectedChannel.id)} />
+            ) : (
+              <View style={styles.noMessages}>
+                <Text style={styles.noMessagesText}>
+                  No messages yet. Start the conversation!
+                </Text>
+              </View>
+            )
           }
         />
       )}

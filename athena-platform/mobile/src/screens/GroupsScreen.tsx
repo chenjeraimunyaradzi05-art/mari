@@ -9,6 +9,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { groupsApi, Group, unwrapApiData } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { LoadingError } from '../components/ErrorBoundary';
 
 export function GroupsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -16,6 +17,9 @@ export function GroupsScreen() {
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // A list that failed to load rendered the same card as a list with nothing
+  // in it, so a dropped connection read as "no groups match".
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -23,8 +27,9 @@ export function GroupsScreen() {
       const response = await groupsApi.list(search.trim() ? { q: search.trim() } : undefined);
       const data = unwrapApiData<Group[] | { groups?: Group[] }>(response.data);
       setGroups(Array.isArray(data) ? data : data?.groups ?? []);
-    } catch (error) {
-      console.error('Failed to load groups:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error?.response?.data?.message || 'Groups could not be loaded. Check your connection and try again.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -103,10 +108,20 @@ export function GroupsScreen() {
         }
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="people-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>{isLoading ? 'Loading groups…' : 'No groups match'}</Text>
-          </View>
+          loadError ? (
+            <LoadingError
+              message={loadError}
+              onRetry={() => {
+                setIsRefreshing(true);
+                load();
+              }}
+            />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="people-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>{isLoading ? 'Loading groups…' : 'No groups match'}</Text>
+            </View>
+          )
         }
       />
     </View>

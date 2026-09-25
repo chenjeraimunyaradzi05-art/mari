@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { notificationsApi, unwrapApiData } from '../services/api';
 import { socketService } from '../services/socket';
+import { LoadingError } from '../components/ErrorBoundary';
 
 // A row of GET /notifications. The server groups the social kinds ("Ana and
 // 3 others liked your post"), so a row can stand for several notifications:
@@ -44,6 +45,10 @@ export function NotificationsScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // "Nothing here yet" was shown whether nothing had happened or the fetch had
+  // failed, which is the difference between a quiet week and a notification
+  // she has not been shown.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -52,8 +57,11 @@ export function NotificationsScreen() {
       const data = unwrapApiData<{ notifications?: Notification[]; unreadCount?: number }>(response.data);
       setNotifications(Array.isArray(data?.notifications) ? data.notifications : []);
       setUnreadCount(typeof data?.unreadCount === 'number' ? data.unreadCount : 0);
-    } catch (error) {
-      console.error('Failed to fetch notifications:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(
+        error?.response?.data?.message || 'Your notifications could not be loaded. Check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -179,10 +187,14 @@ export function NotificationsScreen() {
         }
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <View style={styles.centered}>
-            <Ionicons name="notifications-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>Nothing here yet. We'll let you know when something happens.</Text>
-          </View>
+          loadError ? (
+            <LoadingError message={loadError} onRetry={onRefresh} />
+          ) : (
+            <View style={styles.centered}>
+              <Ionicons name="notifications-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>Nothing here yet. We'll let you know when something happens.</Text>
+            </View>
+          )
         }
       />
     </View>

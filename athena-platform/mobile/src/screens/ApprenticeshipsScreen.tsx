@@ -28,6 +28,7 @@ import {
   ApprenticeshipFramework,
 } from '../services/api-extensions';
 import { unwrapApiData } from '../services/api';
+import { LoadingError } from '../components/ErrorBoundary';
 
 const PAGE_SIZE = 20;
 
@@ -223,6 +224,10 @@ export function ApprenticeshipsScreen() {
   const [applying, setApplying] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  // A search that failed drew "No open apprenticeships match — try another
+  // training package", which is a statement about the market rather than about
+  // the connection, and it sent her looking for a filter to change.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     apprenticeshipApi
@@ -253,8 +258,14 @@ export function ApprenticeshipsScreen() {
       setApprenticeships((prev) => (isRefresh || pageNum === 1 ? newItems : [...prev, ...newItems]));
       setHasMore(typeof pages === 'number' ? pageNum < pages : newItems.length === PAGE_SIZE);
       setPage(pageNum);
-    } catch (error) {
-      console.error('Failed to fetch apprenticeships:', error);
+      setLoadError(null);
+    } catch (error: any) {
+      // A later page that fails leaves what is already on screen alone; only a
+      // first page that fails has nothing behind it to explain itself.
+      setHasMore(false);
+      if (isRefresh || pageNum === 1) {
+        setLoadError(error?.response?.data?.message || 'Apprenticeships could not be loaded. Check your connection and try again.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -395,11 +406,15 @@ export function ApprenticeshipsScreen() {
             ) : null
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="school-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>No open apprenticeships match</Text>
-              <Text style={styles.emptySubtext}>Try another training package or clear your search.</Text>
-            </View>
+            loadError ? (
+              <LoadingError message={loadError} onRetry={() => fetchApprenticeships(1, true)} />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="school-outline" size={64} color="#9ca3af" />
+                <Text style={styles.emptyText}>No open apprenticeships match</Text>
+                <Text style={styles.emptySubtext}>Try another training package or clear your search.</Text>
+              </View>
+            )
           }
         />
       )}
