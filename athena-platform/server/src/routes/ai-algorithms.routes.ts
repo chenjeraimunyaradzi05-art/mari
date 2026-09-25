@@ -4,13 +4,13 @@
  * ## Three of these tables are placeholder-only
  *
  * `careerPrediction`, `mentorMatchScore` and `opportunityMatch` were built for
- * an ML service that was never connected. Nothing on the server writes
- * mentorMatchScore or opportunityMatch, so GET /mentor-match and
- * GET /opportunity-scan here are always empty. The only writer of
- * careerPrediction is POST /career-compass/generate below, which throws 503
- * in production unless AI_ALGORITHMS_ALLOW_PLACEHOLDER=true and otherwise
- * stores invented roles, salaries and probabilities ('Senior Software
- * Engineer', '$150,000 - $180,000', 75).
+ * an ML service that was never connected. Nothing on the server writes any of
+ * the three, so GET /mentor-match and GET /opportunity-scan here are always
+ * empty. careerPrediction had one writer — POST /career-compass/generate — and
+ * it invented every figure it stored; it is gone, that route answers 501, and
+ * GET /career-compass refuses to serve the rows it left behind. See the comment
+ * above the route for what those rows contained and why a 503 in front of them
+ * was not enough.
  *
  * The web app no longer reads any of the three. /dashboard/ai/career-compass,
  * /dashboard/ai/mentors and /dashboard/ai/opportunities read
@@ -27,18 +27,22 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { body, validationResult } from 'express-validator';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { aiLimiter } from '../middleware/rateLimiter';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { creatorTierStanding, refreshCreatorAnalytics } from '../services/creator.service';
 
 const router = Router();
-const isProductionRuntime =
-  process.env.NODE_ENV === 'production' ||
-  process.env.VERCEL_ENV === 'production' ||
-  process.env.RENDER_ENV === 'production';
-const allowPlaceholderAlgorithms = process.env.AI_ALGORITHMS_ALLOW_PLACEHOLDER === 'true';
+
+/**
+ * The modelVersion the deleted placeholder generator stamped on every row it
+ * wrote. Rows carrying it are the invented forecasts described below, and GET
+ * /career-compass refuses to serve them wherever they still exist.
+ */
+const PLACEHOLDER_PREDICTION_VERSION = 'v1.0.0';
 
 // Require authentication for all AI algorithm routes
 router.use(authenticate);
@@ -50,6 +54,14 @@ router.use(authenticate);
 // generate route below. The web app reads /api/algorithms/career-compass.
 
 // Get user's career predictions
+//
+// Anything this returns is served to a member as a forecast of her own career,
+// so it must have been forecast by something. The only writer this table ever
+// had was the generate route below, which invented every figure it stored — so
+// the rows it left behind are excluded by modelVersion rather than trusted
+// because they happen to exist. The exclusion is by version and not a blanket
+// refusal so that a real generator, stamping its own version, needs no change
+// here to be served.
 router.get('/career-compass', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
@@ -61,6 +73,7 @@ router.get('/career-compass', async (req: Request, res: Response, next: NextFunc
       where: {
         userId,
         expiresAt: { gte: new Date() },
+        NOT: { modelVersion: PLACEHOLDER_PREDICTION_VERSION },
       },
       orderBy: { generatedAt: 'desc' },
     });
@@ -72,50 +85,35 @@ router.get('/career-compass', async (req: Request, res: Response, next: NextFunc
 });
 
 // Generate new career prediction
-router.post('/career-compass/generate', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    if (isProductionRuntime && !allowPlaceholderAlgorithms) {
-      throw new ApiError(
-        503,
-        'Career Compass generation is not configured for production. Connect the ML service or set AI_ALGORITHMS_ALLOW_PLACEHOLDER=true only for verification environments.'
-      );
-    }
-
-    // Development placeholder until the ML-backed generator is wired to this route.
-    const prediction = await prisma.careerPrediction.create({
-      data: {
-        userId,
-        predictedRoles: [
-          { role: 'Senior Software Engineer', probability: 75, expectedSalary: '$150,000 - $180,000', timeline: '12 months', skillsGap: ['System Design', 'Leadership'] },
-          { role: 'Engineering Manager', probability: 45, expectedSalary: '$180,000 - $220,000', timeline: '24 months', skillsGap: ['People Management', 'Strategic Planning'] },
-        ],
-        prioritySkills: [
-          { skill: 'System Design', salaryLift: 15000, learningTime: 120, difficulty: 7 },
-          { skill: 'Cloud Architecture', salaryLift: 12000, learningTime: 80, difficulty: 6 },
-          { skill: 'Leadership', salaryLift: 20000, learningTime: 200, difficulty: 8 },
-        ],
-        mentorRecommendations: [],
-        opportunitiesToTrack: [],
-        riskFactors: {
-          attritionRisk: 25,
-          burnoutIndicators: 15,
-          wageGapExposure: 8,
-        },
-        modelVersion: 'v1.0.0',
-        confidenceScore: 0.78,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-      },
-    });
-
-    res.json({ data: prediction });
-  } catch (error) {
-    next(error);
-  }
+//
+// What this route used to do was write, for every member who called it, the
+// same invented forecast: "Senior Software Engineer" at 75% probability paying
+// "$150,000 - $180,000", three priority skills each with a salary lift in whole
+// thousands, and riskFactors carrying an attritionRisk of 25, burnoutIndicators
+// of 15 and a wageGapExposure of 8 — an assessment of how likely a named woman
+// was to burn out and leave, computed by nothing, stored against her record,
+// confidenceScore 0.78. The salary figures were US dollars on a Queensland
+// platform.
+//
+// The 503 that stood in front of it covered production only, and the matching
+// GET had no gate at all, so a row written in staging or during a window with
+// AI_ALGORITHMS_ALLOW_PLACEHOLDER on was served back as a real forecast for the
+// next thirty days. There is no version of this that becomes true by being
+// better guarded, so the writer is gone rather than gated: what is missing is a
+// model, and an environment variable is not one.
+//
+// The route stays mounted and answers 501 so that a caller still holding the
+// old client helper is told plainly what happened rather than getting a 404 it
+// will read as a deploy problem. /dashboard/ai/career-compass reads
+// /api/algorithms/career-compass, which compares her skills against real
+// listings and has never been part of this.
+router.post('/career-compass/generate', async (_req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      501,
+      'ATHENA does not generate career predictions. The forecast this route used to store — predicted roles, salary bands, attrition and burnout risk — was invented, not computed, and has been withdrawn. Career Compass at /api/algorithms/career-compass compares your skills against the roles employers are actually advertising.'
+    )
+  );
 });
 
 // =============================================
@@ -207,10 +205,84 @@ router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Respons
 // =============================================
 // SALARY EQUITY - Pay Gap Detection
 // =============================================
+//
+// Everything below this line is crowd-sourced: one member's submission moves
+// the median every other woman searching that role is shown, and the published
+// gender pay gap she may take into a negotiation. The submit handler used to
+// check only that jobTitle and baseSalary were truthy, and carried no rate
+// limit, so a single caller could post any number of points at baseSalary
+// 5000000 and shift the figure for everyone. `totalComp` was computed as
+// `baseSalary + (bonus || 0) + (equity || 0)`, which string-concatenates when a
+// non-browser caller sends "120000" — writing "1200000" into the column.
+//
+// The constants are named rather than inlined because they are the boundary
+// between a market figure and a poisoned one, and the next person changing one
+// should have to see what it is for.
+
+/** AUD per year. Below the floor this is not an annual salary; above the ceiling it is not credible for a role advertised here. */
+const SALARY_MIN = 1_000;
+const SALARY_MAX = 5_000_000;
+/** Bonus and equity are annual too, and no honest one is many times the base. */
+const SUPPLEMENT_MAX = 20_000_000;
+
+const GENDERS = ['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT'];
+const EDUCATION_LEVELS = ['HIGH_SCHOOL', 'BACHELOR', 'MASTER', 'PHD', 'OTHER'];
+const COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'];
+const AGE_RANGES = ['18-24', '25-34', '35-44', '45-54', '55+'];
+/** One median cannot span currencies; see the analyze route, which reports one at a time. */
+const CURRENCIES = ['AUD', 'NZD', 'USD', 'GBP', 'EUR', 'CAD', 'SGD'];
+
+/** Prisma takes Decimal; these arrive as JSON numbers and must be numbers by the time they are added. */
+const toAmount = (value: unknown): number | null => {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+};
 
 // Submit anonymous salary data
-router.post('/salary-equity/submit', async (req: Request, res: Response, next: NextFunction) => {
+router.post(
+  '/salary-equity/submit',
+  // The route that moves everyone else's number had no limiter at all. A
+  // member submits her own pay a handful of times a year; a script submits it
+  // in a loop.
+  aiLimiter,
+  [
+    body('jobTitle').isString().trim().notEmpty().isLength({ max: 200 })
+      .withMessage('A job title is required'),
+    body('baseSalary').isFloat({ min: SALARY_MIN, max: SALARY_MAX })
+      .withMessage(`Base salary must be an annual figure between ${SALARY_MIN} and ${SALARY_MAX}`),
+    body('bonus').optional({ nullable: true }).isFloat({ min: 0, max: SUPPLEMENT_MAX })
+      .withMessage('Bonus must be a number of zero or more'),
+    body('equity').optional({ nullable: true }).isFloat({ min: 0, max: SUPPLEMENT_MAX })
+      .withMessage('Equity must be a number of zero or more'),
+    body('currency').optional({ nullable: true }).isIn(CURRENCIES)
+      .withMessage(`Currency must be one of ${CURRENCIES.join(', ')}`),
+    body('yearsExperience').optional({ nullable: true }).isInt({ min: 0, max: 70 })
+      .withMessage('Years of experience must be between 0 and 70'),
+    body('yearsInRole').optional({ nullable: true }).isInt({ min: 0, max: 70 })
+      .withMessage('Years in role must be between 0 and 70'),
+    body('gender').optional({ nullable: true }).isIn(GENDERS)
+      .withMessage(`Gender must be one of ${GENDERS.join(', ')}`),
+    body('educationLevel').optional({ nullable: true }).isIn(EDUCATION_LEVELS)
+      .withMessage(`Education level must be one of ${EDUCATION_LEVELS.join(', ')}`),
+    body('companySize').optional({ nullable: true }).isIn(COMPANY_SIZES)
+      .withMessage(`Company size must be one of ${COMPANY_SIZES.join(', ')}`),
+    body('ageRange').optional({ nullable: true }).isIn(AGE_RANGES)
+      .withMessage(`Age range must be one of ${AGE_RANGES.join(', ')}`),
+    body('company').optional({ nullable: true }).isString().isLength({ max: 200 }),
+    body('industry').optional({ nullable: true }).isString().isLength({ max: 120 }),
+    body('city').optional({ nullable: true }).isString().isLength({ max: 120 }),
+    body('state').optional({ nullable: true }).isString().isLength({ max: 120 }),
+    body('country').optional({ nullable: true }).isString().isLength({ max: 120 }),
+    body('isRemote').optional({ nullable: true }).isBoolean(),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
+    }
+
     const userId = (req as any).user?.id; // Optional for anonymous
 
     const {
@@ -222,10 +294,7 @@ router.post('/salary-equity/submit', async (req: Request, res: Response, next: N
       state,
       country,
       isRemote,
-      baseSalary,
       currency,
-      bonus,
-      equity,
       yearsExperience,
       yearsInRole,
       educationLevel,
@@ -233,15 +302,18 @@ router.post('/salary-equity/submit', async (req: Request, res: Response, next: N
       ageRange,
     } = req.body;
 
-    if (!jobTitle || !baseSalary) {
-      return res.status(400).json({ error: 'Job title and base salary are required' });
-    }
+    // Validated above, so these are numbers; coerced here because
+    // express-validator checks the value without rewriting the body, and a
+    // string that passes isFloat would still concatenate in the sum below.
+    const baseSalary = toAmount(req.body.baseSalary) as number;
+    const bonus = toAmount(req.body.bonus);
+    const equity = toAmount(req.body.equity);
 
     const dataPoint = await prisma.salaryDataPoint.create({
       data: {
         userId,
-        jobTitle,
-        normalizedTitle: jobTitle.toLowerCase().trim(),
+        jobTitle: String(jobTitle).trim(),
+        normalizedTitle: String(jobTitle).toLowerCase().trim(),
         company,
         companySize,
         industry,
@@ -268,6 +340,20 @@ router.post('/salary-equity/submit', async (req: Request, res: Response, next: N
   }
 });
 
+/** Below this, a "market median" is a handful of people's pay wearing the word market. */
+const ANALYSIS_MIN_POINTS = 5;
+/**
+ * Per gender, before a gender gap is published for a role.
+ *
+ * It was three. A Queensland job title with three women who have reported their
+ * pay is a room in which each of them can work out what the others earn — the
+ * gap is a difference of two medians over a sample small enough to name, and
+ * publishing it to anyone who types the title is a disclosure the three of them
+ * never agreed to. Eight is still small; it is the point at which one person's
+ * figure stops being recoverable from the published one.
+ */
+const GENDER_GAP_MIN_PER_GENDER = 8;
+
 // Get salary analysis for a role
 router.get('/salary-equity/analyze', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -278,14 +364,24 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
 
     const { role, location, company } = req.query;
 
-    if (!role) {
+    if (!role || typeof role !== 'string' || !role.trim()) {
       return res.status(400).json({ error: 'Role is required' });
     }
+
+    // One median cannot span currencies. Every figure here was pooled
+    // regardless of what it was paid in, so a single salary reported in USD or
+    // GBP pulled the AUD median for that role up by an exchange rate nobody
+    // applied. The analysis reports one currency at a time and says which.
+    const currency =
+      typeof req.query.currency === 'string' && CURRENCIES.includes(req.query.currency.toUpperCase())
+        ? req.query.currency.toUpperCase()
+        : 'AUD';
 
     // Get salary data points for analysis
     const salaryData = await prisma.salaryDataPoint.findMany({
       where: {
-        normalizedTitle: { contains: (role as string).toLowerCase() },
+        normalizedTitle: { contains: role.toLowerCase() },
+        currency,
         ...(location && { city: { contains: location as string } }),
       },
       select: {
@@ -298,10 +394,12 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
       },
     });
 
-    if (salaryData.length < 5) {
+    if (salaryData.length < ANALYSIS_MIN_POINTS) {
       return res.json({
         data: null,
-        message: 'Insufficient data for analysis. Need at least 5 salary data points.',
+        currency,
+        sampleSize: salaryData.length,
+        message: `Insufficient data for analysis. Need at least ${ANALYSIS_MIN_POINTS} salary data points reported in ${currency}.`,
       });
     }
 
@@ -319,18 +417,21 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
 
     let genderGapAmount = null;
     let genderGapPercent = null;
-    if (womenSalaries.length >= 3 && menSalaries.length >= 3) {
+    if (
+      womenSalaries.length >= GENDER_GAP_MIN_PER_GENDER &&
+      menSalaries.length >= GENDER_GAP_MIN_PER_GENDER
+    ) {
       const womenMedian = womenSalaries.sort((a, b) => a - b)[Math.floor(womenSalaries.length / 2)];
       const menMedian = menSalaries.sort((a, b) => a - b)[Math.floor(menSalaries.length / 2)];
       genderGapAmount = menMedian - womenMedian;
-      genderGapPercent = ((menMedian - womenMedian) / menMedian) * 100;
+      genderGapPercent = menMedian === 0 ? null : ((menMedian - womenMedian) / menMedian) * 100;
     }
 
     // Save or update analysis
     const analysis = await prisma.salaryAnalysis.create({
       data: {
         userId,
-        targetRole: role as string,
+        targetRole: role,
         targetLocation: location as string,
         targetCompany: company as string,
         marketMedian: median,
@@ -346,7 +447,18 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
       },
     });
 
-    res.json({ data: analysis });
+    res.json({
+      data: analysis,
+      // Which currency the bands are in, and why a gap may be absent from a
+      // role that plainly has one: too few reports on one side to publish it
+      // without identifying the people who made them.
+      currency,
+      genderGapWithheld:
+        genderGapAmount === null &&
+        (womenSalaries.length > 0 || menSalaries.length > 0)
+          ? `A gender pay gap is published only once at least ${GENDER_GAP_MIN_PER_GENDER} women and ${GENDER_GAP_MIN_PER_GENDER} men have reported pay for this role.`
+          : null,
+    });
   } catch (error) {
     next(error);
   }

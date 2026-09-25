@@ -290,6 +290,12 @@ export default function EventsPage() {
     };
   }, [searchQuery, selectedType]);
 
+  // The server now returns only events from the start of today onwards — it
+  // used to hand back the hundred oldest rows in the table and leave the
+  // discarding to here, which meant that once a hundred events had run this
+  // page was permanently empty. What is left to do here is the hours: an event
+  // that started this morning is in the server's window and is not something
+  // to put under "upcoming" this afternoon.
   const upcomingEvents = useMemo(() => {
     const now = Date.now();
     return events.filter((event) => {
@@ -391,20 +397,18 @@ export default function EventsPage() {
             description="No upcoming event fits the type or the words you searched for. Clearing the filters will show everything that is listed."
             onClear={clearFilters}
           />
-        ) : events.length > 0 ? (
-          <EmptyState
-            icon={CalendarDays}
-            reason="empty"
-            title="Every listed event has already run"
-            description="Nothing is coming up right now. New events appear here as soon as an organiser publishes one."
-            primaryAction={{ label: 'Your event calendar', href: '/dashboard/events' }}
-          />
         ) : (
+          /* One empty state, because the response only ever contains events
+             still to come: an empty list means nothing is coming up, and this
+             page can no longer tell whether anything has ever been listed.
+             There used to be a second state here saying "nobody has published
+             an event here yet", which would have been a claim about the whole
+             history of the catalogue made from a window on its future. */
           <EmptyState
             icon={CalendarDays}
             reason="empty"
-            title="No events listed yet"
-            description="Nobody has published an event here yet. If you are running one, or you know of one worth sharing, tell us and we will look at listing it."
+            title="Nothing coming up just now"
+            description="No upcoming events are listed. New ones appear here as soon as an organiser publishes them — and if you are running one, or know of one worth sharing, tell us."
             primaryAction={{ label: 'Tell us about an event', href: '/contact' }}
             secondaryAction={{ label: 'Your event calendar', href: '/dashboard/events' }}
           />

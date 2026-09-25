@@ -21,6 +21,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useScanOpportunities } from '@/lib/hooks';
+import PaywallGate from '@/components/subscription/PaywallGate';
 import { cn, formatSalary, JOB_TYPE_LABELS } from '@/lib/utils';
 
 interface Opportunity {
@@ -42,8 +43,17 @@ export default function OpportunityRadarPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
+  /**
+   * minMatch used to default to 70, which meant a member had to already hold
+   * 70% of a role's listed skills before the role would appear at all — and
+   * the same threshold was applied twice, once by the server and again here.
+   * Most women scanned, saw "No Matches With These Filters", and concluded
+   * ATHENA had no work for them. The score is skill overlap, not a verdict on
+   * whether she could do the job, so the default now hides nothing and the
+   * filter is hers to raise.
+   */
   const [filters, setFilters] = useState({
-    minMatch: 70,
+    minMatch: 0,
     remoteOnly: false,
     includePartTime: false,
   });
@@ -77,9 +87,11 @@ export default function OpportunityRadarPage() {
                   },
                   type: job.type,
                   matchScore: job.matchScore || 0,
-                  matchReasons: job.matchedSkills?.length
-                    ? job.matchedSkills.map((skill: string) => `Matches ${skill}`)
-                    : ['Profile and role requirements are aligned'],
+                  // A role with no skill in common says nothing. The fallback
+                  // here read 'Profile and role requirements are aligned' under
+                  // the heading 'Why you match', on exactly the roles where the
+                  // scan had found no alignment at all.
+                  matchReasons: (job.matchedSkills || []).map((skill: string) => `Matches ${skill}`),
                   skills: job.skills?.map((item: any) => item.skill?.name).filter(Boolean) || [],
                   postedAt: job.publishedAt
                     ? new Date(job.publishedAt).toLocaleDateString()
@@ -131,11 +143,15 @@ export default function OpportunityRadarPage() {
             <span>Opportunity Radar</span>
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
-            AI-powered job matching based on your profile and preferences
+            Open roles scored by how many of their listed skills you already hold
           </p>
         </div>
       </div>
 
+      {/* Both /ai/opportunity-radar routes carry requirePremium, and the AI
+          hub advertised this tool as free. A free member arrived here, set her
+          filters, pressed Scan and was told the scan was unavailable. */}
+      <PaywallGate feature="ai_opportunity_radar" featureName="Opportunity Radar">
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card text-center">
@@ -157,7 +173,7 @@ export default function OpportunityRadarPage() {
             {opportunities.filter((o) => o.matchScore >= 80).length}
           </div>
           <div className="text-sm text-slate-500 dark:text-slate-400">
-            High Match (80%+)
+            80%+ of skills held
           </div>
         </div>
         <div className="card text-center">
@@ -199,7 +215,7 @@ export default function OpportunityRadarPage() {
             {/* Min Match Filter */}
             <div className="flex items-center space-x-2">
               <label className="text-sm text-slate-600 dark:text-slate-400">
-                Min Match:
+                Min skills held:
               </label>
               <select
                 value={filters.minMatch}
@@ -208,6 +224,8 @@ export default function OpportunityRadarPage() {
                 }
                 className="border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-sm px-2 py-1"
               >
+                <option value={0}>Any</option>
+                <option value={25}>25%</option>
                 <option value={50}>50%</option>
                 <option value={60}>60%</option>
                 <option value={70}>70%</option>
@@ -263,7 +281,7 @@ export default function OpportunityRadarPage() {
           </h3>
           <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
             {scanError ||
-              'Click "Scan Opportunities" to discover jobs that match your skills, experience, and career goals'}
+              'Scan the active roles on ATHENA against the skills and headline on your profile. Nothing else on your profile is read.'}
           </p>
           <button onClick={handleScan} className="btn-primary">
             <Radar className="w-4 h-4 mr-2" />
@@ -303,7 +321,7 @@ export default function OpportunityRadarPage() {
                 No Matches With These Filters
               </h3>
               <p className="text-slate-500 dark:text-slate-400">
-                Lower the minimum match score or broaden your scan settings.
+Lower the minimum skills-held filter or broaden your scan settings.
               </p>
             </div>
           ) : (
@@ -367,7 +385,7 @@ export default function OpportunityRadarPage() {
                       )}
                     >
                       <Star className="w-4 h-4" />
-                      <span className="font-semibold">{opportunity.matchScore}% Match</span>
+                      <span className="font-semibold">{opportunity.matchScore}% of skills</span>
                     </div>
                     <Link
                       href={opportunity.url || `/dashboard/jobs/${opportunity.id}`}
@@ -385,7 +403,7 @@ export default function OpportunityRadarPage() {
                     {/* Match Reasons */}
                     <div className="flex-1">
                       <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                        Why you match:
+                        Skills you already hold:
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {opportunity.matchReasons.map((reason, i) => (
@@ -427,27 +445,33 @@ export default function OpportunityRadarPage() {
       {/* Pro Tips */}
       <div className="card bg-gradient-to-r from-primary-50 to-purple-50 dark:from-primary-900/20 dark:to-purple-900/20 border-primary-200 dark:border-primary-800">
         <h3 className="font-semibold text-slate-900 dark:text-white mb-3">
-          🚀 Improve Your Match Score
+          🚀 Widen what the scan can find
         </h3>
+        {/* These four used to promise that filling in preferences, salary and
+            location would improve the result. The scan reads two things: the
+            skills on your profile and your headline. Advice that cannot change
+            the answer is worse than no advice, because she spends an evening
+            on it. */}
         <div className="grid md:grid-cols-2 gap-4 text-sm text-slate-600 dark:text-slate-300">
           <div className="flex items-start space-x-2">
             <CheckCircle2 className="w-4 h-4 text-primary-500 mt-0.5 flex-shrink-0" />
-            <span>Complete your profile with detailed work experience</span>
+            <span>Add every skill you have — the score is the share of a role&apos;s listed skills you already hold</span>
           </div>
           <div className="flex items-start space-x-2">
             <CheckCircle2 className="w-4 h-4 text-primary-500 mt-0.5 flex-shrink-0" />
-            <span>Add relevant skills and certifications</span>
+            <span>Keep your headline close to the roles you want; the scan searches job titles for it</span>
           </div>
           <div className="flex items-start space-x-2">
             <CheckCircle2 className="w-4 h-4 text-primary-500 mt-0.5 flex-shrink-0" />
-            <span>Update your career preferences and salary expectations</span>
+            <span>Set the skills filter to Any to see everything the scan found, not only the close fits</span>
           </div>
           <div className="flex items-start space-x-2">
             <CheckCircle2 className="w-4 h-4 text-primary-500 mt-0.5 flex-shrink-0" />
-            <span>Enable location preferences for better local matches</span>
+            <span>A role with a long skills list scores lower even when you would be excellent at it</span>
           </div>
         </div>
       </div>
+      </PaywallGate>
     </div>
   );
 }

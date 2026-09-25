@@ -21,33 +21,108 @@ import {
   Scale,
 } from 'lucide-react';
 import { useIdeaValidator } from '@/lib/hooks';
+import PaywallGate from '@/components/subscription/PaywallGate';
 import { cn } from '@/lib/utils';
 
+/**
+ * The shape POST /ai/idea-validator actually returns.
+ *
+ * Every scored field was declared here as a required number or object, which is
+ * why the page could dump raw JSON at a member: the server omits a field the
+ * model would not answer, and returns them all null when no key is configured
+ * and nothing ran at all. TypeScript said that could not happen, so nobody
+ * wrote the branch for it, and `JSON.stringify(result, null, 2)` was left
+ * standing in the fallback — a member who validated her idea with the provider
+ * down read `{"overallScore": null, "marketPotential": null, ...}` on the
+ * screen. Marking them nullable is what forces the honest branch to exist.
+ */
 interface ValidationResult {
-  analysis?: string;
+  analysis?: string | null;
+  overallScore?: number | null;
+  marketPotential?: {
+    score?: number | null;
+    analysis?: string | null;
+  } | null;
+  feasibility?: {
+    score?: number | null;
+    analysis?: string | null;
+  } | null;
+  competition?: {
+    score?: number | null;
+    analysis?: string | null;
+    competitors?: string[] | null;
+  } | null;
+  targetAudience?: {
+    description?: string | null;
+    size?: string | null;
+    demographics?: string[] | null;
+  } | null;
+  strengths?: string[] | null;
+  weaknesses?: string[] | null;
+  recommendations?: string[] | null;
+  nextSteps?: string[] | null;
+  /** True when no model was called — see getSimulatedIdeaValidation on the server. */
+  simulated?: boolean;
+}
+
+/**
+ * A validation complete enough to draw the scored view: the dial, the three
+ * score tiles, the SWOT columns and the audience panel all read these without
+ * checking, so every one of them has to be there before that view is chosen.
+ * `size` is the exception — the prompt tells the model not to invent a market
+ * size, so an answer that leaves it out is a good answer and the line that
+ * would have printed it is simply not drawn.
+ */
+type ScoredValidation = {
   overallScore: number;
-  marketPotential: {
-    score: number;
-    analysis: string;
-  };
-  feasibility: {
-    score: number;
-    analysis: string;
-  };
-  competition: {
-    score: number;
-    analysis: string;
-    competitors: string[];
-  };
-  targetAudience: {
-    description: string;
-    size: string;
-    demographics: string[];
-  };
+  marketPotential: { score: number; analysis: string };
+  feasibility: { score: number };
+  competition: { score: number; analysis: string; competitors: string[] };
+  targetAudience: { description: string; size: string | null; demographics: string[] };
   strengths: string[];
   weaknesses: string[];
   recommendations: string[];
   nextSteps: string[];
+};
+
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * Narrow a response to the scored view, or return null so the caller falls back
+ * to prose. The three sub-scores are required because the tiles print them with
+ * a percent sign after; a missing one used to be impossible according to the
+ * types and would have rendered "%" on its own.
+ */
+function toScored(value: ValidationResult | null): ScoredValidation | null {
+  if (!value) return null;
+  const { overallScore, marketPotential, feasibility, competition, targetAudience } = value;
+
+  if (!isNumber(overallScore)) return null;
+  if (!marketPotential || !isNumber(marketPotential.score)) return null;
+  if (!feasibility || !isNumber(feasibility.score)) return null;
+  if (!competition || !isNumber(competition.score)) return null;
+  if (!targetAudience || !targetAudience.description) return null;
+
+  return {
+    overallScore,
+    marketPotential: { score: marketPotential.score, analysis: marketPotential.analysis || '' },
+    feasibility: { score: feasibility.score },
+    competition: {
+      score: competition.score,
+      analysis: competition.analysis || '',
+      competitors: competition.competitors || [],
+    },
+    targetAudience: {
+      description: targetAudience.description,
+      size: targetAudience.size || null,
+      demographics: targetAudience.demographics || [],
+    },
+    strengths: value.strengths || [],
+    weaknesses: value.weaknesses || [],
+    recommendations: value.recommendations || [],
+    nextSteps: value.nextSteps || [],
+  };
 }
 
 const ideaCategories = [
@@ -114,14 +189,13 @@ export default function IdeaValidatorPage() {
     return 'Needs Work';
   };
 
-  const hasStructuredResult = Boolean(
-    result &&
-      typeof result.overallScore === 'number' &&
-      result.marketPotential &&
-      result.feasibility &&
-      result.competition &&
-      result.targetAudience
-  );
+  const scored = toScored(result);
+
+  // Nothing ran: no provider was configured, so the server returned an empty
+  // assessment with simulated:true rather than inventing one. There is no prose
+  // to fall back to either, and a member is owed the reason instead of a blank
+  // panel or, as before, the JSON.
+  const nothingRan = Boolean(result?.simulated);
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -144,6 +218,10 @@ export default function IdeaValidatorPage() {
         </div>
       </div>
 
+      {/* POST /ai/idea-validator carries requirePremium. A free member used
+          to reach this form from the AI hub and the platform directory, write
+          out the idea she had been sitting on, and get back a toast. */}
+      <PaywallGate feature="ai_idea_validator" featureName="Business Idea Validator">
       {!result ? (
         <div className="max-w-3xl mx-auto space-y-6">
           {/* Idea Input */}
@@ -227,15 +305,32 @@ export default function IdeaValidatorPage() {
             )}
           </button>
         </div>
-      ) : !hasStructuredResult ? (
+      ) : !scored ? (
         <div className="space-y-6">
           <div className="card">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
-              Analysis
+              {nothingRan || !result?.analysis ? 'No assessment was made' : 'Analysis'}
             </h2>
-            <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">
-              {(result as any)?.analysis || JSON.stringify(result, null, 2)}
-            </p>
+            {nothingRan ? (
+              <p className="text-slate-700 dark:text-slate-300">
+                ATHENA&apos;s idea validation is not connected to a language model on this
+                deployment, so nothing read your idea. Your description has not been scored,
+                and no assessment was produced. Nothing you wrote has been lost — try again
+                later, or take it to a mentor in the meantime.
+              </p>
+            ) : result?.analysis ? (
+              <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                {result.analysis}
+              </p>
+            ) : (
+              <p className="text-slate-700 dark:text-slate-300">
+                The validator answered, but not with anything it was willing to score — no
+                viability rating, no market or feasibility read, and no summary. Rather than
+                show you a partial picture as though it were the assessment, ATHENA is
+                telling you it came back empty. Adding more detail about the problem your
+                idea solves and who it is for usually gives it more to work with.
+              </p>
+            )}
           </div>
           <button
             onClick={() => setResult(null)}
@@ -262,13 +357,13 @@ export default function IdeaValidatorPage() {
                 <div
                   className={cn(
                     'w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold',
-                    getScoreColor(result.overallScore)
+                    getScoreColor(scored.overallScore)
                   )}
                 >
-                  {result.overallScore}
+                  {scored.overallScore}
                 </div>
                 <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mt-2">
-                  {getScoreLabel(result.overallScore)}
+                  {getScoreLabel(scored.overallScore)}
                 </p>
               </div>
             </div>
@@ -279,7 +374,7 @@ export default function IdeaValidatorPage() {
             <div className="card text-center">
               <TrendingUp className="w-8 h-8 text-blue-500 mx-auto mb-2" />
               <div className="text-2xl font-bold text-slate-900 dark:text-white">
-                {result.marketPotential.score}%
+                {scored.marketPotential.score}%
               </div>
               <div className="text-sm text-slate-500 dark:text-slate-400">
                 Market Potential
@@ -288,7 +383,7 @@ export default function IdeaValidatorPage() {
             <div className="card text-center">
               <Zap className="w-8 h-8 text-purple-500 mx-auto mb-2" />
               <div className="text-2xl font-bold text-slate-900 dark:text-white">
-                {result.feasibility.score}%
+                {scored.feasibility.score}%
               </div>
               <div className="text-sm text-slate-500 dark:text-slate-400">
                 Feasibility
@@ -297,7 +392,7 @@ export default function IdeaValidatorPage() {
             <div className="card text-center">
               <Shield className="w-8 h-8 text-orange-500 mx-auto mb-2" />
               <div className="text-2xl font-bold text-slate-900 dark:text-white">
-                {result.competition.score}%
+                {scored.competition.score}%
               </div>
               <div className="text-sm text-slate-500 dark:text-slate-400">
                 Competitive Position
@@ -328,7 +423,7 @@ export default function IdeaValidatorPage() {
                     Market Potential
                   </h4>
                   <p className="text-slate-600 dark:text-slate-400">
-                    {result.marketPotential.analysis}
+                    {scored.marketPotential.analysis}
                   </p>
                 </div>
                 <div>
@@ -336,13 +431,19 @@ export default function IdeaValidatorPage() {
                     Target Audience
                   </h4>
                   <p className="text-slate-600 dark:text-slate-400 mb-2">
-                    {result.targetAudience.description}
+                    {scored.targetAudience.description}
                   </p>
-                  <p className="text-sm text-primary-600 dark:text-primary-400">
-                    Estimated market size: {result.targetAudience.size}
-                  </p>
+                  {/* Only when the model gave one. It is told not to invent a
+                      market size, so the honest answer is often no answer, and
+                      "Estimated market size:" followed by nothing is worse than
+                      the line being absent. */}
+                  {scored.targetAudience.size && (
+                    <p className="text-sm text-primary-600 dark:text-primary-400">
+                      Estimated market size: {scored.targetAudience.size}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {result.targetAudience.demographics.map((demo, i) => (
+                    {scored.targetAudience.demographics.map((demo, i) => (
                       <span
                         key={i}
                         className="px-2 py-1 text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full"
@@ -357,10 +458,10 @@ export default function IdeaValidatorPage() {
                     Competition
                   </h4>
                   <p className="text-slate-600 dark:text-slate-400 mb-2">
-                    {result.competition.analysis}
+                    {scored.competition.analysis}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {result.competition.competitors.map((competitor, i) => (
+                    {scored.competition.competitors.map((competitor, i) => (
                       <span
                         key={i}
                         className="px-3 py-1 text-sm border border-slate-200 dark:border-slate-700 rounded-full text-slate-600 dark:text-slate-300"
@@ -394,7 +495,7 @@ export default function IdeaValidatorPage() {
               </button>
               {expandedSections.includes('strengths') && (
                 <ul className="mt-4 space-y-2">
-                  {result.strengths.map((strength, i) => (
+                  {scored.strengths.map((strength, i) => (
                     <li
                       key={i}
                       className="flex items-start space-x-2 text-slate-600 dark:text-slate-300"
@@ -425,7 +526,7 @@ export default function IdeaValidatorPage() {
               </button>
               {expandedSections.includes('weaknesses') && (
                 <ul className="mt-4 space-y-2">
-                  {result.weaknesses.map((weakness, i) => (
+                  {scored.weaknesses.map((weakness, i) => (
                     <li
                       key={i}
                       className="flex items-start space-x-2 text-slate-600 dark:text-slate-300"
@@ -457,7 +558,7 @@ export default function IdeaValidatorPage() {
             </button>
             {expandedSections.includes('recommendations') && (
               <ul className="mt-4 space-y-3">
-                {result.recommendations.map((rec, i) => (
+                {scored.recommendations.map((rec, i) => (
                   <li
                     key={i}
                     className="flex items-start space-x-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg"
@@ -479,7 +580,7 @@ export default function IdeaValidatorPage() {
               <span>Recommended Next Steps</span>
             </h3>
             <div className="space-y-3">
-              {result.nextSteps.map((step, i) => (
+              {scored.nextSteps.map((step, i) => (
                 <div
                   key={i}
                   className="flex items-center space-x-3 p-3 bg-white dark:bg-slate-800 rounded-lg"
@@ -513,6 +614,7 @@ export default function IdeaValidatorPage() {
           </div>
         </div>
       )}
+      </PaywallGate>
     </div>
   );
 }

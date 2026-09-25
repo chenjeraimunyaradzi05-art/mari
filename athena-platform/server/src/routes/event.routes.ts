@@ -142,6 +142,19 @@ async function getEventView(eventId: string, userId?: string, viewerRole?: strin
 }
 
 /**
+ * The midnight at the start of today, in the server's own zone.
+ *
+ * An event is "upcoming" from the start of the day it runs on, not from the
+ * minute it starts: a workshop at 10am is still worth listing at 9am, and the
+ * `date` column carries the day while `startTime` carries the hour. Callers
+ * that care about the hour — the public page does — narrow it further.
+ */
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/**
  * GET /api/events
  * Query params: type, q
  */
@@ -164,7 +177,17 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
     // both the visibility rule and the keyword search want the `OR` key, and a
     // later spread would silently replace an earlier one — which on this route
     // would mean a search returning held listings to strangers.
-    const filters: Prisma.EventWhereInput[] = [visibility];
+    // Only what is still to come, and only ever the soonest hundred of those.
+    //
+    // This route used to take the hundred rows with the earliest date in the
+    // table and hand them over, and the pages built on it threw away anything
+    // in the past client-side. That works until the platform has run a hundred
+    // events: from then on the window holds nothing but finished ones, the
+    // client discards the lot, and both the public catalogue and the dashboard
+    // calendar say there is nothing on while next week's listings sit in the
+    // database unread. Filtering here means the hundred rows are the hundred
+    // that are actually coming up.
+    const filters: Prisma.EventWhereInput[] = [visibility, { date: { gte: startOfToday() } }];
     if (dbType) filters.push({ type: dbType });
     if (q) {
       filters.push({
@@ -218,7 +241,27 @@ router.post('/:id/register', authenticate, async (req: AuthRequest, res, next) =
   try {
     // Ensure the event exists and this member may see it. Her own id goes in
     // because a held listing is visible to its host, and to nobody else.
-    await getEventView(req.params.id, req.user!.id, req.user?.role);
+    const event = await getEventView(req.params.id, req.user!.id, req.user?.role);
+
+    // A cap the organiser set is a cap, not a decoration. Until now this route
+    // never read maxAttendees: an organiser who booked a room for a hundred
+    // would have the five hundredth registration accepted, and the card would
+    // then read "500 going of 100". For a gathering of women at a physical
+    // address that is a door-and-fire-exit problem, not a counter bug.
+    //
+    // The number compared is the one the card shows — the organiser's own
+    // headcount plus the registrations taken here — so the cap means the same
+    // thing to her as it does to the room. Someone already registered is let
+    // through, because re-posting must stay a no-op rather than lock her out
+    // of her own place.
+    //
+    // Two women clicking at the same instant can still both pass this read;
+    // there is no database constraint to lean on and the accelerator enrolment
+    // route has the same shape. A seat or two over on a simultaneous click is
+    // a different problem from four hundred over.
+    if (!event.isRegistered && event.maxAttendees != null && event.attendees >= event.maxAttendees) {
+      throw new ApiError(409, 'This event is full. The organiser has capped it at the number of places listed.');
+    }
 
     await prisma.eventRegistration.upsert({
       where: { eventId_userId: { eventId: req.params.id, userId: req.user!.id } },

@@ -203,7 +203,27 @@ export default function PublicCoursePage({ params }: { params: Promise<{ slug: s
             </>
           ) : isAuthenticated ? (
             <>
-              <p className="text-sm text-slate-600 dark:text-slate-300">{course.isActive === false ? 'This course is not taking enrolments at the moment.' : 'Enrol to open every lesson and track your progress. A certificate is issued when all of them are done.'}</p>
+              {/* What enrolling actually does, rather than what the word
+                  suggests. This panel offered "Enrol to open every lesson" next
+                  to a "Cost: $46,000" fact, which read as a purchase: ATHENA
+                  takes no course payment, so enrolling opens the lessons the
+                  provider has published here and nothing more. On a course with
+                  no lessons on the platform it does not even do that, and
+                  promising a certificate for finishing nought lessons was the
+                  worse half of it. Neither sentence is softened — both are
+                  simply the true one. */}
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {course.isActive === false
+                  ? 'This course is not taking enrolments at the moment.'
+                  : lessonCount === 0
+                    ? 'This course has no lessons on ATHENA yet. Enrolling keeps it in your dashboard and tells the provider you are interested.'
+                    : 'Enrol to open every lesson published here and track your progress. A certificate is issued when all of them are done.'}
+              </p>
+              {course.isActive !== false && course.cost != null && course.cost > 0 && (
+                <p className="text-xs text-slate-500">
+                  Enrolling here does not pay the {money(course.cost)} course fee. That is arranged with {provider}.
+                </p>
+              )}
               <button type="button" onClick={onEnrol} disabled={enrol.isPending || course.isActive === false} className="btn-primary flex w-full items-center justify-center gap-2">
                 {enrol.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />} Enrol
               </button>

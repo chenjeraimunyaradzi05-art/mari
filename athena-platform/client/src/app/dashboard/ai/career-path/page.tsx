@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useGenerateCareerPath } from '@/lib/hooks';
 import { cn, formatSalary } from '@/lib/utils';
+import PaywallGate from '@/components/subscription/PaywallGate';
 
 interface CareerMilestone {
   id: string;
@@ -110,6 +111,14 @@ export default function CareerPathPage() {
           </div>
         </div>
 
+        {/* The gate is here and not at the route, because POST /ai/career-path
+            carries requirePremium on the server and this page had no idea. A
+            free member reached the form from the AI hub, the platform
+            directory, her persona page or onboarding, filled in her current and
+            target role, pressed Generate, and got a toast reading "Failed to
+            generate career path" — a 403 rendered as a fault. Nothing told her
+            the feature was paid, and nothing offered her the upgrade. */}
+        <PaywallGate feature="ai_career_path" featureName="Career Path Planner">
         {/* Input Form */}
         <div className="card">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">
@@ -231,6 +240,7 @@ export default function CareerPathPage() {
             </div>
           </div>
         </div>
+        </PaywallGate>
       </div>
     );
   }

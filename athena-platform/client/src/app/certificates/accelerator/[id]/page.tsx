@@ -8,6 +8,14 @@
  * The length is whatever that cohort actually was. The server used to floor it
  * at twelve, which was true of the default curriculum and a false claim on this
  * public page the moment staff ran a shorter pilot intake.
+ *
+ * The page also says who checked what. Completion here is the founder's own
+ * record: she marks each week done in her dashboard, and the enrolment becomes
+ * COMPLETED once there is a record for every week of the cohort and the cohort
+ * has reached its end date. There is no mentor sign-off, no attendance register
+ * and no review of the deliverables — so a page an investor is invited to rely
+ * on has to say so. Printing "completed the programme" and stopping there
+ * invited a reader to assume a verification that nobody performed.
  */
 
 import { use } from 'react';
@@ -48,7 +56,15 @@ export default function AcceleratorCertificatePage({ params }: { params: Promise
           <p className="mt-6 text-sm text-slate-500">
             Completed {date(certificate.data.completedAt)} · code <code className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800">{certificate.data.code}</code>
           </p>
-          <p className="mt-6 text-xs text-slate-400">Anyone can confirm this certificate at this address. <Link href="/accelerator" className="text-rose-600 hover:underline">About the accelerator</Link></p>
+          <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-xs leading-5 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+            <p className="font-semibold text-slate-600 dark:text-slate-300">What ATHENA checked</p>
+            <p className="mt-1">
+              {certificate.data.holder} held a place in this cohort, the cohort ran to {date(certificate.data.cohort.endDate)},
+              and she recorded her work for each of its {certificate.data.weeks} weeks. Those weekly records are her own.
+              ATHENA does not take an attendance register and does not assess the deliverables.
+            </p>
+          </div>
+          <p className="mt-4 text-xs text-slate-400">Anyone can confirm this certificate at this address. <Link href="/accelerator" className="text-rose-600 hover:underline">About the accelerator</Link></p>
         </div>
       )}
     </div>

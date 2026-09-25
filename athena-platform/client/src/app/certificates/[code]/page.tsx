@@ -50,10 +50,17 @@ export default function CertificatePage({ params }: { params: Promise<{ code: st
             Issued {new Date(certificate.data.issuedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })} · code{' '}
             <code className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800">{certificate.data.code}</code>
           </p>
+          {/* The link has to be the public course page, not the dashboard one.
+              This page exists so an employer can check a claim without having
+              to contact the candidate — it says so a line above — and the only
+              link on it used to point at /dashboard/learn/<id>, which bounced
+              the anonymous reader it was built for straight into the sign-in
+              wall. /courses/<slug> is the same course, readable by anyone, and
+              the response already carries the slug. */}
           <p className="mt-6 text-xs text-slate-400">
             Anyone can confirm this certificate at this address. Course details:{' '}
-            <Link href={`/dashboard/learn/${certificate.data.course.id}`} className="text-primary-600 hover:underline">
-              {certificate.data.course.slug}
+            <Link href={`/courses/${certificate.data.course.slug}`} className="text-primary-600 hover:underline">
+              {certificate.data.course.title}
             </Link>
           </p>
         </div>

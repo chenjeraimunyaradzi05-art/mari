@@ -7,8 +7,9 @@
  * three "ATHENA Academy" programmes with enrolment counts and star ratings
  * nobody had ever measured. It now shows two real things: the certificates
  * the signed-in learner has earned (each with the code an employer can check
- * at /certificates/:code), and the courses in the catalogue that issue one.
- * Where there is nothing yet, it says so.
+ * at /certificates/:code), and the courses in the catalogue that can issue one
+ * — the ones whose lessons are on ATHENA, because the certificate is written
+ * when the last lesson is ticked off. Where there is nothing yet, it says so.
  */
 
 import { FormEvent, useState } from 'react';
@@ -62,9 +63,17 @@ export default function CertificationsPage() {
     select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as Certificate[]) : []),
   });
 
+  // The courses that actually issue one of these certificates are the ones
+  // whose lessons are on ATHENA: the certificate is written when the last
+  // lesson is ticked off. This list used to ask for `type=certificate`, which
+  // is the provider's own name for the qualification and says nothing about
+  // whether anything here can be completed. Under the heading "Courses that
+  // issue a certificate" that put a Graduate Certificate taught entirely off
+  // ATHENA in a list of things that will never issue one, and left out every
+  // bootcamp and short course that would.
   const courses = useQuery({
-    queryKey: ['courses', { type: 'certificate', limit: 12 }],
-    queryFn: () => courseApi.getAll({ type: 'certificate', limit: 12 }),
+    queryKey: ['courses', { withLessons: true, limit: 12 }],
+    queryFn: () => courseApi.getAll({ withLessons: true, limit: 12 }),
     select: (r) => (Array.isArray(r.data?.data) ? (r.data.data as Course[]) : []),
   });
 
@@ -123,15 +132,20 @@ export default function CertificationsPage() {
         </Section>
       )}
 
-      <Section icon={BookOpen} title="Courses that issue a certificate" description="From the catalogue, as providers list them." action={{ label: 'All courses', href: '/courses' }}>
+      <Section
+        icon={BookOpen}
+        title="Courses that issue a certificate"
+        description="These ones are taught here lesson by lesson, so finishing every lesson earns a checkable certificate."
+        action={{ label: 'All courses', href: '/courses' }}
+      >
         {courses.isLoading ? (
           <TileSkeleton count={3} />
         ) : (courses.data?.length ?? 0) === 0 ? (
           <EmptyState
             icon={BookOpen}
             reason="empty"
-            title="No certificate courses listed yet"
-            description="Providers list their courses themselves. The full catalogue may still have short courses and diplomas worth a look."
+            title="No course on ATHENA carries its lessons yet"
+            description="A certificate is issued when every lesson of a course is complete, and providers are still building their lessons here. The catalogue itself has plenty to look at in the meantime."
             primaryAction={{ label: 'Browse all courses', href: '/courses' }}
           />
         ) : (

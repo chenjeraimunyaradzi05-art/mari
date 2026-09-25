@@ -78,6 +78,16 @@ interface Event {
   tags: string[];
 }
 
+/**
+ * The organiser's cap, reached. The server refuses the registration now — it
+ * used to accept the five hundredth person into a room booked for a hundred —
+ * so the button says so rather than offering a place that will be rejected.
+ * Someone already registered is never "full": her own place still stands.
+ */
+function isFull(event: Event): boolean {
+  return !event.isRegistered && typeof event.maxAttendees === 'number' && event.attendees >= event.maxAttendees;
+}
+
 const eventTypes = [
   { value: 'all', label: 'All Events' },
   { value: 'webinar', label: 'Webinars' },
@@ -442,15 +452,28 @@ export default function EventsPage() {
                     </button>
                   ) : (
                     <div className="flex flex-col items-end">
+                      {/* The button used to read "Register - $29" and then take
+                          no money at all: ATHENA has no event ticketing, and
+                          registering here only puts you on the organiser's
+                          list. A woman who read that as paid would have turned
+                          up at a ticketed event without a ticket. The price is
+                          still shown, because it is a fact she needs before she
+                          decides — it is just no longer attached to a button
+                          that does not charge it. */}
                       <button
                         className="btn-primary"
                         onClick={() => registerEvent.mutate(event.id)}
-                        disabled={registerEvent.isPending}
+                        disabled={registerEvent.isPending || isFull(event)}
                       >
-                        {event.price > 0 ? `Register - $${event.price}` : 'Register Free'}
+                        {isFull(event) ? 'Full' : 'Register'}
                       </button>
+                      {event.price > 0 && (
+                        <span className="mt-1 max-w-[16rem] text-right text-xs text-slate-500 dark:text-slate-400">
+                          The organiser charges ${event.price} for this event. You pay them, not ATHENA.
+                        </span>
+                      )}
                       {event.linkRequiresRegistration && (
-                        <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="mt-1 max-w-[16rem] text-right text-xs text-slate-500 dark:text-slate-400">
                           The joining link appears here once you register
                         </span>
                       )}

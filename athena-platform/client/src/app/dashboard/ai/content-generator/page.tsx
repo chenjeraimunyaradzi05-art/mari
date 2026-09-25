@@ -18,6 +18,7 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { useContentGenerator } from '@/lib/hooks';
+import PaywallGate from '@/components/subscription/PaywallGate';
 import { cn } from '@/lib/utils';
 
 const contentTypes = [
@@ -137,6 +138,11 @@ export default function ContentGeneratorPage() {
         </div>
       </div>
 
+      {/* POST /ai/content-generator carries requirePremium. Without a gate
+          here a free member picked a content type, wrote her brief, pressed
+          Generate and was answered with a toast that read like a fault rather
+          than a price. */}
+      <PaywallGate feature="ai_content_generator" featureName="Content Generator">
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Input Section */}
         <div className="space-y-6">
@@ -387,6 +393,7 @@ export default function ContentGeneratorPage() {
           </div>
         </div>
       </div>
+      </PaywallGate>
     </div>
   );
 }

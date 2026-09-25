@@ -22,11 +22,32 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks';
 
+/**
+ * Every description below is read as a promise about what the tool will do, and
+ * six of them used to promise something else entirely.
+ *
+ * CareerCompass was sold here as "ML-powered career predictions" while its own
+ * page opens with "A comparison, not a forecast" — it runs four database
+ * queries and compares her skills to the ones employers are advertising, and
+ * there is no model anywhere behind it. OpportunityScan was "AI-matched
+ * opportunities ranked by your skills and preferences" over three newest-first
+ * queries, and says so on its own page. MentorMatch was "AI-powered mentor
+ * recommendations based on compatibility" over a SQL sort on shared skills,
+ * rating and years mentoring. IncomeStream offered "income projections" whose
+ * modelled-income card was removed from the creator page precisely because
+ * every coefficient in it was invented.
+ *
+ * The contradiction mattered more than the exaggeration. A woman who read
+ * "predictions" here and "not a forecast" one click later has to work out which
+ * of the two ATHENA meant, and there is no good version of that. These say what
+ * each tool does, in the same words the tool itself uses.
+ */
 const tools = [
   {
     id: 'career-compass',
-    name: 'CareerCompass AI',
-    description: 'ML-powered career predictions with role matching and skills gap analysis',
+    name: 'CareerCompass',
+    description:
+      'Compares the skills employers are advertising with the skills on your profile, and names the gap',
     icon: Compass,
     href: '/dashboard/ai/career-compass',
     color: 'bg-indigo-500',
@@ -36,7 +57,7 @@ const tools = [
   {
     id: 'opportunity-scan',
     name: 'OpportunityScan',
-    description: 'AI-matched opportunities ranked by your skills and preferences',
+    description: 'The newest roles, courses and events on ATHENA, newest first',
     icon: Radar,
     href: '/dashboard/ai/opportunities',
     color: 'bg-cyan-500',
@@ -46,7 +67,8 @@ const tools = [
   {
     id: 'salary-equity',
     name: 'SalaryEquity',
-    description: 'Pay gap detection and market salary analysis',
+    description:
+      'The median of advertised ranges for your role, against what you are asking for',
     icon: DollarSign,
     href: '/dashboard/ai/salary',
     color: 'bg-emerald-500',
@@ -56,7 +78,8 @@ const tools = [
   {
     id: 'mentor-match',
     name: 'MentorMatch',
-    description: 'AI-powered mentor recommendations based on compatibility',
+    description:
+      'Mentors ranked by skills you share, their rating and years mentoring — with the reasons shown',
     icon: Users,
     href: '/dashboard/ai/mentors',
     color: 'bg-purple-500',
@@ -65,8 +88,8 @@ const tools = [
   },
   {
     id: 'safety-score',
-    name: 'SafetyScore',
-    description: 'Trust verification, badges, and community safety features',
+    name: 'Trust Score',
+    description: 'What your trust score is made of, and what raises it',
     icon: Shield,
     href: '/dashboard/ai/trust',
     color: 'bg-amber-500',
@@ -75,8 +98,8 @@ const tools = [
   },
   {
     id: 'income-stream',
-    name: 'IncomeStream',
-    description: 'Creator analytics and income projections for content creators',
+    name: 'Creator Analytics',
+    description: 'Your followers, posts and views as counted today, and the share of each gift you keep',
     icon: Video,
     href: '/dashboard/ai/creator',
     color: 'bg-pink-500',
@@ -86,16 +109,22 @@ const tools = [
   {
     id: 'opportunity-radar',
     name: 'Opportunity Radar',
-    description: 'Get personalized job matches based on your skills and career goals',
+    description: 'Open roles scored by how many of their listed skills you already hold',
     icon: Target,
     href: '/dashboard/ai/opportunity-radar',
     color: 'bg-blue-500',
-    premium: false,
+    // The scan route carries requirePremium on the server. This card said
+    // otherwise, so a free member was sent to the page rather than to billing
+    // and met a 403 after filling the form in.
+    premium: true,
   },
   {
     id: 'resume-optimizer',
     name: 'Resume Optimizer',
-    description: 'AI-powered analysis to make your resume stand out',
+    // Not "rewritten against the role you want", which is what the public
+    // directory promises: this returns a score, matched and missing keywords
+    // and a list of suggestions. It has never rewritten a résumé.
+    description: 'Scores your résumé against a role and lists what to change',
     icon: FileText,
     href: '/dashboard/ai/resume',
     color: 'bg-purple-500',
@@ -165,9 +194,12 @@ export default function AIToolsPage() {
                 <Crown className="w-6 h-6" />
                 <span className="text-xl font-bold">Unlock Premium AI Tools</span>
               </div>
+              {/* "Unlimited" was never true: every AI route on the server is
+                  rate limited per minute whatever the tier. Premium removes the
+                  free-tier quota, which is the thing worth saying. */}
               <p className="text-white/90 max-w-xl">
-                Get unlimited access to all AI tools including Resume Optimizer, Interview Coach, 
-                Career Path Analyzer, and more.
+                Premium opens the Resume Optimizer, Interview Coach, Career Path Analyzer,
+                Opportunity Radar and the rest, and lifts the free limit on ATHENA chat.
               </p>
             </div>
             <Link
@@ -252,10 +284,16 @@ export default function AIToolsPage() {
         ))}
       </div>
 
-      {/* How it works */}
+      {/* How it works
+          "Our AI creates personalized recommendations just for you" was
+          printed under a grid in which six of the twelve tools never call a
+          model at all — they read ATHENA's own tables. Saying which tools use
+          a model and which count rows is the difference between a woman
+          trusting a figure for the right reason and trusting it for the wrong
+          one. */}
       <div className="card">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">
-          How Our AI Tools Work
+          How these tools work
         </h2>
         <div className="grid md:grid-cols-3 gap-6">
           <div className="text-center">
@@ -271,9 +309,11 @@ export default function AIToolsPage() {
             <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-xl font-bold text-primary-600">2</span>
             </div>
-            <h3 className="font-medium text-slate-900 dark:text-white">AI analyzes your profile</h3>
+            <h3 className="font-medium text-slate-900 dark:text-white">Two different kinds of answer</h3>
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-              Our AI creates personalized recommendations just for you
+              The Premium tools send what you write to a language model. CareerCompass,
+              OpportunityScan, SalaryEquity, MentorMatch, Trust Score and Creator Analytics
+              read ATHENA&apos;s own listings and records — no model, and no forecast.
             </p>
           </div>
           <div className="text-center">
@@ -282,7 +322,7 @@ export default function AIToolsPage() {
             </div>
             <h3 className="font-medium text-slate-900 dark:text-white">Take action</h3>
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-              Apply the insights to accelerate your career growth
+              Each tool shows what its answer was built from, so you can weigh it yourself
             </p>
           </div>
         </div>

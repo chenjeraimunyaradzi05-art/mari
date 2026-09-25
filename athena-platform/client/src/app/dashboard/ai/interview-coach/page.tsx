@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import PaywallGate from '@/components/subscription/PaywallGate';
 
 interface Message {
   id: string;
@@ -387,6 +388,11 @@ export default function InterviewCoachPage() {
           </div>
         </div>
 
+        {/* Both interview-coach routes on the server carry requirePremium.
+            This page had no gate, so a free member set up a session, typed her
+            first answer and was told the coach was "unavailable right now" —
+            which was a 401 about her plan, not an outage. */}
+        <PaywallGate feature="ai_interview_coach" featureName="Interview Coach">
         {/* Setup */}
         <div className="card">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">
@@ -484,6 +490,7 @@ export default function InterviewCoachPage() {
             <li>• Take your time to think before answering - it's okay to pause</li>
           </ul>
         </div>
+        </PaywallGate>
       </div>
     );
   }

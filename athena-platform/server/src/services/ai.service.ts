@@ -25,6 +25,146 @@ const stringOrNull = (v: unknown): string | null =>
 const stringList = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
 
+/** A 0-100 reading the model offered, clamped, or null when it offered none. */
+const scoreOrNull = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null;
+};
+
+/**
+ * Every shape in this file follows the same rule, and it is the rule the resume
+ * contract above was rewritten to obey: when the model did not run, or ran and
+ * said nothing about a field, the field is null or empty and `simulated` says
+ * which of the two happened. Nothing in this service may fill a gap with a
+ * plausible-looking value. A member reading a career plan, a viability score or
+ * a piece of interview feedback has no way to tell an invented one from a real
+ * one, and the invented ones were being shown to her with no mark at all.
+ */
+export interface CareerPathMilestone {
+  timeframe: string | null;
+  title: string;
+  description: string | null;
+  skillsToAcquire: string[];
+}
+
+export interface CareerPathPlan {
+  currentLevel: string | null;
+  targetLevel: string | null;
+  /** Readiness for the stated goal, 0-100, as the model judged it. Null when nothing judged it. */
+  matchScore: number | null;
+  milestones: CareerPathMilestone[];
+  recommendedRoles: string[];
+  learningPath: string[];
+  careerAdvice: string | null;
+  simulated: boolean;
+}
+
+/** Model JSON arrives on a promise, not a schema; clamp it to the contract. */
+export function normaliseCareerPath(raw: any): CareerPathPlan {
+  const milestones: CareerPathMilestone[] = Array.isArray(raw?.milestones)
+    ? raw.milestones
+        .map((item: unknown) => {
+          const title = stringOrNull((item as any)?.title ?? (item as any)?.role);
+          if (!title) return null;
+          return {
+            timeframe: stringOrNull((item as any)?.timeframe ?? (item as any)?.timeline),
+            title,
+            description: stringOrNull((item as any)?.description),
+            skillsToAcquire: stringList((item as any)?.skillsToAcquire ?? (item as any)?.skills),
+          };
+        })
+        .filter((x: unknown): x is CareerPathMilestone => !!x)
+    : [];
+
+  return {
+    currentLevel: stringOrNull(raw?.currentLevel),
+    targetLevel: stringOrNull(raw?.targetLevel),
+    matchScore: scoreOrNull(raw?.matchScore),
+    milestones,
+    recommendedRoles: stringList(raw?.recommendedRoles),
+    learningPath: stringList(raw?.learningPath),
+    careerAdvice: stringOrNull(raw?.careerAdvice),
+    simulated: false,
+  };
+}
+
+export interface IdeaFacet {
+  score: number | null;
+  analysis: string | null;
+}
+
+export interface IdeaValidation {
+  overallScore: number | null;
+  marketPotential: IdeaFacet | null;
+  feasibility: IdeaFacet | null;
+  competition: (IdeaFacet & { competitors: string[] }) | null;
+  targetAudience: { description: string | null; size: string | null; demographics: string[] } | null;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+  nextSteps: string[];
+  /** The model's prose, kept whole, for the screen that shows no score panels. */
+  analysis: string | null;
+  simulated: boolean;
+}
+
+const facetOrNull = (raw: unknown): IdeaFacet | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const score = scoreOrNull((raw as any).score);
+  const analysis = stringOrNull((raw as any).analysis);
+  return score === null && analysis === null ? null : { score, analysis };
+};
+
+/** Model JSON arrives on a promise, not a schema; clamp it to the contract. */
+export function normaliseIdeaValidation(raw: any): IdeaValidation {
+  const competitionFacet = facetOrNull(raw?.competition);
+  const competitors = stringList(raw?.competition?.competitors);
+
+  const audienceRaw = raw?.targetAudience;
+  const audience =
+    audienceRaw && typeof audienceRaw === 'object'
+      ? {
+          description: stringOrNull(audienceRaw.description),
+          size: stringOrNull(audienceRaw.size),
+          demographics: stringList(audienceRaw.demographics),
+        }
+      : null;
+
+  return {
+    overallScore: scoreOrNull(raw?.overallScore),
+    marketPotential: facetOrNull(raw?.marketPotential),
+    feasibility: facetOrNull(raw?.feasibility),
+    competition: competitionFacet || competitors.length ? { ...(competitionFacet ?? { score: null, analysis: null }), competitors } : null,
+    targetAudience:
+      audience && (audience.description || audience.size || audience.demographics.length) ? audience : null,
+    strengths: stringList(raw?.strengths),
+    weaknesses: stringList(raw?.weaknesses),
+    recommendations: stringList(raw?.recommendations),
+    nextSteps: stringList(raw?.nextSteps),
+    analysis: stringOrNull(raw?.analysis ?? raw?.summary),
+    simulated: false,
+  };
+}
+
+export interface GeneratedContent {
+  content: string | null;
+  simulated: boolean;
+}
+
+export interface InterviewQuestionSet {
+  questions: string[];
+  tips: string | null;
+  answers: string[];
+  simulated: boolean;
+}
+
+export interface InterviewAnswerFeedback {
+  feedback: string | null;
+  analysis: { rating: number | null; strengths: string[]; improvements: string[] };
+  nextQuestion: string | null;
+  simulated: boolean;
+}
+
 /** Model JSON arrives on a promise, not a schema; clamp it to the contract. */
 export function normaliseResumeAnalysis(raw: any): ResumeAnalysis {
   const score = Number(raw?.score);
@@ -138,12 +278,12 @@ class AiService {
     }
   }
 
-  async generateCareerPath(profileData: any, goal?: string): Promise<any> {
+  async generateCareerPath(profileData: any, goal?: string): Promise<CareerPathPlan> {
      if (!this.openai) {
        this.ensureOpenAI('career path generation');
        return this.getSimulatedCareerPathResponse();
     }
-    
+
     try {
       const systemPrompt = `You are an expert career strategist specializing in helping women advance their careers in tech, business, and creative industries. Analyze the user's profile and provide strategic career guidance.
       
@@ -193,7 +333,7 @@ class AiService {
       const content = completion.choices[0].message.content;
       if (!content) throw new Error('No response from AI');
 
-      return JSON.parse(content);
+      return normaliseCareerPath(JSON.parse(content));
     } catch (error) {
       logger.error('AI Career Path failed:', error);
       throw error;
@@ -260,15 +400,24 @@ class AiService {
     }
   }
 
-  async generateInterviewQuestions(jobDescription: string, type: 'behavioral' | 'technical' | 'mixed' = 'mixed'): Promise<any> {
+  async generateInterviewQuestions(
+    jobDescription: string,
+    type: 'behavioral' | 'technical' | 'mixed' = 'mixed'
+  ): Promise<InterviewQuestionSet> {
     if (!this.openai) {
       this.ensureOpenAI('interview question generation');
+        // Two questions that hold for any interview anywhere. They were being
+        // returned unmarked beside the job title and employer name the route
+        // adds, on a screen that sells "questions tailored to your target
+        // role"; `simulated` is what stops that reading as tailoring.
         return {
             questions: [
                 "Tell me about a time you faced a challenge.",
                 "What are your strengths and weaknesses?"
             ],
-            tips: "Use the STAR method."
+            tips: "Use the STAR method: situation, task, action, result.",
+            answers: [],
+            simulated: true,
         };
     }
 
@@ -295,7 +444,13 @@ class AiService {
         
         const content = completion.choices[0].message.content;
         if (!content) throw new Error("No response");
-        return JSON.parse(content);
+        const raw = JSON.parse(content);
+        return {
+          questions: stringList(raw?.questions),
+          tips: stringOrNull(raw?.tips),
+          answers: stringList(raw?.answers),
+          simulated: false,
+        };
     } catch (err) {
         logger.error("Interview Coach AI failed", err);
         throw err;
@@ -308,22 +463,19 @@ class AiService {
     jobRole?: string;
     interviewType?: string;
     difficulty?: string;
-  }): Promise<{
-    feedback: string;
-    analysis: { rating: number; strengths: string[]; improvements: string[] };
-    nextQuestion: string;
-  }> {
+  }): Promise<InterviewAnswerFeedback> {
     if (!this.openai) {
       this.ensureOpenAI('interview answer feedback');
+      // The rating used to be 3, with "Answer submitted successfully" listed
+      // as a strength of the answer. The screen draws the rating as three
+      // filled stars out of five next to the words she typed, so a member
+      // practising for a real interview was being graded by nothing at all.
+      // Null rating, no strengths, no improvements: there is no assessment.
       return {
-        feedback:
-          'Development simulation: connect AI_OPENAI_API_KEY or OPENAI_API_KEY for production interview feedback.',
-        analysis: {
-          rating: 3,
-          strengths: ['Answer submitted successfully'],
-          improvements: ['Configure AI provider credentials for detailed coaching'],
-        },
-        nextQuestion: 'What outcome did your answer create, and how did you measure it?',
+        feedback: null,
+        analysis: { rating: null, strengths: [], improvements: [] },
+        nextQuestion: null,
+        simulated: true,
       };
     }
 
@@ -357,7 +509,22 @@ Candidate answer: ${params.answer}`;
       const content = completion.choices[0]?.message?.content;
       if (!content) throw new Error('No response from AI');
 
-      return JSON.parse(content);
+      const raw = JSON.parse(content);
+      // The prompt asks for 1-5, so this one is not clamped through
+      // scoreOrNull; anything outside the band is the model ignoring the
+      // instruction, and a rating nobody can place on the star row is worse
+      // than no rating.
+      const rating = Number(raw?.analysis?.rating);
+      return {
+        feedback: stringOrNull(raw?.feedback),
+        analysis: {
+          rating: Number.isFinite(rating) && rating >= 1 && rating <= 5 ? Math.round(rating) : null,
+          strengths: stringList(raw?.analysis?.strengths),
+          improvements: stringList(raw?.analysis?.improvements),
+        },
+        nextQuestion: stringOrNull(raw?.nextQuestion),
+        simulated: false,
+      };
     } catch (error) {
       logger.error('AI Interview Answer Feedback failed:', error);
       throw error;
@@ -379,10 +546,15 @@ Candidate answer: ${params.answer}`;
     platform: string = 'LinkedIn',
     tone?: string,
     context?: string
-  ): Promise<string> {
+  ): Promise<GeneratedContent> {
      if (!this.openai) {
        this.ensureOpenAI('content generation');
-       return "Simulated content generation response.";
+       // The sentence that used to come back here — "Simulated content
+       // generation response." — was rendered into the generator's output pane
+       // and offered to the member with a copy button, indistinguishable from
+       // a draft the model had written for her. No draft exists, so none is
+       // returned, and `simulated` tells the screen to say why.
+       return { content: null, simulated: true };
      }
 
      const spokenTone =
@@ -403,32 +575,104 @@ Candidate answer: ${params.answer}`;
          model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
          max_tokens: DEFAULT_MAX_TOKENS,
        });
-       return completion.choices[0]?.message?.content || '';
+       return { content: stringOrNull(completion.choices[0]?.message?.content), simulated: false };
      } catch (e) {
        logger.error('AI Content Gen failed', e);
        throw e;
      }
   }
 
-  async validateBusinessIdea(idea: string, targetMarket?: string, problemSolved?: string): Promise<string> {
+  /**
+   * Two things were wrong here at once, and they compounded.
+   *
+   * The prompt was assembled by interpolating three variables of which two are
+   * optional, so an idea submitted without a target market and a problem
+   * statement — which is every submission the screen can make, because it has
+   * no problem field — reached the model reading "Target: undefined\nProblem:
+   * undefined". The parts are now assembled from what was actually supplied.
+   *
+   * And the completion asked for no JSON, so this returned prose. The screen's
+   * scored view requires overallScore, marketPotential, feasibility,
+   * competition and targetAudience before it will render, so roughly 280 lines
+   * of viability dial, score tiles and SWOT panels were unreachable and every
+   * member landed in the plain-text fallback. The model is now asked for the
+   * object the screen was built for, and `analysis` still carries the prose so
+   * a partial answer degrades to the fallback rather than to nothing.
+   */
+  async validateBusinessIdea(
+    idea: string,
+    targetMarket?: string,
+    problemSolved?: string,
+    category?: string
+  ): Promise<IdeaValidation> {
     if (!this.openai) {
       this.ensureOpenAI('idea validation');
-      return "Simulated idea validation response.";
+      return this.getSimulatedIdeaValidation();
     }
 
     try {
-      const systemPrompt = "You are a startup advisor. Validate this business idea.";
-      const userPrompt = `Idea: ${idea}\nTarget: ${targetMarket}\nProblem: ${problemSolved}\nProvide Viability Score (0-100), Market Size, Competition, SWOT, and Action Plan.`;
-      
+      const systemPrompt = `You are a startup advisor evaluating a business idea for a member of a women's professional platform in Queensland, Australia.
+      Return a VALID JSON object with:
+      {
+        "overallScore": number (0-100 viability),
+        "marketPotential": { "score": number (0-100), "analysis": "Why" },
+        "feasibility": { "score": number (0-100), "analysis": "Why" },
+        "competition": { "score": number (0-100, higher means a more favourable competitive position), "analysis": "Why", "competitors": ["Named competitor"] },
+        "targetAudience": { "description": "Who this is for", "size": "Your best characterisation of how many they are", "demographics": ["Trait"] },
+        "strengths": ["Strength"],
+        "weaknesses": ["Weakness"],
+        "recommendations": ["Recommendation"],
+        "nextSteps": ["Step"],
+        "analysis": "A short prose summary of the whole assessment"
+      }
+      Omit any field you cannot answer from what you were given. Do not invent a competitor, a market size or a statistic to fill a field.`;
+
+      const parts = [
+        asUntrustedBlock('business idea', idea, 6000),
+        targetMarket?.trim() ? asUntrustedBlock('target market', targetMarket, 2000) : '',
+        problemSolved?.trim() ? asUntrustedBlock('problem it solves', problemSolved, 4000) : '',
+        category?.trim() ? asUntrustedBlock('idea category', category, 200) : '',
+      ];
+
       const completion = await this.openai.chat.completions.create({
-         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+         messages: [
+           { role: 'system', content: systemPrompt },
+           { role: 'user', content: parts.filter(Boolean).join('\n\n') },
+         ],
          model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+         response_format: { type: 'json_object' },
+         max_tokens: DEFAULT_MAX_TOKENS,
       });
-      return completion.choices[0]?.message?.content || '';
+
+      const content = completion.choices[0]?.message?.content;
+      if (!content) throw new Error('No response from AI');
+
+      return normaliseIdeaValidation(JSON.parse(content));
     } catch (e) {
         logger.error('AI Idea Validation failed', e);
         throw e;
     }
+  }
+
+  /**
+   * It used to be the single sentence "Simulated idea validation response.",
+   * which the screen rendered into its analysis panel as though a startup
+   * advisor had written it. Nothing is scored here because nothing was read.
+   */
+  private getSimulatedIdeaValidation(): IdeaValidation {
+    return {
+      overallScore: null,
+      marketPotential: null,
+      feasibility: null,
+      competition: null,
+      targetAudience: null,
+      strengths: [],
+      weaknesses: [],
+      recommendations: [],
+      nextSteps: [],
+      analysis: null,
+      simulated: true,
+    };
   }
 
   async chat(message: string, history: any[] = []): Promise<string> {
@@ -545,17 +789,31 @@ Candidate answer: ${params.answer}`;
     };
   }
 
-  private getSimulatedCareerPathResponse() {
+  /**
+   * What comes back when no model is configured, and the twin of
+   * getSimulatedResumeResponse above.
+   *
+   * It used to return a plan: "Mid-Level Professional" advancing to "Senior
+   * Manager", 65% ready, two dated milestones, and "Senior Developer" and
+   * "Tech Lead" as her recommended next roles — for every member, whatever she
+   * had typed, with no simulated flag anywhere in the object for the screen to
+   * notice. The resume path had already been rewritten to say nothing rather
+   * than invent a reading; this one was left behind and kept fabricating a
+   * career for women who were asked to plan around it.
+   *
+   * Nothing here is a judgement of her, because nothing judged her. The screen
+   * reads `simulated` and says so.
+   */
+  private getSimulatedCareerPathResponse(): CareerPathPlan {
     return {
-      currentLevel: "Mid-Level Professional",
-      targetLevel: "Senior Manager",
-      matchScore: 65,
-      milestones: [
-        { timeframe: "0-12 months", title: "Senior Contributor", description: "Take ownership of large projects", skillsToAcquire: ["Leadership", "System Design"]},
-        { timeframe: "1-2 years", title: "Team Lead", description: "Manage a small team", skillsToAcquire: ["People Management", "Mentoring"]}
-      ],
-      recommendedRoles: ["Senior Developer", "Tech Lead"],
-      learningPath: ["Advanced Architecture", "Management 101"]
+      currentLevel: null,
+      targetLevel: null,
+      matchScore: null,
+      milestones: [],
+      recommendedRoles: [],
+      learningPath: [],
+      careerAdvice: null,
+      simulated: true,
     };
   }
 }
