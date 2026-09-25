@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
+import { Prisma, WomanVerificationStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -804,6 +805,29 @@ router.delete(
       // anonymize PII while keeping referential integrity intact.
       const tombstoneEmail = `deleted+${userId}+${Date.now()}@example.invalid`;
 
+      // What this used to leave behind, after telling her "Account deleted":
+      // a live TOTP secret, both OAuth subject identifiers, her gender
+      // verification record, her three consent flags and her Stripe Connect
+      // id. Access was refused because isSuspended was set, so nothing could
+      // be read through the app — but the rows were still there, and the
+      // women-gate record in particular is the single most sensitive thing a
+      // woman leaving a women-only platform would want gone.
+      //
+      // The erasure path in gdpr.service.ts already clears every one of them
+      // (tombstoneFields). The field list is repeated rather than imported
+      // because the two paths answer different questions — a DSAR erasure is
+      // a legal obligation with its own audit trail and retention carve-outs,
+      // a self-serve delete is a member closing her account — and coupling
+      // them would mean a change made for one silently changing the other.
+      // What they must not do is disagree about which columns are personal
+      // data. If you add a column to either list, add it to both.
+      //
+      // Two fields deliberately differ from the DSAR list. `country` is left
+      // alone: it is the jurisdiction whose retention rules govern the
+      // records we are keeping, and losing it would leave us unable to say
+      // how long to keep them. `isActive` is left alone because isSuspended
+      // is what every read path in this codebase checks.
+
       await prisma.$transaction([
         prisma.auditLog.create({
           data: {
@@ -852,6 +876,35 @@ router.delete(
             lastLoginAt: null,
             referralCode: null,
             referralCredits: 0,
+            // A live authenticator secret on a deleted account is a working
+            // second factor for a first factor that no longer exists.
+            twoFactorEnabled: false,
+            twoFactorSecret: null,
+            twoFactorEnabledAt: null,
+            twoFactorRecoveryCodes: { set: [] },
+            // Both OAuth subject identifiers. These are unique columns, so
+            // leaving them also meant the same Google or Facebook account
+            // could never sign up again — the deleted row still owned them.
+            googleId: null,
+            facebookId: null,
+            // Her gender verification. The status goes back to UNVERIFIED
+            // rather than being left at VERIFIED or REJECTED, because either
+            // of those is a finding about a person we have agreed to stop
+            // holding a record of.
+            womanSelfAttested: false,
+            womanVerificationStatus: WomanVerificationStatus.UNVERIFIED,
+            womanVerifiedAt: null,
+            // Consent is a record of a choice a person made. There is no
+            // person here any more to have made it.
+            consentMarketing: false,
+            consentDataProcessing: false,
+            consentCookies: false,
+            consentUpdatedAt: new Date(),
+            // The payout account. Kept clear of a row nobody can sign in to.
+            stripeConnectAccountId: null,
+            stripeConnectStatus: null,
+            notificationPreferences: Prisma.DbNull,
+            inviteCodeId: null,
           },
         }),
       ]);

@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Database, Trash2, Download, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useExportMyData, useDeleteAccount } from '@/lib/hooks';
+import { useAuth, useExportMyData, useDeleteAccount } from '@/lib/hooks';
 import { userApi } from '@/lib/api';
 import { getStoredPreference } from '@/lib/utils';
 import { BlockedMembers } from '@/components/safety/BlockedMembers';
 
 export default function PrivacySettingsPage() {
+  const { user } = useAuth();
   const exportMyData = useExportMyData();
   const deleteAccount = useDeleteAccount();
   const [isDownloading, setIsDownloading] = useState(false);
@@ -18,19 +19,27 @@ export default function PrivacySettingsPage() {
   const [consentCookies, setConsentCookies] = useState(false);
   const [consentDoNotSell, setConsentDoNotSell] = useState(false);
 
-  const isUsRegion = useMemo(
-    () => getStoredPreference('athena.region', 'ANZ') === 'US',
-    []
-  );
-  const isUkEuRegion = useMemo(() => {
-    const region = getStoredPreference('athena.region', 'ANZ');
-    return region === 'UK' || region === 'EU';
-  }, []);
+  /*
+   * Which legal regime's controls this page offers, from the member's record
+   * rather than from her browser.
+   *
+   * All three of these read `getStoredPreference('athena.region', 'ANZ')` — a
+   * localStorage key written by the language settings page. On a device where
+   * that key had never been set it fell to 'ANZ' whatever her account said, and
+   * on a device where she had once flipped it, it stayed flipped. Which
+   * statutory rights a member is offered is not a display preference; it is the
+   * compliance artifact, and for a page that records consent it has to come
+   * from the same value the server acts on.
+   *
+   * User.region is authoritative and is already returned on /auth/me. The
+   * stored key remains only as the fallback for the moment before the user
+   * record has loaded, which is the same order billing settings uses.
+   */
+  const region = user?.region || getStoredPreference('athena.region', 'ANZ');
+  const isUsRegion = useMemo(() => region === 'US', [region]);
+  const isUkEuRegion = useMemo(() => region === 'UK' || region === 'EU', [region]);
   // The home regime: a Queensland company under the Privacy Act 1988.
-  const isAustralianRegion = useMemo(
-    () => getStoredPreference('athena.region', 'ANZ') === 'ANZ',
-    []
-  );
+  const isAustralianRegion = useMemo(() => region === 'ANZ', [region]);
 
   useEffect(() => {
     let active = true;

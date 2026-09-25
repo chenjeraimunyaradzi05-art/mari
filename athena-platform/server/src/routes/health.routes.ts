@@ -308,7 +308,21 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     process.env.RENDER_ENV === 'production';
 
   const workersEnabled = process.env.ENABLE_WORKERS === 'true';
-  const videoSimulationAllowed = process.env.VIDEO_ALLOW_SIMULATION === 'true';
+  // The two names that actually decide whether the video worker hands a reel to
+  // an external transcoder or runs the ffmpeg pipeline in this process:
+  // `canSimulateWorker('VIDEO_PROCESSING')` in services/workers.service.ts reads
+  // WORKER_ALLOW_SIMULATION and VIDEO_PROCESSING_ALLOW_SIMULATION, and nothing
+  // else.
+  //
+  // This endpoint used to gate the media requirement on VIDEO_ALLOW_SIMULATION,
+  // a third name that no worker, service or util reads — it appears only here,
+  // in scripts/check-env.js, and as a literal "false" in render.yaml and
+  // fly.toml. So the gate and the behaviour it was guarding keyed on different
+  // variables: setting VIDEO_ALLOW_SIMULATION=true made readiness stop asking
+  // for a processor while the worker went on demanding one and throwing, and
+  // setting the real flag left readiness failing for a deployment that was
+  // transcoding perfectly well. Both directions were wrong, and both looked
+  // like a configuration mistake rather than a bug in the check.
   const workerSimulationAllowed =
     process.env.WORKER_ALLOW_SIMULATION === 'true' ||
     process.env.VIDEO_PROCESSING_ALLOW_SIMULATION === 'true';
@@ -340,7 +354,15 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     envCheck('AWS_REGION', 'media', production, 'AWS region is not configured'),
     envCheck('AWS_ACCESS_KEY_ID', 'media', production, 'AWS access key is not configured'),
     envCheck('AWS_SECRET_ACCESS_KEY', 'media', production, 'AWS secret key is not configured'),
-    envCheck('VIDEO_PROCESSOR_URL', 'media', production && !videoSimulationAllowed, 'Production video processor is not configured'),
+    // There is no VIDEO_PROCESSOR_URL check in the media category any more.
+    // It required a transcoder URL of every production deployment whether the
+    // BullMQ workers were running or not, which is a requirement the platform
+    // does not have: with ENABLE_WORKERS unset, a reel is processed by
+    // services/video-pipeline.service.ts in this process, using the ffmpeg
+    // binary from the ffmpeg-static package, and no external service is
+    // involved at any point. The one place the URL matters is the video worker,
+    // and the check for that is in the workers category below, where it can see
+    // whether the workers are enabled.
     anyEnvCheck('AI_PROVIDER_KEY', ['AI_OPENAI_API_KEY', 'OPENAI_API_KEY'], 'ai', production, 'AI provider key is not configured'),
     // Reported, never required — and it used to be the reason this endpoint
     // could not return "ready" at all. The Python ML service has no trained
@@ -364,11 +386,20 @@ router.get('/launch-readiness', async (req: Request, res: Response) => {
     ),
     envCheck('OPENSEARCH_NODE', 'search', openSearchEnabled, 'OpenSearch is enabled but OPENSEARCH_NODE is not configured'),
     envCheck('REDIS_URL', 'workers', production || workersEnabled, 'Redis is required for production queues/workers'),
+    // Required, and worth being blunt about why: with the workers enabled in
+    // production and neither simulation flag set, the video worker calls
+    // callVideoProcessor() unconditionally, and postJson() throws
+    // "Video processor URL is required for production worker processing" when
+    // the URL is absent. It does not fall back to the in-process pipeline it
+    // shares every other step with. So this exact combination means every reel
+    // a member uploads fails its job and never leaves PROCESSING — which is a
+    // launch blocker, not a missing integration.
     envCheck(
       'VIDEO_PROCESSOR_URL',
       'workers',
       workersEnabled && production && !workerSimulationAllowed,
-      'Video worker needs VIDEO_PROCESSOR_URL when simulation is disabled'
+      'Reels will not publish: the video worker is enabled and has no transcoder to call. ' +
+        'Set VIDEO_PROCESSOR_URL, or set VIDEO_PROCESSING_ALLOW_SIMULATION=true to transcode in this process with ffmpeg.'
     ),
     // Push runs in process through Expo's API; the token only matters when the
     // Expo project has enhanced push security turned on.

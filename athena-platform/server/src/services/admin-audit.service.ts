@@ -103,7 +103,13 @@ export type AdminAuditAction =
   | 'INDIGENOUS_RESOURCE_DELETED'
   | 'CREDENTIAL_ASSESSMENT_UPDATED'
   // Member-facing queues
-  | 'FEEDBACK_UPDATED';
+  | 'FEEDBACK_UPDATED'
+  // Seeding. Hard-blocked in production, but a demo or CI environment that
+  // mints an administrator account and hands back its password should still be
+  // able to say when that happened and from where.
+  | 'SEED_ADMIN_ACCOUNT_CREATED'
+  | 'SEED_ADMIN_PASSWORD_ROTATED'
+  | 'SEED_CONTENT_RUN';
 
 export interface AdminAuditDetail {
   /** The Prisma model the row belongs to, e.g. 'FeatureFlag'. */

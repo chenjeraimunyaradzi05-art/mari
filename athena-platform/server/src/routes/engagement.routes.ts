@@ -7,8 +7,30 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, AuthRequest, optionalAuth } from '../middleware/auth';
 import * as engagementService from '../services/engagement.service';
 import { logger } from '../utils/logger';
+import { createRateLimiter } from '../middleware/rateLimiter';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
+
+/**
+ * The check-in is once a day by definition, so anything past a handful of
+ * calls is a script. It had no ceiling of its own at all: the global tier
+ * limit allowed two hundred calls every fifteen minutes, each of which used
+ * to pay out. The award is idempotent now, and this keeps the write traffic
+ * down as well.
+ */
+const checkInLimiter = createRateLimiter({
+  max: 20,
+  windowMs: 60 * 60 * 1000,
+  skip: () => process.env.NODE_ENV === 'test' || !process.env.REDIS_URL,
+  keyGenerator: (req) => `engagement:check-in:${(req as AuthRequest).user?.id || req.ip}`,
+  handler: (_req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'You have already checked in today. Come back tomorrow.',
+    });
+  },
+});
 
 // ==========================================
 // ACHIEVEMENTS
@@ -20,7 +42,23 @@ const router = Router();
  */
 router.get('/achievements', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const achievements = await engagementService.getUserAchievements((req as AuthRequest).user!.id);
+    const userId = (req as AuthRequest).user!.id;
+
+    // Reconciled before the panel is drawn. The content and social checks are
+    // wired into posting, publishing a reel and accepting a follow request,
+    // but a follow can also arrive by a path that does not run them, and
+    // every badge here is derived from a count rather than from an event. So
+    // opening the panel asks the counts one more time: whatever the member
+    // has genuinely earned is awarded before she is shown the list, instead
+    // of her reading "Rising Star — reached 100 followers" greyed out with
+    // four hundred followers. Both checks award only what is not already
+    // held, and a failure must not stop her seeing the panel.
+    await bestEffort('engagement.achievements-reconcile', async () => {
+      await engagementService.checkContentAchievements(userId);
+      await engagementService.checkSocialAchievements(userId);
+    });
+
+    const achievements = await engagementService.getUserAchievements(userId);
     res.json(achievements);
   } catch (error) {
     next(error);
@@ -104,17 +142,22 @@ router.get('/streaks', authenticate, async (req: Request, res: Response, next: N
  * POST /api/engagement/streaks/check-in
  * Record a login check-in for streak tracking
  */
-router.post('/streaks/check-in', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/streaks/check-in', authenticate, checkInLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await engagementService.updateStreak((req as AuthRequest).user!.id, 'login');
-    
-    // Award XP for daily check-in (only if streak continues)
-    if (result.currentStreak > 0) {
-      const xpAmount = Math.min(10 + result.currentStreak * 2, 50);
-      await engagementService.addXP((req as AuthRequest).user!.id, xpAmount, 'Daily check-in');
+
+    // XP is paid for the day the check-in recorded, not for the request. The
+    // test used to be `currentStreak > 0`, which every call of the day passes
+    // because updateStreak returns the streak it already had — so holding the
+    // endpoint open paid up to fifty XP a call onto the public leaderboard.
+    // recordedToday is true exactly once per member per day.
+    let awardedXp = 0;
+    if (result.recordedToday) {
+      awardedXp = Math.min(10 + result.currentStreak * 2, 50);
+      await engagementService.addXP((req as AuthRequest).user!.id, awardedXp, 'Daily check-in');
     }
 
-    res.json(result);
+    res.json({ ...result, awardedXp });
   } catch (error) {
     next(error);
   }

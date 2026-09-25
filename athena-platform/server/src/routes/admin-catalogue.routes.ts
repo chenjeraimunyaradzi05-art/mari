@@ -25,7 +25,9 @@ import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
+import { bestEffort } from '../utils/best-effort';
 import { recordAdminAction } from '../services/admin-audit.service';
+import { notifyAdmins } from '../services/admin-notify.service';
 
 const router = Router();
 
@@ -265,6 +267,69 @@ router.patch('/accelerator/cohorts/:id', ...adminOnly, async (req: AuthRequest, 
       include: { sessions: { orderBy: { weekNumber: 'asc' } }, ...cohortInclude },
     });
 
+    // Cancelling a cohort is not a status change, it is news for the women who
+    // were going to be in it.
+    //
+    // Until now this route wrote CANCELLED and returned. Nobody was told: a
+    // founder who had paid her place kept an ACTIVE enrolment on her dashboard,
+    // a countdown to a start date that would never come, and a calendar of
+    // sessions nobody would host. She would have found out by turning up.
+    //
+    // The refund is the other half and it is not automatic — there is no refund
+    // path on the platform, so a payment already taken has to be returned by
+    // hand. What this route can do is make sure that debt is never invisible:
+    // every participant hears immediately, and the paid enrolments are named in
+    // the audit record and put in front of the admin team as money owed rather
+    // than left to be discovered in a chargeback. No amount is quoted to her,
+    // because the enrolment does not store what she was charged and the
+    // cohort's price may have been edited since.
+    const nowCancelled = cohort.status === 'CANCELLED' && existing.status !== 'CANCELLED';
+    let affected: Array<{ id: string; userId: string; paymentStatus: string }> = [];
+    if (nowCancelled) {
+      affected = await prisma.acceleratorEnrollment.findMany({
+        where: { cohortId: cohort.id },
+        select: { id: true, userId: true, paymentStatus: true },
+      });
+
+      for (const enrollment of affected) {
+        const paid = enrollment.paymentStatus === 'PAID';
+        const line = paid
+          ? `The ${cohort.name} cohort has been cancelled and will not run. You paid for your place, and that payment has not been refunded automatically — tell us how to return it and we will.`
+          : `The ${cohort.name} cohort has been cancelled and will not run. You have not been charged for your place.`;
+        // One member's email bouncing must not stop the next member being told,
+        // and none of it may undo a cancellation that has already been written.
+        await bestEffort(`accelerator cohort ${cohort.id} cancellation notice to ${enrollment.userId}`, () =>
+          tellMember(
+            enrollment.userId,
+            `The ${cohort.name} accelerator cohort has been cancelled`,
+            line,
+            paid ? '/contact' : '/dashboard/accelerator'
+          )
+        );
+      }
+
+      const owedRefunds = affected.filter((e) => e.paymentStatus === 'PAID');
+      if (owedRefunds.length > 0) {
+        logger.warn('Accelerator cohort cancelled with paid enrolments awaiting refund', {
+          cohortId: cohort.id,
+          enrollmentIds: owedRefunds.map((e) => e.id),
+          cohortPriceAud: String(cohort.priceAud),
+        });
+        await bestEffort(`accelerator cohort ${cohort.id} refund notice to admins`, () =>
+          notifyAdmins({
+            title: 'A cancelled cohort has payments to return',
+            message: `${cohort.name} was cancelled with ${owedRefunds.length} paid ${owedRefunds.length === 1 ? 'place' : 'places'}. Each of those founders has been told her payment has not come back yet. ATHENA has no automatic refund for this; they have to be returned by hand.`,
+            link: '/admin/accelerator',
+            data: {
+              kind: 'ACCELERATOR_COHORT_REFUNDS_DUE',
+              cohortId: cohort.id,
+              enrollmentIds: owedRefunds.map((e) => e.id),
+            },
+          })
+        );
+      }
+    }
+
     logger.info('Accelerator cohort updated', { cohortId: cohort.id, by: req.user!.id });
 
     await recordAdminAction(req, 'ACCELERATOR_COHORT_UPDATED', {
@@ -273,6 +338,12 @@ router.patch('/accelerator/cohorts/:id', ...adminOnly, async (req: AuthRequest, 
       changedFields: Object.keys(data),
       previousStatus: existing.status,
       status: cohort.status,
+      ...(nowCancelled
+        ? {
+            enrolmentsNotified: affected.length,
+            refundsOwedEnrollmentIds: affected.filter((e) => e.paymentStatus === 'PAID').map((e) => e.id),
+          }
+        : {}),
     });
 
     res.json({ success: true, data: cohort });

@@ -44,8 +44,30 @@ export function apiUrl(): string {
   return (process.env.API_URL || 'http://localhost:5000').replace(/\/$/, '');
 }
 
+const LOOPBACK_HOSTS = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?$/i;
+
+/**
+ * The URL a locally stored file is served from.
+ *
+ * This string is written into the database row — the avatar, the post image,
+ * the résumé, the reel thumbnail — so it is not a setting that can be
+ * corrected after the fact. A host that stored uploads with API_URL unset
+ * persisted `http://localhost:5000/uploads/...` on every one of those rows,
+ * and fixing the variable afterwards did nothing for the files already
+ * saved: they stay broken for their owners forever.
+ *
+ * env.ts now refuses to start a production process without a real API_URL,
+ * and this refuses to write the row if one ever gets past it. A failed upload
+ * she can retry is better than a picture that silently never loads again.
+ */
 export function localFileUrl(key: string): string {
-  return `${apiUrl()}/uploads/${normalizeKey(key)}`;
+  const base = apiUrl();
+  if (process.env.NODE_ENV === 'production' && LOOPBACK_HOSTS.test(base)) {
+    throw new Error(
+      'Refusing to store media against a loopback API_URL: the URL is persisted on the row and would be permanently broken. Set API_URL to the address this API answers on.'
+    );
+  }
+  return `${base}/uploads/${normalizeKey(key)}`;
 }
 
 /** Resolves a key under the uploads root, refusing anything that escapes it. */

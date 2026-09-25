@@ -202,6 +202,56 @@ function resolves(target, docFile, index) {
   return (index.byLastSegment.get(segment) || []).some((p) => p.endsWith(`/${tail}`));
 }
 
+// ------------------------------------------------------------ ignored targets
+
+/**
+ * Of the given targets, the ones git is configured to ignore.
+ *
+ * A path covered by a .gitignore rule can never appear in the index, so every
+ * such citation was reported as a broken reference — and every one of them was
+ * a false positive. The case that made this worth fixing:
+ * SECURITY-HARDENING-CHANGELOG.md lists the patterns added to .gitignore, one
+ * of which is `__pycache__/`. That sentence is not a claim that a directory
+ * exists; it is a claim about an ignore rule, and the rule is there. CI failed
+ * on it, on main, with nothing a reader could do to satisfy the check short of
+ * deleting a true sentence — which is how a gate stops being read.
+ *
+ * NOT_A_PATH already carried a hand-written version of this reasoning for
+ * node_modules. Asking git is the general form of it, and it stays right when
+ * .gitignore changes.
+ *
+ * `git check-ignore` exits 1 when nothing matched, which is a result and not a
+ * failure, so only a missing binary or an unreadable repository is fatal here —
+ * and trackedFiles() has already proved neither is the case.
+ */
+function ignoredByGit(targets) {
+  // Asked exactly as the document wrote it, trailing slash included: git treats
+  // a pathname without one as a file, and a directory-only rule such as
+  // `__pycache__/` does not match a file called `__pycache__`. Trimming the
+  // slash first — the obvious thing to do — silently answers "not ignored" for
+  // every directory rule there is.
+  const list = [...new Set(targets.filter(Boolean))];
+  if (list.length === 0) return new Set();
+
+  let out = '';
+  try {
+    out = execFileSync('git', ['check-ignore', '--stdin', '-z'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      input: `${list.join('\0')}\0`,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    // status 1 is "no path matched"; anything else means the question could not
+    // be asked, and silently treating that as "nothing is ignored" would bring
+    // the false positives back without saying so.
+    if (error.status === 1) return new Set();
+    if (error.status !== 0) fail(`git check-ignore failed: ${error.message}`);
+  }
+
+  return new Set(out.split('\0').filter(Boolean));
+}
+
 // -------------------------------------------------------------------- baseline
 
 const keyOf = (finding) => `${finding.file}|${finding.target}`;
@@ -258,6 +308,11 @@ function main() {
       findings.push({ file: doc, line: citation.line, target: citation.target });
     }
   }
+
+  const ignored = ignoredByGit(findings.map((f) => f.target));
+  const reportable = findings.filter((f) => !ignored.has(f.target));
+  findings.length = 0;
+  findings.push(...reportable);
 
   findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 

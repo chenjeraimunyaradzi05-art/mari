@@ -1,13 +1,37 @@
 #!/usr/bin/env node
 /**
  * Production Database Migration Dry-Run
- * Phase 5: Mobile Parity & Production - Step 98
- * 
- * Validates schema migrations against a staging replica before production deployment.
- * 
+ *
+ * Applies the pending migrations to a copy of production and reports what they
+ * did, before the same SQL touches the real database.
+ *
+ * Where STAGING_DATABASE_URL comes from, because this is the question that kept
+ * the script unused: there is no staging environment. There is one deployment,
+ * and it is production. What there is instead is Neon, and a Neon *branch* is a
+ * copy-on-write clone of the production database — real data, real row counts,
+ * real constraints, created in seconds and costing nothing until it is written
+ * to. That is the staging database this script wants, and it is why the
+ * variable was never in any .env.example: it is not a standing value, it is a
+ * branch you make for the rehearsal and delete afterwards.
+ *
+ *   Neon console → Branches → New branch → from `production`
+ *   or: neonctl branches create --name migration-rehearsal
+ *
+ * Then paste its connection string in:
+ *
+ *   STAGING_DATABASE_URL="postgresql://...neon.tech/athena?sslmode=require" \
+ *     node scripts/migration-dry-run.js
+ *
  * Usage:
  *   node scripts/migration-dry-run.js
  *   node scripts/migration-dry-run.js --apply (actually run migrations)
+ *
+ * This is the rehearsal against real data. It is not the only guard: CI already
+ * runs `prisma migrate deploy` and `prisma migrate diff --exit-code` against an
+ * empty Postgres on every push, so migration SQL that is simply broken, and a
+ * schema.prisma edit that shipped without its migration, both fail there. What
+ * CI cannot tell you is how a migration behaves against three years of rows,
+ * which is what this is for.
  */
 
 const { execSync } = require('child_process');
@@ -44,7 +68,27 @@ function validateEnvironment() {
   log('Validating environment...', 'step');
 
   if (!CONFIG.stagingUrl) {
-    throw new Error('STAGING_DATABASE_URL environment variable is required');
+    // The bare "is required" this used to throw sent whoever ran it looking for
+    // a staging environment that does not exist, and the script went unused for
+    // exactly as long as that took. Say where the value comes from.
+    throw new Error(
+      'STAGING_DATABASE_URL is required, and there is no standing staging environment to take it from.\n' +
+        'Make a Neon branch of production — it is a copy-on-write clone, so it is instant and free:\n' +
+        '  Neon console → Branches → New branch → from production\n' +
+        '  or: neonctl branches create --name migration-rehearsal\n' +
+        'then run:\n' +
+        '  STAGING_DATABASE_URL="<the branch connection string>" node scripts/migration-dry-run.js\n' +
+        'Delete the branch when the rehearsal is done.'
+    );
+  }
+
+  if (CONFIG.stagingUrl === CONFIG.productionUrl) {
+    // Rehearsing against production is not a rehearsal, and --apply would then
+    // run the migrations for real while reporting that it was practising.
+    throw new Error(
+      'STAGING_DATABASE_URL and DATABASE_URL are the same connection string. ' +
+        'This script writes to the staging one — point it at a Neon branch, not at production.'
+    );
   }
 
   if (!fs.existsSync(CONFIG.prismaSchemaPath)) {

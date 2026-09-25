@@ -33,10 +33,18 @@ labelled a forecast is worse than no number, because a developer reading the
 response had no way to tell the two apart — and the switch that was supposed to
 keep it out of production was an environment-variable default. A 503 that says
 "there is no trained model" is the honest answer, and it is now the only one.
+
+Deleting the stand-in from this file did not by itself close the hole, because
+the trainer could still produce one. ``career_compass``'s trainer fits XGBoost to
+a generated dataset whose target is a weighted sum of its own features, and what
+it writes to disk is an ordinary loadable ``model.joblib``. So every artefact now
+carries a ``model_card.json`` saying what it was fitted to, and this loader
+refuses any card that says ``synthetic``. See ``_unservable_reason``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -114,6 +122,53 @@ def _model_directories() -> List[Path]:
     return directories
 
 
+#: The file a trainer writes beside its artefact to say what it was fitted to.
+MODEL_CARD_FILENAME = "model_card.json"
+
+
+def _unservable_reason(artifact: Path) -> Optional[str]:
+    """
+    Why this artefact must not answer a member, or ``None`` when nothing is wrong
+    with it.
+
+    An artefact on disk used to be proof enough. It is not: ``career_compass``'s
+    trainer will happily fit XGBoost to ``generate_synthetic_data`` — a target
+    that is a fixed weighted sum of the features — and write a ``model.joblib``
+    that is byte-for-byte as loadable as a real one. Loading that and serving its
+    output as a career growth score is the same fabrication the noise-fitted
+    ``RandomForestRegressor`` in this file used to commit, only laundered through
+    a file. So the trainer stamps every artefact with a model card, and a card
+    that says ``synthetic`` (or that says ``servable: false`` for any other
+    reason a future trainer decides on) keeps the model out of service.
+
+    A missing card is not a rejection. Nothing has ever written one before this,
+    and refusing an artefact somebody trained last year over a file that did not
+    exist then would be a different kind of wrong answer.
+    """
+    card_path = artifact.parent / MODEL_CARD_FILENAME
+    if not card_path.exists():
+        return None
+
+    try:
+        with card_path.open("r", encoding="utf-8") as handle:
+            card = json.load(handle)
+    except (OSError, ValueError) as error:
+        return f"{card_path} could not be read ({type(error).__name__}: {error})"
+
+    if not isinstance(card, dict):
+        return f"{card_path} does not contain an object"
+
+    if card.get("trained_on") == "synthetic":
+        note = card.get("note") or "the artefact was fitted to generated data, not real data"
+        return f"trained on synthetic data — {note}"
+
+    if card.get("servable") is False:
+        note = card.get("note") or "the trainer marked it unservable"
+        return f"marked unservable in {MODEL_CARD_FILENAME} — {note}"
+
+    return None
+
+
 def _require_artifacts() -> bool:
     """
     Whether a missing artefact should stop the service from starting.
@@ -176,6 +231,13 @@ class ModelLoader:
                     print(f"  – No artefact for {name}; nothing in this service reads it, so nothing is affected")
                 continue
 
+            unservable = _unservable_reason(artifact)
+            if unservable is not None:
+                self._status[name] = False
+                self._load_errors[name] = f"refused {artifact}: {unservable}"
+                print(f"  ✗ Refused {artifact} for {name}: {unservable}")
+                continue
+
             try:
                 self._models[name] = joblib.load(artifact)
                 self._status[name] = True
@@ -229,7 +291,7 @@ class ModelLoader:
             lines.append(f"  needed by   {MODEL_CONSUMERS.get(name, 'nothing in this service')}")
             lines.append(f"  expected at <model directory>/{MODEL_ARTIFACTS[name]}")
             if name in self._load_errors:
-                lines.append(f"  found but unreadable: {self._load_errors[name]}")
+                lines.append(f"  present but not usable: {self._load_errors[name]}")
             command = TRAINING_COMMANDS.get(name)
             if command:
                 lines.append(f"  produced by {command} (run from the ml/ directory)")
@@ -250,7 +312,19 @@ class ModelLoader:
         return "\n".join(lines)
 
     def get_model(self, name: str) -> Optional[Any]:
-        """Get a loaded model by name."""
+        """
+        Get a loaded model by name, or ``None`` when it is not loaded.
+
+        Gated on ``_status`` and not only on the dictionary, because this class
+        is a singleton whose state survives a second ``load_all_models``. Without
+        the gate, a model that loaded once and was refused on the next pass — an
+        artefact replaced by a synthetically trained one, say — would still be
+        handed to the endpoint that asked for it, while ``/health`` reported it
+        missing. The two must never be able to disagree: this is the function
+        every router calls to decide whether to answer or to raise 503.
+        """
+        if not self._status.get(name, False):
+            return None
         return self._models.get(name)
 
     def get_status(self) -> Dict[str, bool]:

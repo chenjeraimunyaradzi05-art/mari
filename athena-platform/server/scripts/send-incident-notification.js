@@ -84,8 +84,20 @@ async function main() {
     .map((value) => value.trim())
     .filter(Boolean);
 
+  // An incident notifier with no channel configured used to print one line and
+  // exit 0, which reads to every caller — a workflow step, a shell `&&`, a
+  // human watching a log — as "the notification was sent". It was not: nobody
+  // was told, and the exit code said the opposite. On a platform whose whole
+  // alerting story is this script, the run where it reaches nobody is the run
+  // that matters most, so it fails, the way the panic button reports
+  // NOBODY_REACHED rather than success.
   if (!webhookUrl && recipients.length === 0) {
-    console.log('No INCIDENT_WEBHOOK_URL or INCIDENT_NOTIFY_EMAILS configured. Nothing to send.');
+    console.error(
+      'NOBODY WAS NOTIFIED: neither INCIDENT_WEBHOOK_URL nor INCIDENT_NOTIFY_EMAILS is set, ' +
+        'so this incident reached no one. Configure one of them on whatever runs this.'
+    );
+    console.error(`Unsent notification: ${subject}`);
+    process.exitCode = 1;
     return;
   }
 

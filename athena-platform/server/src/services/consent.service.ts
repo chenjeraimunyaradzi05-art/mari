@@ -567,6 +567,41 @@ export class ConsentService {
 
     return { allowed: true };
   }
+
+  /**
+   * How many members hold a live consent of each type, counted from the ledger.
+   *
+   * The admin compliance screen counted the four legacy boolean columns on User
+   * instead — consentMarketing, consentDataProcessing, consentCookies,
+   * consentDoNotSell. The cookie banner mirrors onto those booleans as a best
+   * effort, but the Privacy Centre writes only these records, so a member who
+   * withdrew consent there left the compliance screen's number untouched. The
+   * privacy officer's view of consent and the platform's record of consent were
+   * two datasets that could quietly disagree, and the screen labelled
+   * "compliance" was showing the wrong one.
+   *
+   * An expired record is not a live consent, which is the same rule hasConsent
+   * applies. Article 18 restrictions are not netted off here: they suspend
+   * processing without withdrawing the consent, and are reported separately
+   * rather than being folded into a figure that would then match neither the
+   * ledger nor the gate.
+   */
+  async countLiveConsents(): Promise<Record<string, number>> {
+    const now = new Date();
+    const rows = await prisma.consentRecord.groupBy({
+      by: ['consentType'],
+      where: {
+        status: ConsentStatus.GRANTED,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      _count: { _all: true },
+    });
+
+    const counts: Record<string, number> = {};
+    for (const type of Object.values(ConsentType)) counts[type] = 0;
+    for (const row of rows) counts[row.consentType] = row._count._all;
+    return counts;
+  }
 }
 
 export const consentService = new ConsentService();

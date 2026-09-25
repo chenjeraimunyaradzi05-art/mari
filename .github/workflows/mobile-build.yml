@@ -60,6 +60,19 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # This workflow triggers on athena-platform/shared/** and then had no
+      # job that looked at it, so a change to the shared package fired a build
+      # that never compiled the thing that changed. The package has no lock
+      # file of its own and its tsconfig resolves React from the mobile app's
+      # node_modules, which the step above has already installed — so it is
+      # checked from here rather than in a job that would have to install the
+      # app a second time to do it.
+      - name: Type check the shared package
+        working-directory: athena-platform/shared
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
       # The mobile package has test suites covering the safety screen and the
       # panic alert, and CI ran none of them — the job only type-checked. A
       # screen that tells a woman her protections are off when they are on is

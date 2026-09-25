@@ -195,37 +195,63 @@ export function calculateLevel(xp: number): { level: number; currentXp: number; 
 // STREAK TRACKING
 // ==========================================
 
+/**
+ * Records today's activity against a streak.
+ *
+ * `recordedToday` is the part callers have to read. It is true only when this
+ * call is the one that moved the streak on, and false when the day had
+ * already been recorded — by an earlier call, or by another request that got
+ * there first. The check-in route used to decide whether to award XP from
+ * `currentStreak > 0`, which is true on every call of the day, so a member
+ * could hold the button and earn fifty XP a request, all day, straight onto
+ * the public leaderboard. Anything that pays out for a streak advancing has
+ * to ask whether it advanced.
+ */
 export async function updateStreak(userId: string, activity: 'post' | 'login' | 'learn'): Promise<{
   currentStreak: number;
   longestStreak: number;
   isNewRecord: boolean;
+  recordedToday: boolean;
 }> {
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  // Days are counted in UTC, the same basis the string comparison below uses.
+  const startOfToday = new Date(`${today}T00:00:00.000Z`);
   const cacheKey = CacheKeys.user(`${userId}:streak:${activity}`);
 
   // Get or create streak record
-  let streak = await prisma.userStreak.findFirst({
-    where: { userId, type: activity },
+  let streak = await prisma.userStreak.findUnique({
+    where: { userId_type: { userId, type: activity } },
   });
 
   if (!streak) {
-    streak = await prisma.userStreak.create({
-      data: {
-        userId,
-        type: activity,
-        currentStreak: 1,
-        longestStreak: 1,
-        lastActivityDate: new Date(),
-      },
-    });
-    return { currentStreak: 1, longestStreak: 1, isNewRecord: true };
+    try {
+      await prisma.userStreak.create({
+        data: {
+          userId,
+          type: activity,
+          currentStreak: 1,
+          longestStreak: 1,
+          lastActivityDate: now,
+        },
+      });
+      return { currentStreak: 1, longestStreak: 1, isNewRecord: true, recordedToday: true };
+    } catch {
+      // Two first-ever check-ins in the same instant: the unique on
+      // (userId, type) refuses the second, and the row the first one wrote is
+      // the answer. Falling through to re-read it also means the loser of the
+      // race does not get counted as a second day.
+      streak = await prisma.userStreak.findUnique({
+        where: { userId_type: { userId, type: activity } },
+      });
+      if (!streak) throw new Error('Streak row disappeared during creation');
+    }
   }
 
   const lastDate = streak.lastActivityDate.toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   let newCurrentStreak = streak.currentStreak;
-  let isNewRecord = false;
 
   if (lastDate === today) {
     // Already recorded today
@@ -233,6 +259,7 @@ export async function updateStreak(userId: string, activity: 'post' | 'login' | 
       currentStreak: streak.currentStreak,
       longestStreak: streak.longestStreak,
       isNewRecord: false,
+      recordedToday: false,
     };
   } else if (lastDate === yesterday) {
     // Consecutive day
@@ -243,16 +270,31 @@ export async function updateStreak(userId: string, activity: 'post' | 'login' | 
   }
 
   const newLongestStreak = Math.max(streak.longestStreak, newCurrentStreak);
-  isNewRecord = newLongestStreak > streak.longestStreak;
+  const isNewRecord = newLongestStreak > streak.longestStreak;
 
-  await prisma.userStreak.update({
-    where: { id: streak.id },
+  // Conditional on the stored date still being before today, so the write is
+  // the thing that decides the day rather than the read above. Two check-ins
+  // racing at midnight both computed the same new streak and both wrote it;
+  // now the second one's update matches nothing and it is told the day was
+  // already recorded.
+  const { count } = await prisma.userStreak.updateMany({
+    where: { id: streak.id, lastActivityDate: { lt: startOfToday } },
     data: {
       currentStreak: newCurrentStreak,
       longestStreak: newLongestStreak,
-      lastActivityDate: new Date(),
+      lastActivityDate: now,
     },
   });
+
+  if (count === 0) {
+    const current = await prisma.userStreak.findUnique({ where: { id: streak.id } });
+    return {
+      currentStreak: current?.currentStreak ?? streak.currentStreak,
+      longestStreak: current?.longestStreak ?? streak.longestStreak,
+      isNewRecord: false,
+      recordedToday: false,
+    };
+  }
 
   // Clear cache
   cacheDel(cacheKey);
@@ -271,6 +313,7 @@ export async function updateStreak(userId: string, activity: 'post' | 'login' | 
     currentStreak: newCurrentStreak,
     longestStreak: newLongestStreak,
     isNewRecord,
+    recordedToday: true,
   };
 }
 
@@ -370,22 +413,24 @@ export async function addXP(userId: string, amount: number, reason: string): Pro
   levelUp: boolean;
   newLevel: number;
 }> {
-  const user = await prisma.user.findUnique({
+  // Incremented rather than read-then-written. The old form loaded xp, added
+  // to it in memory and wrote the sum back, so two awards landing together —
+  // an achievement and the check-in that unlocked it, say — left only the
+  // larger of the two, and the XP transaction log then disagreed with the
+  // balance it claimed to be recording. The database does the addition, and
+  // the row it returns is what the balance actually became.
+  const updated = await prisma.user.update({
     where: { id: userId },
+    data: { xp: { increment: amount } },
     select: { xp: true },
   });
 
-  const oldXp = user?.xp || 0;
-  const newXp = oldXp + amount;
+  const newXp = updated.xp;
+  const oldXp = newXp - amount;
 
   const oldLevel = calculateLevel(oldXp).level;
   const { level: newLevel } = calculateLevel(newXp);
   const levelUp = newLevel > oldLevel;
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: { xp: newXp },
-  });
 
   // Log XP transaction
   await prisma.xpTransaction.create({
@@ -547,32 +592,60 @@ export async function getLeaderboard(
 // ACHIEVEMENT TRIGGERS
 // ==========================================
 
+/** A post reached this many views, and "Gone Viral" is earned. */
+const VIRAL_VIEW_THRESHOLD = 1000;
+
+/**
+ * Awards whatever the member's posting has earned. Counts rather than deltas,
+ * so it is safe to call after anything that might have moved one and it never
+ * double-awards — awardAchievement returns false for one already held.
+ *
+ * Reels are counted alongside posts. Creator Studio publishes Video rows, not
+ * Post rows with type VIDEO, so a member whose whole output is reels was
+ * counted as having posted nothing: "Video Star — posted 10 videos" could not
+ * be earned by posting ten videos.
+ */
 export async function checkContentAchievements(userId: string): Promise<void> {
-  const [postCount, videoCount, viralPost] = await Promise.all([
+  const [postCount, videoPostCount, reelCount, viralPost, viralReel] = await Promise.all([
     prisma.post.count({ where: { authorId: userId } }),
     prisma.post.count({ where: { authorId: userId, type: 'VIDEO' } }),
+    prisma.video.count({ where: { authorId: userId, status: 'PUBLISHED' } }),
     prisma.post.findFirst({
-      where: { authorId: userId, viewCount: { gte: 1000 } },
+      where: { authorId: userId, viewCount: { gte: VIRAL_VIEW_THRESHOLD } },
+      select: { id: true },
+    }),
+    prisma.video.findFirst({
+      where: { authorId: userId, viewCount: { gte: VIRAL_VIEW_THRESHOLD } },
+      select: { id: true },
     }),
   ]);
 
-  if (postCount === 1) {
+  if (postCount + reelCount >= 1) {
     await awardAchievement(userId, 'FIRST_POST');
   }
-  if (videoCount >= 10) {
+  if (videoPostCount + reelCount >= 10) {
     await awardAchievement(userId, 'VIDEO_CREATOR');
   }
-  if (viralPost) {
+  if (viralPost || viralReel) {
     await awardAchievement(userId, 'VIRAL_POST');
   }
 }
 
+/**
+ * Awards whatever the member's following has earned. Like the content check
+ * this reads totals rather than deltas, so calling it late — or twice, or on
+ * a member who passed the threshold before anything was watching — still
+ * lands the right badges and no duplicates.
+ *
+ * "First Fan" used to test `followerCount === 1`, which meant a member whose
+ * second follower arrived before anyone ran the check could never earn it.
+ */
 export async function checkSocialAchievements(userId: string): Promise<void> {
   const followerCount = await prisma.follow.count({
     where: { followingId: userId },
   });
 
-  if (followerCount === 1) {
+  if (followerCount >= 1) {
     await awardAchievement(userId, 'FIRST_FOLLOWER');
   }
   if (followerCount >= 100) {

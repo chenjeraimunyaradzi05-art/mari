@@ -16,6 +16,24 @@ const ML_SERVICE_TIMEOUT = parseInt(process.env.ML_SERVICE_TIMEOUT || '30000', 1
 const ML_SERVICE_RETRY_ATTEMPTS = 3;
 const ML_SERVICE_RETRY_DELAY = 1000;
 
+/**
+ * The health probe gets its own, much shorter deadline.
+ *
+ * A prediction is worth waiting thirty seconds for; asking whether the service
+ * is alive never is. The probe used to share ML_SERVICE_TIMEOUT, so an ML host
+ * that accepted the connection and then hung — a stuck container, a load
+ * balancer with no backend — cost a full thirty seconds on the feed load that
+ * happened to trigger the check, and on every /health/detailed call. The
+ * negative result is cached for thirty seconds now, which bounds how often that
+ * happens, but the first member through the door still paid it. Two seconds is
+ * long enough for a service on the same private network to answer a handler
+ * that reads two dictionaries, and short enough that a member never notices.
+ */
+const ML_HEALTH_TIMEOUT = Math.min(
+  parseInt(process.env.ML_SERVICE_HEALTH_TIMEOUT || '2000', 10) || 2000,
+  ML_SERVICE_TIMEOUT
+);
+
 // ===========================================
 // TYPES
 // ===========================================
@@ -39,7 +57,12 @@ export interface CareerProfile {
 export interface CareerPrediction {
   user_id: string;
   career_growth_score: number;
-  confidence: number;
+  /**
+   * Null when the model reports none, which is the case for the plain
+   * regressor the Python service loads. It used to be a required number and
+   * the service always sent 0.85 — the same figure whatever it had predicted.
+   */
+  confidence: number | null;
   salary_projection: Record<string, number>;
   role_trajectory: string[];
   skill_gaps: Array<{
@@ -55,8 +78,18 @@ export interface CareerPrediction {
     timeframe: string;
     details: string;
   }>;
-  peer_percentile: number;
-  industry_benchmark: number;
+  /**
+   * Null whenever nothing measured it, which is every case today.
+   *
+   * Both were required numbers, and the Python service filled them with four
+   * hard-coded thresholds over its own output and the literal 65.0. A woman was
+   * being told where she stood against her peers and her industry by a
+   * comparison that had never been made. The service now sends null; anything
+   * reading these has to decide what to show when there is no benchmark, which
+   * is the decision that was being skipped.
+   */
+  peer_percentile: number | null;
+  industry_benchmark: number | null;
 }
 
 export interface MenteeProfile {
@@ -270,10 +303,11 @@ class MLServiceClient {
 
   private async fetch<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    timeoutMs: number = this.timeout
   ): Promise<T> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       // The ML service answers only callers that carry the shared key, once one is configured on both sides.
@@ -339,6 +373,18 @@ class MLServiceClient {
           throw error;
         }
 
+        // 501 is in the 5xx band but it is not weather either: the service is
+        // saying this endpoint does not exist as a capability, which is the
+        // permanent answer from /api/v1/mentor-match/match now that it no
+        // longer invents mentors. Retrying it only spends the back-off delays.
+        if (error instanceof MlServiceError && error.status === 501) {
+          logger.error('ML Service does not implement this endpoint', {
+            endpoint,
+            detail: error.detail ?? error.message,
+          });
+          throw error;
+        }
+
         logger.warn(`ML Service request failed (attempt ${i + 1}/${attempts})`, {
           endpoint,
           error: error.message,
@@ -361,7 +407,11 @@ class MLServiceClient {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const response = await this.fetch<{ status: string; models_loaded?: Record<string, boolean> }>('/health');
+      const response = await this.fetch<{ status: string; models_loaded?: Record<string, boolean> }>(
+        '/health',
+        {},
+        ML_HEALTH_TIMEOUT
+      );
       // "healthy" is the only word that means every endpoint over there can
       // answer. The service also says "degraded", which it uses when it started
       // without a model artefact some endpoint needs — it is alive and most of
@@ -455,6 +505,18 @@ class MLServiceClient {
   // MENTOR MATCH
   // ===========================================
 
+  /**
+   * Answers 501 and will keep doing so. The Python service has no database and
+   * therefore no mentor directory; what it used to return here was five people
+   * who do not exist, scored and given names, ratings and mentee counts. The
+   * mentor matching this platform actually does runs in
+   * algorithm.service getMentorMatch, over live rows, behind
+   * GET /api/algorithms/mentor-match.
+   *
+   * Kept rather than deleted because the ML inference worker still names
+   * 'mentor_match' as an algorithm, and a caller that reaches it should get the
+   * refusal and its explanation rather than a missing-method TypeError.
+   */
   async findMentorMatches(
     mentee: MenteeProfile,
     options?: { mentor_pool?: string[]; max_results?: number; min_score?: number }

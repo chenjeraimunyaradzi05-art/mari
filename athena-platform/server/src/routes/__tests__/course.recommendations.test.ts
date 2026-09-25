@@ -45,7 +45,12 @@ describe('Course recommendations', () => {
     jest.clearAllMocks();
   });
 
-  it('GET /api/courses/recommendations/for-me returns popular courses when anonymous', async () => {
+  // The anonymous list is ordered on how many members have enrolled, then on a
+  // reported outcome rate where a provider has given one, then on newest. It
+  // used to order on employmentRate alone and call that popularity — which was
+  // an arbitrary order in practice, because nothing in the product writes
+  // employmentRate and Postgres sorts nulls first on a DESC order.
+  it('GET /api/courses/recommendations/for-me ranks anonymous visitors by enrolment, not by a column nobody writes', async () => {
     const mockCourses = [{ id: 'c1' }, { id: 'c2' }];
     (prisma.course.findMany as any).mockResolvedValue(mockCourses);
 
@@ -57,7 +62,11 @@ describe('Course recommendations', () => {
     expect(prisma.course.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 10,
-        orderBy: { employmentRate: 'desc' },
+        orderBy: [
+          { enrollments: { _count: 'desc' } },
+          { employmentRate: { sort: 'desc', nulls: 'last' } },
+          { createdAt: 'desc' },
+        ],
       }),
     );
 
@@ -113,7 +122,10 @@ describe('Course recommendations', () => {
     expect(prisma.course.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 50,
-        orderBy: [{ employmentRate: 'desc' }, { createdAt: 'desc' }],
+        // Nulls last, or the fifty-row pool the scorer works from is fifty
+        // rows with no reported outcome picked in whatever order the database
+        // returned them.
+        orderBy: [{ employmentRate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       }),
     );
   });

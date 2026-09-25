@@ -23,9 +23,23 @@
  *
  * Usage:
  *   node scripts/check-env.js [path/to/.env.production]   # exits 1 on MISSING
+ *   node scripts/check-env.js ../../render.yaml           # blueprint mode
  *   node scripts/check-env.js --names-only                # never prints values
  *
  * Values are never printed. Only names appear in the output.
+ *
+ * Blueprint mode, and why CI uses it rather than an env file: this check was
+ * written and then never wired into a pipeline, so the drift it exists to catch
+ * was the drift actually present. It could not be wired to an env file, because
+ * the only env file in the repository is `.env.production.template` and a
+ * template cannot hold a real SENDGRID_API_KEY — every run of it would report
+ * MISSING or PLACEHOLDER and the build would be permanently red for the one
+ * reason nobody can fix. `render.yaml` is the file that does hold the answer:
+ * it declares every name production will be given, and says of each whether
+ * Render generates it, derives it from another service, or asks the operator
+ * for it. Names are the half that drifts; the values were never the point. So a
+ * variable added to src/ without being added to the blueprint fails the build,
+ * and CI still reads no secret to do it.
  */
 
 const fs = require('fs');
@@ -71,7 +85,19 @@ const REQUIRED_IN_PRODUCTION = [
 
 // Required only when the matching switch is on.
 const CONDITIONAL = [
-  { when: (env) => env.ENABLE_WORKERS === 'true' && env.VIDEO_ALLOW_SIMULATION !== 'true' && env.WORKER_ALLOW_SIMULATION !== 'true', names: ['VIDEO_PROCESSOR_URL'], because: 'ENABLE_WORKERS=true without video simulation' },
+  // WORKER_ALLOW_SIMULATION and VIDEO_PROCESSING_ALLOW_SIMULATION are the two
+  // names canSimulateWorker() in services/workers.service.ts reads. This rule
+  // used to name VIDEO_ALLOW_SIMULATION instead, which no worker reads, so it
+  // excused a deployment that would still have thrown on every reel and
+  // demanded a URL from one that would not.
+  {
+    when: (env) =>
+      env.ENABLE_WORKERS === 'true' &&
+      env.WORKER_ALLOW_SIMULATION !== 'true' &&
+      env.VIDEO_PROCESSING_ALLOW_SIMULATION !== 'true',
+    names: ['VIDEO_PROCESSOR_URL'],
+    because: 'ENABLE_WORKERS=true and neither worker simulation flag is set, so the video worker calls an external transcoder',
+  },
   { when: (env) => env.OPENSEARCH_ENABLED === 'true', names: ['OPENSEARCH_NODE'], because: 'OPENSEARCH_ENABLED=true' },
 ];
 
@@ -101,6 +127,68 @@ function parseEnvFile(file) {
   }
   return env;
 }
+
+/**
+ * The env var names a Render blueprint declares, and the literal values it sets.
+ *
+ * Scanned line by line rather than parsed with a YAML library on purpose: this
+ * script has no dependencies and runs before `npm ci` in any pipeline that
+ * wants it, and `render.yaml` has one shape — a flat `envVars:` list of
+ * `- key: NAME` entries, each followed by `value:`, `sync: false`,
+ * `generateValue: true` or a `fromService:` block. A key whose value Render
+ * supplies is recorded as declared-without-a-literal, which is the honest
+ * reading: production will have it, this file does not know what it is.
+ */
+function parseBlueprintFile(file) {
+  const env = {};
+  const text = fs.readFileSync(file, 'utf8');
+  let currentKey = null;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const keyMatch = /^-\s*key:\s*(.+)$/.exec(line);
+    if (keyMatch) {
+      currentKey = unquote(keyMatch[1]);
+      // Declared. A literal on a following line replaces this; a `sync: false`
+      // or `generateValue: true` leaves it as the marker below, which every
+      // caller reads as "set, but this file does not hold the value".
+      env[currentKey] = SUPPLIED_BY_HOST;
+      continue;
+    }
+
+    if (!currentKey) continue;
+
+    const valueMatch = /^value:\s*(.*)$/.exec(line);
+    if (valueMatch) {
+      env[currentKey] = unquote(valueMatch[1]);
+      currentKey = null;
+      continue;
+    }
+
+    // A new list item that is not a key ends the entry we were reading.
+    if (line.startsWith('- ')) currentKey = null;
+  }
+
+  return env;
+}
+
+function unquote(value) {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * Stands for "declared in the blueprint, value supplied by the host". It is a
+ * string no operator would type, so a real env file cannot collide with it, and
+ * it is deliberately not in PLACEHOLDER_VALUES: a `sync: false` entry is a
+ * correct, finished declaration, not an unfilled blank.
+ */
+const SUPPLIED_BY_HOST = '<supplied-by-host>';
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -153,7 +241,8 @@ function main() {
   const stale = REQUIRED_IN_PRODUCTION.flat().filter((name) => !health.includes(`'${name}'`));
   if (stale.length) fail(`REQUIRED_IN_PRODUCTION names the readiness route no longer checks: ${stale.join(', ')} (update this script)`);
 
-  const env = parseEnvFile(file);
+  const blueprint = /\.ya?ml$/i.test(file);
+  const env = blueprint ? parseBlueprintFile(file) : parseEnvFile(file);
   const read = namesReadByCode();
 
   const missing = [];
@@ -177,11 +266,13 @@ function main() {
     .filter((name) => !read.has(name) && !isReadDynamically(name) && !HOST_PROVIDED.has(name))
     .sort();
 
-  console.log(`check-env: ${path.relative(process.cwd(), file) || file}`);
-  console.log(`  ${Object.keys(env).length} variables set · ${read.size} names read by src/`);
+  console.log(`check-env: ${path.relative(process.cwd(), file) || file}${blueprint ? ' (blueprint: names only)' : ''}`);
+  console.log(
+    `  ${Object.keys(env).length} variables ${blueprint ? 'declared' : 'set'} · ${read.size} names read by src/`
+  );
 
   if (missing.length) {
-    console.log(`\n  MISSING (required in production, not set):`);
+    console.log(`\n  MISSING (required in production, not ${blueprint ? 'declared' : 'set'}):`);
     for (const name of missing) console.log(`    - ${name}`);
   }
   if (placeholders.length) {

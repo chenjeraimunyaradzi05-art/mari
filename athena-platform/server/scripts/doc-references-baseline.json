@@ -1,17 +1,13 @@
 {
   "comment": "Broken documentation references, recorded so CI fails only on new ones. Burn this list down; do not add to it. Regenerate with: node scripts/check-doc-references.js --update-baseline",
-  "generated": "2026-09-17",
-  "count": 10,
+  "generated": "2026-09-24",
+  "count": 6,
   "known": [
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/.github/workflows/security-audit.yml",
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/.github/workflows/web.yml",
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/client/src/app/dashboard/profile/page.tsx",
     "ATHENA_IMPLEMENTATION_PLAN_100_STEPS.md|athena-platform/client/src/lib/store/ui.store.ts",
-    "AUTH_FIX_SUMMARY.md|athena-platform/server/.env",
-    "MOBILE_BUILD_GUIDE.md|athena-platform/mobile/google-service-account.json",
     "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|athena-platform/.github/workflows/web.yml",
-    "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|docs/strategy/",
-    "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|src/__tests__/validation.test.ts",
-    "athena-platform/ml/README.md|artifacts/"
+    "athena-platform/docs/PLATFORM_DOCS_AUDIT_REPORT_2026-03-22.md|src/__tests__/validation.test.ts"
   ]
 }

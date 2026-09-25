@@ -43,8 +43,12 @@ jest.mock('../../utils/prisma', () => ({
       update: jest.fn(async () => ({})),
       delete: jest.fn(async () => ({})),
     },
-    notification: { create: jest.fn(async () => ({})) },
-    user: { findUnique: jest.fn(async () => ({ email: 'fern@example.com', firstName: 'Fern' })) },
+    acceleratorEnrollment: { findMany: jest.fn(async () => []) },
+    notification: { create: jest.fn(async () => ({})), createMany: jest.fn(async () => ({ count: 1 })) },
+    user: {
+      findUnique: jest.fn(async () => ({ email: 'fern@example.com', firstName: 'Fern' })),
+      findMany: jest.fn(async () => [{ id: 'staff' }]),
+    },
   },
 }));
 
@@ -177,6 +181,78 @@ describe('Admin catalogue: cohorts, investors, insurance products, introductions
       expect(data.title).toBeUndefined();
 
       await request(app).patch('/api/admin/accelerator/cohorts/c1/sessions/s1').send({ meetingUrl: 'not a url' }).expect(400);
+    });
+
+    // Cancelling a cohort used to write CANCELLED and return. A founder who had
+    // paid kept an ACTIVE enrolment, a start date that would never come and a
+    // calendar of sessions nobody would host; she would have found out by
+    // turning up. The refund has to be made by hand — there is no refund path
+    // on the platform — so the least this route can do is make sure the money
+    // owed is named rather than lost.
+    it('cancelling a cohort tells every enrolled founder, and puts the payments still to be returned in front of staff', async () => {
+      prisma.acceleratorCohort.findUnique.mockResolvedValue({
+        id: 'c1',
+        name: 'Summer 2026',
+        status: 'ENROLLING',
+        startDate: new Date('2026-10-07T08:00:00.000Z'),
+        endDate: new Date('2026-12-30T08:00:00.000Z'),
+      });
+      prisma.acceleratorCohort.update.mockResolvedValue({
+        id: 'c1',
+        name: 'Summer 2026',
+        status: 'CANCELLED',
+        priceAud: '2500',
+        sessions: [],
+        _count: { enrollments: 2, sessions: 12 },
+      });
+      prisma.acceleratorEnrollment.findMany.mockResolvedValue([
+        { id: 'e1', userId: 'u1', paymentStatus: 'PAID' },
+        { id: 'e2', userId: 'u2', paymentStatus: 'PENDING' },
+      ]);
+
+      await request(app).patch('/api/admin/accelerator/cohorts/c1').send({ status: 'CANCELLED' }).expect(200);
+
+      const told = prisma.notification.create.mock.calls.map((call: any) => call[0].data);
+      expect(told.map((n: any) => n.userId)).toEqual(['u1', 'u2']);
+      // The woman who paid is told her money has not come back yet and where to
+      // ask; no amount is quoted, because the enrolment does not store what she
+      // was charged and the cohort price may have been edited since.
+      expect(told[0].message).toMatch(/has not been refunded automatically/);
+      expect(told[0].message).not.toMatch(/\$/);
+      expect(told[0].link).toBe('/contact');
+      expect(told[1].message).toMatch(/have not been charged/);
+      expect(told[1].link).toBe('/dashboard/accelerator');
+
+      // And the admins get the debt, not just the founder.
+      const adminNotice = prisma.notification.createMany.mock.calls[0][0].data[0];
+      expect(adminNotice.title).toMatch(/payments to return/);
+      expect(adminNotice.data).toMatchObject({ kind: 'ACCELERATOR_COHORT_REFUNDS_DUE', enrollmentIds: ['e1'] });
+
+      const audit = prisma.auditLog.create.mock.calls[0][0].data;
+      expect(JSON.stringify(audit)).toContain('refundsOwedEnrollmentIds');
+    });
+
+    it('an ordinary cohort edit tells nobody anything', async () => {
+      prisma.acceleratorCohort.findUnique.mockResolvedValue({
+        id: 'c1',
+        name: 'Summer 2026',
+        status: 'ENROLLING',
+        startDate: new Date('2026-10-07T08:00:00.000Z'),
+        endDate: new Date('2026-12-30T08:00:00.000Z'),
+      });
+      prisma.acceleratorCohort.update.mockResolvedValue({
+        id: 'c1',
+        name: 'Summer 2026 intake',
+        status: 'ENROLLING',
+        priceAud: '2500',
+        sessions: [],
+        _count: { enrollments: 2, sessions: 12 },
+      });
+
+      await request(app).patch('/api/admin/accelerator/cohorts/c1').send({ name: 'Summer 2026 intake' }).expect(200);
+
+      expect(prisma.acceleratorEnrollment.findMany).not.toHaveBeenCalled();
+      expect(prisma.notification.create).not.toHaveBeenCalled();
     });
 
     it('buildDefaultSessions covers every week of the curriculum exactly once', () => {

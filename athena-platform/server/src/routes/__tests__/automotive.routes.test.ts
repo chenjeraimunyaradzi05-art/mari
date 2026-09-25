@@ -2,7 +2,7 @@ import request from 'supertest';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
 type Row = Record<string, any>;
-const store: { cars: Row[]; reviews: Row[]; vehicles: Row[]; records: Row[]; listings: Row[]; purchases: Row[]; inspections: Row[]; mechanics: Row[]; bookings: Row[]; mechanicReviews: Row[]; dealerships: Row[]; applications: Row[]; notifications: Row[]; escrows: Row[]; testDrives: Row[]; referrals: Row[]; leads: Row[] } = { cars: [], reviews: [], vehicles: [], records: [], listings: [], purchases: [], inspections: [], mechanics: [], bookings: [], mechanicReviews: [], dealerships: [], applications: [], notifications: [], escrows: [], testDrives: [], referrals: [], leads: [] };
+const store: { cars: Row[]; reviews: Row[]; vehicles: Row[]; records: Row[]; listings: Row[]; purchases: Row[]; inspections: Row[]; mechanics: Row[]; bookings: Row[]; mechanicReviews: Row[]; dealerships: Row[]; applications: Row[]; notifications: Row[]; escrows: Row[]; testDrives: Row[]; tradeIns: Row[]; referrals: Row[]; leads: Row[]; audits: Row[] } = { cars: [], reviews: [], vehicles: [], records: [], listings: [], purchases: [], inspections: [], mechanics: [], bookings: [], mechanicReviews: [], dealerships: [], applications: [], notifications: [], escrows: [], testDrives: [], tradeIns: [], referrals: [], leads: [], audits: [] };
 let seq = 0;
 import { randomUUID } from "crypto";
 const id = (_p: string) => { seq += 1; return randomUUID(); };
@@ -20,7 +20,31 @@ const matches = (row: Row, where: Row | undefined): boolean => {
       if ('contains' in v) return typeof row[k] === 'string' && row[k].toLowerCase().includes(String(v.contains).toLowerCase());
       if ('has' in v) return Array.isArray(row[k]) && row[k].includes(v.has);
       if ('gte' in v || 'lte' in v || 'lt' in v || 'gt' in v) { const x = row[k] instanceof Date ? row[k].getTime() : row[k]; const t = (y: any) => (y instanceof Date ? y.getTime() : y); return (v.gte === undefined || x >= t(v.gte)) && (v.lte === undefined || x <= t(v.lte)) && (v.lt === undefined || x < t(v.lt)) && (v.gt === undefined || x > t(v.gt)); }
-      if ('some' in v || 'isEmpty' in v || 'path' in v) return true;
+      // `isEmpty` is answered properly because a live filter turns on it: the
+      // mechanic directory offers "or a workshop that works on anything" as
+      // the second half of its make filter, and while this returned true for
+      // every operator it could not name, that filter passed whatever it did.
+      // The bug it was hiding — every filter appended into one flat OR, so a
+      // make or a town widened the results instead of narrowing them — shipped
+      // and stayed shipped, with a green suite over it.
+      if ('isEmpty' in v) return Array.isArray(row[k]) ? (row[k].length === 0) === v.isEmpty : !v.isEmpty;
+      // `some` is answered for the same reason `isEmpty` is: a live filter
+      // turns on it. `?inspected=true` on the pre-loved search is
+      // `inspections: { some: { status: 'COMPLETED' } }`, and a buyer who
+      // ticks that box is asking to be shown only cars a workshop has already
+      // looked over — the one filter on that page with a safety claim behind
+      // it. While this returned true for every operator it could not name,
+      // the box could have selected nothing at all and the suite would still
+      // have been green. Answering it means the rows reaching this matcher
+      // have to carry their relations, which is what `relate` in table() is
+      // for; an unrelated row has no `inspections` array and matches nothing,
+      // which is the honest answer rather than a generous one.
+      if ('some' in v) return Array.isArray(row[k]) && row[k].some((child: Row) => matches(child, v.some as Row));
+      // `path` reads inside a Json column and is still unanswered. Only the
+      // reminder service's duplicate-notification check uses it, and the
+      // notification double here does not go through this matcher at all. See
+      // the deferred note about a real-database suite for this domain.
+      if ('path' in v) return true;
       return matches(row[k] ?? {}, v);
     }
     return row[k] === v;
@@ -43,68 +67,86 @@ const aggregateOver = (hit: Row[], { _avg, _count, _sum }: any = {}) => {
     _sum: over(_sum, (k) => { const v = numbers(k); return v.length ? v.reduce((s, x) => s + x, 0) : null; }),
   };
 };
-const table = (rows: () => Row[], defaults: () => Row = () => ({})) => ({
-  findMany: jest.fn(async ({ where, take, skip, orderBy }: any = {}) => { let out = rows().filter((r) => matches(r, where)); if (Array.isArray(orderBy)) { for (const o of [...orderBy].reverse()) { const [k, dir] = Object.entries(o)[0] as [string, string]; out = [...out].sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * (dir === 'desc' ? -1 : 1)); } } return out.slice(skip ?? 0, (skip ?? 0) + (take ?? out.length)).map((r) => ({ ...r })); }),
-  findFirst: jest.fn(async ({ where }: any = {}) => { const r = rows().find((x) => matches(x, where)); return r ? { ...r } : null; }),
-  findUnique: jest.fn(async ({ where }: any) => { const w = { ...where }; for (const k of Object.keys(w)) if (k.includes('_') && w[k] && typeof w[k] === 'object') { Object.assign(w, w[k]); delete w[k]; } const r = rows().find((x) => matches(x, w)); return r ? { ...r } : null; }),
-  count: jest.fn(async ({ where }: any = {}) => rows().filter((r) => matches(r, where)).length),
-  create: jest.fn(async ({ data }: any) => { const row = { id: id('r'), createdAt: new Date(), updatedAt: new Date(), ...defaults(), ...data }; rows().push(row); return row; }),
-  update: jest.fn(async ({ where, data }: any) => { const row = rows().find((r) => matches(r, where)); if (!row) throw new Error('not found'); for (const [k, v] of Object.entries(data as Row)) { if (v && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v) && ('increment' in v || 'decrement' in v)) row[k] = (row[k] ?? 0) + ((v as any).increment ?? 0) - ((v as any).decrement ?? 0); else if (v !== undefined) row[k] = v; } row.updatedAt = new Date(); return row; }),
-  updateMany: jest.fn(async ({ where, data }: any) => { const hit = rows().filter((r) => matches(r, where)); hit.forEach((r) => Object.assign(r, data)); return { count: hit.length }; }),
-  upsert: jest.fn(async ({ where, create, update }: any) => { const w = { ...where }; for (const k of Object.keys(w)) if (k.includes('_') && w[k] && typeof w[k] === 'object') { Object.assign(w, w[k]); delete w[k]; } const row = rows().find((r) => matches(r, w)); if (row) { Object.assign(row, update); return row; } const made = { id: id('r'), createdAt: new Date(), updatedAt: new Date(), ...defaults(), ...create }; rows().push(made); return made; }),
-  delete: jest.fn(async ({ where }: any) => { const i = rows().findIndex((r) => matches(r, where)); const [row] = rows().splice(i, 1); return row; }),
-  deleteMany: jest.fn(async () => ({ count: 0 })),
-  groupBy: jest.fn(async () => []),
-  // The rating helpers ask the database for the average instead of pulling
-  // every review row into memory, so every mocked model needs this or the
-  // handler dies with "prisma.carReview.aggregate is not a function". This is
-  // the plain version, over the store's own rows; a delegate wrapped in
-  // withRelations replaces it with one that can see across a relation.
-  aggregate: jest.fn(async (args: any = {}) => aggregateOver(rows().filter((r) => matches(r, args.where)), args)),
-});
+/**
+ * A model's rows, and — for the models whose handlers filter across a
+ * relation — the function that hangs those relations off each row.
+ *
+ * `relate` used to live outside in a wrapper that ran after the filtering,
+ * which meant every read filtered raw rows. A raw listing row holds only its
+ * own columns, so `inspections: { some: ... }` and `listing: { sellerId }`
+ * walked into nothing, and the matcher answered true to keep the suite
+ * moving. Relating first and filtering afterwards is what lets those
+ * conditions mean something; the write paths still work on the store's own
+ * objects, because that is where the state lives.
+ */
+const table = (rows: () => Row[], defaults: () => Row = () => ({}), relate: (row: Row) => Row = (r) => r) => {
+  const view = () => rows().map((r) => relate({ ...r }));
+  return {
+    findMany: jest.fn(async ({ where, take, skip, orderBy }: any = {}) => { let out = view().filter((r) => matches(r, where)); if (Array.isArray(orderBy)) { for (const o of [...orderBy].reverse()) { const [k, dir] = Object.entries(o)[0] as [string, string]; out = [...out].sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * (dir === 'desc' ? -1 : 1)); } } return out.slice(skip ?? 0, (skip ?? 0) + (take ?? out.length)); }),
+    findFirst: jest.fn(async ({ where }: any = {}) => view().find((x) => matches(x, where)) ?? null),
+    findUnique: jest.fn(async ({ where }: any) => { const w = { ...where }; for (const k of Object.keys(w)) if (k.includes('_') && w[k] && typeof w[k] === 'object') { Object.assign(w, w[k]); delete w[k]; } return view().find((x) => matches(x, w)) ?? null; }),
+    count: jest.fn(async ({ where }: any = {}) => view().filter((r) => matches(r, where)).length),
+    create: jest.fn(async ({ data }: any) => { const row = { id: id('r'), createdAt: new Date(), updatedAt: new Date(), ...defaults(), ...data }; rows().push(row); return relate({ ...row }); }),
+    update: jest.fn(async ({ where, data }: any) => { const row = rows().find((r) => matches(r, where)); if (!row) throw new Error('not found'); for (const [k, v] of Object.entries(data as Row)) { if (v && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v) && ('increment' in v || 'decrement' in v)) row[k] = (row[k] ?? 0) + ((v as any).increment ?? 0) - ((v as any).decrement ?? 0); else if (v !== undefined) row[k] = v; } row.updatedAt = new Date(); return relate({ ...row }); }),
+    updateMany: jest.fn(async ({ where, data }: any) => { const hit = rows().filter((r) => matches(r, where)); hit.forEach((r) => Object.assign(r, data)); return { count: hit.length }; }),
+    upsert: jest.fn(async ({ where, create, update }: any) => { const w = { ...where }; for (const k of Object.keys(w)) if (k.includes('_') && w[k] && typeof w[k] === 'object') { Object.assign(w, w[k]); delete w[k]; } const row = rows().find((r) => matches(r, w)); if (row) { Object.assign(row, update); return relate({ ...row }); } const made = { id: id('r'), createdAt: new Date(), updatedAt: new Date(), ...defaults(), ...create }; rows().push(made); return relate({ ...made }); }),
+    delete: jest.fn(async ({ where }: any) => { const i = rows().findIndex((r) => matches(r, where)); const [row] = rows().splice(i, 1); return row; }),
+    deleteMany: jest.fn(async () => ({ count: 0 })),
+    groupBy: jest.fn(async () => []),
+    // The rating helpers ask the database for the average instead of pulling
+    // every review row into memory, so every mocked model needs this or the
+    // handler dies with "prisma.carReview.aggregate is not a function". It
+    // goes through the same related view as the rest: dealershipRating
+    // filters on `where: { listing: { dealershipId } }`, and over raw
+    // purchase rows that finds nothing and averages null, which is the same
+    // answer a dealership with no reviews gets — so the assertion would have
+    // passed however wrong the filter was.
+    aggregate: jest.fn(async (args: any = {}) => aggregateOver(view().filter((r) => matches(r, args.where)), args)),
+  };
+};
 
 const users: Record<string, Row> = { member: { id: 'member', firstName: 'Mei', lastName: 'Lin', displayName: null, email: 'mei@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date('2025-01-01') }, seller: { id: 'seller', firstName: 'Ana', lastName: 'Ruiz', displayName: null, email: 'ana@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date('2025-01-01') }, mech: { id: 'mech', firstName: 'Jo', lastName: 'Park', displayName: null, email: 'jo@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date('2025-01-01') }, admin: { id: 'admin', firstName: 'Ad', lastName: 'Min', displayName: null, email: 'admin@athena.com', role: 'ADMIN', timezone: 'Australia/Brisbane', createdAt: new Date('2024-01-01') }, newbie: { id: 'newbie', firstName: 'New', lastName: 'One', displayName: null, email: 'new@athena.com', role: 'USER', timezone: 'Australia/Brisbane', createdAt: new Date() } };
 
 jest.mock('../../utils/prisma', () => {
-  /**
-   * A delegate whose rows carry their relations. aggregate belongs in here
-   * with the rest and not in the bare table: dealershipRating filters on
-   * `where: { listing: { dealershipId } }`, and a raw store row for a purchase
-   * holds only listingId, so matches() walks into an absent `listing`, finds
-   * nothing, and hands back an average of null over no rows. That is the same
-   * answer a dealership with no reviews gets, so a test asserting it would
-   * have passed however wrong the filter was. Relating the rows first, then
-   * filtering, is what makes the filter mean something.
-   */
-  const withRelations = (t: ReturnType<typeof table>, relate: (row: Row, args: any) => Row) => ({ ...t, findMany: jest.fn(async (args: any = {}) => (await t.findMany(args)).map((r: Row) => relate(r, args))), findFirst: jest.fn(async (args: any = {}) => { const r = await t.findFirst(args); return r ? relate(r, args) : null; }), findUnique: jest.fn(async (args: any) => { const r = await t.findUnique(args); return r ? relate(r, args) : null; }), create: jest.fn(async (args: any) => relate(await t.create(args), args)), update: jest.fn(async (args: any) => relate(await t.update(args), args)), aggregate: jest.fn(async (args: any = {}) => aggregateOver((await t.findMany({})).map((r: Row) => relate(r, args)).filter((r: Row) => matches(r, args.where)), args)) });
   const listingRel = (r: Row) => ({ ...r, seller: users[r.sellerId], dealership: r.dealershipId ? store.dealerships.find((d) => d.id === r.dealershipId) ?? null : null, inspections: store.inspections.filter((i) => i.listingId === r.id), purchases: store.purchases.filter((p) => p.listingId === r.id) });
   const purchaseRel = (r: Row) => ({ ...r, listing: listingRel(store.listings.find((l) => l.id === r.listingId)!), buyer: users[r.buyerId], seller: users[r.sellerId], escrow: r.escrowPaymentId ? store.escrows.find((e) => e.id === r.escrowPaymentId) ?? null : null });
   const bookingRel = (r: Row) => ({ ...r, mechanic: store.mechanics.find((m) => m.id === r.mechanicId), vehicle: r.vehicleId ? store.vehicles.find((v) => v.id === r.vehicleId) ?? null : null, review: store.mechanicReviews.find((x) => x.bookingId === r.id) ?? null, escrow: r.escrowPaymentId ? store.escrows.find((e) => e.id === r.escrowPaymentId) ?? null : null, user: users[r.userId] });
   const inspectionRel = (r: Row) => ({ ...r, listing: store.listings.find((l) => l.id === r.listingId), inspector: r.inspectorId ? store.mechanics.find((m) => m.id === r.inspectorId) ?? null : null, requestedBy: users[r.requestedById], escrow: r.escrowPaymentId ? store.escrows.find((e) => e.id === r.escrowPaymentId) ?? null : null });
   const carModelT = table(() => store.cars);
-  return { prisma: {
+  const client: Row = {
     user: { findUnique: jest.fn(async ({ where }: any) => users[where.id] ?? null), findMany: jest.fn(async ({ where }: any) => Object.values(users).filter((u) => matches(u, where))) },
     carModel: carModelT,
-    carReview: withRelations(table(() => store.reviews, () => ({ isHidden: false, helpfulCount: 0 })), (r) => ({ ...r, user: users[r.userId] })),
+    carReview: table(() => store.reviews, () => ({ isHidden: false, helpfulCount: 0 }), (r) => ({ ...r, user: users[r.userId] })),
     vehicle: table(() => store.vehicles, () => ({ isActive: true, nickname: null, variant: null, bodyType: null, colour: null, rego: null, regoState: null, vin: null, odometerKm: null, odometerAt: null, kmPerYear: null, purchasePrice: null, purchasedAt: null, boughtNew: false, newPrice: null, warrantyEndsAt: null, warrantyEndsKm: null, regoDueAt: null, insuranceRenewsAt: null, insurer: null, insurancePremium: null, nextServiceDueAt: null, nextServiceDueKm: null, notes: null, lastReminderKeys: null, carModelId: null })),
-    vehicleServiceRecord: withRelations(table(() => store.records), (r) => ({ ...r, mechanic: r.mechanicId ? store.mechanics.find((m) => m.id === r.mechanicId) ?? null : null })),
-    vehicleListing: withRelations(table(() => store.listings, () => ({ status: 'DRAFT', isFeatured: false, viewCount: 0, saveCount: 0, soldAt: null, suspendedReason: null, variant: null, colour: null, seats: null, videoUrl: null, suburb: null, city: null, postcode: null, vin: null, rego: null, regoExpires: null, ownersCount: null, ppsrCertificateUrl: null, warrantyNote: null, dealershipId: null, vehicleId: null, transmission: 'AUTOMATIC', serviceHistory: 'UNKNOWN', accidentHistory: 'NONE', ppsrChecked: false, roadworthy: false, warranty: 'NONE', riskFlags: [], riskScore: 0 })), listingRel),
+    vehicleServiceRecord: table(() => store.records, () => ({}), (r) => ({ ...r, mechanic: r.mechanicId ? store.mechanics.find((m) => m.id === r.mechanicId) ?? null : null })),
+    vehicleListing: table(() => store.listings, () => ({ status: 'DRAFT', isFeatured: false, viewCount: 0, saveCount: 0, soldAt: null, suspendedReason: null, variant: null, colour: null, seats: null, videoUrl: null, suburb: null, city: null, postcode: null, vin: null, rego: null, regoExpires: null, ownersCount: null, ppsrCertificateUrl: null, warrantyNote: null, dealershipId: null, vehicleId: null, transmission: 'AUTOMATIC', serviceHistory: 'UNKNOWN', accidentHistory: 'NONE', ppsrChecked: false, roadworthy: false, warranty: 'NONE', riskFlags: [], riskScore: 0 }), listingRel),
     vehicleListingSave: table(() => []),
-    vehiclePurchase: withRelations(table(() => store.purchases, () => ({ status: 'OFFERED', agreedAmount: null, platformFee: 0, message: null, sellerMessage: null, escrowPaymentId: null, paidAt: null, handedOverAt: null, inspectionEndsAt: null, releasedAt: null, disputeReason: null, disputeOpenedAt: null, disputeResolution: null, resolvedAt: null, resolvedById: null, transferNote: null, cancelledAt: null, cancelReason: null, reviewRating: null, reviewComment: null })), purchaseRel),
-    vehicleInspection: withRelations(table(() => store.inspections, () => ({ status: 'REQUESTED', inspectorId: null, purchaseId: null, scheduledAt: null, completedAt: null, outcome: null, summary: null, report: null, reportUrl: null, escrowPaymentId: null })), inspectionRel),
+    vehiclePurchase: table(() => store.purchases, () => ({ status: 'OFFERED', agreedAmount: null, platformFee: 0, message: null, sellerMessage: null, escrowPaymentId: null, paidAt: null, handedOverAt: null, inspectionEndsAt: null, releasedAt: null, disputeReason: null, disputeOpenedAt: null, disputeResolution: null, resolvedAt: null, resolvedById: null, transferNote: null, cancelledAt: null, cancelReason: null, reviewRating: null, reviewComment: null }), purchaseRel),
+    vehicleInspection: table(() => store.inspections, () => ({ status: 'REQUESTED', inspectorId: null, purchaseId: null, scheduledAt: null, completedAt: null, outcome: null, summary: null, report: null, reportUrl: null, escrowPaymentId: null }), inspectionRel),
     mechanic: table(() => store.mechanics, () => ({ isActive: true, isFeatured: false, featuredUntil: null, ratingAvg: 0, ratingCount: 0, transparencyAvg: 0, languages: ['English'], makes: [], services: [], acceptsBookings: true, slotMinutes: 60, availability: null, priceList: null })),
-    mechanicBooking: withRelations(table(() => store.bookings, () => ({ status: 'REQUESTED', dropOff: true, address: null, concern: null, odometerKm: null, quoteAmount: null, quoteLines: null, quoteNote: null, quotedAt: null, quoteAcceptedAt: null, partsRequested: null, finalAmount: null, escrowPaymentId: null, paidAt: null, workshopNote: null, completedAt: null, partsWarrantyMonths: null, labourWarrantyMonths: null, cancelReason: null, vehicleId: null })), bookingRel),
+    mechanicBooking: table(() => store.bookings, () => ({ status: 'REQUESTED', dropOff: true, address: null, concern: null, odometerKm: null, quoteAmount: null, quoteLines: null, quoteNote: null, quotedAt: null, quoteAcceptedAt: null, partsRequested: null, finalAmount: null, escrowPaymentId: null, paidAt: null, workshopNote: null, completedAt: null, partsWarrantyMonths: null, labourWarrantyMonths: null, cancelReason: null, vehicleId: null }), bookingRel),
     mechanicReview: table(() => store.mechanicReviews, () => ({ isHidden: false })),
     dealership: table(() => store.dealerships, () => ({ isActive: true, isFeatured: false, featuredUntil: null, ratingAvg: 0, ratingCount: 0, brands: [], financePartners: [], hours: null })),
-    testDriveRequest: withRelations(table(() => store.testDrives, () => ({ status: 'REQUESTED', dealerNote: null, confirmedAt: null, alternativeAt: null, note: null, carModelId: null, listingId: null })), (r) => ({ ...r, dealership: r.dealershipId ? store.dealerships.find((d) => d.id === r.dealershipId) ?? null : null, carModel: r.carModelId ? store.cars.find((c) => c.id === r.carModelId) ?? null : null, listing: r.listingId ? store.listings.find((l) => l.id === r.listingId) ?? null : null, user: users[r.userId] })),
-    tradeInRequest: table(() => []),
-    carReferral: withRelations(table(() => store.referrals, () => ({ status: 'PENDING', userId: null, dealershipId: null, referenceId: null, partner: null, note: null, createdById: null, confirmedAt: null, paidAt: null, feePercent: 0 })), (r) => ({ ...r, user: r.userId ? users[r.userId] ?? null : null, dealership: r.dealershipId ? store.dealerships.find((d) => d.id === r.dealershipId) ?? null : null })),
+    testDriveRequest: table(() => store.testDrives, () => ({ status: 'REQUESTED', dealerNote: null, confirmedAt: null, alternativeAt: null, note: null, carModelId: null, listingId: null }), (r) => ({ ...r, dealership: r.dealershipId ? store.dealerships.find((d) => d.id === r.dealershipId) ?? null : null, carModel: r.carModelId ? store.cars.find((c) => c.id === r.carModelId) ?? null : null, listing: r.listingId ? store.listings.find((l) => l.id === r.listingId) ?? null : null, user: users[r.userId] })),
+    tradeInRequest: table(() => store.tradeIns, () => ({ status: 'OPEN', quotes: [], dealershipId: null, variant: null, notes: null, photos: [], condition: 'GOOD', acceptedQuote: null }), (r) => ({ ...r, user: users[r.userId] })),
+    carReferral: table(() => store.referrals, () => ({ status: 'PENDING', userId: null, dealershipId: null, referenceId: null, partner: null, note: null, createdById: null, confirmedAt: null, paidAt: null, feePercent: 0 }), (r) => ({ ...r, user: r.userId ? users[r.userId] ?? null : null, dealership: r.dealershipId ? store.dealerships.find((d) => d.id === r.dealershipId) ?? null : null })),
     lead: table(() => store.leads, () => ({ status: 'NEW' })),
     carFinanceApplication: table(() => store.applications),
     notification: { create: jest.fn(async ({ data }: any) => { store.notifications.push(data); return data; }), findFirst: jest.fn(async () => null) },
     escrowPayment: table(() => store.escrows),
-    $transaction: jest.fn(async (ops: any[]) => Promise.all(ops)),
-  } };
+    auditLog: table(() => store.audits),
+  };
+  /**
+   * Both forms of $transaction, because the routes now use both. The
+   * interactive form hands the work the same client — this double has one
+   * connection and no isolation to speak of, so what a test proves about it is
+   * that the handler asks for a transaction and that everything inside one
+   * still reads and writes correctly, not that Postgres would serialise two of
+   * them. The real guarantee is the Serializable isolation level the route
+   * passes, and only a database can demonstrate that.
+   */
+  client.$transaction = jest.fn(async (arg: any) => (typeof arg === 'function' ? arg(client) : Promise.all(arg)));
+  return { prisma: client };
 });
 
 jest.mock('../../services/stripe-connect.service', () => ({
@@ -141,7 +183,7 @@ jest.mock('../../utils/logger', () => ({ logger: { debug: jest.fn(), info: jest.
 import { app } from '../../index';
 import { prisma } from '../../utils/prisma';
 import { CAR_SEEDS } from '../../services/automotive/automotive-library';
-import { createEscrowPayment } from '../../services/stripe-connect.service';
+import { captureEscrowPayment, createEscrowPayment } from '../../services/stripe-connect.service';
 
 const as = (userId: string, role = 'USER') => ({ 'x-test-user': userId, 'x-test-role': role });
 /**
@@ -179,6 +221,12 @@ const soldAndRated = async (sellerId: string, listing: Row, rating: number): Pro
   return l.body.data;
 };
 const workshop = () => ({ id: 'm1', slug: 'jos-garage', name: "Jo's Garage", ownerUserId: 'mech', headline: 'Women-owned, plain-spoken', about: 'We explain every charge before we touch the car.', womenOwned: true, womenMechanics: true, services: ['logbook', 'brakes', 'pre_purchase'], makes: [], evCapable: false, mobile: false, loanCar: true, afterHours: false, doesInspections: true, languages: ['English'], suburb: 'Annerley', city: 'Brisbane', state: 'QLD', postcode: '4103', address: null, phone: '07 3000 0000', website: null, bookingUrl: null, licenceNumber: null, priceList: [{ kind: 'logbook', from: 299, to: 399 }], labourRateHour: 120, partsWarrantyMonths: 12, labourWarrantyMonths: 6, warrantyNote: null, availability: { '1': [['08:00', '16:00']], '2': [['08:00', '16:00']], '3': [['08:00', '16:00']], '4': [['08:00', '16:00']], '5': [['08:00', '16:00']] }, slotMinutes: 60, acceptsBookings: true, isVerified: true, isActive: true, isFeatured: false, featuredUntil: null, ratingAvg: 0, ratingCount: 0, transparencyAvg: 0, createdAt: new Date(), updatedAt: new Date() });
+
+/** A second workshop in the store, so a filter has something to leave out. */
+const otherWorkshop = (over: Row = {}): Row => ({ ...workshop(), id: 'm2', slug: 'southport-toyota-specialist', name: 'Southport Toyota Specialist', ownerUserId: null, makes: ['Toyota'], services: ['logbook'], womenOwned: false, mobile: false, suburb: 'Southport', city: 'Gold Coast', acceptsBookings: false, priceList: null, ...over });
+
+/** A verified dealership owned by the named member. */
+const dealership = (id: string, ownerUserId: string, name: string, slug: string, over: Row = {}): Row => ({ id, slug, name, ownerUserId, brands: ['Toyota'], headline: 'Women-led, no games', about: null, suburb: 'Ipswich', city: 'Ipswich', state: 'QLD', postcode: null, address: null, phone: null, website: null, email: null, womenLed: true, financeAvailable: false, financePartners: [], hours: null, isVerified: true, isActive: true, isFeatured: false, featuredUntil: null, ratingAvg: 0, ratingCount: 0, createdAt: new Date(), updatedAt: new Date(), ...over });
 
 describe('The automotive routes', () => {
   beforeEach(() => {
@@ -694,5 +742,327 @@ describe('The automotive routes', () => {
     const after = await request(app).get('/api/automotive/admin/referrals?status=PAID').set(as('admin', 'ADMIN')).expect(200);
     expect(after.body.data.referrals).toHaveLength(1);
     expect(after.body.data.totals.paid).toBe(180);
+  });
+
+  /**
+   * The mechanic directory used to append every filter onto one `where.OR`, so
+   * a town and a make widened the results instead of narrowing them. A woman
+   * asking for a Toyota specialist in Southport got a page that was mostly
+   * neither, and nothing said so.
+   */
+  it('narrows the workshop directory by town and by make instead of widening it', async () => {
+    store.mechanics = [workshop(), otherWorkshop()];
+    const byCity = await request(app).get('/api/automotive/mechanics?city=Southport').expect(200);
+    expect(byCity.body.data.mechanics.map((m: any) => m.slug)).toEqual(['southport-toyota-specialist']);
+    // The keyword matches Jo's Garage and the town matches the other one, so
+    // the two together match nobody. Under the old OR this returned both.
+    const keywordAndCity = await request(app).get('/api/automotive/mechanics?q=Garage&city=Southport').expect(200);
+    expect(keywordAndCity.body.data.mechanics).toHaveLength(0);
+    expect(keywordAndCity.body.data.total).toBe(0);
+    // A workshop that lists no makes works on anything, so Jo's stays in for a
+    // Mazda; the Toyota-only specialist does not.
+    const mazda = await request(app).get('/api/automotive/mechanics?make=Mazda').expect(200);
+    expect(mazda.body.data.mechanics.map((m: any) => m.slug)).toEqual(['jos-garage']);
+    const toyotaOnTheCoast = await request(app).get('/api/automotive/mechanics?make=Toyota&city=Southport').expect(200);
+    expect(toyotaOnTheCoast.body.data.mechanics.map((m: any) => m.slug)).toEqual(['southport-toyota-specialist']);
+  });
+
+  /**
+   * The open inspection queue is a list of women: which of them is selling
+   * which car, in which suburb, and who asked for it to be looked at. A
+   * workshop profile is made by its own owner and starts unverified, so the
+   * only thing standing between a stranger and that list is this check.
+   */
+  it('keeps the open inspection queue away from a workshop nobody has verified', async () => {
+    // Jo's workshop and the car are both in Queensland, so the route's
+    // `listing: { state }` narrowing lets this one through. The double follows
+    // that filter now that it hangs a row's relations on before it matches,
+    // but the guard under test here is the one on the workshop.
+    store.mechanics = [workshop()];
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2019 Kia Sportage, tidy', make: 'Kia', model: 'Sportage', year: 2019, bodyType: 'SUV', fuelType: 'PETROL', odometerKm: 95000, price: 19000, description: 'Serviced on time, second owner, no accidents, sold with a safety certificate.', state: 'QLD', suburb: 'Annerley', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'KNAPH81BDK0123456', publish: true }).expect(201);
+    await request(app).post(`/api/automotive/listings/${l.body.data.id}/inspections`).set(as('member')).send({ kind: 'ATHENA_VETTED' }).expect(201);
+
+    // The attack the finding describes, run end to end: make yourself a
+    // workshop, tick "I do inspections", and read the queue.
+    const hers = await request(app).put('/api/automotive/workshop').set(as('newbie')).send({ name: 'New One Motors', headline: 'Just started', about: 'A workshop profile made a minute ago by someone nobody has checked.', doesInspections: true, state: 'QLD', city: 'Brisbane' }).expect(201);
+    expect(hers.body.data.pendingVerification).toBe(true);
+    const refused = await request(app).get('/api/automotive/inspections/open').set(as('newbie')).expect(403);
+    expect(refused.body.message).toContain('verified workshop');
+
+    const allowed = await request(app).get('/api/automotive/inspections/open').set(as('mech')).expect(200);
+    expect(allowed.body.data).toHaveLength(1);
+    expect(allowed.body.data[0].listing.title).toContain('Kia Sportage');
+    expect(allowed.body.data[0].requestedBy).toBe('Mei L.');
+
+    // Verified, and it opens; unverified again, and it closes. Whoever did
+    // either of those is now on the record.
+    await request(app).patch(`/api/automotive/admin/mechanics/${hers.body.data.id}`).set(as('admin', 'ADMIN')).send({ isVerified: true }).expect(200);
+    await request(app).get('/api/automotive/inspections/open').set(as('newbie')).expect(200);
+    await request(app).patch(`/api/automotive/admin/mechanics/${hers.body.data.id}`).set(as('admin', 'ADMIN')).send({ isVerified: false }).expect(200);
+    await request(app).get('/api/automotive/inspections/open').set(as('newbie')).expect(403);
+    expect(store.audits.map((a) => a.action)).toEqual(['ADMIN_VERIFICATION_APPROVE', 'ADMIN_VERIFICATION_REJECT']);
+    expect(store.audits[0]).toMatchObject({ actorUserId: 'admin', targetUserId: 'newbie', metadata: { area: 'automotive', entity: 'mechanic', name: 'New One Motors', isVerified: true } });
+  });
+
+  it('records which admin verified a dealership, and only when the answer changed', async () => {
+    const id = randomUUID();
+    store.dealerships = [dealership(id, 'seller', 'Sunny Motors', 'sunny-motors', { isVerified: false })];
+    await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ featuredDays: 30 }).expect(200);
+    expect(store.audits).toHaveLength(0);
+    await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ isVerified: true }).expect(200);
+    expect(store.audits).toHaveLength(1);
+    expect(store.audits[0]).toMatchObject({ action: 'ADMIN_VERIFICATION_APPROVE', actorUserId: 'admin', targetUserId: 'seller', metadata: { area: 'automotive', entity: 'dealership', entityId: id } });
+    await request(app).patch(`/api/automotive/admin/dealerships/${id}`).set(as('admin', 'ADMIN')).send({ isVerified: true }).expect(200);
+    expect(store.audits).toHaveLength(1);
+  });
+
+  /**
+   * Reviews are ranked by something ATHENA checked — whether the writer has
+   * the car in her garage — and no longer by a tap count any member could run
+   * up in a loop on any review she liked or disliked.
+   */
+  it('ranks car reviews by ownership, and no longer takes a helpful vote at all', async () => {
+    await request(app).post('/api/automotive/catalogue/toyota-rav4-hybrid/reviews').set(as('seller')).send({ rating: 3, reliability: 4, safetyFeel: 4, runningCosts: 3, title: 'Fine, a bit dull', body: 'Drove one for a fortnight while mine was in the shop. Does everything it should and nothing more.' }).expect(201);
+    await request(app).post('/api/automotive/garage').set(as('member')).send({ make: 'Toyota', model: 'RAV4', year: 2023 }).expect(201);
+    const hers = await request(app).post('/api/automotive/catalogue/toyota-rav4-hybrid/reviews').set(as('member')).send({ rating: 5, reliability: 5, safetyFeel: 4, runningCosts: 5, title: 'Three years, no drama', body: 'Forty thousand kilometres, one set of tyres, services under three hundred dollars each. The lane keeping is gentle.' }).expect(201);
+    expect(hers.body.data.isOwner).toBe(true);
+    const detail = await request(app).get('/api/automotive/catalogue/toyota-rav4-hybrid').expect(200);
+    expect(detail.body.data.reviews.map((r: any) => r.isOwner)).toEqual([true, false]);
+    expect(detail.body.data.reviews.every((r: any) => r.helpfulCount === undefined)).toBe(true);
+    const listed = await request(app).get('/api/automotive/catalogue/toyota-rav4-hybrid/reviews').expect(200);
+    expect(listed.body.data.reviews.map((r: any) => r.title)).toEqual(['Three years, no drama', 'Fine, a bit dull']);
+    expect(listed.body.data.reviews.every((r: any) => r.helpfulCount === undefined)).toBe(true);
+    await request(app).post(`/api/automotive/reviews/${hers.body.data.id}/helpful`).set(as('seller')).expect(404);
+    expect(store.reviews.every((r) => r.helpfulCount === 0)).toBe(true);
+  });
+
+  /**
+   * The dealer sale is one of the two automatic revenue lines and the whole of
+   * it is the dealership's own word, so it is written as a claim: a verified
+   * dealership only, the member told so there is a second pair of eyes, and a
+   * note on the ledger row that says whose figure it is.
+   */
+  it('takes a reported sale only from a verified dealership, tells the member, and books the fee as the dealer\'s own claim', async () => {
+    const id = randomUUID();
+    store.dealerships = [dealership(id, 'seller', 'Sunny Motors', 'sunny-motors')];
+    const drive = await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: id, preferredAt: new Date(Date.now() + 3 * 86400000).toISOString() }).expect(201);
+    store.dealerships[0].isVerified = false;
+    const refused = await request(app).patch(`/api/automotive/dealership/test-drives/${drive.body.data.id}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 42000 }).expect(403);
+    expect(refused.body.message).toContain('verified dealership');
+    expect(store.referrals).toHaveLength(0);
+
+    store.dealerships[0].isVerified = true;
+    const sold = await request(app).patch(`/api/automotive/dealership/test-drives/${drive.body.data.id}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 42000 }).expect(200);
+    expect(sold.body.data.referralFee).toBe(420);
+    expect(store.referrals).toHaveLength(1);
+    expect(store.referrals[0].status).toBe('PENDING');
+    expect(store.referrals[0].note).toContain('not verified by ATHENA');
+    const toHer = store.notifications.find((x) => x.userId === 'member' && x.data.kind === 'CAR_DEALER_SALE_REPORTED');
+    expect(toHer).toBeTruthy();
+    expect(toHer!.message).toContain('$42,000');
+    // Reporting it twice bills it once, and does not tell her twice either.
+    await request(app).patch(`/api/automotive/dealership/test-drives/${drive.body.data.id}`).set(as('seller')).send({ status: 'COMPLETED', sold: true, salePrice: 42000 }).expect(200);
+    expect(store.referrals).toHaveLength(1);
+    expect(store.notifications.filter((x) => x.data.kind === 'CAR_DEALER_SALE_REPORTED')).toHaveLength(1);
+  });
+
+  /**
+   * Two dealerships quoting on the same trade-in used to overwrite each other,
+   * because every quote lives in one Json array that is read, edited and
+   * written back whole. The member had already been told about the offer that
+   * then disappeared from her page.
+   */
+  it('keeps both quotes when two dealerships quote on the same trade-in, and replaces only the quoter\'s own', async () => {
+    const sunny = randomUUID();
+    const coast = randomUUID();
+    store.dealerships = [dealership(sunny, 'seller', 'Sunny Motors', 'sunny-motors'), dealership(coast, 'mech', 'Coast Toyota', 'coast-toyota')];
+    const t = await request(app).post('/api/automotive/trade-ins').set(as('member')).send({ make: 'Toyota', model: 'Corolla', year: 2019, odometerKm: 90000, condition: 'GOOD' }).expect(201);
+    const id = t.body.data.id;
+    await request(app).post(`/api/automotive/dealership/trade-ins/${id}/quotes`).set(as('seller')).send({ amount: 18000, note: 'Drive it in this week.' }).expect(201);
+    const second = await request(app).post(`/api/automotive/dealership/trade-ins/${id}/quotes`).set(as('mech')).send({ amount: 18500 }).expect(201);
+    expect(second.body.data.quotes).toBe(2);
+    expect(prisma.$transaction).toHaveBeenCalled();
+    const hers = await request(app).get('/api/automotive/trade-ins').set(as('member')).expect(200);
+    expect(hers.body.data[0].quotes.map((x: any) => x.amount).sort()).toEqual([18000, 18500]);
+    expect(store.notifications.filter((x) => x.data.kind === 'CAR_TRADE_IN_QUOTE')).toHaveLength(2);
+    // Her own second thoughts replace her own quote and touch nobody else's.
+    const revised = await request(app).post(`/api/automotive/dealership/trade-ins/${id}/quotes`).set(as('seller')).send({ amount: 17500 }).expect(201);
+    expect(revised.body.data.quotes).toBe(2);
+    const after = await request(app).get('/api/automotive/trade-ins').set(as('member')).expect(200);
+    expect(after.body.data[0].quotes.map((x: any) => x.amount).sort()).toEqual([17500, 18500]);
+    expect(after.body.data[0].quotes.find((x: any) => x.dealershipId === coast).name).toBe('Coast Toyota');
+    // An unverified dealership cannot quote at all.
+    store.dealerships[1].isVerified = false;
+    await request(app).post(`/api/automotive/dealership/trade-ins/${id}/quotes`).set(as('mech')).send({ amount: 19000 }).expect(403);
+  });
+
+  /**
+   * The slot check and the booking it permits are one transaction now. This
+   * double runs on one connection and cannot interleave two requests, so what
+   * it proves is that the handler asks for a transaction, does the check
+   * inside it, and still refuses an hour that has gone. Whether Postgres
+   * serialises two of them is a database's answer, not a mock's.
+   */
+  it('books a workshop hour inside a transaction and refuses the same hour twice', async () => {
+    const page = await request(app).get('/api/automotive/mechanics/jos-garage').expect(200);
+    let slot: string | null = null;
+    for (const offered of page.body.data.nextAvailable as Array<{ day: string }>) {
+      const candidate = await request(app).get(`/api/automotive/mechanics/m1/slots?day=${offered.day}&service=brakes`).expect(200);
+      if (candidate.body.data.slots.length > 0) { slot = candidate.body.data.slots[0].start; break; }
+    }
+    if (!slot) throw new Error('No offered day had a brakes slot');
+    const first = await request(app).post('/api/automotive/mechanics/m1/bookings').set(as('member')).send({ kind: 'brakes', scheduledAt: slot }).expect(201);
+    expect(first.body.data.scheduledAt).toBe(slot);
+    expect(prisma.$transaction).toHaveBeenCalled();
+    const clash = await request(app).post('/api/automotive/mechanics/m1/bookings').set(as('seller')).send({ kind: 'brakes', scheduledAt: slot }).expect(400);
+    expect(clash.body.message).toContain('not free');
+    expect(store.bookings).toHaveLength(1);
+  });
+
+  /**
+   * The third money flow, which had no test of its own at all while the
+   * purchase and the workshop job both did.
+   *
+   * A pre-purchase inspection is the one thing standing between a woman and a
+   * five-figure payment for a car she has seen once, so two things have to
+   * hold together: the report has to arrive before the workshop is paid, and
+   * the fee has to be held rather than handed over on trust. Both of those
+   * live in handlers that nothing exercised, and the order between them is the
+   * whole point — a fee released before the report is a workshop with no
+   * reason to write an honest one.
+   */
+  it('holds an inspection fee until the report is in, then releases it with the platform cut taken', async () => {
+    store.mechanics = [workshop()];
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2018 Honda CR-V VTi', make: 'Honda', model: 'CR-V', year: 2018, bodyType: 'SUV', fuelType: 'PETROL', odometerKm: 104000, price: 21500, description: 'One owner from new, serviced at Honda every year, logbooks in the glovebox, two keys.', state: 'QLD', suburb: 'Annerley', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JHLRE4850JC012345', publish: true }).expect(201);
+    const asked = await request(app).post(`/api/automotive/listings/${l.body.data.id}/inspections`).set(as('member')).send({ kind: 'ATHENA_VETTED' }).expect(201);
+    const iid = asked.body.data.id;
+    expect(asked.body.data).toMatchObject({ status: 'REQUESTED', fee: 250 });
+    expect(store.notifications.filter((x) => x.userId === 'mech' && x.data.kind === 'CAR_INSPECTION_OPEN')).toHaveLength(1);
+
+    const accepted = await request(app).post(`/api/automotive/inspections/${iid}/accept`).set(as('mech')).send({ fee: 280 }).expect(200);
+    expect(accepted.body.data).toMatchObject({ status: 'ASSIGNED', fee: 280 });
+
+    // Held, not paid: the workshop's money sits with the processor and the
+    // platform's fifteen per cent is set aside at the same moment.
+    const paid = await request(app).post(`/api/automotive/inspections/${iid}/pay`).set(as('member')).expect(201);
+    expect(paid.body.data).toMatchObject({ amount: 28000, platformFee: 4200, currency: 'aud' });
+    expect(store.escrows).toHaveLength(1);
+    expect(store.escrows[0]).toMatchObject({ buyerId: 'member', sellerId: 'mech', status: 'PENDING' });
+    // Asking again returns the hold she already has rather than a second one.
+    const again = await request(app).post(`/api/automotive/inspections/${iid}/pay`).set(as('member')).expect(200);
+    expect(again.body.data.alreadyHeld).toBe(true);
+    expect(store.escrows).toHaveLength(1);
+
+    const early = await request(app).post(`/api/automotive/inspections/${iid}/release`).set(as('member')).expect(400);
+    expect(early.body.message).toContain('once the report is in');
+    expect(captureEscrowPayment).not.toHaveBeenCalled();
+
+    // She paid for it, but she does not write it. A buyer who could mark her
+    // own inspection complete could release the fee whenever she liked.
+    const notHers = await request(app).patch(`/api/automotive/inspections/${iid}`).set(as('member')).send({ status: 'COMPLETED', summary: 'Looks fine to me' }).expect(403);
+    expect(notHers.body.message).toContain('Only the workshop');
+
+    const report = await request(app).patch(`/api/automotive/inspections/${iid}`).set(as('mech')).send({ status: 'COMPLETED', summary: 'Sound car. Front tyres near the wear bars and a weeping rocker cover gasket.', report: [{ key: 'tyres', result: 'ADVISORY', notes: '3mm across the front pair' }, { key: 'engine', result: 'ADVISORY', notes: 'Rocker cover gasket weeping, not dripping' }, { key: 'road_test', result: 'PASS' }, { key: 'documents', result: 'PASS' }] }).expect(200);
+    expect(report.body.data.outcome).toBe('ADVISORIES');
+    expect(report.body.data.report.map((s: any) => s.label)).toContain('Tyres and wheels');
+    expect(store.notifications.filter((x) => x.userId === 'member' && x.data.kind === 'CAR_INSPECTION_DONE')).toHaveLength(1);
+    expect(store.notifications.filter((x) => x.userId === 'seller' && x.data.kind === 'CAR_INSPECTION_DONE')).toHaveLength(1);
+
+    // Nobody but the woman who paid can let the money go.
+    await request(app).post(`/api/automotive/inspections/${iid}/release`).set(as('seller')).expect(404);
+    await request(app).post(`/api/automotive/inspections/${iid}/release`).set(as('member')).expect(200);
+    expect(store.escrows[0].status).toBe('CAPTURED');
+    // And releasing twice captures once, because a double tap on a slow page
+    // must not become a double charge.
+    await request(app).post(`/api/automotive/inspections/${iid}/release`).set(as('member')).expect(200);
+    expect(captureEscrowPayment).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * `?inspected=true` is `inspections: { some: { status: 'COMPLETED' } }`, and
+   * it is the one filter on the pre-loved search with a safety claim behind
+   * it: she is asking to be shown only cars a workshop has already looked
+   * over. The in-memory double used to answer true to any `some` it was
+   * handed, so the box could have selected nothing at all and this suite would
+   * still have been green.
+   */
+  it('shows only the cars that have been inspected when she asks for inspected ones', async () => {
+    const base = { make: 'Hyundai', model: 'i30', year: 2019, bodyType: 'HATCH' as const, fuelType: 'PETROL' as const, odometerKm: 72000, price: 17500, state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], publish: true };
+    const looked = await request(app).post('/api/automotive/listings').set(as('seller')).send({ ...base, title: '2019 Hyundai i30 Active, inspected', description: 'Second car, garaged, serviced on time. Happy for anyone to have it looked at before they buy.', vin: 'KMHD35LE9KU123456' }).expect(201);
+    const notLooked = await request(app).post('/api/automotive/listings').set(as('seller')).send({ ...base, title: '2019 Hyundai i30 Go, no inspection yet', description: 'Same car in a lower trim, bought from the first owner, drives well and wants nothing.', vin: 'KMHD35LE9KU654321' }).expect(201);
+
+    const before = await request(app).get('/api/automotive/listings?inspected=true').expect(200);
+    expect(before.body.data.listings).toHaveLength(0);
+    expect(before.body.data.total).toBe(0);
+
+    await request(app).post(`/api/automotive/listings/${looked.body.data.id}/inspections`).set(as('seller')).send({ reportUrl: 'https://reports.example.com/i30.pdf' }).expect(201);
+
+    const filtered = await request(app).get('/api/automotive/listings?inspected=true').expect(200);
+    expect(filtered.body.data.listings.map((x: any) => x.id)).toEqual([looked.body.data.id]);
+    expect(filtered.body.data.total).toBe(1);
+    const unfiltered = await request(app).get('/api/automotive/listings').expect(200);
+    expect(unfiltered.body.data.listings.map((x: any) => x.id).sort()).toEqual([looked.body.data.id, notLooked.body.data.id].sort());
+  });
+
+  /**
+   * Accepting a trade-in quote is the end of that flow and had no test either.
+   * It is the point at which a member commits to a figure, so the quote she
+   * accepts has to be one that was actually made, and the dealership has to
+   * hear about it — nothing else tells them to expect the car.
+   */
+  it('accepts a trade-in quote that was really made, and tells the dealership it won', async () => {
+    const sunny = randomUUID();
+    const coast = randomUUID();
+    store.dealerships = [dealership(sunny, 'seller', 'Sunny Motors', 'sunny-motors'), dealership(coast, 'mech', 'Coast Toyota', 'coast-toyota')];
+    const t = await request(app).post('/api/automotive/trade-ins').set(as('member')).send({ make: 'Toyota', model: 'Yaris', year: 2018, odometerKm: 64000, condition: 'GOOD' }).expect(201);
+    const id = t.body.data.id;
+    await request(app).post(`/api/automotive/dealership/trade-ins/${id}/quotes`).set(as('seller')).send({ amount: 13500 }).expect(201);
+
+    // Coast Toyota never quoted, so it cannot be accepted, and nothing moves.
+    const unquoted = await request(app).patch(`/api/automotive/trade-ins/${id}`).set(as('member')).send({ status: 'ACCEPTED', dealershipId: coast }).expect(400);
+    expect(unquoted.body.message).toContain('Pick one of the quotes');
+    expect(store.tradeIns[0].status).toBe('QUOTED');
+
+    const accepted = await request(app).patch(`/api/automotive/trade-ins/${id}`).set(as('member')).send({ status: 'ACCEPTED', dealershipId: sunny }).expect(200);
+    expect(accepted.body.data).toEqual({ status: 'ACCEPTED', dealership: 'Sunny Motors' });
+    expect(store.tradeIns[0]).toMatchObject({ status: 'ACCEPTED', dealershipId: sunny });
+    const won = store.notifications.find((x) => x.userId === 'seller' && x.data.kind === 'CAR_TRADE_IN_ACCEPTED');
+    expect(won).toBeTruthy();
+    expect(won!.message).toContain('$13,500');
+
+    // It is her request and nobody else's to accept or withdraw.
+    await request(app).patch(`/api/automotive/trade-ins/${id}`).set(as('mech')).send({ status: 'WITHDRAWN' }).expect(404);
+    await request(app).patch(`/api/automotive/trade-ins/${id}`).set(as('member')).send({ status: 'WITHDRAWN' }).expect(200);
+    expect(store.tradeIns[0].status).toBe('WITHDRAWN');
+  });
+
+  /**
+   * /overview is the first thing a member sees on the cars dashboard and it
+   * reaches into nine models at once, so a wrong relation name there is a
+   * blank page rather than a wrong number. It had no test.
+   */
+  it('gathers the cars dashboard: her garage, what she has open, and which hats she wears', async () => {
+    store.dealerships = [dealership(randomUUID(), 'seller', 'Sunny Motors', 'sunny-motors')];
+    store.mechanics = [workshop()];
+    await request(app).post('/api/automotive/garage').set(as('member')).send({ make: 'Mazda', model: 'CX-5', year: 2021, odometerKm: 60000, regoDueAt: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10) }).expect(201);
+    const l = await request(app).post('/api/automotive/listings').set(as('seller')).send({ title: '2020 Toyota Corolla Ascent Sport', make: 'Toyota', model: 'Corolla', year: 2020, bodyType: 'HATCH', fuelType: 'PETROL', odometerKm: 58000, price: 23000, description: 'Bought new, serviced at Toyota, never in an accident, selling because we have outgrown it.', state: 'QLD', photos: ['https://img.example.com/a.jpg', 'https://img.example.com/b.jpg', 'https://img.example.com/c.jpg', 'https://img.example.com/d.jpg'], vin: 'JTDBR32E900123456', publish: true }).expect(201);
+    await request(app).post(`/api/automotive/listings/${l.body.data.id}/offers`).set(as('member')).send({ amount: 22000 }).expect(201);
+    await request(app).post('/api/automotive/test-drives').set(as('member')).send({ dealershipId: store.dealerships[0].id, preferredAt: new Date(Date.now() + 3 * 86400000).toISOString() }).expect(201);
+    await request(app).post('/api/automotive/trade-ins').set(as('member')).send({ make: 'Mazda', model: 'CX-5', year: 2021, odometerKm: 60000, condition: 'GOOD' }).expect(201);
+
+    const mine = await request(app).get('/api/automotive/overview').set(as('member')).expect(200);
+    expect(mine.body.data.vehicles).toHaveLength(1);
+    expect(mine.body.data.reminders.some((r: any) => r.kind === 'REGO')).toBe(true);
+    expect(mine.body.data.purchases.map((p: any) => p.status)).toEqual(['OFFERED']);
+    expect(mine.body.data.counts).toEqual({ saved: 0, listings: 0, testDrives: 1, tradeIns: 1 });
+    expect(mine.body.data.roles).toEqual({ isMechanic: false, mechanicVerified: false, isDealer: false, dealerVerified: false, isAdmin: false });
+
+    // The same offer from the other end, and the two hats the seller wears.
+    const hers = await request(app).get('/api/automotive/overview').set(as('seller')).expect(200);
+    expect(hers.body.data.purchases.map((p: any) => p.status)).toEqual(['OFFERED']);
+    expect(hers.body.data.counts).toMatchObject({ listings: 1, testDrives: 0, tradeIns: 0 });
+    expect(hers.body.data.roles).toMatchObject({ isDealer: true, dealerVerified: true, isMechanic: false });
+    const jo = await request(app).get('/api/automotive/overview').set(as('mech')).expect(200);
+    expect(jo.body.data.roles).toMatchObject({ isMechanic: true, mechanicVerified: true, isDealer: false });
   });
 });

@@ -7,6 +7,25 @@ const CURRENCY_REGEX = /^[A-Z]{3}$/;
 const TAX_TYPES = ['GST', 'VAT', 'SALES_TAX', 'WITHHOLDING'] as const;
 const REGIONS = ['ANZ', 'US', 'SEA', 'MEA', 'UK', 'EU'] as const;
 
+/**
+ * A rate is stored, and passed in, as a fraction: 0.1 is ten per cent.
+ *
+ * The bound itself is not new. What is new is that the message says which unit
+ * it wants. 'Tax rate must be between 0 and 1' was the entire explanation given
+ * to an admin who had typed 10 into a field labelled 'Rate (%)', and since the
+ * route above it accepted anything up to 100, the only place the disagreement
+ * surfaced was here, as a refusal that read like a bug in the number rather
+ * than a mismatch in the unit.
+ */
+function assertRateIsAFraction(rate: number): void {
+  if (!Number.isFinite(rate) || rate < 0 || rate > 1) {
+    throw new ApiError(
+      400,
+      'Tax rate must be a fraction between 0 and 1 — 0.1 means 10%.'
+    );
+  }
+}
+
 export async function listTaxRates(params: { organizationId?: string; region?: string }) {
   return prisma.taxRate.findMany({
     where: {
@@ -33,9 +52,7 @@ export async function createTaxRate(data: {
   if (!TAX_TYPES.includes(data.type)) {
     throw new ApiError(400, 'Invalid tax rate type');
   }
-  if (!Number.isFinite(data.rate) || data.rate < 0 || data.rate > 1) {
-    throw new ApiError(400, 'Tax rate must be between 0 and 1');
-  }
+  assertRateIsAFraction(data.rate);
   if (data.region && !REGIONS.includes(data.region as any)) {
     throw new ApiError(400, 'Invalid region');
   }
@@ -65,8 +82,8 @@ export async function updateTaxRate(id: string, data: {
   if (data.type && !TAX_TYPES.includes(data.type)) {
     throw new ApiError(400, 'Invalid tax rate type');
   }
-  if (data.rate !== undefined && (!Number.isFinite(data.rate) || data.rate < 0 || data.rate > 1)) {
-    throw new ApiError(400, 'Tax rate must be between 0 and 1');
+  if (data.rate !== undefined) {
+    assertRateIsAFraction(data.rate);
   }
   if (data.region && !REGIONS.includes(data.region as any)) {
     throw new ApiError(400, 'Invalid region');

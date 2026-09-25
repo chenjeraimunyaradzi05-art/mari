@@ -21,6 +21,12 @@ import {
 } from '../utils/contentSafety';
 import { prisma } from '../utils/prisma';
 import { emitToGroupRoom } from '../services/socket.service';
+// Group chat reaches a whole room at once and had no ceiling of its own:
+// only the global tier limit, which allows a message every few seconds all
+// day. The direct-message ceiling is the right one — a group message is a
+// message to everyone in the room — and it is generous for a real
+// conversation while being a wall for a script.
+import { messageLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -105,7 +111,7 @@ router.get('/:groupId/chat/pinned', authenticate, async (req: AuthRequest, res: 
  */
 // Speaking in a group chat is the surface a refused account would use to reach
 // a room full of members at once, so the women-only floor applies to the write.
-router.post('/:groupId/chat/message', authenticate, requireWomanMember, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { groupId } = req.params;
     const attachments = normalizeMessageAttachments(req.body?.attachments);

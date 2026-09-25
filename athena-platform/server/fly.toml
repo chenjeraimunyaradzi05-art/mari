@@ -44,7 +44,18 @@ primary_region = "syd"
   SCHEDULER_TIMEZONE = "Australia/Brisbane"
   ENABLE_WORKERS = "true"
   WORKER_ALLOW_SIMULATION = "false"
-  VIDEO_ALLOW_SIMULATION = "false"
+  # Transcode reels in this process with the ffmpeg binary the ffmpeg-static
+  # package puts in the image, rather than posting them to an external
+  # transcoder at VIDEO_PROCESSOR_URL. "Simulation" is the flag's name and not
+  # what it does: the branch it selects is video-pipeline.service.ts, the same
+  # real pipeline that runs when the workers are switched off entirely. With
+  # this "false" and no VIDEO_PROCESSOR_URL set, the worker throws on every
+  # reel and nothing a member uploads ever publishes.
+  #
+  # This used to read VIDEO_ALLOW_SIMULATION, a name nothing under src/ reads,
+  # so it appeared to be choosing the external processor and was choosing
+  # nothing.
+  VIDEO_PROCESSING_ALLOW_SIMULATION = "true"
   AI_ALLOW_SIMULATION = "false"
   ALLOW_STRIPE_SIMULATION = "false"
   OPENSEARCH_ENABLED = "false"

@@ -10,9 +10,27 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
+import { bestEffort } from '../utils/best-effort';
+import { sendEmail } from '../utils/email';
 import { digitsOnly, formatAbn, isValidAbn } from './abr.service';
 import fs from 'fs';
 import path from 'path';
+
+/**
+ * Local, as in breach.service. Nothing interpolated into the invoice email
+ * below is member-supplied — an invoice number ATHENA generated, one of three
+ * document titles, a formatted amount and a URL from the environment — so this
+ * is belt and braces rather than the only thing standing between a member's
+ * mailbox and an injected tag. It is here so that it stays true if somebody
+ * later adds her name to the message.
+ */
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 // ==========================================
 // TYPES
@@ -742,11 +760,24 @@ function formatDate(date: Date): string {
  * because the Stripe webhook is retried and the admin button can be pressed
  * twice, and a second invoice number for one charge is a bookkeeping error.
  */
+/**
+ * Whether the member was actually emailed about this invoice.
+ *
+ * Three states rather than a boolean, because `false` could not tell an admin
+ * apart from a send that was never asked for — and the whole reason this exists
+ * is that the previous code could not tell them apart either. `sendEmail: true`
+ * used to reach a single `logger.info('Invoice email queued for ...')` and stop
+ * there: nothing was queued, nothing was sent, and the admin who ticked the box
+ * had no way to find that out.
+ */
+export type InvoiceEmailOutcome = 'sent' | 'failed' | 'not_requested';
+
 export interface IssuedInvoice {
   invoiceId: string;
   invoiceNumber: string;
   created: boolean;
   pdf: Buffer;
+  emailed: InvoiceEmailOutcome;
 }
 
 /**
@@ -795,7 +826,15 @@ async function createInvoiceRow(data: Omit<Prisma.InvoiceUncheckedCreateInput, '
     const invoiceNumber = await generateInvoiceNumber();
     try {
       return await prisma.invoice.create({
-        data: { ...data, invoiceNumber, pdfUrl: `invoices/${invoiceNumber}.pdf` },
+        // pdfUrl is deliberately not written. It used to be set to
+        // `invoices/<number>.pdf`, which is a path nothing ever stores a file
+        // at: the PDF is rendered on demand by GET /api/invoices/:id/pdf and
+        // never persisted. A grep for pdfUrl across the server and the client
+        // found the write and no reader, so the column said a document was
+        // filed somewhere when none was — and the first reader anyone added
+        // would have got a 404 for every invoice ever issued. Left null, it
+        // says the true thing: there is no stored file, only a renderer.
+        data: { ...data, invoiceNumber },
       });
     } catch (err: any) {
       if (err?.code !== 'P2002') throw err;
@@ -803,6 +842,61 @@ async function createInvoiceRow(data: Omit<Prisma.InvoiceUncheckedCreateInput, '
     }
   }
   throw lastError;
+}
+
+/**
+ * Tell a member her invoice is ready, and say honestly whether it went.
+ *
+ * The invoice itself is not attached. utils/email sends through SendGrid with
+ * subject, html and text and no attachment support, and a tax document is not
+ * something to bolt onto that transport in passing — an invoice mailed to the
+ * wrong inbox is her name, her city and what she paid ATHENA, sitting in
+ * somebody else's mail. The link goes to the invoices page, which is behind her
+ * login and re-renders the PDF on demand, so the document only ever leaves the
+ * platform to a session that has already authenticated as her.
+ *
+ * bestEffort, because an invoice that was filed correctly must not be un-filed
+ * by a mail server having a bad morning — but the failure is recorded rather
+ * than swallowed, and the outcome is returned so the admin who asked for the
+ * email is told what happened to it.
+ */
+async function emailInvoiceReady(params: {
+  to: string;
+  invoiceNumber: string;
+  documentTitle: string;
+  total: number;
+  currency: string;
+}): Promise<InvoiceEmailOutcome> {
+  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const invoicesUrl = `${clientUrl}/dashboard/finance/invoices`;
+  const amount = formatMoney(params.total, params.currency);
+  const title = params.documentTitle;
+
+  const sent = await bestEffort(
+    'invoice.email-ready',
+    () =>
+      sendEmail({
+        to: params.to,
+        subject: `Your ATHENA ${title.toLowerCase()} ${params.invoiceNumber}`,
+        html:
+          `<p>Your ${escapeHtml(title.toLowerCase())} <strong>${escapeHtml(params.invoiceNumber)}</strong> ` +
+          `for ${escapeHtml(amount)} is ready.</p>` +
+          `<p><a href="${escapeHtml(invoicesUrl)}">Open it in ATHENA</a> to download the PDF.</p>`,
+        text:
+          `Your ${title.toLowerCase()} ${params.invoiceNumber} for ${amount} is ready. ` +
+          `Download it at ${invoicesUrl}`,
+      }),
+    false
+  );
+
+  if (!sent) {
+    logger.error('Could not email a member about her invoice', {
+      invoiceNumber: params.invoiceNumber,
+    });
+    return 'failed';
+  }
+
+  return 'sent';
 }
 
 /**
@@ -877,12 +971,27 @@ export async function createInvoiceForPayment(
     transactionId: payment.stripePaymentIntentId || undefined,
   };
 
+  // The email is sent on a re-issue too. It used to sit past this early return,
+  // so an admin re-sending an invoice to a member who said she had not received
+  // it ticked the box, got a 200, and nothing was sent — which is exactly the
+  // situation a re-issue exists for.
+  const emailRecipient = options?.sendEmail ? payment.user?.email : undefined;
+
   if (existing) {
     return {
       invoiceId: existing.id,
       invoiceNumber: existing.invoiceNumber,
       created: false,
       pdf: await generateInvoicePDF({ ...invoiceData, status: existing.status as InvoiceData['status'] }),
+      emailed: emailRecipient
+        ? await emailInvoiceReady({
+            to: emailRecipient,
+            invoiceNumber: existing.invoiceNumber,
+            documentTitle: tax.title,
+            total,
+            currency: payment.currency,
+          })
+        : 'not_requested',
     };
   }
 
@@ -900,17 +1009,20 @@ export async function createInvoiceForPayment(
 
   logger.info(`Generated invoice ${invoice.invoiceNumber} for payment ${paymentId}`);
 
-  // Optionally send email
-  if (options?.sendEmail && payment.user?.email) {
-    // Email sending would be triggered here
-    logger.info(`Invoice email queued for ${payment.user.email}`);
-  }
-
   return {
     invoiceId: invoice.id,
     invoiceNumber: invoice.invoiceNumber,
     created: true,
     pdf: await generateInvoicePDF({ ...invoiceData, invoiceNumber: invoice.invoiceNumber }),
+    emailed: emailRecipient
+      ? await emailInvoiceReady({
+          to: emailRecipient,
+          invoiceNumber: invoice.invoiceNumber,
+          documentTitle: tax.title,
+          total,
+          currency: payment.currency,
+        })
+      : 'not_requested',
   };
 }
 
@@ -1000,6 +1112,11 @@ export async function createInvoiceForSubscription(
       invoiceNumber: existing.invoiceNumber,
       created: false,
       pdf: await generateInvoicePDF(invoiceData),
+      // The membership invoice path has no sendEmail option and never had one;
+      // it is called by the Stripe webhook, which must not block on a mail
+      // server. Named rather than left off, so the field means the same thing
+      // everywhere it appears.
+      emailed: 'not_requested',
     };
   }
 
@@ -1021,6 +1138,7 @@ export async function createInvoiceForSubscription(
     invoiceNumber: invoice.invoiceNumber,
     created: true,
     pdf: await generateInvoicePDF({ ...invoiceData, invoiceNumber: invoice.invoiceNumber }),
+    emailed: 'not_requested',
   };
 }
 

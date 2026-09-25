@@ -81,6 +81,7 @@ export function ListingFields({ f, setF }: { f: ListingForm; setF: (fn: (x: List
           <Field label="PPSR certificate link" className="sm:col-span-2"><input value={f.ppsrCertificateUrl} onChange={(e) => set('ppsrCertificateUrl', e.target.value)} className={inputClass} placeholder="https://" /></Field>
         </div>
         <div className="mt-3 flex flex-wrap gap-4"><Check checked={f.ppsrChecked} onChange={(v) => set('ppsrChecked', v)} label="I have run a PPSR check: no money owing, not written off" /><Check checked={f.roadworthy} onChange={(v) => set('roadworthy', v)} label="Sold with a safety certificate" /></div>
+        <p className="mt-2 text-xs text-slate-500">Both of these are shown to buyers as your word, not as something ATHENA has checked: we do not run the PPSR search or read the certificate you link. Buyers are told to run their own for two dollars, and ticking the box does not change how your listing is ranked or reviewed.</p>
       </Panel>
     </>
   );

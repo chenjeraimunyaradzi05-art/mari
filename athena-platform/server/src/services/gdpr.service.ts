@@ -1091,6 +1091,104 @@ export class GDPRService {
   }
 
   /**
+   * Erase an account because an administrator asked for it, rather than because
+   * the member did.
+   *
+   * The admin console had its own deletion: a seven-table transaction —
+   * comments, likes, posts, notifications, job applications, saved jobs, then
+   * the user row — against a personal-data register of sixty-odd tables. It
+   * left the rest of her behind wherever a relation was optional, threw a
+   * foreign-key error wherever one was not, and, worst of all, never looked at
+   * LegalHold. The DSAR path refuses to delete an account under an active hold
+   * and says why; the admin path destroyed the evidence. The two now run the
+   * same erasure and obey the same refusal, so which door the request came
+   * through cannot change the answer.
+   *
+   * `reference` is what the outcome and the audit trail are filed under, since
+   * there is no DSAR row behind an administrator's decision.
+   */
+  async eraseAccountByAdmin(
+    userId: string,
+    context: { adminId: string | null; ipAddress?: string; userAgent?: string }
+  ): Promise<ErasureOutcome> {
+    const reference = `ADMIN-ERASURE-${userId}`;
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const legalHold = await prisma.legalHold.findFirst({
+      where: { isActive: true, affectedUserIds: { has: userId } },
+    });
+
+    if (legalHold) {
+      const reason = `Cannot delete: active legal hold (${legalHold.id})`;
+
+      await this.logPrivacyAction({
+        userId,
+        adminId: context.adminId ?? undefined,
+        action: 'ADMIN_ERASURE_REJECTED',
+        resourceType: 'User',
+        resourceId: userId,
+        details: { reason, legalHoldId: legalHold.id },
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+      });
+
+      return {
+        requestId: reference,
+        status: 'REJECTED',
+        accountRemoved: false,
+        retainedSections: [],
+        rowsRemoved: 0,
+        reason,
+      };
+    }
+
+    const outcome = await this.eraseUser(userId, reference);
+
+    // The account row is gone by now, so this entry is the only surviving
+    // record that an administrator — this one — destroyed it.
+    await this.logPrivacyAction({
+      adminId: context.adminId ?? undefined,
+      action: 'ADMIN_ERASURE_COMPLETED',
+      resourceType: 'User',
+      resourceId: reference,
+      details: {
+        subject: pseudonym(userId),
+        accountRemoved: outcome.accountRemoved,
+        retainedSections: outcome.retainedSections,
+        rowsRemoved: outcome.rowsRemoved,
+      },
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+
+    logger.info('[GDPR] Administrator erasure completed', {
+      reference,
+      accountRemoved: outcome.accountRemoved,
+      rowsRemoved: outcome.rowsRemoved,
+    });
+
+    return outcome;
+  }
+
+  /**
+   * The address a suspended-and-anonymised account is parked on.
+   *
+   * The admin soft delete wrote `deleted_<id>@athena.local`: a live-looking
+   * address that carries the member's id in the clear, on a domain that could
+   * one day resolve. The erasure path already had the right answer — a hash on
+   * the reserved .invalid domain, which can never be delivered to — and this is
+   * the same shape, marked as a suspension rather than an erasure so the two
+   * are never confused for one another.
+   */
+  suspensionTombstoneEmail(userId: string): string {
+    return `suspended-${pseudonym(userId).slice(0, 32)}@erased.invalid`;
+  }
+
+  /**
    * Carry out every deletion request that has reached its due date.
    *
    * This is the entry point a scheduler calls; nothing about it assumes a

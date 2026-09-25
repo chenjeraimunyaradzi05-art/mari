@@ -144,6 +144,100 @@ describe('Events routes (Prisma-backed)', () => {
     expect(prisma.eventRegistration.upsert).toHaveBeenCalled();
   });
 
+  // The list used to be "the hundred rows with the earliest date", which after
+  // a hundred events had run was a window containing nothing but finished ones.
+  // Both the public catalogue and the dashboard calendar then said there was
+  // nothing on while next week's listings sat in the database.
+  it('GET /api/events only asks for events that have not happened yet', async () => {
+    (prisma.event.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/events?type=all').expect(200);
+
+    const { where, take } = (prisma.event.findMany as any).mock.calls[0][0];
+    const dateClause = where.AND.find((clause: any) => clause.date);
+    expect(dateClause).toBeDefined();
+    expect(dateClause.date.gte).toBeInstanceOf(Date);
+    // The start of today, not the current moment: a workshop at 10am is still
+    // worth listing at 9am, and the column carries the day.
+    const midnight = dateClause.date.gte as Date;
+    expect([midnight.getHours(), midnight.getMinutes(), midnight.getSeconds()]).toEqual([0, 0, 0]);
+    expect(midnight.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(take).toBe(100);
+  });
+
+  // An organiser who books a room for a hundred means a hundred. This route
+  // never read maxAttendees, so the five hundredth registration was accepted
+  // and the card then read "500 going of 100".
+  it('POST /api/events/:id/register refuses a place once the organiser’s cap is reached', async () => {
+    (prisma.event.findUnique as any).mockResolvedValueOnce({
+      id: 'e1',
+      title: 'Brisbane meetup',
+      description: 'Desc',
+      type: 'MEETUP',
+      format: 'IN_PERSON',
+      date: new Date('2026-12-20T00:00:00.000Z'),
+      startTime: '18:00',
+      endTime: '20:00',
+      location: 'Brisbane',
+      image: 'https://img',
+      hostName: 'Host',
+      hostTitle: 'Title',
+      hostAvatar: 'https://ava',
+      baseAttendees: 90,
+      maxAttendees: 100,
+      price: 0,
+      tags: [],
+      _count: { registrations: 10 },
+      registrations: [],
+      saves: [],
+    });
+
+    const res = await request(app)
+      .post('/api/events/e1/register')
+      .set('x-test-auth', '1')
+      .send({})
+      .expect(409);
+
+    expect(res.body.message).toMatch(/full/i);
+    expect(prisma.eventRegistration.upsert).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/events/:id/register is still a no-op for someone who already has a place at a full event', async () => {
+    const full = {
+      id: 'e1',
+      title: 'Brisbane meetup',
+      description: 'Desc',
+      type: 'MEETUP',
+      format: 'IN_PERSON',
+      date: new Date('2026-12-20T00:00:00.000Z'),
+      startTime: '18:00',
+      endTime: '20:00',
+      location: 'Brisbane',
+      image: 'https://img',
+      hostName: 'Host',
+      hostTitle: 'Title',
+      hostAvatar: 'https://ava',
+      baseAttendees: 90,
+      maxAttendees: 100,
+      price: 0,
+      tags: [],
+      _count: { registrations: 10 },
+      registrations: [{ id: 'er_1' }],
+      saves: [],
+    };
+    (prisma.event.findUnique as any).mockResolvedValue(full);
+    (prisma.eventRegistration.upsert as any).mockResolvedValue({ id: 'er_1' });
+
+    const res = await request(app)
+      .post('/api/events/e1/register')
+      .set('x-test-auth', '1')
+      .send({})
+      .expect(200);
+
+    expect(res.body.data.isRegistered).toBe(true);
+    expect(prisma.eventRegistration.upsert).toHaveBeenCalled();
+  });
+
   it('POST /api/events/:id/save upserts save and returns isSaved=true', async () => {
     (prisma.event.findUnique as any)
       .mockResolvedValueOnce({

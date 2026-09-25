@@ -10,6 +10,11 @@ jest.mock('../../utils/prisma', () => ({
       findMany: jest.fn(async () => []),
     },
     notification: {
+      // The sweep checks for a notification it has already sent before sending
+      // another, so this has to answer as well as create. Null is "nothing sent
+      // recently", which is the state every test below wants unless it says
+      // otherwise.
+      findFirst: jest.fn(async () => null),
       create: jest.fn(async () => ({})),
     },
   },
@@ -184,5 +189,45 @@ describe('Escrow holds approaching the end of their authorisation', () => {
         data: expect.objectContaining({ userId: 'admin-1', type: 'SYSTEM' }),
       })
     );
+  });
+
+  // The escalation used to fire only once a hold had already outlived its
+  // authorisation — that is, once the seller had most likely lost the money for
+  // work she had already delivered. These two cover the warning that arrives
+  // while somebody can still do something about it.
+  describe('escalating while the money can still be collected', () => {
+    it('tells administrators about a hold that is about to lapse, not only one that has', async () => {
+      prismaAny.escrowPayment.findMany.mockResolvedValue([hold()]);
+      prismaAny.mentorSession.findMany.mockResolvedValue([]);
+      prismaAny.user.findMany.mockResolvedValue([{ id: 'admin-1' }]);
+      prismaAny.notification.findFirst.mockResolvedValue(null);
+
+      const result = await runEscrowExpirySweep(NOW);
+
+      expect(result.expiringSoon).toBe(1);
+      expect(result.alreadyLapsed).toBe(0);
+      expect(prismaAny.notification.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'admin-1',
+            title: 'Escrow holds are about to lapse',
+          }),
+        })
+      );
+    });
+
+    it('does not raise the same condition again the same day', async () => {
+      prismaAny.escrowPayment.findMany.mockResolvedValue([hold()]);
+      prismaAny.mentorSession.findMany.mockResolvedValue([]);
+      prismaAny.user.findMany.mockResolvedValue([{ id: 'admin-1' }]);
+      // The sweep runs every six hours and nothing in it resolves a hold, so
+      // without this check one hold would notify every admin four times a day
+      // until a human dealt with it.
+      prismaAny.notification.findFirst.mockResolvedValue({ id: 'notif-1' });
+
+      await runEscrowExpirySweep(NOW);
+
+      expect(prismaAny.notification.create).not.toHaveBeenCalled();
+    });
   });
 });

@@ -4,7 +4,15 @@ import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { UserRole, JobStatus, SubscriptionTier, SubscriptionStatus, EventType, EventFormat } from '@prisma/client';
 import { z } from 'zod';
 import { ApiError } from '../middleware/errorHandler';
-import { ModerationAction, processReportById } from '../services/content-report.service';
+import {
+  ModerationAction,
+  getAnonymousReport,
+  listAnonymousReports,
+  processReportById,
+  resolveAnonymousReport,
+} from '../services/content-report.service';
+import { gdprService } from '../services/gdpr.service';
+import { consentService } from '../services/consent.service';
 import { logAudit } from '../utils/audit';
 import { logger } from '../utils/logger';
 import { sendEmail } from '../utils/email';
@@ -400,35 +408,71 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
 /**
  * DELETE /admin/users/:id
  * Delete a user (soft delete or hard delete)
+ *
+ * The hard branch used to run a seven-table transaction — comments, likes,
+ * posts, notifications, job applications, saved jobs, then the user row —
+ * against a personal-data register that names more than sixty tables, and it
+ * never consulted LegalHold. So an administrator with curl could destroy data
+ * that was under litigation hold, through a path that also left most of the
+ * member behind or died on a foreign key halfway. It now runs the same erasure
+ * the member's own right-to-be-forgotten runs, and refuses on the same terms.
  */
 router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { hard = false } = req.query;
+    const isHard = hard === 'true';
 
-    if (hard === 'true') {
-      // Hard delete - remove all user data
-      await prisma.$transaction([
-        prisma.comment.deleteMany({ where: { authorId: id } }),
-        prisma.like.deleteMany({ where: { userId: id } }),
-        prisma.post.deleteMany({ where: { authorId: id } }),
-        prisma.notification.deleteMany({ where: { userId: id } }),
-        prisma.jobApplication.deleteMany({ where: { userId: id } }),
-        prisma.savedJob.deleteMany({ where: { userId: id } }),
-        prisma.user.delete({ where: { id } }),
-      ]);
-    } else {
-      // Soft delete - suspend and anonymize
-      await prisma.user.update({
-        where: { id },
+    if (isHard) {
+      const outcome = await gdprService.eraseAccountByAdmin(id, {
+        adminId: req.user?.id ?? null,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+      });
+
+      if (outcome.status === 'REJECTED') {
+        // A hold is a court's claim on this data, not a preference, so the
+        // refusal is the answer rather than something to log and work around.
+        throw new ApiError(409, outcome.reason || 'This account is under a legal hold and cannot be deleted.');
+      }
+
+      await logAudit({
+        action: 'ADMIN_USER_DELETE',
+        actorUserId: req.user?.id ?? null,
+        targetUserId: id,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+        metadata: {
+          hard: true,
+          accountRemoved: outcome.accountRemoved,
+          retainedSections: outcome.retainedSections,
+          rowsRemoved: outcome.rowsRemoved,
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: outcome.accountRemoved
+          ? 'Account erased.'
+          : 'Account stripped back to a shell; records we must retain still point at it.',
         data: {
-          isSuspended: true,
-          email: `deleted_${id}@athena.local`,
-          firstName: 'Deleted',
-          lastName: 'User',
+          accountRemoved: outcome.accountRemoved,
+          retainedSections: outcome.retainedSections,
+          rowsRemoved: outcome.rowsRemoved,
         },
       });
     }
+
+    // Soft delete - suspend and anonymize
+    await prisma.user.update({
+      where: { id },
+      data: {
+        isSuspended: true,
+        email: gdprService.suspensionTombstoneEmail(id),
+        firstName: 'Deleted',
+        lastName: 'User',
+      },
+    });
 
     await logAudit({
       action: 'ADMIN_USER_DELETE',
@@ -436,12 +480,10 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
       targetUserId: id,
       ipAddress: req.ip,
       userAgent: req.get('user-agent') || undefined,
-      metadata: {
-        hard: hard === 'true',
-      },
+      metadata: { hard: false },
     });
 
-    res.json({ success: true, message: hard ? 'User permanently deleted' : 'User suspended and anonymized' });
+    res.json({ success: true, message: 'User suspended and anonymized' });
   } catch (error) {
     next(error);
   }
@@ -913,6 +955,118 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
 });
 
 // ============================================================================
+// ANONYMOUS REPORT QUEUE
+// ============================================================================
+
+/**
+ * A ContentReport names a member on both sides, so a report filed by somebody
+ * with no account — the case the Online Safety Act 2021 (Cth) cares most about,
+ * because a woman who has just been targeted may have no way to sign in — is
+ * written as a SafetyIncident instead. Nothing read those rows back: no route,
+ * no page, no worker. Every anonymous report since the public form shipped went
+ * into a table no moderator opens, behind a response promising a review within
+ * 48 hours. These three routes are the queue: the same shape as the named
+ * queue above, and the same enforcement behind the decision.
+ */
+
+/**
+ * GET /admin/moderation/anonymous-reports
+ * Work queue of reports filed without an account, newest first
+ */
+router.get('/moderation/anonymous-reports', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { page = '1', limit = '20', status, contentType, reason } = req.query;
+    const normalizedStatus = String(status || '').toUpperCase();
+
+    const result = await listAnonymousReports({
+      status: normalizedStatus === 'PENDING' || normalizedStatus === 'ACTIONED' ? normalizedStatus : undefined,
+      contentType: contentType ? String(contentType) : undefined,
+      reason: reason ? String(reason) : undefined,
+      page: parseInt(String(page), 10),
+      limit: parseInt(String(limit), 10),
+    });
+
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /admin/moderation/anonymous-reports/:id
+ * One anonymous report, with the named reports already open against the same account
+ */
+router.get('/moderation/anonymous-reports/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const report = await getAnonymousReport(req.params.id);
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const relatedReports = report.reportedUser
+      ? await prisma.contentReport.findMany({
+          where: { reportedUserId: report.reportedUser.id },
+          select: { id: true, reason: true, status: true, action: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        })
+      : [];
+
+    res.json({ report, relatedReports });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/moderation/anonymous-reports/:id/action
+ * Decide an anonymous report and enforce the decision
+ */
+router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { action, notes } = req.body ?? {};
+
+    if (!MODERATION_ACTIONS.includes(action)) {
+      return res.status(400).json({ error: 'Invalid action' });
+    }
+
+    const outcome = await resolveAnonymousReport(req.params.id, action, req.user!.id, notes);
+
+    await logAudit({
+      action: REPORT_AUDIT_ACTIONS[action as ModerationAction],
+      actorUserId: req.user?.id ?? null,
+      targetUserId: outcome.reportedUserId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || undefined,
+      metadata: {
+        incidentId: outcome.reportId,
+        anonymous: true,
+        moderationAction: outcome.action,
+        contentType: outcome.contentType,
+        contentId: outcome.contentId,
+        notes: notes ?? null,
+      },
+    });
+
+    logger.info('Anonymous report actioned', {
+      incidentId: outcome.reportId,
+      action: outcome.action,
+      adminId: req.user?.id,
+    });
+
+    res.json(outcome);
+  } catch (error) {
+    // resolveAnonymousReport throws for a missing row and for one already
+    // decided, and a moderator needs to be told which rather than shown a 500.
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'Report not found') return res.status(404).json({ error: message });
+    if (message === 'Report has already been actioned') return res.status(409).json({ error: message });
+    next(error);
+  }
+});
+
+// ============================================================================
 // AUDIT LOGS (Compliance)
 // ============================================================================
 
@@ -968,6 +1122,18 @@ router.get('/audit-logs', async (req: AuthRequest, res: Response, next: NextFunc
 /**
  * GET /admin/gdpr/summary
  * Summary stats for GDPR/UK compliance tracking
+ *
+ * This counted UK members and EU members and nothing else, on the compliance
+ * screen of a Queensland company whose default region is ANZ — the home regime,
+ * the Privacy Act 1988 (Cth), had no figure at all. The whole region breakdown
+ * is returned now, so no regime can be missing from it again by omission.
+ *
+ * The consent tiles counted the four legacy boolean columns on User. Those are
+ * a best-effort mirror the cookie banner keeps; the Privacy Centre writes only
+ * the ConsentRecord ledger, which is also the one hasConsent() reads before the
+ * platform acts. Both are reported, side by side and labelled, because a
+ * divergence between them is itself something a privacy officer needs to see
+ * rather than something to hide behind one number.
  */
 router.get('/gdpr/summary', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -976,19 +1142,18 @@ router.get('/gdpr/summary', async (req: AuthRequest, res: Response, next: NextFu
 
     const [
       totalUsers,
-      ukUsers,
-      euUsers,
-      consentMarketing,
-      consentDataProcessing,
-      consentCookies,
-      consentDoNotSell,
+      regionRows,
+      legacyConsentMarketing,
+      legacyConsentDataProcessing,
+      legacyConsentCookies,
+      legacyConsentDoNotSell,
       consentUpdatesLastWindow,
       dsarExportsLastWindow,
       accountDeletesLastWindow,
+      ledgerCounts,
     ] = await Promise.all([
       prisma.user.count(),
-      prisma.user.count({ where: { region: 'UK' } }),
-      prisma.user.count({ where: { region: 'EU' } }),
+      prisma.user.groupBy({ by: ['region'], _count: { _all: true } }),
       prisma.user.count({ where: { consentMarketing: true } }),
       prisma.user.count({ where: { consentDataProcessing: true } }),
       prisma.user.count({ where: { consentCookies: true } }),
@@ -1000,21 +1165,37 @@ router.get('/gdpr/summary', async (req: AuthRequest, res: Response, next: NextFu
       prisma.auditLog.count({
         where: { action: 'ACCOUNT_DELETE', createdAt: { gte: windowStart } },
       }),
+      consentService.countLiveConsents(),
     ]);
+
+    const byRegion: Record<string, number> = {};
+    for (const row of regionRows) {
+      byRegion[row.region || 'UNKNOWN'] = row._count._all;
+    }
+    // ANZ is the default region and AU is what a country-code detection writes,
+    // so the home figure is the two together rather than whichever one happens
+    // to have been stamped on a given account.
+    const auUsers = (byRegion.ANZ || 0) + (byRegion.AU || 0) + (byRegion.NZ || 0);
 
     res.json({
       totalUsers,
-      ukUsers,
-      euUsers,
+      auUsers,
+      ukUsers: byRegion.UK || 0,
+      euUsers: byRegion.EU || 0,
+      usersByRegion: byRegion,
       dsarExportsLastWindow,
       accountDeletesLastWindow,
       consentUpdatesLastWindow,
       lastWindowDays: days,
-      consentCounts: {
-        consentMarketing,
-        consentDataProcessing,
-        consentCookies,
-        consentDoNotSell,
+      // What the platform actually enforces: the per-type ledger.
+      consentLedger: ledgerCounts,
+      // The legacy User booleans, kept visible so a drift between the two is
+      // readable rather than invisible. They are not what hasConsent() reads.
+      legacyConsentCounts: {
+        consentMarketing: legacyConsentMarketing,
+        consentDataProcessing: legacyConsentDataProcessing,
+        consentCookies: legacyConsentCookies,
+        consentDoNotSell: legacyConsentDoNotSell,
       },
     });
   } catch (error) {

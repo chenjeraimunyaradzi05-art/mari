@@ -78,6 +78,29 @@ describe('Course curriculum: builder, classroom, certificates', () => {
     await request(app).post('/api/courses/c1/modules/m-other/lessons').set(as('teacher')).send({ title: 'Sneaky' }).expect(404);
   });
 
+  // A lesson's video and resource addresses used to be stored as whatever
+  // string arrived, so `javascript:` went into the column and came back out as
+  // the href a learner is invited to click in the classroom.
+  it('a lesson address has to be a real http(s) address, or one of ATHENA’s own upload paths', async () => {
+    prisma.courseModule.findUnique.mockResolvedValue({ id: 'm1', courseId: 'c1' });
+    prisma.courseLesson.count.mockResolvedValue(0);
+    prisma.courseLesson.create.mockImplementation(async ({ data }: any) => ({ id: 'l-new', ...data }));
+
+    await request(app)
+      .post('/api/courses/c1/modules/m1/lessons')
+      .set(as('teacher'))
+      .send({ title: 'Pricing', type: 'VIDEO', videoUrl: 'javascript:alert(1)' })
+      .expect(400);
+    expect(prisma.courseLesson.create).not.toHaveBeenCalled();
+
+    const uploaded = await request(app)
+      .post('/api/courses/c1/modules/m1/lessons')
+      .set(as('teacher'))
+      .send({ title: 'Pricing', type: 'VIDEO', videoUrl: '/uploads/videos/teacher/pricing.mp4', resourceUrl: '' })
+      .expect(201);
+    expect(uploaded.body.data).toMatchObject({ videoUrl: '/uploads/videos/teacher/pricing.mp4', resourceUrl: null });
+  });
+
   it('someone not enrolled sees the outline and the preview lessons, not the rest', async () => {
     prisma.course.findFirst.mockResolvedValue({
       ...course,

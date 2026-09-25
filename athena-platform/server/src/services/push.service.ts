@@ -76,9 +76,32 @@ export function wantsPush(preferences: unknown, type: NotificationType): boolean
 async function activeTokensOf(userId: string): Promise<StoredToken[]> {
   const rows = await prisma.pushToken.findMany({
     where: { userId, isActive: true },
+    orderBy: { createdAt: 'desc' },
     select: { id: true, token: true, platform: true },
   });
-  return Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows)) return [];
+
+  // One device, one notification.
+  //
+  // PushToken.token is indexed but not unique, and the register handler is a
+  // findFirst followed by a create with no constraint behind it. The app calls
+  // syncPushToken() twice in quick succession on a cold start that ends in a
+  // sign-in — once from App.tsx on mount, once from AuthContext on login — so
+  // the two registrations race and both create a row. The phone then had two
+  // active rows and Expo was handed the same token twice in the same batch, so
+  // every notification arrived twice: two buzzes for one message.
+  //
+  // De-duplicating here fixes the delivery for the rows that already exist. It
+  // does not stop the duplicates being written; that needs @unique on
+  // PushToken.token, which is a schema change.
+  const seen = new Set<string>();
+  const unique: StoredToken[] = [];
+  for (const row of rows) {
+    if (seen.has(row.token)) continue;
+    seen.add(row.token);
+    unique.push(row);
+  }
+  return unique;
 }
 
 async function deactivate(ids: string[]): Promise<void> {

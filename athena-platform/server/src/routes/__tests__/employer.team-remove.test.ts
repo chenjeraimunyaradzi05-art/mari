@@ -43,6 +43,7 @@ const arrange = (target: { id: string; organizationId: string; role: string } | 
         userId: where.organizationId_userId.userId,
         role: 'ADMIN',
         canManageTeam: true,
+        acceptedAt: new Date('2026-01-05T00:00:00.000Z'),
       };
     }
     return target && where.id === target.id ? target : null;

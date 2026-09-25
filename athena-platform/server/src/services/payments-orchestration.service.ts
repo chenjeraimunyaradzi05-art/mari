@@ -6,6 +6,7 @@
 import Stripe from 'stripe';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { ApiError } from '../middleware/errorHandler';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
 
 // Stripe comes from the one shared client in utils/stripe; `Stripe` is still
@@ -87,7 +88,23 @@ const CURRENCY_REGION: Record<Currency, string> = {
   KES: 'KE',
 };
 
-// FX rates cache (would be real-time API in production)
+/**
+ * Indicative FX rates, and the day they were taken.
+ *
+ * These are compile-time constants, not a feed, and they are treated as an
+ * estimate everywhere they surface. Two things used to be wrong with them and
+ * both mattered. Any pair not in this table converted at `|| 1` — a silent
+ * parity — so A$100 came back as 99 pesos, 99 rupees or 99 shillings for
+ * currencies this service's own type union advertises. And nothing recorded
+ * when the numbers were written, so they could drift for years without anything
+ * saying so.
+ *
+ * A missing pair is now a refusal (see convertCurrency) and the date below
+ * travels with every quote, so a caller can see how old the number it is
+ * showing is.
+ */
+const FX_RATES_AS_AT = '2025-01-01';
+
 const FX_RATES: Record<string, number> = {
   'AUD_USD': 0.65,
   'USD_AUD': 1.54,
@@ -103,6 +120,27 @@ const FX_RATES: Record<string, number> = {
   'GBP_USD': 1.25,
 };
 
+/** The pairs a quote can actually be given for, for a caller that wants to ask first. */
+export function supportedConversions(): string[] {
+  return Object.keys(FX_RATES);
+}
+
+/**
+ * The providers this platform can actually take money with.
+ *
+ * Stripe is the only one that is built. PayPal, GrabPay, GCash, M-Pesa, Pix and
+ * UPI each have a function below, and each of those functions fabricates its
+ * answer — there is no integration behind any of them. Routing a member to one
+ * is therefore not a payment that might fail; it is a payment that cannot
+ * happen, and the difference belongs in one place rather than in six.
+ *
+ * Stripe counts as live only when a key is configured, because without one it
+ * cannot take money either.
+ */
+export function isProviderLive(provider: PaymentProvider): boolean {
+  return provider === 'stripe' && isStripeConfigured();
+}
+
 function assertProviderConfigured(provider: PaymentProvider): void {
   const message = `${provider} payments are not configured`;
 
@@ -111,6 +149,28 @@ function assertProviderConfigured(provider: PaymentProvider): void {
   }
 
   logger.warn(`${message}; returning development simulation`);
+}
+
+/**
+ * What an unbuilt provider returns.
+ *
+ * Each of these used to answer with a redirect it had invented —
+ * `paypal.com/checkout?amount=`, `grab.com/pay?amount=`,
+ * `gcash.com/pay?amount=` — none of which is a checkout anywhere. A UI given
+ * one of those would have sent a woman to a page that could not take her money
+ * and, for the two that are not even real endpoints, would have shown her an
+ * error from somebody else's domain. Nothing is invented now: the result says
+ * the provider is not available and names it.
+ */
+function providerNotAvailable(provider: PaymentProvider): PaymentResult {
+  assertProviderConfigured(provider);
+
+  return {
+    success: false,
+    provider,
+    status: 'failed',
+    error: `ATHENA cannot take payments through ${provider} yet. Please pay by card.`,
+  };
 }
 
 /**
@@ -135,8 +195,27 @@ export function getBestProvider(
   return providers[0];
 }
 
+const PROVIDER_LABELS: Record<PaymentProvider, { type: string; name: string; icon: string }> = {
+  stripe: { type: 'card', name: 'Credit/Debit Card', icon: 'credit-card' },
+  paypal: { type: 'wallet', name: 'PayPal', icon: 'paypal' },
+  grabpay: { type: 'wallet', name: 'GrabPay', icon: 'grabpay' },
+  gcash: { type: 'wallet', name: 'GCash', icon: 'gcash' },
+  mpesa: { type: 'mobile_money', name: 'M-Pesa', icon: 'mpesa' },
+  pix: { type: 'bank', name: 'Pix', icon: 'pix' },
+  upi: { type: 'bank', name: 'UPI', icon: 'upi' },
+  wise: { type: 'bank', name: 'Wise', icon: 'wise' },
+};
+
 /**
- * Get available payment methods for user's region
+ * The payment methods a member in this region can actually use.
+ *
+ * This endpoint used to list every provider mapped to the region regardless of
+ * whether it was built or configured, so a woman in Manila was offered GCash and
+ * GrabPay and a woman in Nairobi was offered M-Pesa, and all three of those
+ * choices led to a function that fabricated a result. Six advertised ways to pay
+ * and one that worked. Only live providers are returned now — which is Stripe,
+ * and only where a key is configured — so the list matches what /process will
+ * accept.
  */
 export function getAvailablePaymentMethods(region: string): {
   provider: PaymentProvider;
@@ -144,74 +223,13 @@ export function getAvailablePaymentMethods(region: string): {
   name: string;
   icon: string;
 }[] {
-  const methods = [];
+  // Card is offered in every region Stripe covers, whether or not the region
+  // table names it, which is why stripe is unioned in rather than looked up.
+  const candidates = new Set<PaymentProvider>(['stripe', ...(REGION_PROVIDERS[region] || [])]);
 
-  // Always available
-  methods.push({
-    provider: 'stripe' as PaymentProvider,
-    type: 'card',
-    name: 'Credit/Debit Card',
-    icon: 'credit-card',
-  });
-
-  // Region-specific
-  const providers = REGION_PROVIDERS[region] || [];
-
-  if (providers.includes('paypal')) {
-    methods.push({
-      provider: 'paypal' as PaymentProvider,
-      type: 'wallet',
-      name: 'PayPal',
-      icon: 'paypal',
-    });
-  }
-
-  if (providers.includes('grabpay')) {
-    methods.push({
-      provider: 'grabpay' as PaymentProvider,
-      type: 'wallet',
-      name: 'GrabPay',
-      icon: 'grabpay',
-    });
-  }
-
-  if (providers.includes('gcash')) {
-    methods.push({
-      provider: 'gcash' as PaymentProvider,
-      type: 'wallet',
-      name: 'GCash',
-      icon: 'gcash',
-    });
-  }
-
-  if (providers.includes('mpesa')) {
-    methods.push({
-      provider: 'mpesa' as PaymentProvider,
-      type: 'mobile_money',
-      name: 'M-Pesa',
-      icon: 'mpesa',
-    });
-  }
-
-  if (providers.includes('pix')) {
-    methods.push({
-      provider: 'pix' as PaymentProvider,
-      type: 'bank',
-      name: 'Pix',
-      icon: 'pix',
-    });
-  }
-
-  if (providers.includes('upi')) {
-    methods.push({
-      provider: 'upi' as PaymentProvider,
-      type: 'bank',
-      name: 'UPI',
-      icon: 'upi',
-    });
-  }
-
-  return methods;
+  return [...candidates]
+    .filter(isProviderLive)
+    .map((provider) => ({ provider, ...PROVIDER_LABELS[provider] }));
 }
 
 /**
@@ -231,24 +249,11 @@ export async function processPayment(
   });
 
   try {
-    switch (provider) {
-      case 'stripe':
-        return await processStripePayment(request);
-      case 'paypal':
-        return await processPayPalPayment(request);
-      case 'grabpay':
-        return await processGrabPayPayment(request);
-      case 'gcash':
-        return await processGCashPayment(request);
-      case 'mpesa':
-        return await processMPesaPayment(request);
-      case 'pix':
-        return await processPixPayment(request);
-      case 'upi':
-        return await processUPIPayment(request);
-      default:
-        return await processStripePayment(request);
+    if (provider !== 'stripe') {
+      return providerNotAvailable(provider);
     }
+
+    return await processStripePayment(request);
   } catch (error: any) {
     logger.error('Payment processing failed', { error: error.message, provider });
     return {
@@ -274,19 +279,7 @@ async function processStripePayment(request: PaymentRequest): Promise<PaymentRes
     };
   }
 
-  // Get or create customer
-  let customerId = await getStripeCustomerId(request.userId);
-  
-  if (!customerId) {
-    const user = await prisma.user.findUnique({ where: { id: request.userId } });
-    const customer = await getStripe().customers.create({
-      email: user?.email || undefined,
-      name: user?.displayName || undefined,
-      metadata: { userId: request.userId },
-    });
-    customerId = customer.id;
-    // Store customer ID (in production, save to user record)
-  }
+  const customerId = await resolveStripeCustomerId(request.userId);
 
   // Create payment intent
   const paymentIntent = await getStripe().paymentIntents.create({
@@ -309,95 +302,10 @@ async function processStripePayment(request: PaymentRequest): Promise<PaymentRes
   };
 }
 
-/**
- * Process PayPal payment (simulated)
- */
-async function processPayPalPayment(request: PaymentRequest): Promise<PaymentResult> {
-  assertProviderConfigured('paypal');
-  logger.info('Processing PayPal payment', { amount: request.amount });
-  
-  return {
-    success: false,
-    provider: 'paypal',
-    status: 'requires_action',
-    redirectUrl: `https://paypal.com/checkout?amount=${request.amount}`,
-  };
-}
-
-/**
- * Process GrabPay payment (simulated)
- */
-async function processGrabPayPayment(request: PaymentRequest): Promise<PaymentResult> {
-  assertProviderConfigured('grabpay');
-  logger.info('Processing GrabPay payment', { amount: request.amount });
-  
-  return {
-    success: false,
-    provider: 'grabpay',
-    status: 'requires_action',
-    redirectUrl: `https://grab.com/pay?amount=${request.amount}`,
-  };
-}
-
-/**
- * Process GCash payment (simulated)
- */
-async function processGCashPayment(request: PaymentRequest): Promise<PaymentResult> {
-  assertProviderConfigured('gcash');
-  logger.info('Processing GCash payment', { amount: request.amount });
-  
-  return {
-    success: false,
-    provider: 'gcash',
-    status: 'requires_action',
-    redirectUrl: `https://gcash.com/pay?amount=${request.amount}`,
-  };
-}
-
-/**
- * Process M-Pesa payment (simulated)
- */
-async function processMPesaPayment(request: PaymentRequest): Promise<PaymentResult> {
-  assertProviderConfigured('mpesa');
-  logger.info('Processing M-Pesa payment', { amount: request.amount });
-  
-  return {
-    success: false,
-    provider: 'mpesa',
-    status: 'pending',
-    // M-Pesa uses STK push - user receives prompt on phone
-  };
-}
-
-/**
- * Process Pix payment (simulated)
- */
-async function processPixPayment(request: PaymentRequest): Promise<PaymentResult> {
-  assertProviderConfigured('pix');
-  logger.info('Processing Pix payment', { amount: request.amount });
-  
-  return {
-    success: false,
-    provider: 'pix',
-    status: 'requires_action',
-    // Return QR code data for Pix payment
-  };
-}
-
-/**
- * Process UPI payment (simulated)
- */
-async function processUPIPayment(request: PaymentRequest): Promise<PaymentResult> {
-  assertProviderConfigured('upi');
-  logger.info('Processing UPI payment', { amount: request.amount });
-  
-  return {
-    success: false,
-    provider: 'upi',
-    status: 'requires_action',
-    // Return UPI deep link
-  };
-}
+// PayPal, GrabPay, GCash, M-Pesa, Pix and UPI are not integrated. Each is
+// routed through the one refusal above rather than its own invented answer, so
+// that there is a single place to delete from when one of them is genuinely
+// built.
 
 /**
  * Creator payouts do not happen here, and this says so rather than trying.
@@ -438,19 +346,38 @@ export async function processCreatorPayout(
 }
 
 /**
- * Convert currency with FX rate
+ * An indicative conversion, or nothing.
+ *
+ * `FX_RATES[rateKey] || 1` was the whole of the rate lookup, so every pair
+ * outside the twelve-entry table converted at parity after the 1% fee was taken
+ * off: A$100 to PHP returned 99, A$100 to INR returned 99, A$100 to KES
+ * returned 99. Those are currencies the Currency union above offers, so this
+ * was not an edge — it was most of the advertised surface returning a number
+ * that was wrong by a factor of fifty and looked like a quote.
+ *
+ * An unsupported pair now throws. `rateAsAt` goes out with every quote that
+ * does work, because these are stored numbers rather than a live feed and a
+ * caller showing one to a member should be able to say how old it is.
  */
 export function convertCurrency(
   amount: number,
   fromCurrency: Currency,
   toCurrency: Currency
-): { amount: number; rate: number; fee: number } {
+): { amount: number; rate: number; fee: number; rateAsAt: string } {
   if (fromCurrency === toCurrency) {
-    return { amount, rate: 1, fee: 0 };
+    return { amount, rate: 1, fee: 0, rateAsAt: FX_RATES_AS_AT };
   }
 
   const rateKey = `${fromCurrency}_${toCurrency}`;
-  const rate = FX_RATES[rateKey] || 1;
+  const rate = FX_RATES[rateKey];
+
+  if (rate === undefined) {
+    throw new ApiError(
+      422,
+      `ATHENA has no exchange rate for ${fromCurrency} to ${toCurrency}, so it cannot quote this conversion.`
+    );
+  }
+
   const fee = amount * 0.01; // 1% FX fee
   const convertedAmount = (amount - fee) * rate;
 
@@ -458,6 +385,7 @@ export function convertCurrency(
     amount: Math.round(convertedAmount * 100) / 100,
     rate,
     fee,
+    rateAsAt: FX_RATES_AS_AT,
   };
 }
 
@@ -744,14 +672,60 @@ export async function recordAcceleratorPaymentFailure(
 
 // Helper functions
 
-async function getStripeCustomerId(userId: string): Promise<string | null> {
-  // In production, query from user record
-  return null;
-}
+/**
+ * The one Stripe customer behind a member, created once and remembered.
+ *
+ * The lookup this replaces was a two-line stub whose whole body was a comment
+ * and `return null`, so every call to processStripePayment fell through to
+ * customers.create and Stripe accumulated a fresh customer record for the same
+ * woman on every single payment. Nothing pointed her subscription, her saved
+ * cards or her billing portal at any of them, and Stripe's own dashboard showed
+ * one person as a dozen.
+ *
+ * `Subscription.stripeCustomerId` is where the id lives — subscription.routes
+ * writes it on the first checkout and reads it back for the billing portal — so
+ * that is the column consulted and written here too, rather than a second one
+ * that would disagree with it.
+ */
+async function resolveStripeCustomerId(userId: string): Promise<string> {
+  const existing = await prisma.subscription.findUnique({
+    where: { userId },
+    select: { stripeCustomerId: true },
+  });
 
-async function getStripeConnectAccountId(userId: string): Promise<string | null> {
-  // In production, query from creator profile
-  return null;
+  if (existing?.stripeCustomerId) {
+    return existing.stripeCustomerId;
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, displayName: true },
+  });
+
+  const customer = await getStripe().customers.create({
+    email: user?.email || undefined,
+    name: user?.displayName || undefined,
+    metadata: { userId },
+  });
+
+  // updateMany, because a member who has never had a membership has no
+  // Subscription row at all and an update would throw on her. She still gets a
+  // customer for this one payment; the id is simply not stored until there is a
+  // row to store it on, which is the same position as before this change for
+  // her and a strict improvement for everybody who has one.
+  const stored = await prisma.subscription.updateMany({
+    where: { userId },
+    data: { stripeCustomerId: customer.id },
+  });
+
+  if (stored.count === 0) {
+    logger.info('Created a Stripe customer for a member with no subscription row to hold it', {
+      userId,
+      customerId: customer.id,
+    });
+  }
+
+  return customer.id;
 }
 
 function mapStripeStatus(status: string): PaymentResult['status'] {
@@ -773,8 +747,10 @@ function mapStripeStatus(status: string): PaymentResult['status'] {
 export default {
   getBestProvider,
   getAvailablePaymentMethods,
+  isProviderLive,
   processPayment,
   processCreatorPayout,
   convertCurrency,
+  supportedConversions,
   getRegionalPricing,
 };

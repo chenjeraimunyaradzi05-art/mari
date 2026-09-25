@@ -3,7 +3,7 @@ import { assessAffordability, assessReadiness, calculateRepayment, compareCarLoa
 import { benchmarkPrice, estimateValue, projectValue, retainedShare, upgradePath } from '../valuation.service';
 import { compareInsuranceQuotes, estimatePremium } from '../car-insurance.service';
 import { dealerSaleFee, referralFee, summariseReferrals } from '../referrals.service';
-import { assessListingRisk, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin, normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection } from '../marketplace.service';
+import { assessListingRisk, historyChecks, inspectionEnds, inspectionOutcome, isValidVin, maskRego, maskVin, normaliseInspectionReport, purchaseFee, purchaseTransition, withinInspection } from '../marketplace.service';
 import { bookingMinutes, markSent, nextServiceAfter, normaliseQuoteLines, priceFor, projectedOdometer, quoteTotal, shouldSend, vehicleReminders } from '../garage.service';
 import { CAR_SEEDS, SAFETY_FEATURES, SERVICE_KINDS, ancapStatus, co2ForCar } from '../automotive-library';
 
@@ -164,12 +164,36 @@ describe('the marketplace rules', () => {
   });
 
   it('flags the things a fraud looks like and holds the worst for review', () => {
-    const clean = assessListingRisk({ price: 20000, verdict: 'FAIR', photosCount: 8, vin: 'JTDKN3DU0A0123456', ppsrChecked: true, sellerAccountAgeDays: 400, description: 'Well kept, full history, happy to meet at the workshop.', odometerKm: 80000, year: 2020, serviceHistory: 'FULL', accidentHistory: 'NONE', now: new Date('2026-09-13') });
+    const clean = assessListingRisk({ price: 20000, verdict: 'FAIR', photosCount: 8, vin: 'JTDKN3DU0A0123456', sellerAccountAgeDays: 400, description: 'Well kept, full history, happy to meet at the workshop.', odometerKm: 80000, year: 2020, serviceHistory: 'FULL', accidentHistory: 'NONE', now: new Date('2026-09-13') });
     expect(clean.flags).toHaveLength(0);
     expect(clean.band).toBe('low');
-    const dodgy = assessListingRisk({ price: 9000, verdict: 'WELL_BELOW', photosCount: 0, vin: null, ppsrChecked: false, sellerAccountAgeDays: 2, description: 'Urgent sale, I am overseas, a shipping agent will deliver after a deposit to hold it.', odometerKm: 12000, year: 2018, serviceHistory: 'NONE', accidentHistory: 'NONE', now: new Date('2026-09-13') });
+    const dodgy = assessListingRisk({ price: 9000, verdict: 'WELL_BELOW', photosCount: 0, vin: null, sellerAccountAgeDays: 2, description: 'Urgent sale, I am overseas, a shipping agent will deliver after a deposit to hold it.', odometerKm: 12000, year: 2018, serviceHistory: 'NONE', accidentHistory: 'NONE', now: new Date('2026-09-13') });
     expect(dodgy.holdForReview).toBe(true);
     expect(dodgy.flags.map((f) => f.key)).toEqual(expect.arrayContaining(['price_well_below', 'no_photos', 'no_vin', 'new_seller', 'urgent_language', 'low_km']));
+  });
+
+  /**
+   * The score decides whether a listing is held for review at forty-five, so
+   * every input to it has to be something other than the seller's word. The
+   * PPSR tick box was not: ticking it took ten points off her own score, and
+   * nothing on the platform ever opened the certificate she linked. This is
+   * the regression guard — a listing that is exactly on the threshold without
+   * any PPSR term is still held, and no flag about the seller's PPSR claim is
+   * produced at all.
+   */
+  it('gives a seller no way to lower her own risk score by saying she ran a PPSR check', () => {
+    const onThreshold = assessListingRisk({ price: 20000, verdict: 'FAIR', photosCount: 0, vin: null, sellerAccountAgeDays: 400, description: 'Tidy car, no rush.', odometerKm: 80000, year: 2020, serviceHistory: 'FULL', accidentHistory: 'NONE', now: new Date('2026-09-13') });
+    expect(onThreshold.flags.map((f) => f.key)).toEqual(['no_photos', 'no_vin']);
+    expect(onThreshold.score).toBe(45);
+    expect(onThreshold.holdForReview).toBe(true);
+    expect(onThreshold.flags.some((f) => f.key.includes('ppsr'))).toBe(false);
+  });
+
+  it('tells every buyer to run her own PPSR, whatever the seller ticked', () => {
+    const checks = historyChecks('JTDKN3DU0A0123456', 'ABC123', 'QLD');
+    expect(checks.ppsr.url).toBe('https://www.ppsr.gov.au');
+    expect(checks.ppsr.ready).toBe(true);
+    expect(historyChecks(null, 'ABC123', 'QLD').ppsr.ready).toBe(false);
   });
 
   it('walks the buyer protection states and nobody else\'s', () => {

@@ -59,6 +59,19 @@ export interface FeedOptions {
   limit?: number;
   type?: 'all' | 'video' | 'image' | 'text' | 'poll' | 'win';
   algorithm?: 'chronological' | 'engagement' | 'personalized';
+  /**
+   * Authors this viewer must not be shown: blocking, in both directions.
+   *
+   * It belongs here rather than in the caller because the feed ranks and then
+   * slices. The route used to take a page of `limit` posts back and filter
+   * blocked authors out of that already-sliced array, so a member who had
+   * blocked a few active posters got short pages — sometimes empty ones —
+   * while the total she was told about counted the posts she could not see,
+   * and her scroll stalled on a page with nothing new in it. Removing them
+   * before the ranking means she gets a full page of people she has not
+   * blocked, which is what blocking is supposed to feel like.
+   */
+  excludeAuthorIds?: string[];
 }
 
 type ScorePost = any & { engagementScore: number; decayedScore: number; __source?: FeedSource };
@@ -191,6 +204,30 @@ function getFeedDiversityLimit(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 3;
 }
 
+/**
+ * The deepest a ranked feed will go. Ranking happens in memory, so every post
+ * a page can reach has to be loaded and scored, and that pool cannot grow
+ * without limit.
+ */
+function getRankedFeedCeiling(): number {
+  const raw = Number.parseInt(process.env.FEED_MAX_RANKED_CANDIDATES || '1000', 10);
+  return Number.isFinite(raw) && raw >= 200 ? raw : 1000;
+}
+
+/**
+ * How many posts to load and rank so that the requested page exists.
+ *
+ * The candidate window used to be a flat 200 whatever page was asked for, so
+ * at the default twenty per page the eleventh page was empty however many
+ * posts the platform held — the feed simply stopped, with nothing saying so.
+ * Three times what the page needs gives the ranking something to choose
+ * between rather than merely enough rows to fill the slice, and the ceiling
+ * is where the ranked feed honestly ends.
+ */
+function candidateWindow(page: number, limit: number): number {
+  return Math.min(getRankedFeedCeiling(), Math.max(200, page * limit * 3));
+}
+
 // ==========================================
 // ALGORITHM WEIGHTS
 // ==========================================
@@ -242,7 +279,10 @@ export async function generateFeed(options: FeedOptions): Promise<{
     limit = 20,
     type = 'all',
     algorithm = 'engagement',
+    excludeAuthorIds = [],
   } = options;
+
+  const blockedAuthorIds = [...new Set(excludeAuthorIds)].filter(Boolean);
 
   // Build base query
   let where: any = { isPublic: true, isHidden: false };
@@ -288,7 +328,35 @@ export async function generateFeed(options: FeedOptions): Promise<{
   // Connections-only authors reach their followers; private authors nobody.
   where = { AND: [where, authorAudienceWhere(userId, followingIds)] };
 
+  // Blocked in either direction, removed before the ranking rather than after
+  // the slice. See excludeAuthorIds on FeedOptions for what the old order of
+  // operations did to a member who had blocked a few busy posters.
+  const blocked = new Set(blockedAuthorIds);
+  if (blockedAuthorIds.length > 0) {
+    where = { AND: [where, { authorId: { notIn: blockedAuthorIds } }] };
+  }
+
+  // How deep this feed can honestly go, and how many posts are behind it.
+  //
+  // `total` used to be the length of the in-memory candidate pool, which was
+  // a flat two hundred rows, so every surface that printed "of N posts" or
+  // worked out a page count was reading a ranking buffer and calling it the
+  // platform. It is now the number of posts this viewer is eligible to see,
+  // counted in the database and capped at the depth an in-memory ranking can
+  // reach. Muted words and muted hashtags are still applied after the rows
+  // are loaded, so it stays an upper bound on what she will be shown; an
+  // upper bound that moves with the platform is an honest answer, a constant
+  // two hundred was not.
+  const ceiling = getRankedFeedCeiling();
+  const eligibleTotal = Math.min(ceiling, await prisma.post.count({ where }));
+
   let rankedPosts: ScorePost[] = [];
+
+  // Whether a wider candidate window — the one the next page will ask for —
+  // would reach rows this page's window did not. Set by whichever branch
+  // below does the loading, and the only thing that can honestly say "there
+  // is more" once the ranked pool itself has run out.
+  let windowCouldGrow = false;
 
   // "See fewer posts from X" and muted topics apply to every ranked feed.
   const exclusions = await loadFeedExclusions(userId);
@@ -303,9 +371,12 @@ export async function generateFeed(options: FeedOptions): Promise<{
     const outNetworkTarget = Math.ceil(target * (1 - ratio) * (5 / 7));
     const trendingTarget = Math.max(0, target - inNetworkTarget - outNetworkTarget);
 
-    // 1) In-network (following + own)
+    // 1) In-network (following + own). A blocked author is dropped from the
+    // list of people sourced from, not from the page after it was built.
     const inNetworkWhere: any = {
-      authorId: { in: [...new Set([...followingIds, userId])] },
+      authorId: {
+        in: [...new Set([...followingIds, userId])].filter((id) => !blocked.has(id)),
+      },
       isHidden: false,
       AND: [authorAudienceWhere(userId, followingIds)],
     };
@@ -381,6 +452,10 @@ export async function generateFeed(options: FeedOptions): Promise<{
       if (isExcluded(item, exclusions)) return false;
       const authorId = item.authorId || item.author?.id;
       if (!authorId) return true;
+      // Discovery and trending are sourced by helpers that know nothing about
+      // who has blocked whom, so the block is enforced here as well as in the
+      // in-network query above.
+      if (blocked.has(authorId)) return false;
       const prev = countsByAuthor.get(authorId) || 0;
       return prev < maxPerCreator;
     };
@@ -433,9 +508,20 @@ export async function generateFeed(options: FeedOptions): Promise<{
       }
     }
 
+    // The fill loop stops either because it reached `target` — which is
+    // page * limit, i.e. everything up to and including this page — or
+    // because no source could give it another item. So "is there more" is
+    // exactly "did any source still have something takeable when we
+    // stopped". The old answer compared the slice against result.length,
+    // which the loop had just filled to the slice's own end, so it was false
+    // by construction and this algorithm's infinite scroll never advanced
+    // past page one.
+    windowCouldGrow = sources.some((src) => src.list.some((item) => canTake(item)));
+
     rankedPosts = result;
   } else {
     // Get candidate posts (recent + high engagement)
+    const window = candidateWindow(page, limit);
     const candidatePosts = await prisma.post.findMany({
       where,
       include: {
@@ -458,8 +544,14 @@ export async function generateFeed(options: FeedOptions): Promise<{
         algorithm === 'chronological'
           ? { createdAt: 'desc' }
           : [{ likeCount: 'desc' }, { createdAt: 'desc' }],
-      take: 200, // Get more posts for ranking
+      take: window,
     });
+
+    // A window that came back full means the database had at least this many
+    // eligible rows, so the wider window the next page asks for will reach
+    // further — unless this one is already the ceiling, which is where the
+    // ranked feed genuinely ends.
+    windowCouldGrow = candidatePosts.length >= window && window < ceiling;
 
     // Score and rank posts
     const scoredPosts: ScorePost[] = candidatePosts
@@ -560,8 +652,12 @@ export async function generateFeed(options: FeedOptions): Promise<{
 
   return {
     posts,
-    hasMore: startIndex + limit < rankedPosts.length,
-    total: rankedPosts.length,
+    // Either the pool already holds posts past this slice, or a wider window
+    // will fetch them. Diversity and muted-word trimming can leave the pool
+    // shorter than the page asked for while there are plenty more rows
+    // behind it, which is why this cannot be read off the pool alone.
+    hasMore: startIndex + limit < rankedPosts.length || windowCouldGrow,
+    total: eligibleTotal,
   };
 }
 

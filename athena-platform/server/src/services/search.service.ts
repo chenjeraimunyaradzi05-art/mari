@@ -1022,48 +1022,87 @@ export async function getRecommendedJobs(userId: string, limit = 10): Promise<Se
 // SEARCH SUGGESTIONS
 // ==========================================
 
+/** Nothing shorter than this is a prefix worth matching anything against. */
+const MIN_SUGGESTION_PREFIX = 2;
+
+const SUGGESTION_LIMIT = 5;
+
+/**
+ * What a member could search for next, taken from what is actually on the
+ * platform.
+ *
+ * Half of this used to be a literal list — 'javascript developer',
+ * 'react jobs', 'python tutorial', 'data science' and six more — substring
+ * matched against what she had typed and unioned with a genuine skills query,
+ * so the two were indistinguishable in the response. It is reached from
+ * search() whenever a search returns fewer than five results, which is to say
+ * it is shown to a woman at the moment her search found nothing: exactly when
+ * a suggestion she cannot act on is worst. Every one of those terms was US
+ * tech recruiting and none of them had anything to do with a Queensland
+ * women's platform, so following one landed her on an empty page a second
+ * time.
+ *
+ * Every suggestion now names something that exists: a skill a member holds,
+ * the title of a job that is open, the title of a course that is running, or
+ * a hashtag the community has used this week. If none of those match what she
+ * typed, the honest answer is no suggestions rather than a plausible one.
+ */
 export async function getSearchSuggestions(partialQuery: string): Promise<string[]> {
-  const cacheKey = CacheKeys.search(`suggestions:${partialQuery.toLowerCase()}`);
+  const prefix = partialQuery.trim();
+  if (prefix.length < MIN_SUGGESTION_PREFIX) return [];
+
+  const cacheKey = CacheKeys.search(`suggestions:${prefix.toLowerCase()}`);
 
   return cacheGetOrSet(
     cacheKey,
     async () => {
-      const suggestions: string[] = [];
+      const contains = { contains: prefix, mode: 'insensitive' as const };
 
-      // Popular searches
-      const popularSearches = [
-        'javascript developer',
-        'react jobs',
-        'python tutorial',
-        'data science',
-        'machine learning',
-        'web development',
-        'mobile app',
-        'ui/ux design',
-        'product management',
-        'startup jobs',
+      const [skills, jobs, courses, tags] = await Promise.all([
+        prisma.skill.findMany({
+          where: { name: contains },
+          select: { name: true },
+          // Skills members actually hold come before skills nobody has
+          // claimed, so the list leads with the one most likely to find her
+          // somebody.
+          orderBy: { users: { _count: 'desc' } },
+          take: SUGGESTION_LIMIT,
+        }),
+        prisma.job.findMany({
+          where: { status: 'ACTIVE', title: contains },
+          select: { title: true },
+          orderBy: { applicationCount: 'desc' },
+          take: SUGGESTION_LIMIT,
+        }),
+        prisma.course.findMany({
+          where: { isActive: true, title: contains },
+          select: { title: true },
+          orderBy: { createdAt: 'desc' },
+          take: SUGGESTION_LIMIT,
+        }),
+        trendingHashtagTerms(),
+      ]);
+
+      const lower = prefix.toLowerCase();
+      const suggestions = [
+        ...skills.map((skill) => skill.name),
+        ...jobs.map((job) => job.title),
+        ...courses.map((course) => course.title),
+        ...tags.filter((tag) => tag.toLowerCase().includes(lower)),
       ];
 
-      // Filter by partial match
-      const matching = popularSearches.filter((s) =>
-        s.toLowerCase().includes(partialQuery.toLowerCase())
-      );
-      suggestions.push(...matching.slice(0, 5));
-
-      // Add skill-based suggestions
-      const skills = await prisma.user.findMany({
-        where: {
-          skills: { some: { skill: { name: { contains: partialQuery, mode: 'insensitive' } } } },
-        },
-        select: { skills: { select: { skill: { select: { name: true } } } } },
-        take: 10,
-      });
-
-      const relatedSkills = new Set<string>();
-      skills.forEach((u) => u.skills.forEach((s) => relatedSkills.add(s.skill.name)));
-      suggestions.push(...Array.from(relatedSkills).slice(0, 3));
-
-      return [...new Set(suggestions)].slice(0, 5);
+      // De-duplicated case-insensitively: 'Python' from the skill table and
+      // 'python' from a hashtag are one suggestion, not two.
+      const seen = new Set<string>();
+      const unique: string[] = [];
+      for (const suggestion of suggestions) {
+        const key = suggestion.trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        unique.push(suggestion.trim());
+        if (unique.length === SUGGESTION_LIMIT) break;
+      }
+      return unique;
     },
     3600 // Cache for 1 hour
   );
@@ -1073,27 +1112,48 @@ export async function getSearchSuggestions(partialQuery: string): Promise<string
 // TRENDING SEARCHES
 // ==========================================
 
+/**
+ * The hashtags the community has used most in the last week, as plain search
+ * terms. Counted over real posts and reels by the same aggregation the topics
+ * page shows, so a term here always has something behind it.
+ *
+ * A failure is worth a line in the log and an empty list; trending is a
+ * garnish and must not take a search response down with it.
+ */
+async function trendingHashtagTerms(limit = 8): Promise<string[]> {
+  try {
+    const { trendingTopics } = await import('../routes/topic.routes');
+    const topics = await trendingTopics(7, limit);
+    return topics.map((topic) => topic.tag);
+  } catch (error) {
+    logger.error('Failed to read trending topics for search', { error });
+    return [];
+  }
+}
+
+/**
+ * What the community is searching for — or as close to it as this platform
+ * can honestly get.
+ *
+ * This returned a literal array: 'AI jobs', 'remote work', 'tech startup',
+ * 'web3', 'product manager', 'data analyst', 'UX designer', 'full stack
+ * developer'. Its own comment said a real version would track search queries.
+ * Wrapped in a thirty-minute cache, it read to anyone looking at a trace like
+ * an aggregation result, and it was served unauthenticated to a Queensland
+ * women's platform as if those eight US recruiting terms were what its
+ * members were looking for.
+ *
+ * Nothing on this platform records what was searched for — there is no query
+ * log to aggregate, and adding one would mean storing what every member
+ * looked for, which is not a thing to do casually on a product used by women
+ * hiding from someone. So this answers the nearest question it can answer
+ * truthfully: what the community has been tagging this week. When nobody has
+ * tagged anything, the list is empty, which is also the truth.
+ */
 export async function getTrendingSearches(): Promise<string[]> {
   const cacheKey = CacheKeys.search('trending');
 
-  return cacheGetOrSet(
-    cacheKey,
-    async () => {
-      // In production, this would track actual search queries
-      // For now, return curated trending topics
-      return [
-        'AI jobs',
-        'remote work',
-        'tech startup',
-        'web3',
-        'product manager',
-        'data analyst',
-        'UX designer',
-        'full stack developer',
-      ];
-    },
-    1800 // Cache for 30 minutes
-  );
+  return cacheGetOrSet(cacheKey, async () => trendingHashtagTerms(), 1800);
 }
 
 // ==========================================

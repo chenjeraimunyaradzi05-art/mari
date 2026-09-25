@@ -244,13 +244,34 @@ let warnedNoRedisForSweeps = false;
 
 /**
  * A scheduled sweep (reminders, expiries, scheduled posts) runs on one
- * instance at a time. With Redis the lock decides and the instances that
- * lose it skip the round; without Redis there is nothing to coordinate
- * with, so the sweep runs here on the assumption of a single instance,
- * and says so once.
+ * instance at a time.
+ *
+ * With Redis the lock decides and the instances that lose it skip the round.
+ * Without Redis there is nothing to coordinate with, and what the sweeps do
+ * is not repeatable: the escrow-expiry sweep warns about money that is about
+ * to be released, the wellness sweep sends a woman her medication and
+ * check-in reminders, the scheduled-post publisher publishes. Running those
+ * on every instance at once means duplicate warnings about her money,
+ * duplicate reminders about her health, and a post published as many times
+ * as there are instances.
+ *
+ * So the unlocked path is a development convenience only. Outside production
+ * the sweep runs on the assumption of a single instance and says so once; in
+ * production the round is skipped and the reason is logged at error, because
+ * nothing here can tell whether it is the only instance and guessing wrong
+ * costs a member real money or a duplicate message about her health. Note
+ * that this is the *runtime* half: env.ts refuses to start a production
+ * process with no REDIS_URL at all, so this catches the case the variable
+ * cannot — Redis configured and then unreachable.
  */
 export async function runExclusively<T>(key: string, fn: () => Promise<T>, ttlMs = 10 * 60 * 1000): Promise<T | null> {
   if (!isRedisAvailable()) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('Skipping a scheduled sweep: Redis is unavailable, so nothing can stop every instance running it at once', {
+        sweep: key,
+      });
+      return null;
+    }
     if (!warnedNoRedisForSweeps) {
       warnedNoRedisForSweeps = true;
       logger.warn('Redis is not available: scheduled sweeps run unlocked, which is only safe on a single instance');

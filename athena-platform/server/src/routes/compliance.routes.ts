@@ -16,9 +16,19 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
-import { ConsentType, Prisma } from '@prisma/client';
+import { ConsentType, Prisma, Region } from '@prisma/client';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
+import {
+  newReportTicketId,
+  reportPriorityFor,
+  runReportIntakeConsequences,
+} from '../services/content-report.service';
+import { reviewReportedContent, type ReportableContent } from '../services/moderation-threshold.service';
+import { handleUserReport } from '../services/safety-score.service';
+import { recordSafetyReport } from '../services/trust.service';
+import { publicFormLimiter } from '../middleware/socialLimits';
+import { bestEffort } from '../utils/best-effort';
 import { prisma } from '../utils/prisma';
 import {
   REGION_CONFIGS,
@@ -274,6 +284,86 @@ function reportSeverity(reason: string): 'CRITICAL' | 'HIGH' | 'MEDIUM' {
   if (URGENT_REPORT_REASONS.has(reason)) return 'CRITICAL';
   if (HIGH_HARM_REPORT_REASONS.has(reason)) return 'HIGH';
   return 'MEDIUM';
+}
+
+/** How many evidence links one report may carry, and how long each may be. */
+const MAX_EVIDENCE_URLS = 10;
+const MAX_EVIDENCE_URL_LENGTH = 2048;
+
+/**
+ * The links a reporter attached, or null when what arrived is not a list of web
+ * addresses.
+ *
+ * These are stored and shown to a moderator, so only http and https are
+ * accepted: a javascript: or data: URI in a field that ends up rendered in the
+ * console is an attack on the moderator, not evidence.
+ */
+function parseEvidenceUrls(value: unknown): string[] | null {
+  if (value === undefined || value === null || value === '') return [];
+  if (!Array.isArray(value)) return null;
+  if (value.length > MAX_EVIDENCE_URLS) return null;
+
+  const urls: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') return null;
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    if (trimmed.length > MAX_EVIDENCE_URL_LENGTH) return null;
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    } catch {
+      return null;
+    }
+    urls.push(trimmed);
+  }
+  return urls;
+}
+
+/** The address to write back to: undefined when none was given, null when it is not an address. */
+function parseContactEmail(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Content types the three-reporter auto-hide understands. */
+const AUTO_HIDEABLE: Record<string, ReportableContent> = {
+  POST: 'post',
+  COMMENT: 'comment',
+  VIDEO: 'video',
+};
+
+async function applyAutoHideThreshold(contentType: string, contentId: string): Promise<void> {
+  const hideable = AUTO_HIDEABLE[contentType];
+  if (!hideable) return;
+  await reviewReportedContent(hideable, contentId);
+}
+
+/**
+ * What a reporter is told about the decision. Derived from the action column,
+ * never from reviewNotes, which are a moderator's notes about another member.
+ */
+function describeReportOutcome(action: string | null): string | null {
+  switch (action) {
+    case 'NO_ACTION':
+      return 'We reviewed the content and did not find a breach of the community guidelines.';
+    case 'WARNING':
+      return 'We reviewed your report and warned the member responsible.';
+    case 'CONTENT_REMOVED':
+      return 'We reviewed your report and removed the content.';
+    case 'SUSPENSION':
+      return 'We reviewed your report and suspended the account responsible.';
+    case 'BAN':
+      return 'We reviewed your report and removed the account responsible.';
+    case 'ESCALATED':
+      return 'Your report is with our senior Trust & Safety reviewers.';
+    default:
+      return null;
+  }
 }
 
 function normalizeRegionCode(code?: string): string {
@@ -703,9 +793,9 @@ router.get('/legal-documents', (req: Request, res: Response) => {
  * Deliberately open to people without an account: somebody who has just been
  * targeted may have no way to sign in, and neither Act lets us insist.
  */
-router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/report-content', optionalAuth, publicFormLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { contentType, contentId, reason, details } = req.body;
+    const { contentType, contentId, reason, details, evidenceUrls, contactEmail, isUrgent } = req.body;
 
     if (!contentType || !contentId || !reason) {
       return res.status(400).json({
@@ -725,6 +815,30 @@ router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Respo
       });
     }
 
+    // The form posts seven fields and the handler read four. The evidence
+    // links, the contact address and the urgency flag were destructured away,
+    // under a confirmation screen that promises to write back to that address
+    // and to answer a critical report inside 24 hours. A safety form that
+    // discards what a woman took the trouble to give it is worse than one that
+    // never asked, so all three are kept, validated, and acted on below.
+    const parsedEvidence = parseEvidenceUrls(evidenceUrls);
+    if (parsedEvidence === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Evidence links must be http or https web addresses, ten at most.',
+      });
+    }
+
+    const parsedContactEmail = parseContactEmail(contactEmail);
+    if (parsedContactEmail === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please give a valid email address, or leave it blank.',
+      });
+    }
+
+    const urgent = isUrgent === true || isUrgent === 'true';
+
     const reportedUserId = await resolveOwner(String(contentId));
 
     if (!reportedUserId) {
@@ -734,13 +848,46 @@ router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Respo
       });
     }
 
-    // One queue, one clock: the home regime's review target, which is the same
-    // 48 hours the UK config carries.
-    const reviewDeadline = new Date(
-      Date.now() + AU_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours * 60 * 60 * 1000
-    );
+    // Two clocks, the ones the product already promises: 24 hours for illegal
+    // content, CSAM and terrorism — and for anything a reporter has marked
+    // urgent — and 48 hours for everything else. One uniform 48 was stamped on
+    // every report, including the ones the confirmation screen tells a reporter
+    // we answer in a day.
+    const priority = reportPriorityFor(normalizedReason, urgent);
+    const reviewHours =
+      priority === 'critical'
+        ? AU_ONLINE_SAFETY_CONFIG.illegalContentRemovalHours
+        : AU_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours;
+    const reviewDeadline = new Date(Date.now() + reviewHours * 60 * 60 * 1000);
     const reporterId = req.user?.id;
     const description = typeof details === 'string' ? details : undefined;
+    // A reference a reporter can quote, and the key the status lookup and the
+    // authority-referral queue both find the report by.
+    const ticketId = newReportTicketId();
+
+    const evidence = {
+      ticketId,
+      reviewDeadline: reviewDeadline.toISOString(),
+      reviewHours,
+      priority,
+      source: 'ONLINE_SAFETY_REPORT',
+      urls: parsedEvidence,
+      contactEmail: parsedContactEmail ?? undefined,
+      isUrgent: urgent,
+    };
+
+    const responseBody = (reportId: string, queue: string, status: string) => ({
+      success: true,
+      message: `Report submitted. We will review it within ${reviewHours} hours.`,
+      data: {
+        reportId,
+        reference: ticketId,
+        queue,
+        status,
+        priority,
+        reviewDeadline,
+      },
+    });
 
     if (reporterId) {
       const report = await prisma.contentReport.create({
@@ -751,28 +898,48 @@ router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Respo
           contentId: String(contentId),
           reason: normalizedReason,
           description,
-          evidence: { reviewDeadline: reviewDeadline.toISOString(), source: 'ONLINE_SAFETY_REPORT' },
+          evidence,
           status: 'PENDING',
         },
       });
 
-      logger.info('Content report filed', { reportId: report.id, reason: normalizedReason });
+      // The in-app report dialog has always run these three; this route, the
+      // one the Online Safety Act actually requires, ran none of them. Three
+      // women reporting the same post here never tripped the auto-hide that
+      // three reporting through the dialog do, and none of it reached the
+      // reported member's safety score. bestEffort because the report is
+      // already filed: a failure here must be visible in the log, not swallowed
+      // and not turned into a lost report.
+      await bestEffort('compliance.report.trust-score', recordSafetyReport(reporterId, reportedUserId));
+      await bestEffort(
+        'compliance.report.safety-score',
+        handleUserReport(reportedUserId, reporterId, normalizedReason, String(contentId), normalizedType)
+      );
+      await bestEffort('compliance.report.auto-hide', () => applyAutoHideThreshold(normalizedType, String(contentId)));
 
-      return res.status(201).json({
-        success: true,
-        message: 'Report submitted. We will review it within 48 hours.',
-        data: {
-          reportId: report.id,
-          queue: 'CONTENT_REPORT',
-          status: report.status,
-          reviewDeadline,
-        },
-      });
+      await bestEffort(
+        'compliance.report.intake-consequences',
+        runReportIntakeConsequences({
+          ticketId,
+          reason: normalizedReason,
+          priority,
+          contentType: normalizedType,
+          contentId: String(contentId),
+          description,
+          contactEmail: parsedContactEmail ?? undefined,
+          isUrgent: urgent,
+        })
+      );
+
+      logger.info('Content report filed', { reportId: report.id, ticketId, reason: normalizedReason, priority });
+
+      return res.status(201).json(responseBody(report.id, 'CONTENT_REPORT', report.status));
     }
 
     // A content report row names a member on both sides, so an anonymous report
     // is filed as a safety incident instead. Same moderators, same queue tools,
-    // no invented reporter.
+    // no invented reporter: the anonymous queue is read by
+    // listAnonymousReports and decided by resolveAnonymousReport.
     const incident = await prisma.safetyIncident.create({
       data: {
         userId: reportedUserId,
@@ -782,27 +949,116 @@ router.post('/report-content', optionalAuth, async (req: AuthRequest, res: Respo
         contentType: normalizedType,
         contentId: String(contentId),
         metadata: {
+          ...evidence,
           description: description ?? null,
-          reviewDeadline: reviewDeadline.toISOString(),
-          source: 'ONLINE_SAFETY_REPORT',
           anonymous: true,
         },
       },
     });
 
+    // An anonymous report cannot move a trust score — there is no reporter to
+    // weigh — but the auto-hide counts the whole anonymous cohort as one voice,
+    // and the alerting and authority referral are the same.
+    await bestEffort('compliance.report.auto-hide', () => applyAutoHideThreshold(normalizedType, String(contentId)));
+    await bestEffort(
+      'compliance.report.intake-consequences',
+      runReportIntakeConsequences({
+        ticketId,
+        reason: normalizedReason,
+        priority,
+        contentType: normalizedType,
+        contentId: String(contentId),
+        description,
+        contactEmail: parsedContactEmail ?? undefined,
+        isUrgent: urgent,
+      })
+    );
+
     logger.info('Anonymous content report filed', {
       incidentId: incident.id,
+      ticketId,
       reason: normalizedReason,
+      priority,
     });
 
-    res.status(201).json({
+    res.status(201).json(responseBody(incident.id, 'SAFETY_INCIDENT', 'PENDING'));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/compliance/report-status/:reference
+ *
+ * "Keep your reference number so you can quote it" is what the confirmation
+ * screen tells every reporter, and until now there was nothing anywhere on the
+ * server that would answer when she did. This is that lookup. It takes either
+ * the RPT- reference or the row id the confirmation screen displays, and it
+ * answers for a named report and an anonymous one alike, because the reporter
+ * who most needs to check back is the one who had no account to file it with.
+ *
+ * It deliberately returns a plain-language outcome and never reviewNotes: those
+ * are a moderator's working notes about another member, and a reference number
+ * is not an authorisation to read them.
+ */
+router.get('/report-status/:reference', publicFormLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const reference = String(req.params.reference || '').trim();
+    if (!reference || reference.length > 100) {
+      return res.status(400).json({ success: false, error: 'A report reference is required.' });
+    }
+
+    const report =
+      (await prisma.contentReport.findFirst({
+        where: { evidence: { path: ['ticketId'], equals: reference } },
+        select: { id: true, status: true, action: true, updatedAt: true, evidence: true },
+      })) ??
+      (await prisma.contentReport.findUnique({
+        where: { id: reference },
+        select: { id: true, status: true, action: true, updatedAt: true, evidence: true },
+      }));
+
+    if (report) {
+      const evidence = (report.evidence ?? null) as { reviewDeadline?: string; ticketId?: string } | null;
+      return res.json({
+        success: true,
+        data: {
+          reference: evidence?.ticketId ?? report.id,
+          status: report.status,
+          outcome: describeReportOutcome(report.action),
+          reviewDeadline: evidence?.reviewDeadline ?? null,
+          lastUpdated: report.updatedAt,
+        },
+      });
+    }
+
+    const incident = await prisma.safetyIncident.findFirst({
+      where: { type: 'USER_REPORT', metadata: { path: ['anonymous'], equals: true }, id: reference },
+      select: { id: true, resolvedAt: true, updatedAt: true, metadata: true },
+    });
+
+    if (!incident) {
+      return res.status(404).json({
+        success: false,
+        error: 'We could not find a report with that reference.',
+      });
+    }
+
+    const metadata = (incident.metadata ?? null) as {
+      reviewDeadline?: string;
+      ticketId?: string;
+      status?: string;
+      action?: string;
+    } | null;
+
+    return res.json({
       success: true,
-      message: 'Report submitted. We will review it within 48 hours.',
       data: {
-        reportId: incident.id,
-        queue: 'SAFETY_INCIDENT',
-        status: 'PENDING',
-        reviewDeadline,
+        reference: metadata?.ticketId ?? incident.id,
+        status: incident.resolvedAt ? metadata?.status ?? 'RESOLVED' : 'PENDING',
+        outcome: describeReportOutcome(metadata?.action ?? null),
+        reviewDeadline: metadata?.reviewDeadline ?? null,
+        lastUpdated: incident.updatedAt,
       },
     });
   } catch (error) {
@@ -893,6 +1149,15 @@ router.get('/my-region', async (req: AuthRequest, res: Response, next: NextFunct
 /**
  * PUT /api/compliance/region-preferences
  * Update user's region preferences
+ *
+ * This validated the region, assembled the four values into an object, and
+ * answered "Region preferences updated" without going anywhere near the
+ * database — the comment said "In production, update user preferences in
+ * database" and there was no production path behind it. The member's region
+ * decides which privacy regime, which currency and which legal documents she is
+ * shown, so a silent no-op here is not a cosmetic bug: she sets herself to UK,
+ * is told it worked, and keeps being served the Australian set. The row is
+ * written now and the response reports what the row says.
  */
 router.put('/region-preferences', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -907,18 +1172,29 @@ router.put('/region-preferences', async (req: AuthRequest, res: Response, next: 
       });
     }
 
-    // In production, update user preferences in database
-    const updatedPreferences = {
-      region,
-      preferredLocale: locale,
-      preferredCurrency: currency,
-      timezone,
-    };
+    const updates: Prisma.UserUpdateInput = {};
+    if (region) updates.region = region as Region;
+    if (typeof locale === 'string' && locale.trim()) updates.preferredLocale = locale.trim();
+    if (typeof currency === 'string' && currency.trim()) updates.preferredCurrency = currency.trim().toUpperCase();
+    if (typeof timezone === 'string' && timezone.trim()) updates.timezone = timezone.trim();
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Give at least one of region, locale, currency or timezone.',
+      });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: updates,
+      select: { region: true, preferredLocale: true, preferredCurrency: true, timezone: true },
+    });
 
     res.json({
       success: true,
       message: 'Region preferences updated',
-      data: updatedPreferences,
+      data: updated,
     });
   } catch (error) {
     next(error);

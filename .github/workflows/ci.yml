@@ -93,6 +93,26 @@ jobs:
       - name: Check for dead interactions in reachable UI
         run: node ../client/scripts/check-dead-interactions.js
 
+      # scripts/check-env.js existed, worked, and was called by nothing — so the
+      # production drift it was written to catch (STRIPE_PRICE_STARTER for
+      # STRIPE_PRICE_CAREER, OPENSEARCH_URL for OPENSEARCH_NODE, SES settings
+      # for SendGrid) was the drift actually live on the host. Features ran in
+      # their "not configured" branch and nothing failed at boot.
+      #
+      # It runs against render.yaml rather than against an env file because a
+      # blueprint declares every name production will be given while holding
+      # none of the values, and names are the half that drifts. Pointing it at
+      # .env.production.template instead would fail forever for the one reason
+      # nobody can fix: a template in a public repository cannot contain a real
+      # Stripe key. Nothing here reads a secret.
+      #
+      # It fails on a variable that src/ requires in production and the
+      # blueprint does not declare, and on a variable the blueprint declares
+      # that nothing under src/ reads any more — the renamed-key case, where the
+      # old name lingers and the new one was never added.
+      - name: Check production env blueprint matches the code
+        run: node scripts/check-env.js ../../render.yaml
+
       - name: Run tests
         run: npm test --silent
 

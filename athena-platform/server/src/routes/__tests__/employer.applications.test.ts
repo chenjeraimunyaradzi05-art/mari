@@ -32,7 +32,7 @@ const ORG = 'org-1';
 describe('Employer applicant pipeline', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1', organizationId: ORG, userId: 'recruiter-1', role: 'ADMIN' });
+    prisma.organizationMember.findUnique.mockResolvedValue({ id: 'm1', organizationId: ORG, userId: 'recruiter-1', role: 'ADMIN', canPostJobs: true, acceptedAt: new Date('2026-01-05T00:00:00.000Z') });
   });
 
   it('lists applications as a plain array, with the candidate’s face and headline', async () => {

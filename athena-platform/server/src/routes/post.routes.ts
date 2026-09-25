@@ -33,6 +33,8 @@ import { authorAudienceWhere, canViewAuthor, canViewGroupPosts } from '../servic
 import { mutedWordMatcher } from '../utils/muted-words';
 import { emitToUserRoom, isUserOnline } from '../services/socket.service';
 import { commentLimiter, postLimiter } from '../middleware/socialLimits';
+import { checkContentAchievements, updateStreak } from '../services/engagement.service';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -196,13 +198,18 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       limit,
       type: normalizedType,
       algorithm: normalizedAlgorithm,
+      // The block list goes into the ranking rather than being applied to
+      // what comes back out of it. Filtering the already-sliced page here
+      // handed a member who had blocked a few active posters short pages, and
+      // sometimes empty ones, while the total still counted the posts she
+      // could not see — so her scroll stalled on a page with nothing new in
+      // it and she had no way to tell that blocking was the reason.
+      excludeAuthorIds: blockedIds,
     });
 
-    // generateFeed ranks without knowing about blocks or saves, so drop blocked
-    // authors and decorate the rest here.
-    const blocked = new Set(blockedIds);
-    const visiblePosts = result.posts.filter((post) => !blocked.has(post.authorId));
-    const posts = await decoratePosts(visiblePosts, req.user?.id);
+    // generateFeed does not know what the viewer has saved, so decoration is
+    // still the route's job.
+    const posts = await decoratePosts(result.posts, req.user?.id);
 
     res.json({
       success: true,
@@ -529,6 +536,21 @@ router.post(
       // The link card is fetched after answering, so posting never waits on
       // someone else's server.
       enrichPostLinkPreview(post.id, content);
+
+      // "First Steps", "Week Warrior", "Consistency King", "Gone Viral" and
+      // "Video Star" were in the catalogue, drawn in the achievements panel
+      // and impossible to earn: nothing anywhere called the checks that award
+      // them, and updateStreak was only ever called with 'login', so the two
+      // posting-streak badges had no streak to read. Showing a member a goal
+      // she cannot reach is worse than not offering it, so posting now counts
+      // towards both. A scheduled post counts when the publisher runs it, not
+      // when it is queued.
+      if (!scheduledFor) {
+        await bestEffort('post.achievements', async () => {
+          await updateStreak(req.user!.id, 'post');
+          await checkContentAchievements(req.user!.id);
+        });
+      }
 
       res.status(201).json({
         success: true,

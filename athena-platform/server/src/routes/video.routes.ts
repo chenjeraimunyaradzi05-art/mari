@@ -15,8 +15,38 @@ import { notifySocial, socialLinks } from '../utils/social-notifications';
 import { assertSoundExists, attachSounds, recordSoundUse } from '../services/sound.service';
 import { enqueueVideoProcessing } from '../services/video-pipeline.service';
 import { bestEffort } from '../utils/best-effort';
+import { createRateLimiter } from '../middleware/rateLimiter';
+import { commentLimiter, postLimiter, reactionLimiter } from '../middleware/socialLimits';
 
 const router = Router();
+
+/**
+ * How long one member's watch of one reel stands for a single counted view.
+ * A day, so rewatching a reel in the evening that she watched at breakfast
+ * counts twice — which is a real second view — while a page that fires the
+ * ping on every loop of a fifteen-second clip counts once.
+ */
+const COUNTED_VIEW_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Reels had no ceiling of any kind: publishing, commenting, reacting and the
+ * view ping were all governed only by the global tier limit. The view ping is
+ * the one with no account behind it, so it is keyed by member where there is
+ * one and by address where there is not, and set well above what continuous
+ * scrolling produces — a reel is watched in seconds, not tenths of a second.
+ */
+const viewPingLimiter = createRateLimiter({
+  max: 600,
+  windowMs: 10 * 60 * 1000,
+  skip: () => process.env.NODE_ENV === 'test' || !process.env.REDIS_URL,
+  keyGenerator: (req) => `video:view:${(req as AuthRequest).user?.id || req.ip}`,
+  handler: (_req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'You are doing that a lot. Take a short break and try again in a few minutes.',
+    });
+  },
+});
 
 function parseLimit(value: unknown, fallback = 20, max = 50): number {
   const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
@@ -432,6 +462,7 @@ router.get('/:id/processing', authenticate, async (req: AuthRequest, res, next) 
 router.post(
   '/',
   authenticate,
+  postLimiter,
   [
     body('videoUrl').isString().notEmpty().isLength({ max: 2048 }),
     body('title').optional().isString().isLength({ max: CONTENT_LIMITS.videoTitle }),
@@ -678,7 +709,7 @@ async function loadPublicVideo(id: string) {
 // ===========================================
 // LIKE VIDEO
 // ===========================================
-router.post('/:id/like', authenticate, async (req: AuthRequest, res, next) => {
+router.post('/:id/like', authenticate, reactionLimiter, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const video = await loadPublicVideo(id);
@@ -775,6 +806,7 @@ router.get('/:id/comments', optionalAuth, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/comments',
   authenticate,
+  commentLimiter,
   [
     body('content').isString().notEmpty().isLength({ max: CONTENT_LIMITS.comment }).withMessage('Comment max 2000 characters'),
     body('parentId').optional().isString().isLength({ max: 100 }),
@@ -1009,6 +1041,7 @@ router.delete('/:id/save', authenticate, async (req: AuthRequest, res, next) => 
 router.post(
   '/:id/view',
   optionalAuth,
+  viewPingLimiter,
   [
     body('watchDuration').isInt({ min: 1 }),
     body('completionPct').isFloat({ min: 0, max: 100 }),
@@ -1022,12 +1055,41 @@ router.post(
       }
 
       const { id } = req.params;
-      await loadPublicVideo(id);
+      const video = await loadPublicVideo(id);
+      const viewerId = req.user?.id;
 
+      // viewCount is not analytics. It is printed on the reel, it is the
+      // second sort key on the trending tab, and a creator's standing is read
+      // off it. It used to be incremented once per call on an endpoint that
+      // needs no account and had no ceiling, so a loop put any reel at the top
+      // of trending in a minute, and a creator refreshing her own page watched
+      // her own numbers climb.
+      //
+      // It now counts distinct viewers rather than calls: the author's own
+      // watches never count, an unauthenticated watch is recorded but not
+      // counted because there is nobody to count it as, and a signed-in member
+      // counts once per reel per COUNTED_VIEW_WINDOW_MS however many times she
+      // rewatches it. Checked before the row below is written, so this watch
+      // is not mistaken for an earlier one.
+      const countable =
+        !!viewerId &&
+        viewerId !== video.authorId &&
+        !(await prisma.videoView.findFirst({
+          where: {
+            videoId: id,
+            userId: viewerId,
+            createdAt: { gte: new Date(Date.now() - COUNTED_VIEW_WINDOW_MS) },
+          },
+          select: { id: true },
+        }));
+
+      // Every watch is still recorded whether or not it counts: watch duration
+      // and completion are the creator's real analytics, and a second watch of
+      // the same reel is a second watch.
       await prisma.videoView.create({
         data: {
           videoId: id,
-          userId: req.user?.id,
+          userId: viewerId,
           watchDuration: Number(req.body.watchDuration),
           completionPct: Number(req.body.completionPct),
           source: normalizeOptionalUserText(req.body.source, {
@@ -1038,10 +1100,12 @@ router.post(
         },
       });
 
-      await prisma.video.update({
-        where: { id },
-        data: { viewCount: { increment: 1 } },
-      });
+      if (countable) {
+        await prisma.video.update({
+          where: { id },
+          data: { viewCount: { increment: 1 } },
+        });
+      }
 
       res.json({ success: true, message: 'View recorded' });
     } catch (error) {

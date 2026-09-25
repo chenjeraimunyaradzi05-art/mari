@@ -545,6 +545,10 @@ export default function BreachRegisterPage() {
             {!current.regulatorNotifiedAt && (ndbNotifiable(current) || (clockApplies(current) && current.notificationRequired)) && (
               <NotifyRegulatorForm key={current.id} breach={current} onDone={refresh} />
             )}
+
+            {!current.usersNotifiedAt && (ndbNotifiable(current) || (clockApplies(current) && current.notificationRequired)) && (
+              <NotifyAffectedPeopleForm key={`people-${current.id}`} breach={current} onDone={refresh} />
+            )}
           </aside>
         )}
       </div>
@@ -687,6 +691,127 @@ function NotifyRegulatorForm({ breach, onDone }: { breach: Breach; onDone: () =>
         className="btn-primary w-full text-sm"
       >
         {regime === 'AU' ? 'Record statement and send copy' : 'Send and record'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Telling the people affected.
+ *
+ * The Privacy Act requires both halves of a notification — the Commissioner
+ * under s 26WK and the individuals under s 26WL — and this register only ever
+ * had a button for the first. The backend half was finished and careful:
+ * notifyAffectedUsers refuses an Australian breach with no recommended steps,
+ * batches the send in hundreds, stamps usersNotifiedAt and writes a privacy
+ * audit row. Nothing called it. A privacy officer discharging the second half
+ * of her duty had to do it with curl, during an incident, against a clock.
+ *
+ * The breach record deliberately holds a count of the people affected and never
+ * their ids — keeping a list of victims beside the description of what leaked
+ * would be its own harm — so the recipients are supplied here, from whatever
+ * the investigation identified. The form says that plainly rather than
+ * pretending the product can work the list out.
+ */
+function NotifyAffectedPeopleForm({ breach, onDone }: { breach: Breach; onDone: () => void }) {
+  const [recipients, setRecipients] = useState('');
+  const [content, setContent] = useState('');
+  const [steps, setSteps] = useState(breach.statementRecommendedSteps ?? '');
+
+  const ids = Array.from(new Set(recipients.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean)));
+  const ndb = underNdb(breach);
+  // s 26WL: an Australian breach must tell people what they can do. The server
+  // refuses without it, so the button does too rather than sending a request
+  // that is going to bounce mid-incident.
+  const ready = ids.length > 0 && content.trim().length > 0 && (!ndb || steps.trim().length > 0 || Boolean(breach.statementRecommendedSteps));
+
+  const notify = useMutation({
+    mutationFn: () =>
+      api.post(`/admin/breaches/${breach.id}/notify-users`, {
+        userIds: ids,
+        notificationContent: content.trim(),
+        ...(steps.trim() ? { recommendedSteps: steps.trim() } : {}),
+      }),
+    onSuccess: (res) => {
+      onDone();
+      const requested = (res.data as { requested?: number } | undefined)?.requested ?? ids.length;
+      setRecipients('');
+      setContent('');
+      toast.success(`${requested} ${requested === 1 ? 'person' : 'people'} notified.`);
+    },
+    onError: (e: unknown) => toast.error(errorMessage(e) || 'That did not send'),
+  });
+
+  const field = (name: string) => `affected-${name}-${breach.id}`;
+
+  return (
+    <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {ndb ? 'Tell the people affected (s 26WL)' : 'Tell the people affected'}
+      </p>
+      <p className="text-xs text-slate-500">
+        {breach.affectedUsers != null
+          ? `${breach.affectedUsers.toLocaleString()} ${breach.affectedUsers === 1 ? 'person was' : 'people were'} recorded as affected. `
+          : ''}
+        The register holds the count, never the list, so paste the member ids the investigation identified — one per line, or separated by commas.
+      </p>
+
+      <label htmlFor={field('ids')} className="block text-xs text-slate-500">
+        Member ids to notify
+      </label>
+      <textarea
+        id={field('ids')}
+        value={recipients}
+        onChange={(e) => setRecipients(e.target.value)}
+        rows={3}
+        placeholder={'cku1a2b3c...\ncku4d5e6f...'}
+        className="input w-full font-mono text-xs"
+      />
+      {ids.length > 0 && (
+        <p className="text-xs text-slate-500">
+          {ids.length} {ids.length === 1 ? 'recipient' : 'recipients'}
+          {breach.affectedUsers != null && ids.length !== breach.affectedUsers ? ` · the register records ${breach.affectedUsers.toLocaleString()} affected` : ''}
+        </p>
+      )}
+
+      <label htmlFor={field('content')} className="block text-xs text-slate-500">
+        What happened, in the words they will read
+      </label>
+      <textarea
+        id={field('content')}
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        rows={4}
+        placeholder="What happened, when, what of theirs was involved, and what we have done about it"
+        className="input w-full text-sm"
+      />
+
+      <label htmlFor={field('steps')} className="block text-xs text-slate-500">
+        What they can do{ndb ? ' (required for an Australian breach)' : ''}
+      </label>
+      <textarea
+        id={field('steps')}
+        value={steps}
+        onChange={(e) => setSteps(e.target.value)}
+        rows={3}
+        placeholder="Change your password, watch for messages that ask for your details, reach us through the privacy centre if anything looks wrong"
+        className="input w-full text-sm"
+      />
+      {breach.statementRecommendedSteps && (
+        <p className="text-xs text-slate-500">Prefilled from the OAIC statement. Edit it and this notification uses the edited wording.</p>
+      )}
+
+      <button
+        type="button"
+        onClick={() => {
+          if (window.confirm(`Email ${ids.length} ${ids.length === 1 ? 'person' : 'people'} about this breach and stamp the time? This cannot be undone.`)) {
+            notify.mutate();
+          }
+        }}
+        disabled={notify.isPending || !ready}
+        className="btn-primary w-full text-sm"
+      >
+        {notify.isPending ? 'Sending…' : `Notify ${ids.length || ''} ${ids.length === 1 ? 'person' : 'people'}`.trim()}
       </button>
     </div>
   );

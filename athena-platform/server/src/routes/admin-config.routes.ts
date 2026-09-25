@@ -29,6 +29,7 @@ import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { staffTwoFactorRequired } from '../middleware/roles';
 import { getMaintenanceState } from '../services/feature-flags.service';
 import { ingestConfig } from '../services/livestream.service';
+import { authorityReferralMailbox, trustAndSafetyMailbox } from '../services/content-report.service';
 import { decodeToken, generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { bestEffort } from '../utils/best-effort';
 
@@ -166,6 +167,15 @@ router.get('/ops/config', ...adminOnly, async (_req: AuthRequest, res: Response,
         livestreamIngest: Boolean(ingestUrl),
         livestreamPlayback: Boolean(playbackTemplate),
         sentry: isConfiguredEnv('SENTRY_DSN'),
+        // Where a content report's contents are sent when it is high priority,
+        // and where a CSAM or terrorism referral is queued for a human to file.
+        // Both used to fall back to a literal address at a domain the venture
+        // does not own, and nothing anywhere told an operator the variable was
+        // missing, so the audit that exists to catch exactly this now covers
+        // them. False means the alert is not sent at all: the queue still holds
+        // the report, but nobody is told it is there.
+        trustSafetyAlerts: Boolean(trustAndSafetyMailbox()),
+        authorityReferralAlerts: Boolean(authorityReferralMailbox()),
       },
       checkedAt: new Date().toISOString(),
     });

@@ -27,6 +27,21 @@ services:
     region: singapore
     # 2GB. The process holds Prisma, sharp, ffmpeg and the BullMQ workers in
     # one container; the 512MB starter plan cannot load it.
+    #
+    # One instance, and it has to stay one instance. There is no numInstances
+    # key below on purpose, and adding one is not a scaling decision — it is a
+    # correctness decision that this codebase has not earned yet. Socket.IO
+    # keeps its room membership in the process that owns the connection, and
+    # there is no @socket.io/redis-adapter installed, so with two instances a
+    # message emitted on A never reaches a socket connected to B. Chat,
+    # presence, typing indicators and live notifications would half-work, for
+    # half the members, with nothing logged anywhere: the emit succeeds, it just
+    # reaches an empty room. src/index.ts already reasons this way out loud for
+    # the rate limiters and the scheduled-sweep locks when REDIS_URL is missing;
+    # the socket layer has no equivalent guard because it cannot have one.
+    #
+    # If one instance is not enough, take a larger plan. Scaling out needs the
+    # adapter first.
     plan: standard
     branch: main
     dockerfilePath: athena-platform/server/Dockerfile
@@ -168,15 +183,25 @@ services:
       - key: ML_SERVICE_URL
         sync: false
 
-      # Background jobs. ENABLE_WORKERS=true with simulation off means the
-      # video pipeline needs somewhere real to send work, which is what
-      # VIDEO_PROCESSOR_URL is; scripts/check-env.js enforces that pairing.
+      # Background jobs. With ENABLE_WORKERS=true and both flags below false,
+      # the video worker hands every reel to an external transcoder at
+      # VIDEO_PROCESSOR_URL and throws if there is not one — it does not fall
+      # back. Set VIDEO_PROCESSOR_URL, or set VIDEO_PROCESSING_ALLOW_SIMULATION
+      # to "true" and the reel is transcoded in this process by
+      # video-pipeline.service.ts, using the ffmpeg binary that ships in the
+      # image with the ffmpeg-static package. "Simulation" is the flag's name,
+      # not what it does: that path is the real ffmpeg pipeline, and it is the
+      # one a single-service deployment wants.
+      #
+      # The name here used to be VIDEO_ALLOW_SIMULATION, which nothing in src/
+      # reads. It looked like it was turning the external processor off and it
+      # was doing nothing at all. scripts/check-env.js enforces the pairing.
       - key: ENABLE_WORKERS
         value: "true"
       - key: WORKER_ALLOW_SIMULATION
         value: "false"
-      - key: VIDEO_ALLOW_SIMULATION
-        value: "false"
+      - key: VIDEO_PROCESSING_ALLOW_SIMULATION
+        value: "true"
       - key: VIDEO_PROCESSOR_URL
         sync: false
 
@@ -186,6 +211,19 @@ services:
       - key: SCHEDULER_TIMEZONE
         value: Australia/Brisbane
 
+      # Off, and not merely "not set up yet" — turning it on today makes search
+      # worse than the Prisma path it replaces. utils/opensearch.ts declares six
+      # indexes and init-opensearch.ts creates mappings for all six, but
+      # indexDocument is only ever called for posts, jobs and users.
+      # athena_courses, athena_videos and athena_mentors are created and never
+      # written. search.service.ts prefers OpenSearch whenever a client exists
+      # and falls back to Prisma only when a query *throws*, and an empty index
+      # does not throw — it answers, successfully, with nothing. So a member
+      # searching "all" would silently stop finding any course, reel or mentor,
+      # with no error and no log line to explain it.
+      #
+      # Flip this to "true" only once those three are being indexed on write and
+      # a backfill has run.
       - key: OPENSEARCH_ENABLED
         value: "false"
       - key: RATE_LIMIT_ENABLED

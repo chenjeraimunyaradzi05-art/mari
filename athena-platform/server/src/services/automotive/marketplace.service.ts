@@ -49,7 +49,6 @@ export interface RiskInput {
   verdict?: PriceVerdict | null;
   photosCount: number;
   vin?: string | null;
-  ppsrChecked: boolean;
   sellerAccountAgeDays: number;
   description: string;
   odometerKm: number;
@@ -77,8 +76,21 @@ export function assessListingRisk(input: RiskInput): RiskAssessment {
   else if (input.verdict === 'BELOW') add('price_below', 'Priced under the guide', 8, 'Under the guide. Fine for a quick sale; ask what is being disclosed.');
   if (input.photosCount === 0) add('no_photos', 'No photos', 25, 'No photos means nothing to check against. Ask for photos of the car with today\'s newspaper, or walk away.');
   else if (input.photosCount < 4) add('few_photos', 'Fewer than four photos', 8, 'Ask for the odometer, the tyres, the engine bay and the compliance plate.');
+  // The VIN is the one PPSR-shaped thing on a listing that is not the seller's
+  // word for it: a buyer either has seventeen valid characters to type into
+  // ppsr.gov.au or she does not, and no tick box changes that.
+  //
+  // What used to sit under this line was a ten-point penalty for a listing
+  // whose ppsrChecked box was unticked — which meant the box was a lever the
+  // seller held over her own fraud score. Ticking it took ten points off, and
+  // at forty-five a listing is held for review, so the one kind of seller most
+  // motivated to tick a box she had not earned was the one it helped most.
+  // ATHENA runs no PPSR lookup: nothing fetches the certificate the seller
+  // pastes, nothing checks it belongs to the VIN, so a tick is a claim and not
+  // a check, and a claim must not move a score that decides whether a listing
+  // is shown. The advice to run your own is unconditional now — it is given to
+  // every buyer through historyChecks() below, whatever the seller ticked.
   if (!isValidVin(input.vin)) add('no_vin', 'No VIN, or one of the wrong shape', 20, 'Without a VIN you cannot run a PPSR check. Ask for it before you meet.');
-  if (!input.ppsrChecked) add('no_ppsr', 'No PPSR certificate attached', 10, 'Run your own for two dollars at ppsr.gov.au once you have the VIN.');
   if (input.sellerAccountAgeDays < 14) add('new_seller', 'Seller joined in the last two weeks', 15, 'A brand-new account is not a fraud, but it has no history either. Meet in daylight, in a public place, with someone.');
   if (URGENT_WORDS.test(input.description)) add('urgent_language', 'Urgency, distance or an unusual payment method in the description', 35, 'Any request to pay outside ATHENA, to hold the car with a deposit, or to deal with a shipping agent is a reason to stop.');
   const age = Math.max(0.5, now.getFullYear() - input.year + 0.5);

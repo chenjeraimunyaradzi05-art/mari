@@ -44,7 +44,15 @@ class CareerPrediction(BaseModel):
     """Career growth prediction result."""
     user_id: str
     career_growth_score: float = Field(..., description="Predicted career growth score (0-100)")
-    confidence: float = Field(..., ge=0, le=1, description="Prediction confidence")
+    # Null whenever nothing measured it. It used to be a required float and was
+    # filled with the literal 0.85 on every prediction, under a comment saying a
+    # real figure "would come from model in production" — so the API published a
+    # confidence that was the same for a perfect fit and a hopeless one, and a
+    # consumer had no way to know. A regressor with no calibrated interval has
+    # no confidence to report; saying so is the honest field.
+    confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="Prediction confidence, or null when the model reports none"
+    )
     
     # Trajectory projections
     salary_projection: Dict[str, float] = Field(..., description="Salary projections by year")
@@ -55,8 +63,28 @@ class CareerPrediction(BaseModel):
     recommended_actions: List[Dict[str, Any]] = Field(..., description="Actionable steps")
     
     # Benchmarks
-    peer_percentile: float = Field(..., description="Position relative to peers")
-    industry_benchmark: float = Field(..., description="Industry average score")
+    #
+    # Both are null, and both used to be numbers this file made up.
+    #
+    # `peer_percentile` was four thresholds over the model's own output — score
+    # 80 became "90th percentile", 60 became "70th" — under the comment
+    # "Simplified - would use actual distribution in production". No distribution
+    # of peers was ever computed, so the figure compared a woman to nobody while
+    # telling her she was ahead of nine in ten of them. `industry_benchmark` was
+    # the literal 65.0, commented "Would come from aggregated data".
+    #
+    # A benchmark that is not measured against anything is not a weak benchmark,
+    # it is a fiction with a number's authority, and this one is shown to a woman
+    # deciding whether to ask for a promotion. There is no aggregate to compute
+    # them from in this service, so they report that rather than inventing it.
+    peer_percentile: Optional[float] = Field(
+        None,
+        description="Position relative to peers, or null when no peer distribution has been computed",
+    )
+    industry_benchmark: Optional[float] = Field(
+        None,
+        description="Industry average score, or null when no industry aggregate has been computed",
+    )
 
 
 class BatchPredictionRequest(BaseModel):
@@ -78,12 +106,21 @@ class BatchPredictionResponse(BaseModel):
 async def predict_career_growth(profile: CareerProfile):
     """
     Predict career growth trajectory for a single user.
-    
-    Uses XGBoost model trained on career progression data to estimate:
-    - Career growth score
-    - Salary projections
-    - Role trajectory
-    - Skill gap analysis
+
+    The career growth score is the loaded artefact's output and nothing else.
+    That artefact is produced by ``src/algorithms/career_compass/train.py``,
+    which fits an XGBoost regressor — on whatever dataset it was pointed at, and
+    this repository ships none, so in practice there is no artefact and this
+    endpoint answers 503. It said "trained on career progression data" here,
+    which was a description of an intention rather than of anything that had
+    happened.
+
+    Everything else in the response is derived from the request and the score by
+    the helpers at the bottom of this file: the salary projection is compound
+    growth on her current salary at a rate the score picks, the role trajectory
+    and the skill gaps are threshold rules over the fields she sent. They are
+    arithmetic on her own numbers, not predictions, and the fields that could
+    not be computed at all are null rather than filled.
     """
     try:
         model = model_loader.get_model("career_compass")
@@ -119,13 +156,17 @@ async def predict_career_growth(profile: CareerProfile):
         return CareerPrediction(
             user_id=profile.user_id,
             career_growth_score=round(float(prediction), 2),
-            confidence=0.85,  # Would come from model in production
+            # The loaded artefact is a plain regressor; it returns a point
+            # estimate and nothing about how sure it is. See the field.
+            confidence=None,
             salary_projection=_generate_salary_projection(profile, prediction),
             role_trajectory=_generate_role_trajectory(profile, prediction),
             skill_gaps=_analyze_skill_gaps(profile),
             recommended_actions=_generate_recommendations(profile, prediction),
-            peer_percentile=_calculate_peer_percentile(prediction),
-            industry_benchmark=65.0,  # Would come from aggregated data
+            # See the fields: nothing in this service holds a peer distribution
+            # or an industry aggregate, so there is nothing honest to put here.
+            peer_percentile=None,
+            industry_benchmark=None,
         )
         
     except HTTPException:
@@ -282,13 +323,3 @@ def _generate_recommendations(profile: CareerProfile, score: float) -> List[Dict
     return recommendations
 
 
-def _calculate_peer_percentile(score: float) -> float:
-    """Calculate peer percentile based on score distribution."""
-    # Simplified - would use actual distribution in production
-    if score >= 80:
-        return 90.0
-    elif score >= 60:
-        return 70.0
-    elif score >= 40:
-        return 50.0
-    return 30.0

@@ -16,6 +16,8 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { notifySocial, socialLinks } from '../utils/social-notifications';
+import { checkSocialAchievements } from '../services/engagement.service';
+import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
 
@@ -93,6 +95,13 @@ router.post('/me/follow-requests/:id/accept', authenticate, async (req: AuthRequ
       message: (name) => `${name} accepted your request to follow them`,
       link: socialLinks.profile(req.user!.id),
     });
+
+    // "First Fan", "Rising Star" and "Influencer" are drawn in the
+    // achievements panel and nothing anywhere awarded them. A follower is how
+    // all three are earned, so accepting a request asks. The check counts
+    // followers rather than adding one, so it is right whichever way the
+    // follow arrived and never awards the same badge twice.
+    await bestEffort('follow-request.achievements', () => checkSocialAchievements(req.user!.id));
 
     res.json({ success: true, message: 'Request accepted', data: requestView(request) });
   } catch (error) {

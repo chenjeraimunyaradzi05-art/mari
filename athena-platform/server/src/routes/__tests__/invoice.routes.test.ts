@@ -37,7 +37,19 @@ jest.mock('../../utils/stripe', () => ({
 
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  redactSensitive: (value: unknown) => value,
 }));
+
+// `sendEmail: true` used to reach a single log line reading "Invoice email
+// queued" and send nothing at all, so the transport is mocked here rather than
+// the service: what these tests need to prove is that something was handed to
+// it, and that a transport which refuses is reported to the admin instead of
+// being swallowed.
+const sendEmailMock = jest.fn(async (..._args: any[]): Promise<boolean> => true);
+jest.mock('../../utils/email', () => {
+  const actual: any = jest.requireActual('../../utils/email');
+  return { ...actual, sendEmail: (...args: any[]) => sendEmailMock(...args) };
+});
 
 import { app } from '../../index';
 import { prisma as prismaTyped } from '../../utils/prisma';
@@ -73,7 +85,63 @@ describe('POST /api/invoices/payment/:paymentId', () => {
     currentUser = { id: 'admin-1', role: 'ADMIN', email: 'admin@athena.com', twoFactorEnabled: true };
     prisma.invoice.count.mockResolvedValue(0);
     prisma.invoice.findFirst.mockResolvedValue(null);
+    sendEmailMock.mockResolvedValue(true);
     answerCreate();
+  });
+
+  it('sends the member an email when one is asked for, and says it went', async () => {
+    stubPayment();
+
+    const res = await request(app)
+      .post('/api/invoices/payment/pay-1')
+      .send({ sendEmail: true })
+      .expect(200);
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const sent: any = sendEmailMock.mock.calls[0][0];
+    expect(sent.to).toBe('mei@example.com');
+    expect(sent.subject).toContain('INV-');
+    // The PDF is not attached. It is her name, her city and what she paid, and
+    // the transport has no attachment support to send it safely through; the
+    // link goes to the page behind her login, which re-renders it on demand.
+    expect(sent.html).toContain('/dashboard/finance/invoices');
+    expect(res.body.data.emailed).toBe('sent');
+  });
+
+  it('still issues the invoice when the email cannot be sent, and says it failed', async () => {
+    stubPayment();
+    sendEmailMock.mockResolvedValue(false);
+
+    const res = await request(app)
+      .post('/api/invoices/payment/pay-1')
+      .send({ sendEmail: true })
+      .expect(200);
+
+    // A mail server having a bad morning must not un-file a correctly issued
+    // invoice — but the admin who ticked the box has to be told it did not go.
+    expect(prisma.invoice.create).toHaveBeenCalled();
+    expect(res.body.data.emailed).toBe('failed');
+  });
+
+  it('emails on a re-issue too, which is what a re-issue is for', async () => {
+    stubPayment();
+    prisma.invoice.findFirst.mockResolvedValue({
+      id: 'inv-existing',
+      invoiceNumber: 'INV-202609-00001',
+      status: 'PAID',
+    });
+
+    const res = await request(app)
+      .post('/api/invoices/payment/pay-1')
+      .send({ sendEmail: true })
+      .expect(200);
+
+    // The send used to sit past the early return for an invoice already filed,
+    // so an admin re-sending to a member who said she had not received it got a
+    // 200 and the member got nothing.
+    expect(prisma.invoice.create).not.toHaveBeenCalled();
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(res.body.data).toMatchObject({ alreadyIssued: true, emailed: 'sent' });
   });
 
   it('issues one invoice for a payment, numbered and paid', async () => {
@@ -96,7 +164,16 @@ describe('POST /api/invoices/payment/:paymentId', () => {
 
     expect(prisma.invoice.findFirst).toHaveBeenCalledWith({ where: { paymentId: 'pay-1' } });
     expect(prisma.invoice.create).not.toHaveBeenCalled();
-    expect(res.body.data).toEqual({ invoiceId: 'inv-existing', invoiceNumber: 'INV-202609-00001', alreadyIssued: true });
+    expect(res.body.data).toEqual({
+      invoiceId: 'inv-existing',
+      invoiceNumber: 'INV-202609-00001',
+      alreadyIssued: true,
+      // No email was asked for, and the response says that rather than leaving
+      // it to be inferred. `sendEmail: true` used to reach a log line reading
+      // "Invoice email queued" and send nothing, so what the caller is told
+      // about the email is now part of the contract.
+      emailed: 'not_requested',
+    });
   });
 
   it('says so when the payment does not exist', async () => {

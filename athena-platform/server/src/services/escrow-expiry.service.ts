@@ -32,6 +32,23 @@ const WARN_WINDOW_DAYS = 2;
 /** Statuses where money is still merely held rather than taken or returned. */
 const HELD_STATUSES = ['PENDING', 'AUTHORIZED'];
 
+/**
+ * How long before the same standing condition is raised with the admins again.
+ *
+ * The sweep runs every six hours and nothing in it moves a hold out of
+ * HELD_STATUSES, so the same holds come back on every run for as long as they
+ * go unresolved. A day is long enough that a person who has already been told
+ * is not told three more times before they have had a chance to act, and short
+ * enough that the reminder still arrives while a hold in the two-day warning
+ * window can be saved.
+ */
+const NOTIFY_AGAIN_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Raised while the money can still be collected. */
+const EXPIRING_TITLE = 'Escrow holds are about to lapse';
+/** Raised once it most likely cannot. */
+const LAPSED_TITLE = 'Escrow holds need attention';
+
 const captureEnabled = (): boolean => process.env.ESCROW_CAPTURE_BEFORE_EXPIRY === 'true';
 
 export interface EscrowExpirySweep {
@@ -59,7 +76,12 @@ export interface EscrowExpirySweep {
  * both written above whether or not the notification lands. So the log is the
  * right home for these two, and the health endpoint loses nothing.
  */
-async function noteAdmins(title: string, message: string, data: Record<string, unknown>): Promise<void> {
+async function noteAdmins(
+  title: string,
+  message: string,
+  data: Record<string, unknown>,
+  now: Date
+): Promise<void> {
   // An empty list on failure, exactly as the `.catch(() => [])` this replaces:
   // there is nobody to notify if we cannot find out who the admins are, and the
   // sweep still has to return. The bug was that the two situations looked
@@ -72,6 +94,8 @@ async function noteAdmins(title: string, message: string, data: Record<string, u
     []
   );
 
+  const repeatsAfter = new Date(now.getTime() - NOTIFY_AGAIN_AFTER_MS);
+
   // Wrapped per admin rather than around the Promise.all, which is what the old
   // per-row `.catch(() => null)` did too: one admin's row failing must not stop
   // the other four being written. The null fallback is kept as it was and
@@ -83,8 +107,23 @@ async function noteAdmins(title: string, message: string, data: Record<string, u
     admins.map(a =>
       bestEffort(
         'notification.escrow-expiry-admins',
-        () =>
-          prisma.notification.create({
+        async () => {
+          // Nothing here moves a hold out of HELD_STATUSES, so the sweep finds
+          // the same ones every six hours. Without this check a single lapsed
+          // hold sent every admin four identical notifications a day until
+          // somebody dealt with it by hand — which is how a channel that only
+          // ever carries "money is about to stop being collectable" becomes a
+          // channel nobody reads. Matched on the title, because that is what
+          // distinguishes the two conditions this sweep raises and it is a
+          // literal on our side rather than anything a member can set.
+          const recent = await prisma.notification.findFirst({
+            where: { userId: a.id, type: 'SYSTEM', title, createdAt: { gte: repeatsAfter } },
+            select: { id: true },
+          });
+
+          if (recent) return null;
+
+          return prisma.notification.create({
             data: {
               userId: a.id,
               type: 'SYSTEM',
@@ -93,7 +132,8 @@ async function noteAdmins(title: string, message: string, data: Record<string, u
               link: '/admin',
               data: data as Prisma.InputJsonValue,
             },
-          }),
+          });
+        },
         null
       )
     )
@@ -251,11 +291,44 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
       : null
   );
 
+  // A gauge for the holds that can still be saved, written on every sweep for
+  // the same reason as the one above: it is a standing condition an operator
+  // clears by acting on it, not an event.
+  recordCondition(
+    'escrow_expiry.expiring_soon',
+    result.expiringSoon,
+    result.expiringSoon > 0
+      ? 'Holds are within two days of their card authorisation lapsing. Each one still needs a release or a cancellation while the money is collectable.'
+      : null
+  );
+
   if (result.alreadyLapsed || result.failed) {
     await noteAdmins(
-      'Escrow holds need attention',
+      LAPSED_TITLE,
       `${result.alreadyLapsed} hold(s) have outlived their card authorisation and ${result.failed} could not be captured. Funds may no longer be collectable.`,
-      { kind: 'ESCROW_EXPIRY', lapsed: result.alreadyLapsed, failed: result.failed }
+      { kind: 'ESCROW_EXPIRY', lapsed: result.alreadyLapsed, failed: result.failed },
+      now
+    );
+  }
+
+  // Raised while there is still something to be done about it.
+  //
+  // The only escalation this sweep had fired once a hold had already lapsed —
+  // that is, once the seller had most likely lost the money for work she had
+  // already delivered and the decision left to make was about compensation
+  // rather than collection. The warning window exists precisely so somebody can
+  // act inside it; until now it went no further than a log line that nobody is
+  // watching at three in the morning. Building the buyer-facing release chase
+  // this really wants is a larger job — every order type releases from a
+  // different screen — but telling the people who can already release a hold
+  // from /admin, in time to do it, is the whole of the gap that can be closed
+  // here, and it is closed rather than half-closed.
+  if (result.expiringSoon) {
+    await noteAdmins(
+      EXPIRING_TITLE,
+      `${result.expiringSoon} hold(s) are within ${WARN_WINDOW_DAYS} days of their card authorisation lapsing. Release or cancel each one while the money can still be collected.`,
+      { kind: 'ESCROW_EXPIRING', expiringSoon: result.expiringSoon },
+      now
     );
   }
 

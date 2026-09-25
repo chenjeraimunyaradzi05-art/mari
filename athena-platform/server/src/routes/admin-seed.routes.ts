@@ -23,6 +23,8 @@ import { logger } from '../utils/logger';
 import { createRateLimiter } from '../middleware/rateLimiter';
 import { seedContent } from '../services/seed/content.seed';
 import { seedAdmin } from '../services/seed/admin.seed';
+import { recordAdminAction } from '../services/admin-audit.service';
+import type { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -134,6 +136,12 @@ router.post('/content', async (req: Request, res: Response, next: NextFunction) 
     logger.info('Seeding content via admin seed route', { ip: req.ip });
     const summary = await seedContent(prisma, { verbose: false });
 
+    await recordAdminAction(req as AuthRequest, 'SEED_CONTENT_RUN', {
+      resourceType: 'Post',
+      viaSeedToken: true,
+      environment: process.env.NODE_ENV ?? 'development',
+    });
+
     res.json({
       message: 'Content seeded',
       ...summary,
@@ -175,6 +183,26 @@ router.post('/admin', async (req: Request, res: Response, next: NextFunction) =>
       rotated: rotateExisting,
     });
 
+    // Minting an administrator account, or resetting its password and handing
+    // the new one back over HTTP, left no trace anywhere but a log line. The
+    // caller here is a seed token rather than a signed-in member, so the row
+    // has no actor id — the address it came from is the whole of what we know,
+    // and recording that is better than recording nothing. The email is the
+    // account's identifier on a route that has just returned it in the clear;
+    // the password never appears here.
+    if (result.created || result.generatedPassword) {
+      await recordAdminAction(
+        req as AuthRequest,
+        result.created ? 'SEED_ADMIN_ACCOUNT_CREATED' : 'SEED_ADMIN_PASSWORD_ROTATED',
+        {
+          resourceType: 'User',
+          email: result.email,
+          viaSeedToken: true,
+          environment: process.env.NODE_ENV ?? 'development',
+        }
+      );
+    }
+
     res.json({
       message: result.created ? 'Admin account created' : 'Admin account already existed',
       email: result.email,
@@ -207,6 +235,24 @@ router.post('/all', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = await seedAdmin(prisma, { rotateExisting: req.body?.rotateExisting === true });
     const content = await seedContent(prisma, { verbose: false });
+
+    if (admin.created || admin.generatedPassword) {
+      await recordAdminAction(
+        req as AuthRequest,
+        admin.created ? 'SEED_ADMIN_ACCOUNT_CREATED' : 'SEED_ADMIN_PASSWORD_ROTATED',
+        {
+          resourceType: 'User',
+          email: admin.email,
+          viaSeedToken: true,
+          environment: process.env.NODE_ENV ?? 'development',
+        }
+      );
+    }
+    await recordAdminAction(req as AuthRequest, 'SEED_CONTENT_RUN', {
+      resourceType: 'Post',
+      viaSeedToken: true,
+      environment: process.env.NODE_ENV ?? 'development',
+    });
 
     res.json({
       message: 'Seed complete',

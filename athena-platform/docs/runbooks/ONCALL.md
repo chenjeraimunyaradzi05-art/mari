@@ -77,11 +77,39 @@ curl https://athena-empress.netlify.app/api/health
 
 ---
 
+## How anyone finds out
+
+Read this before the escalation table, because it decides whether the table
+means anything.
+
+**There is no paging system, no metrics scraper, no dashboard and no alert
+rule in this repository.** `/metrics` is produced and token-gated correctly and
+nothing reads it. An earlier version of this runbook said "Page on-call" as if
+a rota and a pager existed; they do not, and a response-time target measured
+from an alert nobody receives is not a target. If the API falls over at 2am,
+the current answer is that a member reports it.
+
+What does exist, and what to turn on before relying on any of the numbers
+below:
+
+| Signal | State | What it takes |
+|---|---|---|
+| Render health check on `/livez` | **Live** — Render restarts an instance that stops answering, and emails the service's notification address on failed deploys and health-check failures. | Set the notification email in Render → Settings → Notifications. This is the only thing today that tells a human unprompted. |
+| External uptime check on `/readyz` | **Not configured.** `/readyz` is the one that proves Neon is reachable; `/livez` only proves the process is up. | Point any uptime service (Better Stack, Uptime Robot, Pingdom) at `$API_URL/readyz` on a 1-minute interval. A 503 there is a P0 and is invisible to Render's own check. |
+| `scripts/send-incident-notification.js` | **Present, wired to nothing.** Posts to a webhook and/or emails via SendGrid. With neither `INCIDENT_WEBHOOK_URL` nor `INCIDENT_NOTIFY_EMAILS` set it now exits non-zero rather than reporting success for a notification it sent to nobody. | Set `INCIDENT_WEBHOOK_URL` (Slack/Teams incoming webhook) wherever it is invoked, and call it from the uptime service's webhook or from a deploy step. |
+| GitHub issue on a failed production migration | **Live**, from `.github/workflows/build-and-deploy.yml`. | Nothing — but it is a GitHub notification, not a page, and it only covers migrations. |
+| Sentry | Configured, and reporting almost nothing: `initSentry()` runs too late in `src/index.ts` for the Express instrumentation to attach and the central error handler never calls it, so only process-level crashes arrive. | Tracked separately; do not treat an empty Sentry as a quiet night. |
+| Prometheus / Grafana / Alertmanager | **None in this repository.** | `$API_URL/metrics` with `X-Metrics-Token` is a standard Prometheus exposition; any hosted scraper can read it. Nothing consumes it today. |
+
 ## Escalation
+
+The response times below are targets for a human who has *already* been told.
+Until an external check on `/readyz` exists, treat detection as manual: nothing
+in the list above will wake anyone for a P0 that is not a failed deploy.
 
 | Severity | Response Time | Action |
 |----------|--------------|--------|
-| P0 — Site down | 15 min | Page on-call, rollback if needed |
+| P0 — Site down | 15 min | Roll back if the last deploy is the suspect; otherwise work the failure modes above. Tell the other maintainers by hand — `node scripts/send-incident-notification.js --severity critical --message "..."` if a webhook is configured. |
 | P1 — Auth broken | 30 min | Check `/health/auth-diag`, review the API host's logs |
 | P2 — Feature broken | 4 hours | Investigate, hotfix if straightforward |
 | P3 — Cosmetic/minor | Next business day | Triage and schedule |

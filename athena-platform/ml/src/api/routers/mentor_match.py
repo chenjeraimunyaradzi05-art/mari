@@ -116,34 +116,42 @@ class MatchResponse(BaseModel):
 # ENDPOINTS
 # ===========================================
 
+#: What ``/match`` answers with, and why. Kept as a constant because the Node
+#: client logs it and an operator reading that log needs the whole account.
+NO_MENTOR_SOURCE = (
+    "This service holds no mentor directory and cannot find mentors. "
+    "It has no database connection, and the endpoint that used to answer this "
+    "call returned five people who do not exist — mentor_1 through mentor_5, "
+    "scored 85 down to 53, each with a name, a title of 'Senior Professional' "
+    "and a star rating — over a total_considered of 100 that was also invented. "
+    "Real mentor matching runs in the API from live rows: "
+    "GET /api/algorithms/mentor-match (algorithm.service getMentorMatch), which "
+    "ranks available mentors by shared skills, rating and years of experience. "
+    "POST /api/v1/mentor-match/score still works: it scores one mentee against "
+    "one mentor profile the caller supplies, and invents nobody."
+)
+
+
 @router.post("/match", response_model=MatchResponse)
 async def find_mentor_matches(request: MatchRequest):
     """
-    Find optimal mentor matches for a mentee.
-    
-    Uses multi-factor compatibility scoring considering:
-    - Skill alignment
-    - Goal compatibility
-    - Communication style fit
-    - Availability overlap
-    - Experience relevance
+    Refuses: this service cannot find mentors, because it has none to find.
+
+    It used to build a list its own code called ``simulated_matches`` and return
+    it as a match result. On a platform where a mentee acts on these — a woman
+    looking for someone to help her change career, sometimes while leaving a
+    situation she needs to leave — being handed five invented professionals with
+    ratings and mentee counts is not a stub that fails safe. It fails as a lie,
+    and the caller has no way to tell it apart from a real answer.
+
+    Nothing enqueues the Node job that reaches here, which is the only reason
+    those five were never shown to anybody. A 501 is what makes that a guarantee
+    rather than a near miss.
     """
-    try:
-        # In production, this would query the database for mentors
-        # For now, return simulated matches
-        matches = _calculate_matches(request.mentee, request.max_results, request.min_score)
-        
-        return MatchResponse(
-            mentee_id=request.mentee.user_id,
-            matches=matches,
-            total_considered=100,  # Would be actual count
-            algorithm_version="1.0"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Matching failed: {str(e)}"
-        )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=NO_MENTOR_SOURCE,
+    )
 
 
 @router.post("/score", response_model=MatchScore)
@@ -215,41 +223,6 @@ async def recommend_mentorship_goals(
 # ===========================================
 # HELPER FUNCTIONS
 # ===========================================
-
-def _calculate_matches(mentee: MenteeProfile, max_results: int, min_score: float) -> List[MatchScore]:
-    """Calculate mentor matches (simplified for demonstration)."""
-    # In production, this queries the database and uses the trained model
-    simulated_matches = []
-    
-    for i in range(min(max_results, 5)):
-        score = 85 - (i * 8)  # Decreasing scores
-        if score >= min_score:
-            simulated_matches.append(MatchScore(
-                mentor_id=f"mentor_{i+1}",
-                overall_score=score,
-                skill_alignment=score + 5,
-                goal_compatibility=score - 3,
-                style_fit=score + 2,
-                availability_match=score - 5,
-                experience_relevance=score + 8,
-                match_reasons=[
-                    f"Strong alignment in {mentee.goals[0].value if mentee.goals else 'career goals'}",
-                    f"Experience in {mentee.industry}",
-                    "Positive mentee feedback history"
-                ],
-                potential_challenges=[
-                    "Different timezone may require scheduling flexibility"
-                ],
-                mentor_summary={
-                    "name": f"Mentor {i+1}",
-                    "title": "Senior Professional",
-                    "rating": 4.8 - (i * 0.1),
-                    "mentees_helped": 25 - (i * 3)
-                }
-            ))
-    
-    return simulated_matches
-
 
 def _compute_compatibility(mentee: MenteeProfile, mentor: MentorProfile) -> MatchScore:
     """Compute detailed compatibility score."""

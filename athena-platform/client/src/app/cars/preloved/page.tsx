@@ -2,9 +2,16 @@
 
 /**
  * Pre-loved cars. Filters that matter (price, kilometres, year, fuel,
- * state, a PPSR certificate, a full history, an inspection already done,
- * a warranty), every card carrying its price against the guide, and the
- * promise on the way in: the money is held until she has the keys.
+ * state, the seller's word that she has run a PPSR check, a full history,
+ * an inspection already done, a warranty), every card carrying its price
+ * against the guide, and the promise on the way in: the money is held
+ * until she has the keys.
+ *
+ * The PPSR filter is named for what it is everywhere it appears, because
+ * it is a tick box on the seller's own form and nothing in ATHENA fetches
+ * a certificate or checks it against the VIN. "Already inspected" is the
+ * one on this row ATHENA can stand behind: it means a workshop has filed
+ * a completed report against the listing.
  */
 
 import { Suspense, useState } from 'react';
@@ -50,7 +57,7 @@ function Listings() {
           <Field label="Fuel"><SelectInput value={f.fuelType} onChange={(v) => set('fuelType', v)} options={[{ value: '', label: 'Any' }, ...(ref.data?.fuelTypes ?? []).map((b) => ({ value: b.key, label: b.label }))]} /></Field>
           <Field label="Seller"><SelectInput value={f.sellerKind} onChange={(v) => set('sellerKind', v)} options={[{ value: '', label: 'Anyone' }, { value: 'PRIVATE', label: 'Private' }, { value: 'DEALER', label: 'Dealer' }]} /></Field>
         </div>
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2"><Check checked={f.ppsr} onChange={(v) => set('ppsr', v)} label="PPSR certificate attached" /><Check checked={f.fullHistory} onChange={(v) => set('fullHistory', v)} label="Full service history" /><Check checked={f.inspected} onChange={(v) => set('inspected', v)} label="Already inspected" /><Check checked={f.warranty} onChange={(v) => set('warranty', v)} label="With a warranty" /><Check checked={f.electrified} onChange={(v) => set('electrified', v)} label="Hybrid or electric" /></div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2"><Check checked={f.ppsr} onChange={(v) => set('ppsr', v)} label="Seller says a PPSR check is done" /><Check checked={f.fullHistory} onChange={(v) => set('fullHistory', v)} label="Full service history" /><Check checked={f.inspected} onChange={(v) => set('inspected', v)} label="Already inspected" /><Check checked={f.warranty} onChange={(v) => set('warranty', v)} label="With a warranty" /><Check checked={f.electrified} onChange={(v) => set('electrified', v)} label="Hybrid or electric" /></div>
       </div>
       {data.loading && <div className="mt-6"><Loading /></div>}
       <ErrorBox error={data.error} />
@@ -68,7 +75,7 @@ function Listings() {
               <div className="flex items-center justify-between gap-2"><span className="text-lg font-semibold text-slate-900 dark:text-white">{aud0(l.price)}</span><VerdictChip verdict={l.priceVerdict} /></div>
               <Link href={`/cars/preloved/${l.id}`} className="mt-0.5 block font-medium text-slate-900 hover:text-rose-600 dark:text-white">{l.year} {l.make} {l.model}{l.variant ? ` ${l.variant}` : ''}</Link>
               <p className="text-xs text-slate-500">{km(l.odometerKm)} · {l.fuelLabel} · {l.transmission === 'MANUAL' ? 'manual' : 'auto'} · {[l.suburb || l.city, l.state].filter(Boolean).join(', ')}</p>
-              <div className="mt-2 flex flex-wrap gap-1">{l.sellerKind === 'DEALER' && <Chip tone="sky">Dealer</Chip>}{l.ppsrChecked && <Chip tone="emerald">PPSR</Chip>}{l.serviceHistory === 'FULL' && <Chip tone="emerald">Full history</Chip>}{l.inspected && <Chip tone={l.inspected === 'PASS' ? 'emerald' : 'amber'}>Inspected: {l.inspected.toLowerCase()}</Chip>}{l.warranty !== 'NONE' && <Chip>Warranty</Chip>}{l.status === 'UNDER_OFFER' && <Chip tone="amber">Under offer</Chip>}{l.isFeatured && <Chip tone="amber">Featured</Chip>}</div>
+              <div className="mt-2 flex flex-wrap gap-1">{l.sellerKind === 'DEALER' && <Chip tone="sky">Dealer</Chip>}{l.ppsrChecked && <Chip>PPSR: seller says</Chip>}{l.serviceHistory === 'FULL' && <Chip tone="emerald">Full history</Chip>}{l.inspected && <Chip tone={l.inspected === 'PASS' ? 'emerald' : 'amber'}>Inspected: {l.inspected.toLowerCase()}</Chip>}{l.warranty !== 'NONE' && <Chip>Warranty</Chip>}{l.status === 'UNDER_OFFER' && <Chip tone="amber">Under offer</Chip>}{l.isFeatured && <Chip tone="amber">Featured</Chip>}</div>
               <div className="mt-3 flex items-center justify-between text-xs text-slate-500"><span>{l.seller.name}</span><button type="button" onClick={() => save(l)} className={cn('inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold', l.saved ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}><Heart className={cn('h-3.5 w-3.5', l.saved && 'fill-current')} /> {l.saved ? 'Saved' : 'Save'}</button></div>
             </div>
           </li>

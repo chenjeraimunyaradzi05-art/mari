@@ -53,6 +53,10 @@ const asMember = (overrides: Record<string, unknown> = {}) => {
     canPostJobs: false,
     canManageTeam: false,
     canViewAnalytics: true,
+    // A membership row with no acceptedAt is a pending invitation, and
+    // requireOrgAccess refuses those; the console's own members have
+    // accepted.
+    acceptedAt: new Date('2026-01-05T00:00:00.000Z'),
     ...overrides,
   }));
 };

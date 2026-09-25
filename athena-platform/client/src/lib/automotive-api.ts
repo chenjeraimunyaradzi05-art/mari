@@ -23,7 +23,6 @@ export const autoApi = {
   car: (slug: string, params?: Body) => api.get(`/automotive/catalogue/${slug}`, { params }),
   carReviews: (slug: string, page = 1) => api.get(`/automotive/catalogue/${slug}/reviews`, { params: { page } }),
   reviewCar: (slug: string, data: Body) => api.post(`/automotive/catalogue/${slug}/reviews`, data),
-  helpful: (id: string) => api.post(`/automotive/reviews/${id}/helpful`),
   updateReview: (id: string, data: Body) => api.patch(`/automotive/reviews/${id}`, data),
   deleteReview: (id: string) => api.delete(`/automotive/reviews/${id}`),
 

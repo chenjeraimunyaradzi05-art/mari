@@ -35,6 +35,7 @@ import { bestEffort } from '../utils/best-effort';
 import { localPathForUrl, storeFile } from '../utils/media-storage';
 import { fetchPublic } from '../utils/outbound-url';
 import { emitToUserRoom } from './socket.service';
+import { checkContentAchievements } from './engagement.service';
 
 // The most a source video may be: the upload ceiling for videos. Anything
 // larger is refused rather than read into memory or onto the disk.
@@ -262,6 +263,15 @@ async function publish(
     thumbnailUrl: updated.thumbnailUrl,
     duration: updated.duration,
   });
+
+  // "First Steps" and "Video Star" count published reels, and a reel is
+  // published here rather than when it is uploaded. Nothing used to run these
+  // checks from anywhere, so a creator who posted nothing but reels held no
+  // content achievement at all however many she made. The check reads counts
+  // and awards only what is not already held, so re-processing a video that
+  // was already published costs two counts and awards nothing.
+  await bestEffort('video-pipeline.achievements', () => checkContentAchievements(authorId));
+
   return updated;
 }
 

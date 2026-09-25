@@ -73,14 +73,74 @@ const ENV_VALIDATIONS: EnvValidation[] = [
     validator: (v) => v.startsWith('whsec_'),
     errorMessage: 'STRIPE_WEBHOOK_SECRET must start with whsec_',
   },
-  // The web proxy proves who it is with this; without it every visitor shares
-  // the proxy's address for rate limits, lockouts and new-device alerts.
+  // The web proxy proves who it is with this.
+  //
+  // It used to be optional, and being optional is the whole defect. In
+  // production no browser talks to this API directly: every call goes through
+  // the Next.js route handlers, which fetch us from the web host's own egress
+  // addresses. Without the secret those forwarded addresses are not believed,
+  // so the API sees one address for the entire site — the login limiter's
+  // budget of ten attempts per fifteen minutes is then shared by every member
+  // at once, the login lockout locks out the proxy rather than the attacker,
+  // and the new-device alert compares the web host's address to itself and
+  // therefore never fires. That last one is a woman not being told that
+  // somebody else has signed into her account, which is not something to
+  // start a production process without.
+  //
+  // The value has to be the same string the web host sends in
+  // X-Athena-Proxy-Secret (client/src/app/api/proxy-identity.ts reads it from
+  // its own PROXY_SHARED_SECRET); `openssl rand -hex 32` generates one.
   {
     name: 'PROXY_SHARED_SECRET',
-    required: false,
+    required: true,
     productionOnly: true,
     validator: (v) => v.trim().length >= 32,
-    errorMessage: 'PROXY_SHARED_SECRET must be at least 32 characters',
+    errorMessage:
+      'PROXY_SHARED_SECRET must be at least 32 characters, and must match the value the web host sends. ' +
+      'Without it the whole site shares one login budget and new-device alerts never fire.',
+  },
+  // Redis.
+  //
+  // The launch-readiness endpoint and scripts/check-env.js have both called
+  // this required in production for a long time; the boot sequence did not,
+  // so a deployment missing it started anyway and only said so in a log line.
+  // What is actually per-instance without it: the rate-limit counters, the
+  // caches, and the locks that stop the nine scheduled sweepers running on
+  // every instance at once — which is duplicate escrow-expiry warnings,
+  // duplicate wellness reminders and scheduled posts published N times.
+  {
+    name: 'REDIS_URL',
+    required: true,
+    productionOnly: true,
+    errorMessage:
+      'REDIS_URL is required in production: without it rate limits and caches are per instance and the ' +
+      'scheduled sweeps run unlocked on every instance, sending duplicate reminders and publishing posts more than once.',
+  },
+  // Where this API answers from, as the outside world reaches it.
+  //
+  // It was read in two places and validated in none. When S3 is not
+  // configured an upload is stored on this host and its public URL is built
+  // as `${API_URL}/uploads/...` — and the fallback when API_URL is unset is
+  // http://localhost:5000. That URL is then written into the database row for
+  // the avatar, the post image, the résumé or the reel, so the media is
+  // broken for everyone and stays broken after the variable is fixed, because
+  // the wrong URL was persisted rather than derived.
+  {
+    name: 'API_URL',
+    required: true,
+    productionOnly: true,
+    validator: (v) => {
+      try {
+        const url = new URL(v);
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+        return !/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(url.hostname);
+      } catch {
+        return false;
+      }
+    },
+    errorMessage:
+      'API_URL must be the absolute address this API answers on from the outside (not localhost): locally stored ' +
+      'uploads bake it into the URL saved on the row, so a wrong value is permanent for that file.',
   },
   // Operator tokens: a short one is guessable, so a short one is reported.
   {

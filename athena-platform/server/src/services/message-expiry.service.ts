@@ -7,6 +7,12 @@
  * filter expired rows out immediately; a sweep deletes them for real every
  * minute and tells both participants which ids to drop, so an open thread
  * loses the message at the same moment the database does.
+ *
+ * The same timer also sweeps expired stories (services/story-expiry). They
+ * are a different feature with the same promise — content the platform told a
+ * member would be gone by a certain time — and the promise was being kept for
+ * messages and not for stories. Rather than add a second interval and a
+ * second lock for work that takes milliseconds, the one sweeper does both.
  */
 
 import { prisma } from '../utils/prisma';
@@ -14,6 +20,7 @@ import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { emitToUserRoom } from './socket.service';
 import { runExclusively } from '../utils/redis';
+import { sweepExpiredStories } from './story-expiry.service';
 
 /** 1 hour, 24 hours, 7 days, 90 days. */
 export const DISAPPEARING_TTL_OPTIONS = [3600, 86400, 604800, 7776000] as const;
@@ -245,10 +252,30 @@ export async function sweepExpiredMessages(now = new Date()): Promise<number> {
   return removed;
 }
 
-/** Runs the sweep on an interval. Returns a function that stops it. */
+/**
+ * Runs the expiry sweeps on an interval. Returns a function that stops it.
+ *
+ * Messages and stories are swept in sequence under the one lock. Stories go
+ * second and in their own try, so a story sweep that throws — a bucket
+ * refusing deletes, say — never stops messages from being deleted on time.
+ */
 export function startMessageExpirySweeper(intervalMs = 60_000): () => void {
   const run = () =>
-    runExclusively('message-expiry', () => sweepExpiredMessages(), 5 * 60 * 1000).catch((error) => {
+    runExclusively(
+      'message-expiry',
+      async () => {
+        const messages = await sweepExpiredMessages();
+        try {
+          await sweepExpiredStories();
+        } catch (error) {
+          logger.error('Story expiry sweep failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return messages;
+      },
+      5 * 60 * 1000
+    ).catch((error) => {
       logger.error('Message expiry sweep failed', {
         error: error instanceof Error ? error.message : String(error),
       });

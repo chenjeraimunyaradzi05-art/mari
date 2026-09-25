@@ -630,6 +630,15 @@ router.post('/business/deck-outline', async (req: AuthRequest, res: Response, ne
 // certificate honest if staff edit the curriculum after the cohort ends.
 // `completedWeeks` remains the fallback for the older rows seeded before
 // sessions were required.
+//
+// What this endpoint attests to is narrow, and the page that renders it now
+// says so in as many words. An enrolment reaches COMPLETED when the founder
+// has recorded her own work for every week of the cohort and the cohort has
+// passed its end date (business.routes.ts). Nobody signs off on the weeks, no
+// attendance is taken and no deliverable is reviewed. Nothing may be added to
+// this payload that implies otherwise, and nothing about her payment belongs
+// here either — the route is unauthenticated by design, so an investor can
+// check a code, and her financial standing is not part of the claim.
 router.get('/business/accelerator-certificates/:enrollmentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const enrollment = await prisma.acceleratorEnrollment.findUnique({

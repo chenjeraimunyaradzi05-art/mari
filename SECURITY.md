@@ -5,7 +5,7 @@
 If you discover a security vulnerability in any ATHENA component, please email
 **chenjeraimunyaradzi05@gmail.com** with:
 
-- A description of the issue and the affected component (athena-frontend, athena-platform, app-backend, auth-service, packages/*)
+- A description of the issue and the affected component (see the table below)
 - Steps to reproduce
 - Any proof-of-concept code
 
@@ -17,12 +17,22 @@ well-known security.txt URL on the deployed site (source file:
 
 ## Supported components
 
-| Component | Status |
-|---|---|
-| athena-frontend | Active — deployed via Netlify |
-| athena-platform (client/server/mobile/ml) | Active |
-| app-backend | Active (Laravel-to-Node conversion in progress) |
-| auth-service | Development mock only — never deploy to production |
+This table used to list `athena-frontend`, `app-backend`, `auth-service` and
+`packages/*`. None of those directories exist in this repository — they were
+names from an earlier layout, and asking a researcher to report a finding
+against a component that is not here wastes the only part of a disclosure that
+cannot be redone: the first message. What is actually here:
+
+| Component | Path | Status |
+|---|---|---|
+| Web app | `athena-platform/client` | Active — Next.js, deployed on Netlify |
+| API | `athena-platform/server` | Active — Express, deployed on Render (`render.yaml`) |
+| Mobile app | `athena-platform/mobile` | Active — Expo/React Native, built through EAS |
+| Shared package | `athena-platform/shared` | Active — consumed by the mobile app |
+| ML service | `athena-platform/ml` | **Not deployed.** A FastAPI app with a Dockerfile and a docker-compose entry; nothing in production runs it, and the API treats `ML_SERVICE_URL` as optional and falls back when it is absent. |
+
+Authentication is part of the API (`athena-platform/server/src/middleware/auth.ts`
+and `src/routes/auth.routes.ts`), not a separate service.
 
 ## Key security controls
 
@@ -33,7 +43,7 @@ well-known security.txt URL on the deployed site (source file:
 - Outbound fetches of member-supplied links restricted to public hosts, every redirect checked (athena-platform/server/src/utils/outbound-url.ts)
 - Uploads content-sniffed, read under per-kind size ceilings, and served sandboxed
 - Stripe webhook signature verification
-- Nonce-based CSP on the web app (client/src/middleware.ts), security headers on both tiers, secrets masked in logs
+- Nonce-based CSP on the web app (athena-platform/client/src/proxy.ts), security headers on both tiers, secrets masked in logs
 
 ## Operational requirements (production)
 

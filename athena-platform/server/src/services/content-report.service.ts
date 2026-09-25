@@ -13,6 +13,8 @@ import type { ContentReport, Prisma, SafetyIncident } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
+import { recordFailure } from '../utils/ops-metrics';
+import { resolveContactEmail } from '../config/region.config';
 
 export type ContentType = 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
 export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';
@@ -105,6 +107,114 @@ const RESPONSE_TIMES: Record<ReportPriority, string> = {
   medium: 'within 48 hours',
   low: 'within 72 hours',
 };
+
+// ============================================
+// Intake, shared by every way in
+// ============================================
+
+/**
+ * What happens to a report once it is written, independent of which door it
+ * came through.
+ *
+ * There were two doors — the in-app dialog (POST /api/safety/reports) and the
+ * public form the Online Safety Act requires (POST
+ * /api/compliance/report-content) — and they did different things with the same
+ * row. The public one, the one a woman uses when she has been targeted and
+ * cannot or will not sign in, acknowledged nothing, alerted nobody, and did not
+ * refer CSAM or terrorism to an authority, while the in-app one did. The
+ * difference was invisible from either side. These helpers are the shared part,
+ * so a new door cannot quietly get a different set of consequences again.
+ */
+export function reportPriorityFor(reason: string, isUrgent?: boolean): ReportPriority {
+  const normalized = reason.toLowerCase() as ReportReason;
+  const base = REASON_PRIORITY[normalized] ?? 'medium';
+  // An urgency flag can only raise the priority. A reporter ticking the box on
+  // a spam report does not make it critical, but she can pull a report forward
+  // that our own reason mapping would have left at medium.
+  if (!isUrgent) return base;
+  return base === 'critical' ? 'critical' : base === 'high' ? 'critical' : 'high';
+}
+
+/** The response time this priority is promised, in the words the member is shown. */
+export function expectedResponseFor(priority: ReportPriority): string {
+  return RESPONSE_TIMES[priority];
+}
+
+/** A reference a reporter can quote back to us. */
+export function newReportTicketId(): string {
+  return generateTicketId();
+}
+
+export interface IntakeRecord {
+  ticketId: string;
+  reason: string;
+  priority: ReportPriority;
+  contentType: string;
+  contentId: string;
+  description?: string;
+  contactEmail?: string;
+  isUrgent?: boolean;
+}
+
+/**
+ * Acknowledge, alert and refer. Each step is awaited but none of them is
+ * allowed to lose the others: an acknowledgment that bounces must not stop the
+ * CSAM referral being queued, which is why they are caught individually here
+ * rather than by one try around the lot.
+ */
+export async function runReportIntakeConsequences(record: IntakeRecord): Promise<void> {
+  const input: ContentReportInput = {
+    contentType: record.contentType.toLowerCase() as ContentType,
+    contentId: record.contentId,
+    reason: record.reason.toLowerCase() as ReportReason,
+    description: record.description,
+    contactEmail: record.contactEmail,
+    isUrgent: record.isUrgent,
+  };
+
+  if (record.contactEmail) {
+    try {
+      await sendReportAcknowledgment(
+        record.contactEmail,
+        record.ticketId,
+        expectedResponseFor(record.priority)
+      );
+    } catch (error) {
+      logger.warn('Report acknowledgment could not be sent', {
+        ticketId: record.ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.acknowledgment', error);
+    }
+  }
+
+  if (record.priority === 'critical' || record.priority === 'high') {
+    try {
+      await alertTrustAndSafety(record.ticketId, record.priority, input);
+    } catch (error) {
+      logger.error('Trust & Safety alert failed', {
+        ticketId: record.ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.trust-safety', error);
+    }
+  }
+
+  if (AUTHORITY_REPORTABLE_REASONS.includes(input.reason)) {
+    try {
+      await escalateToAuthorities(record.ticketId, input);
+    } catch (error) {
+      // A missed referral is the one failure on this path that has a statutory
+      // consequence, so it is an error line and an ops failure, never a warn.
+      logger.error('Authority escalation could not be recorded', {
+        ticketId: record.ticketId,
+        reason: input.reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.authority-escalation', error);
+    }
+  }
+}
 
 /**
  * Submit a content report
@@ -299,10 +409,7 @@ async function applyReportDecision(
     },
   });
 
-  // Notify reporter of outcome
-  if (ticketId && evidence?.contactEmail) {
-    await sendReportOutcome(evidence.contactEmail, ticketId, action);
-  }
+  await notifyReporterOfOutcome(report, ticketId, action);
 
   return {
     reportId: report.id,
@@ -368,6 +475,16 @@ export async function reverseEnforcement(input: {
 }
 
 /**
+ * Where a reporter goes to challenge a decision. It was written as the bare
+ * string 'athena.com/help/appeal' — a domain the venture does not own, so the
+ * one link in the email that matters pointed at somebody else's website.
+ */
+function appealUrl(): string {
+  const base = (process.env.CLIENT_URL || 'http://localhost:3000').trim().replace(/\/$/, '');
+  return `${base}/help/appeal`;
+}
+
+/**
  * Generate unique ticket ID
  */
 function generateTicketId(): string {
@@ -401,6 +518,81 @@ async function sendReportAcknowledgment(
 }
 
 /**
+ * Tell the woman who raised the alarm what happened.
+ *
+ * This used to be `if (ticketId && evidence?.contactEmail)`, and both of those
+ * keys were only ever written by submitContentReport, the legacy path with no
+ * production callers. Every report that actually exists in the database
+ * therefore had neither, so the branch never ran once: a member reported
+ * harassment, a moderator suspended the account, and the reporter heard
+ * nothing, while the reported member got a notification. The account holder was
+ * told and the person who was harmed was not.
+ *
+ * A signed-in reporter is told in-app, which is the only channel that always
+ * exists for her. An emailed address is written on the report by the public
+ * form, and that gets the email as well, because somebody reporting without an
+ * account has no other way to hear back. Neither failure is allowed to leave
+ * the decision half applied — the enforcement has already happened by the time
+ * this runs.
+ */
+const OUTCOME_SUMMARY: Record<ModerationAction, string> = {
+  dismiss: 'We reviewed the content you reported and did not find a breach of the community guidelines.',
+  warn: 'We reviewed your report and warned the member responsible.',
+  remove: 'We reviewed your report and removed the content.',
+  suspend: 'We reviewed your report and suspended the account responsible.',
+  ban: 'We reviewed your report and removed the account responsible.',
+  escalate: 'Your report has gone to our senior Trust & Safety reviewers. We will come back to you.',
+};
+
+async function notifyReporterOfOutcome(
+  report: ContentReport,
+  ticketId: string | null,
+  action: ModerationAction
+): Promise<void> {
+  const reference = ticketId || report.id;
+  const evidence = (report.evidence ?? null) as { contactEmail?: string } | null;
+
+  // reporterId is a required column, but the legacy path wrote the literal
+  // 'system-anonymous' into it, so the account is looked up rather than assumed.
+  const reporter = await prisma.user
+    .findUnique({ where: { id: report.reporterId }, select: { id: true } })
+    .catch(() => null);
+
+  if (reporter) {
+    try {
+      await prisma.notification.create({
+        data: {
+          userId: reporter.id,
+          type: 'SYSTEM',
+          title: 'Update on your report',
+          message: OUTCOME_SUMMARY[action],
+          link: '/dashboard/safety',
+          data: { reportId: report.id, reference, action },
+        },
+      });
+    } catch (error) {
+      logger.error('Could not tell a reporter the outcome of her report', {
+        reportId: report.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.reporter-notification', error);
+    }
+  }
+
+  if (evidence?.contactEmail) {
+    try {
+      await sendReportOutcome(evidence.contactEmail, reference, action);
+    } catch (error) {
+      logger.error('Could not email a reporter the outcome of her report', {
+        reportId: report.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.reporter-outcome-email', error);
+    }
+  }
+}
+
+/**
  * Send report outcome notification
  */
 async function sendReportOutcome(
@@ -424,7 +616,7 @@ async function sendReportOutcome(
       <h2>Update on Your Report</h2>
       <p>We have completed our review of your report (${ticketId}).</p>
       <p><strong>Outcome:</strong> ${actionMessages[action] || 'Action taken.'}</p>
-      <p>If you believe this decision was made in error, you can submit an appeal at athena.com/help/appeal.</p>
+      <p>If you believe this decision was made in error, you can <a href="${appealUrl()}">submit an appeal</a>.</p>
       <p>Thank you for helping keep ATHENA safe.</p>
       <br>
       <p>Best regards,<br>ATHENA Trust & Safety Team</p>
@@ -433,16 +625,53 @@ async function sendReportOutcome(
 }
 
 /**
+ * Where a Trust & Safety alert goes.
+ *
+ * Both alert paths used to fall back to the literal 'trust-safety@athena.com'.
+ * athena.com is not a domain this venture owns, so in any deployment that had
+ * not set TRUST_SAFETY_EMAIL the body of a content report — the reported
+ * content id, the reason, which for these two paths can be CSAM or terrorism,
+ * and the reporter's free text — was posted to a stranger's mail server. The
+ * fallback is now ATHENA's own support mailbox, derived the same way every
+ * other published address on this server is, and null when no domain is
+ * configured at all. Null means the alert is not sent: the report row and the
+ * escalation row are already written, so the queue still holds the work, and
+ * recordFailure puts the missing alert where the operations screen shows it.
+ */
+export function trustAndSafetyMailbox(): string | null {
+  return process.env.TRUST_SAFETY_EMAIL?.trim() || resolveContactEmail('support');
+}
+
+/** The authority-referral desk, which falls back to Trust & Safety, never off-domain. */
+export function authorityReferralMailbox(): string | null {
+  return process.env.AUTHORITY_ESCALATION_EMAIL?.trim() || trustAndSafetyMailbox();
+}
+
+function reportAlertUndeliverable(kind: string, ticketId: string): void {
+  const error = new Error(
+    'No ATHENA mailbox is configured for safety alerts; set TRUST_SAFETY_EMAIL or CONTACT_DOMAIN'
+  );
+  logger.error(`${kind} alert could not be addressed`, { ticketId, error: error.message });
+  recordFailure(`content-report.${kind}`, error);
+}
+
+/**
  * Alert Trust & Safety team
  */
-async function alertTrustAndSafety(
+export async function alertTrustAndSafety(
   ticketId: string,
   priority: ReportPriority,
   report: ContentReportInput
 ): Promise<void> {
+  const to = trustAndSafetyMailbox();
+  if (!to) {
+    reportAlertUndeliverable('trust-safety', ticketId);
+    return;
+  }
+
   // Send to internal Trust & Safety channel (Slack, email, etc.)
   await sendEmail({
-    to: process.env.TRUST_SAFETY_EMAIL || 'trust-safety@athena.com',
+    to,
     subject: `[${priority.toUpperCase()}] New Content Report - ${ticketId}`,
     html: `
       <h2>New Content Report Requires Attention</h2>
@@ -499,11 +728,14 @@ async function notifyEscalationQueue(
   reportedTo: string,
   report: ContentReportInput
 ): Promise<void> {
+  const to = authorityReferralMailbox();
+  if (!to) {
+    reportAlertUndeliverable('authority-referral', ticketId);
+    return;
+  }
+
   await sendEmail({
-    to:
-      process.env.AUTHORITY_ESCALATION_EMAIL ||
-      process.env.TRUST_SAFETY_EMAIL ||
-      'trust-safety@athena.com',
+    to,
     subject: `[AUTHORITY REFERRAL REQUIRED] ${ticketId} - ${report.reason}`,
     html: `
       <h2>Authority Referral Required</h2>
@@ -1112,6 +1344,10 @@ export async function updateAuthorityEscalationStatus(
 
 export default {
   submitContentReport,
+  reportPriorityFor,
+  expectedResponseFor,
+  newReportTicketId,
+  runReportIntakeConsequences,
   getReportStatus,
   processContentReport,
   processReportById,

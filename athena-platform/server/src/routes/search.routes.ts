@@ -88,7 +88,12 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
 
 /**
  * GET /api/search/suggestions
- * Get search suggestions for autocomplete
+ *
+ * Autocomplete drawn from what is on the platform: skills members hold, open
+ * job titles, running course titles and hashtags used this week. Half of it
+ * used to be a hardcoded list of US recruiting phrases, which is also what a
+ * member saw suggested when her search found nothing. Nothing matching gives
+ * an empty list.
  */
 router.get('/suggestions', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -107,7 +112,11 @@ router.get('/suggestions', async (req: Request, res: Response, next: NextFunctio
 
 /**
  * GET /api/search/trending
- * Get trending search topics
+ *
+ * The hashtags the community has used most over the last seven days, counted
+ * across posts and reels. It is not a log of what people searched for —
+ * nothing records that, deliberately — and it used to be eight hardcoded
+ * phrases behind a thirty-minute cache.
  */
 router.get('/trending', async (req: Request, res: Response, next: NextFunction) => {
   try {

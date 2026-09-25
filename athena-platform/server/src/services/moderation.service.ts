@@ -23,14 +23,30 @@ const moderationApiKey = process.env.AI_OPENAI_API_KEY || process.env.OPENAI_API
 
 const openai = moderationApiKey ? new OpenAI({ apiKey: moderationApiKey }) : null;
 
-// Initialize Rekognition client
-const rekognition = new RekognitionClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-  }
-});
+// Initialize Rekognition client.
+//
+// This was constructed unconditionally with `|| ''` for both credentials, so a
+// deployment with no AWS keys held a client that looked configured and failed
+// on the first call instead of standing down deliberately. Worse, the only
+// guard on the call path tested AWS_ACCESS_KEY_ID alone: set the id and forget
+// the secret — the ordinary shape of a half-finished deployment — and every
+// image went to Rekognition with an empty secret, failed, and was allowed
+// through by the catch as though it had been screened. The client is null
+// unless both halves are present, and null is what the call path checks.
+const imageModerationCredentials =
+  process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+    ? {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      }
+    : null;
+
+const rekognition = imageModerationCredentials
+  ? new RekognitionClient({
+      region: process.env.AWS_REGION || 'ap-southeast-2',
+      credentials: imageModerationCredentials,
+    })
+  : null;
 
 // Moderation categories and thresholds
 const MODERATION_THRESHOLDS = {
@@ -292,6 +308,16 @@ function announceMissingProvider(kind: ModeratedSurface): void {
   );
 }
 
+let missingImageProviderAnnounced = false;
+
+function announceMissingImageProvider(): void {
+  if (missingImageProviderAnnounced) return;
+  missingImageProviderAnnounced = true;
+  logger.error(
+    'No image moderation provider is configured: member images are being published unscreened. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.'
+  );
+}
+
 /**
  * Gate for user generated text on the write paths.
  *
@@ -528,9 +554,12 @@ export async function evaluateSafetyScore(content: string): Promise<SafetyScoreR
  * Moderate image content using AWS Rekognition
  */
 export async function moderateImage(imageBuffer: Buffer): Promise<ModerationResult> {
-  // If no credentials, skip (for dev)
-  if (!process.env.AWS_ACCESS_KEY_ID) {
-    logger.warn('AWS credentials not configured, skipping image moderation');
+  // No provider, no screening — said once at error level and counted every
+  // time, the same way the text gate reports itself, because "how many images
+  // went up unscreened" is a question a warn line cannot answer.
+  if (!rekognition) {
+    announceMissingImageProvider();
+    recordFailure('moderation.unscreened_image', new Error('no image moderation provider'));
     return { flagged: false, categories: [], scores: {}, action: 'allow' };
   }
 

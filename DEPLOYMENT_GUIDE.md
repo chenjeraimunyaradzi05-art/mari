@@ -48,6 +48,45 @@ Three pieces, three homes:
 Follow [NEON_SETUP.md](NEON_SETUP.md). You come out of it with a pooled
 `DATABASE_URL` and a direct `DIRECT_DATABASE_URL`.
 
+#### There is one environment, and Neon branches are how you get a second
+
+Worth saying plainly before anything else, because the rest of this guide reads
+differently once you know it: there is no staging deployment. One Render
+service, one Netlify site, one Neon database, all of them production. Nothing
+below creates a second one.
+
+What Neon gives you instead is branching, and it is enough for the case that
+actually matters — rehearsing a migration against real data before it touches
+the real database. A branch is a copy-on-write clone: instant, free until it is
+written to, and carrying production's row counts rather than an empty schema's.
+
+```bash
+# Neon console → Branches → New branch → from production
+# or:
+neonctl branches create --name migration-rehearsal
+
+# From athena-platform/server, with the branch's connection string:
+STAGING_DATABASE_URL="postgresql://...neon.tech/athena?sslmode=require" \
+  node scripts/migration-dry-run.js
+
+# Delete the branch when you are done.
+```
+
+`STAGING_DATABASE_URL` appears in no `.env.example` on purpose: it is not a
+standing value, it is the branch you made for that rehearsal. The script used to
+throw a bare "STAGING_DATABASE_URL is required", which sent people looking for
+an environment that does not exist; it now says this.
+
+CI is the other half, and it runs on every push without anyone remembering to:
+the server job applies `prisma migrate deploy` to a throwaway Postgres and then
+`prisma migrate diff --exit-code` against `schema.prisma`, so migration SQL that
+is simply broken, and a schema edit that shipped without its migration, both
+fail before merge. The branch rehearsal is for the thing CI cannot see — how a
+migration behaves against three years of rows.
+
+Read [SHARED-DATABASE-HAZARD](athena-platform/docs/runbooks/SHARED-DATABASE-HAZARD.md)
+before pointing a local checkout at any of these URLs.
+
 ### 2. API Server
 
 Both hosts build `athena-platform/server/Dockerfile`, whose `CMD` is
@@ -238,27 +277,71 @@ said — nothing under `src/` reads one. `src/index.ts` sets
 reverse proxy in front of the process; Render, Fly and Netlify each put exactly
 one there.
 
-### API Server (optional)
+### API Server (also required in production)
+
+These are separated from the block above only because the server will *boot*
+without them. `/health/launch-readiness` marks every one of them `required`
+once `NODE_ENV=production`, so a deployment missing any of them answers 503 on
+that endpoint and is not launched.
 
 ```env
 REDIS_URL=redis://...            # BullMQ workers, rate limits and login lockouts
+SENDGRID_API_KEY=SG....          # verification and password-reset email
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-AI_OPENAI_API_KEY=sk-...         # read before OPENAI_API_KEY; also gates text moderation
+STRIPE_PRICE_CAREER=price_...    # and _PROFESSIONAL, _ENTREPRENEUR, _CREATOR
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=ap-southeast-2
 S3_BUCKET=athena-uploads
-SENTRY_DSN=https://...
+AI_OPENAI_API_KEY=sk-...         # read before OPENAI_API_KEY; also gates text moderation
+METRICS_TOKEN=<openssl rand -hex 32>
+HEALTH_DIAGNOSTICS_TOKEN=<openssl rand -hex 32>
 ```
 
-"Optional" means the server starts without them and the features they carry
-run in their not-configured branch. `npm run check:env -- <file>` reports which
-ones production actually wants, and `/health/launch-readiness` reports the same
-thing from the deployed API. `render.yaml` and `fly.toml` list the full set with
-a note on each.
+The AWS four used to be listed here as "optional", and that was wrong in a way
+that cost member data rather than a feature. `utils/media-storage.ts` writes to
+S3 only when `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are *both* present;
+without them every avatar, post image, reel and resume is written to `./uploads`
+inside the container. Render and Fly replace that container on every deploy, so
+the documented "minimal" deployment silently lost every photograph a member had
+uploaded each time the API shipped — and a second instance would 404 on the
+first one's files. There is no disk mounted in `render.yaml` for exactly this
+reason: local media storage is not a mode this platform should run in, so it
+should fail readiness rather than lose things quietly.
 
-The full list, with what each one does, is
-`athena-platform/server/.env.production.template`.
+### API Server (genuinely optional)
+
+```env
+SENTRY_DSN=https://...           # error reporting; absence is reported, not fatal
+ML_SERVICE_URL=http://...        # feed re-ranking; the feed falls back to engagement order
+OPENSEARCH_NODE=https://...      # only read when OPENSEARCH_ENABLED=true
+EXPO_ACCESS_TOKEN=...            # only with Expo enhanced push security
+```
+
+"Optional" here means the server starts without them, the features they carry
+run in their not-configured branch, and `/health/launch-readiness` reports them
+as recommended rather than required.
+
+### Where each value comes from
+
+`render.yaml` is the authoritative list: every variable the API reads is
+declared there with a comment saying what it does and whether Render can invent
+it (`generateValue: true`), derive it (`fromService`) or has to be given it
+(`sync: false`). `athena-platform/server/fly.toml` carries the non-secret half
+for the Fly path. Run
+`npm run check:env -- <file>` from `athena-platform/server` against whatever env
+file you are about to load: it reports every variable production requires and
+does not have, every one set to an obvious placeholder, and every one set that
+no code under `src/` reads any more — which is how the last round of drift
+(`STRIPE_PRICE_STARTER`, `OPENSEARCH_URL`, the SES keys) went unnoticed.
+
+The same script runs in CI, against `render.yaml` rather than against an env
+file: a blueprint declares the *names* production will be given without holding
+any of the values, which is exactly the half that drifts. So a variable added to
+`src/` without being added to the blueprint now fails the build, instead of
+being discovered on the host at three in the morning. Nothing in CI reads a
+secret to do it.
 
 ### Web Client (required)
 

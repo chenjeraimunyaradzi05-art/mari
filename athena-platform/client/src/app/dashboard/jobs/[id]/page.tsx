@@ -38,6 +38,7 @@ import { Loading } from '@/components/ui/loading';
 import { Badge } from '@/components/ui/badge';
 import { sanitizeHtml } from '@/lib/utils/sanitize';
 import { safeHref } from '@/lib/safe-href';
+import { ResumeAttachment, type ResumeAttachmentValue } from '@/app/jobs/ResumeAttachment';
 
 type JobLike = Record<string, any>;
 
@@ -87,6 +88,7 @@ export default function JobDetailPage() {
   const unsaveJob = useUnsaveJob();
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
+  const [resume, setResume] = useState<ResumeAttachmentValue | null>(null);
 
   const savedJobIds = useMemo(
     () => new Set((savedJobs || []).map((savedJob: { id: string }) => savedJob.id)),
@@ -105,11 +107,12 @@ export default function JobDetailPage() {
 
   const handleApply = () => {
     applyToJob.mutate(
-      { jobId, data: { coverLetter } },
+      { jobId, data: { coverLetter, resumeUrl: resume?.url } },
       {
         onSuccess: () => {
           setShowApplyModal(false);
           setCoverLetter('');
+          setResume(null);
         },
       }
     );
@@ -516,10 +519,25 @@ export default function JobDetailPage() {
                 />
               </div>
 
+              <ResumeAttachment
+                value={resume}
+                onChange={setResume}
+                disabled={applyToJob.isPending}
+              />
+
               <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  <strong>Your resume</strong> and <strong>profile</strong> will be shared
-                  with the employer.
+                  {resume ? (
+                    <>
+                      <strong>Your résumé</strong> and <strong>profile</strong> will be shared with
+                      the employer.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Your profile</strong> will be shared with the employer. Attach a
+                      résumé above if you want one sent with your application.
+                    </>
+                  )}
                 </p>
               </div>
             </div>

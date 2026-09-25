@@ -138,6 +138,21 @@ const paragraphs = (value: string): string =>
     .map((block) => `<p>${escapeHtml(block.trim()).replace(/\n/g, '<br>')}</p>`)
     .join('');
 
+/**
+ * The page a breach notification points a member at.
+ *
+ * This read process.env.APP_URL, which is the API host in .env.example and is
+ * commented out there, so the one link in a breach email either pointed at the
+ * API or, far more likely, rendered as "undefined/help/security". Members are
+ * being told their data was exposed; the link they are given to find out more
+ * has to work. CLIENT_URL is the web app, and it is what every other member
+ * email on this server already uses.
+ */
+function securitySupportUrl(): string {
+  const base = (process.env.CLIENT_URL || 'http://localhost:3000').trim().replace(/\/$/, '');
+  return `${base}/help/security`;
+}
+
 export class BreachNotificationService {
   // 72-hour deadline in milliseconds
   private readonly NOTIFICATION_DEADLINE_MS = 72 * 60 * 60 * 1000;
@@ -756,7 +771,7 @@ export class BreachNotificationService {
               <p>Dear ${user.firstName},</p>
               <p>${notificationContent}</p>
               ${stepsSection}
-              <p>For more information, please visit our <a href="${process.env.APP_URL}/help/security">security support page</a>.</p>
+              <p>For more information, please visit our <a href="${securitySupportUrl()}">security support page</a>.</p>
               <p>Best regards,<br>The ATHENA Security Team</p>
             `,
           })

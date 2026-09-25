@@ -12,6 +12,13 @@ import {
   normalizeSafeUrl,
   normalizeUserText,
 } from '../utils/contentSafety';
+// A broadcast channel had no ceiling of its own: only the global tier limit,
+// which lets a free account put roughly thirteen messages a minute into a room
+// of subscribers, indefinitely, on a path with no moderation queue behind it.
+// Posting reuses the message ceiling because a channel post is a message to
+// everyone subscribed; creating channels and reacting reuse the post and
+// reaction ceilings for the same reason.
+import { messageLimiter, postLimiter, reactionLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -90,6 +97,7 @@ router.get('/', optionalAuth, async (req: AuthRequest, res, next) => {
 router.post(
   '/',
   authenticate,
+  postLimiter,
   [
     body('name').isString().notEmpty().isLength({ max: CONTENT_LIMITS.channelName }).withMessage('Channel name max 100 characters'),
     body('type').isIn(['EMPLOYER_BROADCAST', 'MENTOR_BROADCAST', 'COMMUNITY_CHANNEL', 'EDUCATION_CHANNEL', 'CREATOR_CHANNEL']),
@@ -772,6 +780,7 @@ router.get('/:id/messages', optionalAuth, async (req: AuthRequest, res, next) =>
 router.post(
   '/:id/messages',
   authenticate,
+  messageLimiter,
   [
     body('content').optional().isString().isLength({ max: CONTENT_LIMITS.channelMessage }),
     body('mediaUrls').optional().isArray({ max: 10 }),
@@ -949,6 +958,7 @@ router.delete(
 router.post(
   '/:channelId/messages/:messageId/reactions',
   authenticate,
+  reactionLimiter,
   [body('emoji').isString().trim().notEmpty().isLength({ max: 32 })],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
