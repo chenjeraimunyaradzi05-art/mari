@@ -2,20 +2,116 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Shield, Loader2, Phone, MapPin, Lock, FileText, AlertTriangle, Home } from 'lucide-react';
+import { Shield, Loader2, Phone, Lock, AlertTriangle, Home } from 'lucide-react';
 import { impactApi } from '@/lib/api';
 import { SafeModeBanner } from '@/components/safety/SafeModeBanner';
 import { safeHref } from '@/lib/safe-href';
+import { QuickExitButton } from '../../safety/QuickExit';
 
 type SafetyPlan = {
   id: string;
   emergencyContacts?: unknown;
   safeLocations?: unknown;
+  warningTriggers?: unknown;
   exitStrategies?: unknown;
   importantDocs?: unknown;
   financialPlan?: unknown;
+  legalContacts?: unknown;
   lastReviewedAt?: string;
 };
+
+/**
+ * The seven things a safety plan holds, in the order a woman writing one
+ * tends to think of them. The key is the column on SafetyPlan; the server
+ * accepts all seven and stores each as a list of lines.
+ *
+ * Four of them — warning triggers, documents, money and legal contacts — had
+ * no input on this page at all, so the column existed, the server accepted it
+ * and there was no way to put anything in it.
+ */
+const PLAN_FIELDS = [
+  {
+    key: 'emergencyContacts',
+    label: 'Emergency contacts',
+    placeholder: 'Name - phone number - relationship',
+    hint: 'People you would call. One per line.',
+  },
+  {
+    key: 'safeLocations',
+    label: 'Safe places',
+    placeholder: 'An address, or enough to find it again',
+    hint: 'Where you could go. One per line.',
+  },
+  {
+    key: 'warningTriggers',
+    label: 'Warning signs',
+    placeholder: 'What happens before it gets worse',
+    hint: 'The signs that tell you it is time to leave. One per line.',
+  },
+  {
+    key: 'exitStrategies',
+    label: 'Getting out',
+    placeholder: 'The steps, in the order you would take them',
+    hint: 'How you would leave. One per line.',
+  },
+  {
+    key: 'importantDocs',
+    label: 'Documents to take',
+    placeholder: 'Passport, Medicare card, birth certificates',
+    hint: 'What you would need with you, and where it is kept. One per line.',
+  },
+  {
+    key: 'financialPlan',
+    label: 'Money',
+    placeholder: 'An account in your name only, cash put by, who holds it',
+    hint: 'What you would have to live on. One per line.',
+  },
+  {
+    key: 'legalContacts',
+    label: 'Legal and police',
+    placeholder: 'Solicitor, community legal centre, an officer you have spoken to',
+    hint: 'Anyone official already involved. One per line.',
+  },
+] as const;
+
+type PlanFieldKey = (typeof PLAN_FIELDS)[number]['key'];
+
+type PlanDraft = Record<PlanFieldKey, string>;
+
+const EMPTY_DRAFT = PLAN_FIELDS.reduce(
+  (draft, field) => ({ ...draft, [field.key]: '' }),
+  {} as PlanDraft
+);
+
+/**
+ * A stored field back into lines. The column is Json and older rows may hold
+ * a plain string rather than a list, so both are read; anything else reads as
+ * empty rather than throwing on a page someone opened because she is afraid.
+ */
+function planLines(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry).trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * An empty box has to erase what is stored, not leave it there.
+ *
+ * This sent `undefined` for a field the member had cleared, and Prisma reads
+ * undefined in an update as "leave this alone" — so a safe address the abuser
+ * had since found out about stayed in the record forever while the form
+ * showed her an empty box. An empty list is a value, and it overwrites.
+ */
+function planPayload(draft: PlanDraft): Record<PlanFieldKey, string[]> {
+  return PLAN_FIELDS.reduce(
+    (payload, field) => ({ ...payload, [field.key]: planLines(draft[field.key]) }),
+    {} as Record<PlanFieldKey, string[]>
+  );
+}
 
 type DVService = {
   id: string;
@@ -126,10 +222,20 @@ export default function SafetyPage() {
   const [serviceType, setServiceType] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // Safety plan form state (simplified - in real app would be more structured)
-  const [emergencyContacts, setEmergencyContacts] = useState('');
-  const [safeLocations, setSafeLocations] = useState('');
-  const [exitStrategies, setExitStrategies] = useState('');
+  // What is in the boxes right now. Filled from the saved plan every time it
+  // loads, because "Update plan" used to open three empty boxes over a plan
+  // she had already written, and saving from there wiped what she could not
+  // see.
+  const [draft, setDraft] = useState<PlanDraft>(EMPTY_DRAFT);
+
+  const hydrateDraft = (plan: SafetyPlan | null) => {
+    setDraft(
+      PLAN_FIELDS.reduce(
+        (next, field) => ({ ...next, [field.key]: planLines(plan?.[field.key]).join('\n') }),
+        {} as PlanDraft
+      )
+    );
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -139,7 +245,9 @@ export default function SafetyPage() {
         impactApi.getSafetyPlan(),
         impactApi.getDVServices({ type: serviceType || undefined }),
       ]);
-      setSafetyPlan(planRes.data?.data || null);
+      const plan: SafetyPlan | null = planRes.data?.data || null;
+      setSafetyPlan(plan);
+      hydrateDraft(plan);
       setServices(servicesRes.data?.data || []);
       setFallback(servicesRes.data?.fallback || []);
     } catch (err: unknown) {
@@ -159,11 +267,7 @@ export default function SafetyPage() {
     setSaving(true);
     setError(null);
     try {
-      await impactApi.saveSafetyPlan({
-        emergencyContacts: emergencyContacts ? emergencyContacts.split('\n').filter(Boolean) : undefined,
-        safeLocations: safeLocations ? safeLocations.split('\n').filter(Boolean) : undefined,
-        exitStrategies: exitStrategies ? exitStrategies.split('\n').filter(Boolean) : undefined,
-      });
+      await impactApi.saveSafetyPlan(planPayload(draft));
       setShowPlanForm(false);
       await loadData();
     } catch (err: unknown) {
@@ -174,19 +278,29 @@ export default function SafetyPage() {
     }
   };
 
+  const planHasContent = PLAN_FIELDS.some((field) => planLines(safetyPlan?.[field.key]).length > 0);
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8">
-      <div>
-        <div className="flex items-center gap-2 text-red-600">
-          <Shield className="w-5 h-5" />
-          <span className="text-sm font-semibold uppercase tracking-wider">Safety Planning</span>
+      {/*
+        This is the page where she writes down her safe addresses and her way
+        out. Quick exit belonged here before it belonged anywhere, and it was
+        on the settings page instead.
+      */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-red-600">
+            <Shield className="w-5 h-5" />
+            <span className="text-sm font-semibold uppercase tracking-wider">Safety Planning</span>
+          </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
+            DV Survivor Support
+          </h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
+            Safety planning tools and support services
+          </p>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mt-2">
-          DV Survivor Support
-        </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Safety planning tools and support services
-        </p>
+        <QuickExitButton />
       </div>
 
       <SafeModeBanner />
@@ -247,92 +361,97 @@ export default function SafetyPage() {
               </button>
             </div>
 
+            {/*
+              This said "private and encrypted". Nothing encrypts it — the
+              columns are plain Json and the schema comment saying otherwise
+              was aspirational. Telling a woman her safe addresses are
+              encrypted when they are not is the kind of claim she would make
+              a decision on, so it says what is actually true: nobody else
+              reaches it through ATHENA, and it lives in our database.
+            */}
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4 text-sm text-yellow-800 dark:text-yellow-200">
               <Lock className="w-4 h-4 inline mr-2" />
-              Your safety plan is private and encrypted. Only you can access it.
+              Your safety plan is yours alone. No one else on ATHENA can open it — not other members, not staff. It is stored on ATHENA&rsquo;s servers, so put in it only what you would be comfortable having there, and clear anything that stops being safe to keep.
             </div>
 
             {showPlanForm && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    Emergency Contacts (one per line)
-                  </label>
-                  <textarea
-                    value={emergencyContacts}
-                    onChange={(e) => setEmergencyContacts(e.target.value)}
-                    placeholder="Name - Phone number - Relationship"
-                    rows={3}
-                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    Safe Locations (one per line)
-                  </label>
-                  <textarea
-                    value={safeLocations}
-                    onChange={(e) => setSafeLocations(e.target.value)}
-                    placeholder="Address or description of safe places"
-                    rows={3}
-                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    Exit Strategies (one per line)
-                  </label>
-                  <textarea
-                    value={exitStrategies}
-                    onChange={(e) => setExitStrategies(e.target.value)}
-                    placeholder="Steps to safely leave if needed"
-                    rows={3}
-                    className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Every box is optional. Emptying one and saving deletes what was in it.
+                </p>
+                {PLAN_FIELDS.map((field) => (
+                  <div key={field.key}>
+                    <label
+                      htmlFor={`plan-${field.key}`}
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      {field.label}
+                    </label>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{field.hint}</p>
+                    <textarea
+                      id={`plan-${field.key}`}
+                      value={draft[field.key]}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      rows={3}
+                      className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm"
+                    />
+                  </div>
+                ))}
                 <div className="flex gap-2">
                   <button onClick={handleSavePlan} disabled={saving} className="btn-primary">
                     {saving ? 'Saving...' : 'Save plan'}
                   </button>
-                  <button onClick={() => setShowPlanForm(false)} className="btn-secondary">Cancel</button>
+                  <button
+                    onClick={() => {
+                      hydrateDraft(safetyPlan);
+                      setShowPlanForm(false);
+                    }}
+                    className="btn-secondary"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
             )}
 
+            {/*
+              Her plan, read back to her. This used to render three cards
+              saying "Configured" whether or not the field held anything, and
+              the contents were never shown anywhere — so a plan she wrote
+              once she could never read again, and a field she thought she had
+              filled in looked identical to one she had not.
+            */}
             {safetyPlan && !showPlanForm && (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
-                      <Phone className="w-5 h-5 text-red-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-white">Emergency Contacts</p>
-                      <p className="text-xs text-slate-500">Configured</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
-                      <MapPin className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-white">Safe Locations</p>
-                      <p className="text-xs text-slate-500">Configured</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-purple-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-white">Exit Strategies</p>
-                      <p className="text-xs text-slate-500">Configured</p>
-                    </div>
-                  </div>
-                </div>
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-5">
+                {planHasContent ? (
+                  PLAN_FIELDS.map((field) => {
+                    const lines = planLines(safetyPlan[field.key]);
+                    if (lines.length === 0) return null;
+                    return (
+                      <div key={field.key}>
+                        <h3 className="text-sm font-medium text-slate-900 dark:text-white">{field.label}</h3>
+                        <ul className="mt-2 space-y-1">
+                          {lines.map((line, index) => (
+                            <li
+                              key={`${field.key}-${index}`}
+                              className="text-sm text-slate-600 dark:text-slate-300 break-words"
+                            >
+                              {line}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Your plan is empty. Press Update to write one — or leave it empty, which is also a decision.
+                  </p>
+                )}
                 {safetyPlan.lastReviewedAt && (
-                  <p className="text-xs text-slate-500 mt-4">
-                    Last reviewed: {new Date(safetyPlan.lastReviewedAt).toLocaleDateString()}
+                  <p className="text-xs text-slate-500">
+                    Last saved: {new Date(safetyPlan.lastReviewedAt).toLocaleDateString()}
                   </p>
                 )}
               </div>

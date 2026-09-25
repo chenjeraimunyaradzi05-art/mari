@@ -276,6 +276,31 @@ export async function updateSafetyScore(userId: string): Promise<number> {
  * Record a safety incident and trigger score recalculation
  */
 export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' | 'createdAt'>): Promise<void> {
+  /*
+   * The score as it stands, read before anything moves it.
+   *
+   * This read happened *after* updateSafetyScore had already written the new
+   * value onto the row, so `oldScore` was the new score under another name.
+   * Both comparisons below are between a number and itself: the drop was
+   * always 0, so the "Account Standing Update" notification never went to
+   * anybody, and `newScore < 25 && oldScore >= 25` was never true, so the
+   * SAFETY_CRITICAL AdminFlag — the row that puts an account in front of the
+   * staff safety queue — was never raised by a report or a block. Every
+   * reported member and every blocked member came through here. The one case
+   * that slipped through was a score landing on exactly 0, because `||` read
+   * it as absent and substituted the default.
+   *
+   * `??` rather than `||` for the same reason: a stored 0 is a measurement,
+   * not a missing value. A member who has never been scored reads the column
+   * default, which is what the rest of the platform reads about her too, so
+   * it is the right thing to compare against.
+   */
+  const before = await prisma.user.findUnique({
+    where: { id: incident.userId },
+    select: { safetyScore: true },
+  });
+  const oldScore = before?.safetyScore ?? WEIGHTS.DEFAULT_SCORE;
+
   // Create incident record
   await prisma.safetyIncident.create({
     data: {
@@ -289,18 +314,10 @@ export async function recordSafetyIncident(incident: Omit<SafetyIncident, 'id' |
       verified: incident.verified,
     },
   });
-  
+
   // Recalculate safety score
   const newScore = await updateSafetyScore(incident.userId);
-  
-  // Check if score dropped significantly and notify
-  const user = await prisma.user.findUnique({
-    where: { id: incident.userId },
-    select: { safetyScore: true },
-  });
-  
-  const oldScore = user?.safetyScore || WEIGHTS.DEFAULT_SCORE;
-  
+
   if (oldScore - newScore >= 15) {
     // Score dropped significantly - notify user
     await notificationService.notify({

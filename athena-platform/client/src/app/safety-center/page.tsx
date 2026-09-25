@@ -21,6 +21,7 @@ import { Modal, ModalContent, ModalFooter } from '@/components/ui/modal';
 import { safetyApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { InlineAlert } from '@/components/ui/alert';
+import { QuickExitButton } from '../dashboard/safety/QuickExit';
 
 interface ReportRecord {
   id: string;
@@ -226,7 +227,9 @@ export default function SafetyCenterPage() {
               </div>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            {/* The hub a woman reaches for when something is wrong had no way off it. */}
+            <QuickExitButton />
             <Button variant="outline" onClick={() => setIsReportOpen(true)}>
               <MessageCircleWarning className="w-4 h-4 mr-2" />
               Report Content

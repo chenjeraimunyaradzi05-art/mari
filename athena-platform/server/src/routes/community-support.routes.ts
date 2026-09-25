@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError, type ZodTypeAny } from 'zod';
+import type { SupportProgramStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
@@ -174,47 +175,139 @@ router.post('/programs/:id/enroll', authenticate, async (req: AuthRequest, res: 
     }
     const goalsSet = rawGoals === undefined ? undefined : (rawGoals as string[]).map((g) => g.trim());
 
-    // Check if program exists and has capacity
     const program = await prisma.communitySupportProgram.findUnique({
       where: { id },
+      select: { id: true, isActive: true },
     });
 
     if (!program || !program.isActive) {
       return res.status(404).json({ success: false, error: 'Program not found or inactive' });
     }
 
-    if (program.maxParticipants && program.currentParticipants >= program.maxParticipants) {
+    /*
+     * Capacity, the enrolment and the count, in one transaction.
+     *
+     * This was three separate statements: read currentParticipants, create the
+     * enrolment, increment the count. Two women pressing enrol on the last
+     * place both read the same count and both got in, and if the increment
+     * failed after the create had landed the count drifted below the truth and
+     * never came back — a programme that had quietly overfilled would keep
+     * accepting people, and one that had quietly undercounted would keep
+     * refusing them.
+     *
+     * The capacity read moves inside the transaction and the count is written
+     * with a conditional updateMany: `currentParticipants: { lt:
+     * maxParticipants }` means the database itself refuses the second of two
+     * simultaneous enrolments for the last place, rather than us deciding from
+     * a number we read a moment ago. A programme with no maxParticipants has
+     * no ceiling to check, so it takes the plain increment.
+     */
+    const outcome = await prisma.$transaction(async (tx) => {
+      const existingEnrollment = await tx.programEnrollment.findUnique({
+        where: { programId_userId: { programId: id, userId } },
+        select: { id: true, status: true },
+      });
+
+      if (existingEnrollment) {
+        return { kind: 'already-enrolled' as const };
+      }
+
+      const current = await tx.communitySupportProgram.findUnique({
+        where: { id },
+        select: { maxParticipants: true },
+      });
+
+      if (current?.maxParticipants) {
+        const claimed = await tx.communitySupportProgram.updateMany({
+          where: { id, currentParticipants: { lt: current.maxParticipants } },
+          data: { currentParticipants: { increment: 1 } },
+        });
+        if (claimed.count === 0) {
+          return { kind: 'at-capacity' as const };
+        }
+      } else {
+        await tx.communitySupportProgram.update({
+          where: { id },
+          data: { currentParticipants: { increment: 1 } },
+        });
+      }
+
+      const enrollment = await tx.programEnrollment.create({
+        data: { programId: id, userId, goalsSet },
+        include: { program: true },
+      });
+
+      return { kind: 'enrolled' as const, enrollment };
+    });
+
+    if (outcome.kind === 'already-enrolled') {
+      return res.status(400).json({ success: false, error: 'Already enrolled in this program' });
+    }
+    if (outcome.kind === 'at-capacity') {
       return res.status(400).json({ success: false, error: 'Program is at capacity' });
     }
 
-    // Check if already enrolled
-    const existingEnrollment = await prisma.programEnrollment.findUnique({
-      where: { programId_userId: { programId: id, userId } },
+    res.status(201).json({ success: true, data: outcome.enrollment });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/*
+ * DELETE /api/community-support/programs/:id/enroll - Leave a program
+ *
+ * There was no way out. currentParticipants only ever went up, so a programme
+ * that filled was closed forever even if every one of those women had moved
+ * on, and a member who enrolled by mistake — or who no longer wanted a
+ * support programme on her record — had to ask someone.
+ *
+ * currentParticipants means one thing here: how many ProgramEnrollment rows
+ * the programme has. Every create adds one, so every delete takes one back,
+ * whatever status the enrolment had reached. The decrement is conditional on
+ * the count being above zero so that a count which has drifted for some other
+ * reason cannot be driven negative by people leaving.
+ *
+ * Note what this does NOT do: finishing a programme does not free a place. A
+ * cohort that completes still occupies its seats until someone decides the
+ * programme is taking people again, and there is no admin route that makes
+ * that decision. That is a real gap, and it is a different one.
+ */
+router.delete('/programs/:id/enroll', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    const outcome = await prisma.$transaction(async (tx) => {
+      const enrollment = await tx.programEnrollment.findUnique({
+        where: { programId_userId: { programId: id, userId } },
+        select: { id: true, status: true },
+      });
+
+      if (!enrollment) {
+        return { kind: 'not-enrolled' as const };
+      }
+
+      // MilestoneProgress points at the enrolment with no cascade on the
+      // relation, so the children go first or the delete fails on the foreign
+      // key. Her progress through a programme she has left is not a record
+      // worth keeping over her having asked to leave it.
+      await tx.milestoneProgress.deleteMany({ where: { enrollmentId: enrollment.id } });
+      await tx.programEnrollment.delete({ where: { id: enrollment.id } });
+
+      await tx.communitySupportProgram.updateMany({
+        where: { id, currentParticipants: { gt: 0 } },
+        data: { currentParticipants: { decrement: 1 } },
+      });
+
+      return { kind: 'withdrawn' as const };
     });
 
-    if (existingEnrollment) {
-      return res.status(400).json({ success: false, error: 'Already enrolled in this program' });
+    if (outcome.kind === 'not-enrolled') {
+      return res.status(404).json({ success: false, error: 'You are not enrolled in this program' });
     }
 
-    // Create enrollment
-    const enrollment = await prisma.programEnrollment.create({
-      data: {
-        programId: id,
-        userId,
-        goalsSet,
-      },
-      include: {
-        program: true,
-      },
-    });
-
-    // Update participant count
-    await prisma.communitySupportProgram.update({
-      where: { id },
-      data: { currentParticipants: { increment: 1 } },
-    });
-
-    res.status(201).json({ success: true, data: enrollment });
+    logger.info('Member left a support program', { programId: id, userId });
+    res.json({ success: true, data: { programId: id, enrolled: false } });
   } catch (error) {
     next(error);
   }
@@ -246,20 +339,49 @@ router.get('/my/enrollments', authenticate, async (req: AuthRequest, res: Respon
   }
 });
 
+/**
+ * What a member may say about a milestone. `milestoneId` was read straight
+ * off the body and handed to an upsert, so an absent one reached Prisma as
+ * undefined inside a compound unique and failed with a 500 rather than a
+ * refusal, and `evidence` had no length at all.
+ */
+const milestoneUpdateSchema = z
+  .object({
+    milestoneId: z.string().trim().min(1).max(200),
+    isCompleted: z.boolean().default(false),
+    evidence: z.string().trim().max(2000).nullable().optional(),
+  })
+  .strict();
+
 // PATCH /api/community-support/enrollments/:id/milestone - Update milestone progress
 router.patch('/enrollments/:id/milestone', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const userId = req.user!.id;
-    const { milestoneId, isCompleted, evidence } = req.body;
+    const body = parse(milestoneUpdateSchema, req.body);
+    const { milestoneId, isCompleted, evidence } = body;
 
     // Verify enrollment belongs to user
     const enrollment = await prisma.programEnrollment.findFirst({
       where: { id, userId },
+      select: { id: true, programId: true, status: true },
     });
 
     if (!enrollment) {
       return res.status(404).json({ success: false, error: 'Enrollment not found' });
+    }
+
+    // The milestone has to belong to the programme she is enrolled in. Without
+    // this, any milestone id from any programme could be written against her
+    // enrolment, and the completion count below would be counting rows that
+    // have nothing to do with it.
+    const milestone = await prisma.programMilestone.findFirst({
+      where: { id: milestoneId, programId: enrollment.programId },
+      select: { id: true },
+    });
+
+    if (!milestone) {
+      return res.status(404).json({ success: false, error: 'Milestone not found on this program' });
     }
 
     const progress = await prisma.milestoneProgress.upsert({
@@ -269,7 +391,7 @@ router.patch('/enrollments/:id/milestone', authenticate, async (req: AuthRequest
       create: {
         enrollmentId: id,
         milestoneId,
-        isCompleted: isCompleted ?? false,
+        isCompleted,
         completedAt: isCompleted ? new Date() : null,
         evidence,
       },
@@ -280,11 +402,80 @@ router.patch('/enrollments/:id/milestone', authenticate, async (req: AuthRequest
       },
     });
 
-    res.json({ success: true, data: progress });
+    /*
+     * Finishing the last required milestone finishes the programme.
+     *
+     * Nothing in the server ever wrote COMPLETED to a ProgramEnrollment. The
+     * impact dashboard's "Programs finished" tile counts exactly those rows,
+     * so it read zero for every member forever, however much of a programme
+     * she had actually worked through — a woman could complete every milestone
+     * of a support programme and be shown a nought for it.
+     *
+     * A programme is finished when every milestone marked
+     * requiredForCompletion has a completed progress row. A programme with no
+     * required milestones is never completed this way, because "you have
+     * finished" is a claim, and there is nothing here that would make it true.
+     *
+     * It also unwinds: un-ticking a required milestone puts her back to ACTIVE
+     * and clears completedAt, because a status she cannot undo is the same
+     * write-only trap this whole finding is about. PAUSED and CANCELLED are
+     * left alone — those are decisions someone made about the enrolment, not
+     * states a checkbox should overwrite.
+     */
+    const status = await recomputeEnrollmentCompletion(id, enrollment.programId, enrollment.status);
+
+    res.json({ success: true, data: { ...progress, enrollmentStatus: status } });
   } catch (error) {
     next(error);
   }
 });
+
+/**
+ * Whether this enrolment now counts as finished, and the status it was left
+ * in. Split out of the route because it is the only place COMPLETED is ever
+ * written and it should be readable on its own.
+ */
+async function recomputeEnrollmentCompletion(
+  enrollmentId: string,
+  programId: string,
+  currentStatus: SupportProgramStatus
+): Promise<SupportProgramStatus> {
+  if (currentStatus !== 'ACTIVE' && currentStatus !== 'COMPLETED') {
+    return currentStatus;
+  }
+
+  const required = await prisma.programMilestone.findMany({
+    where: { programId, requiredForCompletion: true },
+    select: { id: true },
+  });
+
+  if (required.length === 0) {
+    return currentStatus;
+  }
+
+  const done = await prisma.milestoneProgress.count({
+    where: {
+      enrollmentId,
+      isCompleted: true,
+      milestoneId: { in: required.map((milestone) => milestone.id) },
+    },
+  });
+
+  const finished = done >= required.length;
+  const nextStatus: SupportProgramStatus = finished ? 'COMPLETED' : 'ACTIVE';
+
+  if (nextStatus === currentStatus) {
+    return currentStatus;
+  }
+
+  await prisma.programEnrollment.update({
+    where: { id: enrollmentId },
+    data: { status: nextStatus, completedAt: finished ? new Date() : null },
+  });
+
+  logger.info('Support program enrollment status changed', { enrollmentId, status: nextStatus });
+  return nextStatus;
+}
 
 // ===========================================
 // INDIGENOUS COMMUNITIES
@@ -342,7 +533,16 @@ router.get('/indigenous/communities/:id', async (req: Request, res: Response, ne
   }
 });
 
-// POST /api/community-support/indigenous/communities/:id/join - Join community
+/*
+ * POST /api/community-support/indigenous/communities/:id/join
+ *
+ * The membership row and the count move together, for the same reason the
+ * support-programme enrolment above does. This was a create followed by a
+ * separate increment: if the increment failed after the create had landed,
+ * membersCount drifted below the truth and nothing ever put it back, and the
+ * number a community page shows about itself is the number people judge it
+ * by.
+ */
 router.post('/indigenous/communities/:id/join', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -350,23 +550,24 @@ router.post('/indigenous/communities/:id/join', authenticate, async (req: AuthRe
 
     const community = await prisma.indigenousCommunityPage.findUnique({
       where: { id },
+      select: { id: true },
     });
 
     if (!community) {
       return res.status(404).json({ success: false, error: 'Community not found' });
     }
 
-    const membership = await prisma.indigenousCommunityMember.create({
-      data: {
-        communityId: id,
-        userId,
-      },
-    });
+    const membership = await prisma.$transaction(async (tx) => {
+      const created = await tx.indigenousCommunityMember.create({
+        data: { communityId: id, userId },
+      });
 
-    // Update member count
-    await prisma.indigenousCommunityPage.update({
-      where: { id },
-      data: { membersCount: { increment: 1 } },
+      await tx.indigenousCommunityPage.update({
+        where: { id },
+        data: { membersCount: { increment: 1 } },
+      });
+
+      return created;
     });
 
     res.status(201).json({ success: true, data: membership });
@@ -375,6 +576,55 @@ router.post('/indigenous/communities/:id/join', authenticate, async (req: AuthRe
     if (err.code === 'P2002') {
       return res.status(400).json({ success: false, error: 'Already a member' });
     }
+    next(error);
+  }
+});
+
+/*
+ * DELETE /api/community-support/indigenous/communities/:id/join - Leave community
+ *
+ * There was no way out of a community once she had joined one. membersCount
+ * only ever went up, so the figure on the page was a running total of everyone
+ * who had ever pressed join rather than who is there now, and a woman who
+ * joined the wrong community — or who no longer wants her name on a cultural
+ * community's member list, which on this platform is not a small thing to ask
+ * — had to write to someone.
+ *
+ * The decrement is conditional on the count being above zero so a figure that
+ * has drifted for some other reason cannot be driven negative by people
+ * leaving. A member who was never in the community is told so rather than
+ * being allowed to take a place off the count.
+ */
+router.delete('/indigenous/communities/:id/join', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    const left = await prisma.$transaction(async (tx) => {
+      const membership = await tx.indigenousCommunityMember.findUnique({
+        where: { communityId_userId: { communityId: id, userId } },
+        select: { id: true },
+      });
+
+      if (!membership) {
+        return false;
+      }
+
+      await tx.indigenousCommunityMember.delete({ where: { id: membership.id } });
+      await tx.indigenousCommunityPage.updateMany({
+        where: { id, membersCount: { gt: 0 } },
+        data: { membersCount: { decrement: 1 } },
+      });
+
+      return true;
+    });
+
+    if (!left) {
+      return res.status(404).json({ success: false, error: 'You are not a member of this community' });
+    }
+
+    res.json({ success: true, message: 'You have left this community' });
+  } catch (error) {
     next(error);
   }
 });
@@ -687,7 +937,30 @@ router.post('/bridging-programs/:id/enroll', authenticate, async (req: AuthReque
   try {
     const { id } = req.params;
     const userId = req.user!.id;
-    const { credentialId } = req.body;
+
+    /*
+     * The credential this enrolment is about, checked against the member who
+     * is enrolling.
+     *
+     * This read `credentialId` straight off the body and put it in the create
+     * with nothing in between. So one member could attach another member's
+     * InternationalCredential id to her own enrolment — and because the
+     * enrolment is included with the program on read and lands in the
+     * credentials queue staff work from, that misattribution became something
+     * a person acted on. An id that was not a credential at all produced an
+     * unhandled foreign-key error and a 500, because only P2002 was caught.
+     *
+     * The ownership check is the one the same file already does correctly on
+     * /credentials/pathway: findFirst scoped to { id, userId }, so a
+     * credential belonging to someone else is indistinguishable from one that
+     * does not exist. Not saying which is deliberate — "that credential is
+     * not yours" confirms it exists.
+     */
+    const rawCredentialId: unknown = req.body?.credentialId;
+    if (rawCredentialId !== undefined && rawCredentialId !== null && typeof rawCredentialId !== 'string') {
+      return res.status(400).json({ success: false, error: 'credentialId must be a credential id' });
+    }
+    const credentialId = typeof rawCredentialId === 'string' && rawCredentialId.trim() ? rawCredentialId.trim() : undefined;
 
     const program = await prisma.bridgingProgram.findUnique({
       where: { id },
@@ -695,6 +968,16 @@ router.post('/bridging-programs/:id/enroll', authenticate, async (req: AuthReque
 
     if (!program || !program.isActive) {
       return res.status(404).json({ success: false, error: 'Program not found or inactive' });
+    }
+
+    if (credentialId) {
+      const credential = await prisma.internationalCredential.findFirst({
+        where: { id: credentialId, userId },
+        select: { id: true },
+      });
+      if (!credential) {
+        return res.status(404).json({ success: false, error: 'Credential not found' });
+      }
     }
 
     const enrollment = await prisma.bridgingEnrollment.create({

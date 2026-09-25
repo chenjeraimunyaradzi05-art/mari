@@ -98,6 +98,38 @@ export default function ReportsPage() {
         <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">{error}</div>
       )}
 
+      {/*
+        Seven tiles reading nought is not a report, it is a claim that ATHENA
+        supported nobody, housed nobody and got nobody to safety.
+        ImpactReport has two read paths in the whole server and no write path
+        at all — no admin builder, no aggregation worker, no seed — so the
+        table cannot hold a row and every one of those tiles was structurally
+        zero for every visitor. Rendering them anyway, under the headline
+        "Tracking real outcomes for women", said something false about the
+        women this platform is for.
+        Until something writes a report, the page says there are none. The
+        tiles come back the moment there is one to total.
+      */}
+      {!loading && reports.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+          <h2 className="font-semibold text-slate-900 dark:text-white">No impact report has been published yet</h2>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            {filterCommunity
+              ? 'Nothing has been published for this community yet. Try another filter, or come back — reports are published by ATHENA staff for a period at a time, and there are none covering this one.'
+              : 'Reports are published by ATHENA staff for a period at a time and total what actually happened: women supported, jobs gained, housing secured, safety reached. There is nothing to total yet, so rather than show you a row of zeros we are telling you plainly.'}
+          </p>
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+            Your own progress is on the{' '}
+            <Link href="/dashboard/impact" className="text-primary-600 hover:underline">
+              Impact Hub
+            </Link>
+            , and it is counted from your record rather than from this.
+          </p>
+        </div>
+      ) : null}
+
+      {reports.length > 0 && (
+        <>
       {/* Aggregate Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
@@ -156,6 +188,8 @@ export default function ReportsPage() {
           <p className="text-xs text-red-600 dark:text-red-400">Achieved Safety</p>
         </div>
       </div>
+        </>
+      )}
 
       {/* Filter */}
       <div className="flex items-center gap-4">
@@ -178,11 +212,7 @@ export default function ReportsPage() {
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading reports...
         </div>
-      ) : reports.length === 0 ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center text-sm text-slate-500">
-          No impact reports available for this filter.
-        </div>
-      ) : (
+      ) : reports.length === 0 ? null : (
         <div className="space-y-4">
           {reports.map((report) => (
             <div

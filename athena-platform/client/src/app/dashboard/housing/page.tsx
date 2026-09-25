@@ -23,6 +23,7 @@ import { Home, Loader2, MapPin, BedDouble, ShieldCheck, Heart, Search, Plus, Loc
 import { housingApi } from '@/lib/api';
 import { EmptyState } from '@/components/layout/PageShell';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { QuickExitButton } from '../safety/QuickExit';
 
 const listingTypes = [
   { value: '', label: 'All types' },
@@ -423,6 +424,13 @@ function HousingContent() {
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-400"><Link href="/dashboard/safety" className="font-medium text-rose-600 hover:underline dark:text-rose-400">Leaving violence? Emergency help and a safety plan</Link>, and 1800RESPECT on 1800 737 732, any hour.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/*
+            A woman browsing DV-safe listings is looking at exactly the screen
+            she cannot be caught looking at. Quick exit used to live on the
+            Safety page alone, which is the one page she is not on when it
+            matters.
+          */}
+          <QuickExitButton />
           <a href="#list-a-place" onClick={() => setShowListForm(true)} className="btn-secondary inline-flex items-center gap-2">
             <Plus className="w-4 h-4" /> List a place
           </a>

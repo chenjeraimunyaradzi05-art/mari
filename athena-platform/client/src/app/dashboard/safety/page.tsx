@@ -13,13 +13,12 @@
  * alarming on a screen someone else might glance at.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import {
-  DoorOpen,
   Eraser,
   ExternalLink,
   Home,
@@ -37,6 +36,7 @@ import { dvSafeApi, searchApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
+import { DEFAULT_EXIT_URL, QuickExitButton, useQuickExit } from './QuickExit';
 
 type Contact = { id: string; name: string; phone: string; email?: string; relationship: string; notifyOnPanic: boolean };
 /** A search hit, narrowed to what this page needs. Search returns a name as `title`. */
@@ -60,7 +60,6 @@ type ChatMessage = { id: string; senderId: string; content: string; autoDeleteAt
 type ChatView = ChatSummary & { messages: ChatMessage[] };
 type Resource = { name: string; phone: string; website: string; description: string; available: string };
 
-const DEFAULT_EXIT = 'https://www.google.com';
 const AUTO_DELETE = [
   { value: 0, label: 'Keep' },
   { value: 60, label: 'Delete after 1 hour' },
@@ -76,16 +75,6 @@ const REGIONS = [
 
 const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-
-/** Leaves for a harmless page, and makes Back come here no more. */
-function quickExit(url: string) {
-  try {
-    window.history.replaceState(null, '', '/');
-  } catch {
-    // Some browsers refuse; leaving still matters more.
-  }
-  window.location.replace(url || DEFAULT_EXIT);
-}
 
 function Toggle({ on, onChange, label, description, disabled }: { on: boolean; onChange: (next: boolean) => void; label: string; description?: string; disabled?: boolean }) {
   return (
@@ -135,18 +124,9 @@ export default function SafetyPage() {
     select: (response) => (Array.isArray(response.data) ? (response.data as Resource[]) : []),
   });
 
-  const exitUrl = settings.data?.safeExitUrl || DEFAULT_EXIT;
-  const exit = useCallback(() => quickExit(exitUrl), [exitUrl]);
-
-  // Escape leaves, when the member has turned quick exit on.
-  useEffect(() => {
-    if (!settings.data?.safeExitEnabled) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') exit();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [settings.data?.safeExitEnabled, exit]);
+  // The exit and the Escape binding are shared with every other page that
+  // carries them; they read this same query.
+  useQuickExit();
 
   const refreshSettings = () => queryClient.invalidateQueries({ queryKey: ['dv-safe-settings'] });
 
@@ -326,13 +306,7 @@ export default function SafetyPage() {
             Tools for staying safe while you use ATHENA. Everything here is yours alone; nobody else can see it.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={exit}
-          className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white shadow hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2"
-        >
-          <DoorOpen className="h-5 w-5" /> Quick exit
-        </button>
+        <QuickExitButton />
       </div>
 
       {settings.isLoading ? (
@@ -369,7 +343,7 @@ export default function SafetyPage() {
               <Toggle on={!s.allowMessages} onChange={(v) => update.mutate({ allowMessages: !v })} label="Close my messages" description="Nobody can message you — not a new conversation, and not one you already have. Your threads are still there to read." disabled={update.isPending} />
               <Toggle on={s.notificationsSafe} onChange={(v) => update.mutate({ notificationsSafe: v })} label="Keep notifications vague" description='Your phone shows "New update" instead of who wrote and what.' disabled={update.isPending} />
               <Toggle on={s.panicButtonEnabled} onChange={(v) => update.mutate({ panicButtonEnabled: v })} label="Safety alert button" description="Lets you tell your emergency contacts with one tap." disabled={update.isPending} />
-              <Toggle on={s.safeExitEnabled} onChange={(v) => update.mutate({ safeExitEnabled: v })} label="Quick exit with the Escape key" description="Pressing Escape on this page leaves for the address below." disabled={update.isPending} />
+              <Toggle on={s.safeExitEnabled} onChange={(v) => update.mutate({ safeExitEnabled: v })} label="Quick exit with the Escape key" description="Pressing Escape anywhere on ATHENA leaves for the address below. The Quick exit button is on every safety and housing page whether or not this is on." disabled={update.isPending} />
             </div>
             <Link
               href="/dashboard/housing?dvSafe=true"
@@ -397,7 +371,7 @@ export default function SafetyPage() {
                   type="url"
                   value={exitDraft ?? s.safeExitUrl}
                   onChange={(event) => setExitDraft(event.target.value)}
-                  placeholder={DEFAULT_EXIT}
+                  placeholder={DEFAULT_EXIT_URL}
                   className="input w-full"
                 />
               </label>
