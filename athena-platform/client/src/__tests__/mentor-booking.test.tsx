@@ -54,7 +54,11 @@ function mentor(overrides: Record<string, unknown> = {}) {
     sessionCount: 21,
     yearsExperience: 7,
     isAvailable: true,
-    stripeAccountId: 'acct_live',
+    // The server answers bookability now rather than shipping the connected
+    // account id for the client to infer it from. When that id was taken off
+    // the public payload the old fallback read undefined for everybody, and the
+    // page told every visitor that every mentor had not finished setting up.
+    acceptsBookings: true,
     specializations: ['Product'],
     user: { id: 'mentor-user', displayName: 'Grace Hopper', headline: 'Engineering leader', bio: null, avatar: null },
     ...overrides,
@@ -194,7 +198,7 @@ describe('mentor booking', () => {
   });
 
   it('cannot be booked when the mentor is not taking sessions, and says why', async () => {
-    mockedMentor.mockReturnValue({ data: mentor({ isAvailable: false }), isLoading: false, isError: false });
+    mockedMentor.mockReturnValue({ data: mentor({ isAvailable: false, acceptsBookings: false }), isLoading: false, isError: false });
     renderPage();
 
     expect(await screen.findByText(/not taking new sessions right now/)).toBeInTheDocument();
@@ -203,7 +207,7 @@ describe('mentor booking', () => {
   });
 
   it('cannot be booked when the mentor has set no rate, and says why', async () => {
-    mockedMentor.mockReturnValue({ data: mentor({ hourlyRate: null }), isLoading: false, isError: false });
+    mockedMentor.mockReturnValue({ data: mentor({ hourlyRate: null, acceptsBookings: false }), isLoading: false, isError: false });
     renderPage();
 
     expect(await screen.findByText(/has not finished setting up bookings yet/)).toBeInTheDocument();
@@ -211,8 +215,12 @@ describe('mentor booking', () => {
     expect(mockedApi.slots).not.toHaveBeenCalled();
   });
 
+  // The public payload no longer carries stripeAccountId at all — the server
+  // answers bookability instead of shipping the column the client used to infer
+  // it from. So an unpayable mentor is expressed the way the server expresses
+  // her: acceptsBookings false.
   it('cannot be booked when the mentor cannot be paid, and says why', async () => {
-    mockedMentor.mockReturnValue({ data: mentor({ stripeAccountId: null }), isLoading: false, isError: false });
+    mockedMentor.mockReturnValue({ data: mentor({ acceptsBookings: false }), isLoading: false, isError: false });
     renderPage();
 
     expect(await screen.findByText(/has not finished setting up bookings yet/)).toBeInTheDocument();

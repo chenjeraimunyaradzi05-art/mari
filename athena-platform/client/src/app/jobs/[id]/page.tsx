@@ -23,6 +23,7 @@ import { Spinner as LoadingSpinner } from '@/components/ui/loading';
 import { Modal, ModalContent, ModalFooter } from '@/components/ui/modal';
 import { CrossModuleShareButton } from '@/components/share/cross-module-share';
 import { safeHref } from '@/lib/safe-href';
+import { ResumeAttachment, type ResumeAttachmentValue } from '../ResumeAttachment';
 
 export default function JobDetailsPage() {
   const params = useParams();
@@ -34,6 +35,7 @@ export default function JobDetailsPage() {
   const [hasApplied, setHasApplied] = useState(false);
   const [isApplyOpen, setIsApplyOpen] = useState(false);
   const [coverLetter, setCoverLetter] = useState('');
+  const [resume, setResume] = useState<ResumeAttachmentValue | null>(null);
   const [isApplying, setIsApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
 
@@ -75,10 +77,14 @@ export default function JobDetailsPage() {
     setIsApplying(true);
     setApplyError(null);
     try {
-      await jobApi.apply(job.id, { coverLetter: coverLetter.trim() || undefined });
+      await jobApi.apply(job.id, {
+        coverLetter: coverLetter.trim() || undefined,
+        resumeUrl: resume?.url,
+      });
       setHasApplied(true);
       setIsApplyOpen(false);
       setCoverLetter('');
+      setResume(null);
     } catch (error) {
       const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
       setApplyError(message || 'Your application could not be submitted. Please try again.');
@@ -286,8 +292,11 @@ export default function JobDetailsPage() {
               className="w-full rounded-lg border border-slate-200 p-3 text-sm resize-none"
             />
           </div>
+          <ResumeAttachment value={resume} onChange={setResume} disabled={isApplying} />
           <p className="text-sm text-slate-600">
-            Your ATHENA profile is shared with {job.organization?.name || 'the employer'} when you apply.
+            {resume
+              ? `Your ATHENA profile and the résumé you attached are shared with ${job.organization?.name || 'the employer'} when you apply.`
+              : `Your ATHENA profile is shared with ${job.organization?.name || 'the employer'} when you apply.`}
           </p>
           {applyError && (
             <p className="text-sm text-red-600" role="alert">

@@ -286,7 +286,11 @@ describe('Booking a mentor session', () => {
   });
 
   it('refuses a mentor who has not set an hourly rate', async () => {
-    mockMentorProfile({ hourlyRate: 0 });
+    // null, not 0. A null rate means she has not said what she charges and there
+    // is no amount to authorise; zero means she has said, and the answer is
+    // nothing. Conflating them made a woman offering to mentor for free
+    // unbookable while still being published as a mentor.
+    mockMentorProfile({ hourlyRate: null });
 
     await request(app)
       .post(`/api/mentors/${MENTOR_PROFILE}/book`)
@@ -295,6 +299,29 @@ describe('Booking a mentor session', () => {
       .expect(400);
 
     expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+  });
+
+  // The other half of that distinction, and the reason it matters. A mentor who
+  // charges nothing needs no Stripe account either: requiring one before a free
+  // session could be booked would make "I will do this for nothing" the single
+  // thing this marketplace could not arrange.
+  it('books a mentor who charges nothing, and authorises no card for it', async () => {
+    mockMentorProfile({ hourlyRate: 0 });
+    mockUser({ stripeConnectAccountId: null, mentorProfile: { stripeAccountId: null } });
+
+    const res = await request(app)
+      .post(`/api/mentors/${MENTOR_PROFILE}/book`)
+      .set(as(MENTEE))
+      .send(bookingBody())
+      .expect(201);
+
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect((prisma.mentorSession.create as any).mock.calls[0][0].data).toMatchObject({
+      sessionAmount: 0,
+      platformFee: 0,
+      mentorPayout: 0,
+    });
+    expect(res.body.paymentIntentClientSecret ?? null).toBeNull();
   });
 
   it('refuses a mentor who is not connected to payments', async () => {

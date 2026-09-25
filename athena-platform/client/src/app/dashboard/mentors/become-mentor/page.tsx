@@ -11,13 +11,7 @@ import {
   CheckCircle,
   ArrowRight,
   ArrowLeft,
-  Star,
-  Briefcase,
-  GraduationCap,
   Heart,
-  Upload,
-  Plus,
-  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { mentorApi, userApi } from '@/lib/api';
@@ -52,7 +46,7 @@ const steps = [
   { id: 1, title: 'Personal Info' },
   { id: 2, title: 'Experience' },
   { id: 3, title: 'Expertise' },
-  { id: 4, title: 'Availability' },
+  { id: 4, title: 'Rate & Hours' },
   { id: 5, title: 'Review' },
 ];
 
@@ -63,36 +57,20 @@ interface FormData {
   email: string;
   headline: string;
   bio: string;
-  linkedinUrl: string;
-  profilePhoto: File | null;
 
   // Step 2: Experience
   currentRole: string;
   company: string;
   yearsExperience: string;
   industry: string;
-  previousRoles: Array<{ title: string; company: string; years: string }>;
 
   // Step 3: Expertise
   expertiseAreas: string[];
   specializations: string[];
-  languages: string[];
-  certifications: string[];
 
-  // Step 4: Availability
+  // Step 4: Rate & hours
   hourlyRate: string;
-  sessionLength: string[];
-  availability: {
-    monday: boolean;
-    tuesday: boolean;
-    wednesday: boolean;
-    thursday: boolean;
-    friday: boolean;
-    saturday: boolean;
-    sunday: boolean;
-  };
   timezone: string;
-  maxMenteesPerMonth: string;
 }
 
 const expertiseOptions = [
@@ -130,36 +108,21 @@ export default function BecomeMentorPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [formData, setFormData] = useState<FormData>({
     firstName: '',
     lastName: '',
     email: '',
     headline: '',
     bio: '',
-    linkedinUrl: '',
-    profilePhoto: null,
     currentRole: '',
     company: '',
     yearsExperience: '',
     industry: '',
-    previousRoles: [],
     expertiseAreas: [],
     specializations: [],
-    languages: ['English'],
-    certifications: [],
     hourlyRate: '',
-    sessionLength: ['60'],
-    availability: {
-      monday: true,
-      tuesday: true,
-      wednesday: true,
-      thursday: true,
-      friday: true,
-      saturday: false,
-      sunday: false,
-    },
     timezone: 'Australia/Brisbane',
-    maxMenteesPerMonth: '5',
   });
 
   const updateFormData = (updates: Partial<FormData>) => {
@@ -189,20 +152,6 @@ export default function BecomeMentorPage() {
       expertiseAreas: prev.expertiseAreas.includes(area)
         ? prev.expertiseAreas.filter((a) => a !== area)
         : [...prev.expertiseAreas, area],
-    }));
-  };
-
-  const addPreviousRole = () => {
-    setFormData((prev) => ({
-      ...prev,
-      previousRoles: [...prev.previousRoles, { title: '', company: '', years: '' }],
-    }));
-  };
-
-  const removePreviousRole = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      previousRoles: prev.previousRoles.filter((_, i) => i !== index),
     }));
   };
 
@@ -417,18 +366,6 @@ export default function BecomeMentorPage() {
               <p className="text-xs text-slate-500 mt-1">Min 100 characters</p>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                LinkedIn Profile URL
-              </label>
-              <input
-                type="url"
-                value={formData.linkedinUrl}
-                onChange={(e) => updateFormData({ linkedinUrl: e.target.value })}
-                className="input-field"
-                placeholder="https://linkedin.com/in/janedoe"
-              />
-            </div>
           </div>
         )}
 
@@ -498,67 +435,6 @@ export default function BecomeMentorPage() {
               </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Previous Roles (Optional)
-                </label>
-                <button
-                  type="button"
-                  onClick={addPreviousRole}
-                  className="text-sm text-primary-500 hover:text-primary-600 flex items-center"
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add Role
-                </button>
-              </div>
-              {formData.previousRoles.map((role, index) => (
-                <div key={index} className="flex items-start gap-2 mb-2">
-                  <div className="flex-1 grid grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Title"
-                      value={role.title}
-                      onChange={(e) => {
-                        const updated = [...formData.previousRoles];
-                        updated[index].title = e.target.value;
-                        updateFormData({ previousRoles: updated });
-                      }}
-                      className="input-field"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Company"
-                      value={role.company}
-                      onChange={(e) => {
-                        const updated = [...formData.previousRoles];
-                        updated[index].company = e.target.value;
-                        updateFormData({ previousRoles: updated });
-                      }}
-                      className="input-field"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Years"
-                      value={role.years}
-                      onChange={(e) => {
-                        const updated = [...formData.previousRoles];
-                        updated[index].years = e.target.value;
-                        updateFormData({ previousRoles: updated });
-                      }}
-                      className="input-field"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removePreviousRole(index)}
-                    className="p-2 text-slate-400 hover:text-red-500"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
@@ -604,141 +480,63 @@ export default function BecomeMentorPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Languages Spoken
-              </label>
-              <input
-                type="text"
-                value={formData.languages.join(', ')}
-                placeholder="e.g., English, Spanish, Mandarin"
-                className="input-field"
-                onChange={(e) =>
-                  updateFormData({
-                    languages: e.target.value.split(',').map((s) => s.trim()),
-                  })
-                }
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Certifications (comma-separated)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g., PMP, AWS Solutions Architect, ICF Coach"
-                className="input-field"
-                onChange={(e) =>
-                  updateFormData({
-                    certifications: e.target.value.split(',').map((s) => s.trim()),
-                  })
-                }
-              />
-            </div>
           </div>
         )}
 
-        {/* Step 4: Availability */}
+        {/* Step 4: Rate & hours */}
         {currentStep === 4 && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Hourly Rate (USD) *
-                </label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input
-                    type="number"
-                    value={formData.hourlyRate}
-                    onChange={(e) => updateFormData({ hourlyRate: e.target.value })}
-                    className="input-field pl-10"
-                    placeholder="100"
-                  />
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Average on ATHENA: $75-$200/hour
-                </p>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Hourly rate (AUD) *
+              </label>
+              <div className="relative max-w-xs">
+                <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  type="number"
+                  min={0}
+                  value={formData.hourlyRate}
+                  onChange={(e) => updateFormData({ hourlyRate: e.target.value })}
+                  className="input-field pl-10"
+                  placeholder="100"
+                />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Max Mentees/Month *
-                </label>
-                <select
-                  value={formData.maxMenteesPerMonth}
-                  onChange={(e) => updateFormData({ maxMenteesPerMonth: e.target.value })}
-                  className="input-field"
-                >
-                  <option value="3">Up to 3</option>
-                  <option value="5">Up to 5</option>
-                  <option value="10">Up to 10</option>
-                  <option value="15">Up to 15</option>
-                  <option value="unlimited">Unlimited</option>
-                </select>
-              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Enter 0 to mentor for free. A paid rate needs payouts connected before anyone can
+                book you.
+              </p>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
-                Session Lengths Offered *
-              </label>
-              <div className="flex flex-wrap gap-3">
-                {['30', '45', '60', '90'].map((length) => (
-                  <label
-                    key={length}
-                    className={cn(
-                      'flex items-center px-4 py-2 rounded-lg border cursor-pointer transition',
-                      formData.sessionLength.includes(length)
-                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-slate-300 dark:border-slate-600'
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={formData.sessionLength.includes(length)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          updateFormData({ sessionLength: [...formData.sessionLength, length] });
-                        } else {
-                          updateFormData({
-                            sessionLength: formData.sessionLength.filter((l) => l !== length),
-                          });
-                        }
-                      }}
-                      className="mr-2"
-                    />
-                    <span className="text-sm">{length} min</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
-                Available Days *
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(formData.availability).map(([day, available]) => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() =>
-                      updateFormData({
-                        availability: { ...formData.availability, [day]: !available },
-                      })
-                    }
-                    className={cn(
-                      'px-4 py-2 rounded-lg text-sm font-medium capitalize transition',
-                      available
-                        ? 'bg-primary-500 text-white'
-                        : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
-                    )}
-                  >
-                    {day.slice(0, 3)}
-                  </button>
-                ))}
-              </div>
+            {/*
+              This step used to also collect a seven-day availability grid, a
+              set of session lengths and a monthly mentee cap, and send none of
+              them: MentorProfile has no column for any of the three, and the
+              slot generator offers every mentor the same nine-to-five, seven
+              days a week. A woman who ticked "Saturday only" was published as
+              bookable all week, including while she was at her actual job. The
+              controls are gone rather than quietened, and what the platform
+              really does is written out instead, because a mentor deciding
+              whether to be listed at all needs to know which hours she is
+              putting her name to.
+            */}
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-2">
+              <h3 className="text-sm font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-400" />
+                When people can book you
+              </h3>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Your profile offers hourly slots between 9am and 5pm in your own timezone, and a
+                slot disappears as soon as someone books it.
+              </p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Nothing is confirmed without you. Every request arrives as an invitation you accept
+                or decline, so a time that does not suit you is a decline, not an obligation. You
+                can stop taking new requests at any moment from your mentor dashboard.
+              </p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Choosing specific days, session lengths and a monthly limit is not something ATHENA
+                can hold yet, so this step does not ask for them.
+              </p>
             </div>
 
             <div>
@@ -826,35 +624,45 @@ export default function BecomeMentorPage() {
             </div>
 
             <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 space-y-4">
-              <h3 className="font-medium text-slate-900 dark:text-white">Availability & Pricing</h3>
+              <h3 className="font-medium text-slate-900 dark:text-white">Rate &amp; hours</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-slate-500">Hourly Rate:</span>{' '}
-                  <span className="text-slate-900 dark:text-white">${formData.hourlyRate}/hour</span>
-                </div>
-                <div>
-                  <span className="text-slate-500">Session Lengths:</span>{' '}
+                  <span className="text-slate-500">Hourly rate:</span>{' '}
                   <span className="text-slate-900 dark:text-white">
-                    {formData.sessionLength.join(', ')} min
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500">Max Mentees:</span>{' '}
-                  <span className="text-slate-900 dark:text-white">
-                    {formData.maxMenteesPerMonth}/month
+                    {Number(formData.hourlyRate) === 0
+                      ? 'Free'
+                      : `A$${formData.hourlyRate || '—'} per hour`}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-500">Timezone:</span>{' '}
                   <span className="text-slate-900 dark:text-white">{formData.timezone}</span>
                 </div>
+                <div className="col-span-2">
+                  <span className="text-slate-500">Bookable hours:</span>{' '}
+                  <span className="text-slate-900 dark:text-white">
+                    9am to 5pm in your timezone, one hour at a time, every request yours to accept
+                    or decline.
+                  </span>
+                </div>
               </div>
             </div>
 
+            {/*
+              The box was drawn with no state behind it and nothing read it, so
+              a woman could publish a mentor profile without ever ticking it and
+              the platform would still have a screen claiming she had agreed.
+              Its wording also promised a review that does not happen — the
+              profile goes live the moment this form is submitted, which the
+              confirmation screen says plainly — so the sentence now describes
+              what actually follows.
+            */}
             <div className="flex items-start space-x-3">
               <input
                 type="checkbox"
                 id="terms"
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
                 className="mt-1"
               />
               <label htmlFor="terms" className="text-sm text-slate-600 dark:text-slate-300">
@@ -866,8 +674,8 @@ export default function BecomeMentorPage() {
                 <a href="/mentor-agreement" className="text-primary-500 hover:underline">
                   Mentor Agreement
                 </a>
-                . I understand that my application will be reviewed and I may be contacted for
-                additional information.
+                . I understand my profile goes live straight away, and that mentees will be able to
+                see it and ask me for sessions.
               </label>
             </div>
           </div>
@@ -903,17 +711,18 @@ export default function BecomeMentorPage() {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="btn-primary flex items-center space-x-2"
+              disabled={isSubmitting || !agreedToTerms}
+              title={agreedToTerms ? undefined : 'Agree to the terms above to publish your profile'}
+              className="btn-primary flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isSubmitting ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Submitting...</span>
+                  <span>Publishing...</span>
                 </>
               ) : (
                 <>
-                  <span>Submit Application</span>
+                  <span>Publish my mentor profile</span>
                   <CheckCircle className="w-4 h-4" />
                 </>
               )}

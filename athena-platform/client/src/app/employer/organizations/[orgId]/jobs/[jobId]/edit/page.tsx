@@ -76,8 +76,11 @@ const jobStatuses = [
   { value: 'DRAFT', label: 'Draft — not visible to anyone yet' },
   { value: 'ACTIVE', label: 'Active — open for applications' },
   { value: 'PAUSED', label: 'Paused — hidden, applications closed' },
-  { value: 'CLOSED', label: 'Closed — no longer hiring' },
-  { value: 'FILLED', label: 'Filled — the role has been filled' },
+  // "Filled" was offered here and JobStatus has no such value, so choosing it
+  // got past the validator and came back from Prisma as a 500 on a form that
+  // looked complete. Closing a filled role is what the schema can actually
+  // record, so the label says so.
+  { value: 'CLOSED', label: 'Closed — filled, or no longer hiring' },
 ];
 
 const australianStates = [

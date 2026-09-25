@@ -4,6 +4,10 @@ import { ApplicationStatus, type OrganizationMember } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import {
+  EMPLOYER_SETTABLE_STATUSES,
+  assertEmployerStatusMove,
+} from '../services/application-status.service';
 
 const router = Router();
 
@@ -37,6 +41,16 @@ async function requireOrgAccess(req: AuthRequest, res: Response, next: NextFunct
     return res.status(403).json({ error: 'Not a member of this organization' });
   }
 
+  // An invitation that has not been accepted is not a membership. See the
+  // invite route below: the row is created the moment someone types an email
+  // address, and until this check existed that row was indistinguishable from
+  // a membership the person had agreed to.
+  if (!membership.acceptedAt) {
+    return res.status(403).json({
+      error: 'You have a pending invitation to this organisation. Accept it before using its console.',
+    });
+  }
+
   (req as OrgScopedRequest).membership = membership;
   next();
 }
@@ -54,6 +68,38 @@ function callerMembership(req: AuthRequest): OrganizationMember {
   return membership;
 }
 
+/**
+ * Whether this member may see who applied.
+ *
+ * An applicant's row carries her full name, her email address, her avatar, her
+ * headline, her cover letter and her résumé link. The woman who applied was
+ * told her details go to "the employer"; she was not told they go to everyone
+ * the employer has ever added to a company page. VIEWER is the schema default
+ * for OrganizationMember, so until this existed the applicant list and the
+ * pipeline PATCH were open to every member of the organisation while the
+ * analytics route beside them — which shows nothing but counts — correctly
+ * asked for canViewAnalytics.
+ *
+ * Hiring roles see applicants. A VIEWER does not, unless she has explicitly
+ * been given posting rights, which is the closest thing the current schema has
+ * to "this person works on hiring": the invite route only ever grants
+ * canPostJobs to an ADMIN or a RECRUITER by default.
+ */
+function canViewApplicants(membership: OrganizationMember): boolean {
+  return (
+    membership.role === 'OWNER' ||
+    membership.role === 'ADMIN' ||
+    membership.role === 'RECRUITER' ||
+    membership.canPostJobs
+  );
+}
+
+function assertCanViewApplicants(membership: OrganizationMember): void {
+  if (!canViewApplicants(membership)) {
+    throw new ApiError(403, 'You do not have permission to view applicants for this organisation');
+  }
+}
+
 // ============================================================================
 // GET MY ORGANIZATIONS
 // ============================================================================
@@ -66,8 +112,12 @@ router.get('/organizations', authenticate, async (req: AuthRequest, res: Respons
   try {
     const userId = req.user!.id;
 
+    // Pending invitations are deliberately excluded. requireOrgAccess refuses
+    // them, so listing them here would put an organisation in the console's
+    // switcher that answers 403 to everything the console then asks it. They
+    // are served by GET /employer/invitations instead, where she can answer.
     const memberships = await prisma.organizationMember.findMany({
-      where: { userId },
+      where: { userId, acceptedAt: { not: null } },
       include: {
         organization: {
           include: {
@@ -449,7 +499,7 @@ async function requireJobAccess(jobId: string, userId: string) {
         organizationId_userId: { organizationId: job.organizationId, userId },
       },
     });
-    if (!membership) {
+    if (!membership || !membership.acceptedAt) {
       throw new ApiError(403, 'Access denied');
     }
   } else if (job.postedById !== userId) {
@@ -495,7 +545,12 @@ router.patch(
     body('title').optional().notEmpty().trim().withMessage('Job title cannot be empty'),
     body('description').optional().notEmpty().withMessage('Job description cannot be empty'),
     body('type').optional().isIn(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERNSHIP', 'CASUAL', 'APPRENTICESHIP']),
-    body('status').optional().isIn(['DRAFT', 'ACTIVE', 'PAUSED', 'CLOSED', 'FILLED']),
+    // FILLED was on this list and EXPIRED was missing, but JobStatus has
+    // neither the first nor a gap for the second: an employer who chose
+    // "Filled" in the console had her edit accepted by the validator and then
+    // rejected by Prisma as an unknown enum value — a 500 on a dropdown the
+    // console itself drew.
+    body('status').optional().isIn(['DRAFT', 'ACTIVE', 'PAUSED', 'CLOSED', 'EXPIRED']),
     body('isRemote').optional().isBoolean(),
     body('showSalary').optional().isBoolean(),
     body('salaryMin').optional({ nullable: true }).isInt({ min: 0 }),
@@ -575,8 +630,17 @@ router.get(
   requireOrgAccess,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      assertCanViewApplicants(callerMembership(req));
+
       const { orgId } = req.params;
-      const { jobId, status, page = '1', limit = '20' } = req.query;
+      const { jobId, status } = req.query;
+
+      // `limit` used to go straight into `take` with no ceiling, so
+      // `?limit=100000` returned every applicant the organisation has ever
+      // had — names, email addresses, cover letters and résumé links — in one
+      // response. 100 is the same ceiling the job-scoped applicant list uses.
+      const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
 
       const where: any = { job: { organizationId: orgId } };
       if (jobId) where.jobId = jobId;
@@ -602,8 +666,8 @@ router.get(
             },
           },
           orderBy: { appliedAt: 'desc' },
-          skip: (parseInt(page as string) - 1) * parseInt(limit as string),
-          take: parseInt(limit as string),
+          skip: (page - 1) * limit,
+          take: limit,
         }),
         prisma.jobApplication.count({ where }),
       ]);
@@ -612,10 +676,10 @@ router.get(
         success: true,
         data: applications,
         pagination: {
-          page: parseInt(page as string),
-          limit: parseInt(limit as string),
+          page,
+          limit,
           total,
-          pages: Math.ceil(total / parseInt(limit as string)),
+          pages: Math.ceil(total / limit),
         },
       });
     } catch (error) {
@@ -632,12 +696,18 @@ router.patch(
   '/applications/:applicationId/status',
   authenticate,
   [
-    body('status').isIn(['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED', 'REJECTED', 'WITHDRAWN']),
+    // WITHDRAWN used to be on this list. Accepting an offer had already been
+    // taken off it because accepting is the candidate's move; withdrawing is
+    // the same move in the other direction and was simply missed, so an
+    // employer could record that a woman had pulled out of a process she was
+    // still in. The stages an employer may set, and the order she may move
+    // through them, now live in one place shared with the job-scoped twin of
+    // this route.
+    body('status').isIn(EMPLOYER_SETTABLE_STATUSES),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       // The validator was declared but never read, so any status reached Prisma.
-      // Accepting an offer is the candidate's move, not the employer's.
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         throw new ApiError(400, 'That is not a stage an employer can set');
@@ -656,7 +726,15 @@ router.patch(
         throw new ApiError(404, 'Application not found');
       }
 
-      // Check access
+      // Check access.
+      //
+      // This used to be an `if` with no `else`: the membership check ran only
+      // when the job belonged to an organisation, and Job.organizationId is
+      // nullable — every listing created through POST /api/jobs has none. So
+      // for an application against an org-less job, any authenticated account
+      // on the platform could reject a candidate, shortlist her, or tell her
+      // she had an offer, in the employer's name. The job-update handler above
+      // has always had the else branch; this one did not.
       if (application.job.organizationId) {
         const membership = await prisma.organizationMember.findUnique({
           where: {
@@ -666,6 +744,21 @@ router.patch(
         if (!membership) {
           throw new ApiError(403, 'Access denied');
         }
+        assertCanViewApplicants(membership);
+      } else if (application.job.postedById !== userId) {
+        throw new ApiError(403, 'Access denied');
+      }
+
+      // Dropping a card back into the column it came from is a routine
+      // kanban miss. It is not a stage change, and the candidate should not be
+      // emailed a second time about a stage she is already at.
+      const { changed } = assertEmployerStatusMove(application.status, status);
+      if (!changed) {
+        return res.json({
+          success: true,
+          message: 'Application already at that stage',
+          data: application,
+        });
       }
 
       const updatedApplication = await prisma.jobApplication.update({
@@ -746,6 +839,10 @@ router.get(
             role: member.role,
             createdAt: member.invitedAt,
             acceptedAt: member.acceptedAt,
+            // An invited person is on the roster but has not agreed to be
+            // there yet, and the console has to say so rather than presenting
+            // her as staff.
+            pending: member.acceptedAt === null,
             user: member.user,
             permissions: {
               canPostJobs: member.canPostJobs,
@@ -758,6 +855,7 @@ router.get(
               membership.canPostJobs || membership.role === 'OWNER' || membership.role === 'ADMIN',
             canManageTeam: membership.canManageTeam || membership.role === 'OWNER',
             canViewAnalytics: membership.canViewAnalytics,
+            canViewApplicants: canViewApplicants(membership),
           },
         },
       });
@@ -800,9 +898,29 @@ router.post(
         where: { organizationId_userId: { organizationId: orgId, userId: user.id } },
       });
       if (existing) {
-        throw new ApiError(400, 'User is already a member');
+        throw new ApiError(400, existing.acceptedAt ? 'User is already a member' : 'That person already has a pending invitation');
       }
 
+      const organization = await prisma.organization.findUnique({
+        where: { id: orgId },
+        select: { name: true },
+      });
+
+      // The row is created with acceptedAt left null, which is what makes it
+      // an invitation rather than a membership.
+      //
+      // This route used to create the membership outright, with full
+      // permissions, and then tell the person afterwards that she had "been
+      // added to an organization". Anyone with canManageTeam on any company
+      // could therefore attach a stranger's ATHENA account to that company
+      // without asking her, and the account appeared on the public roster and
+      // — before the applicant-visibility check above existed — could read
+      // every applicant's email address, cover letter and résumé link. On a
+      // platform where a woman's employer may be exactly who she is hiding
+      // from, being silently listed as staff somewhere is not a small thing.
+      //
+      // requireOrgAccess refuses a row with no acceptedAt, so the invitation
+      // grants nothing until she answers it.
       const member = await prisma.organizationMember.create({
         data: {
           organizationId: orgId,
@@ -824,22 +942,127 @@ router.post(
         data: {
           userId: user.id,
           type: 'SYSTEM',
-          title: 'You\'ve been invited to a team!',
-          message: `You've been added to an organization. View your employer dashboard.`,
-          link: '/employer',
+          title: 'You have been invited to a team',
+          message: `${organization?.name ?? 'An organisation'} has invited you to join their hiring team. You choose whether to accept.`,
+          link: '/employer/invitations',
         },
       });
 
       res.status(201).json({
         success: true,
-        message: 'Team member invited',
-        data: member,
+        message: 'Invitation sent',
+        data: { ...member, pending: true },
       });
     } catch (error) {
       next(error);
     }
   }
 );
+
+/**
+ * GET /employer/invitations
+ * The invitations waiting for the caller to answer.
+ *
+ * Nothing used to read `acceptedAt` anywhere in the codebase, because nothing
+ * ever asked the invitee. These three routes are the other half of the invite
+ * above: she can see who has asked for her, and she can say yes or no.
+ */
+router.get('/invitations', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const invitations = await prisma.organizationMember.findMany({
+      where: { userId: req.user!.id, acceptedAt: null },
+      include: {
+        organization: {
+          select: { id: true, name: true, slug: true, logo: true, city: true, state: true },
+        },
+      },
+      orderBy: { invitedAt: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      data: invitations.map((invitation) => ({
+        id: invitation.id,
+        invitedAt: invitation.invitedAt,
+        role: invitation.role,
+        permissions: {
+          canPostJobs: invitation.canPostJobs,
+          canManageTeam: invitation.canManageTeam,
+          canViewAnalytics: invitation.canViewAnalytics,
+        },
+        organization: invitation.organization,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /employer/invitations/:memberId/accept
+ * Take up an invitation. Only the invited account can do this.
+ */
+router.post('/invitations/:memberId/accept', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const invitation = await prisma.organizationMember.findUnique({
+      where: { id: req.params.memberId },
+      include: { organization: { select: { name: true } } },
+    });
+
+    // An invitation belonging to someone else answers the same 404 a missing
+    // one does, so membership ids cannot be probed.
+    if (!invitation || invitation.userId !== req.user!.id) {
+      throw new ApiError(404, 'Invitation not found');
+    }
+
+    if (invitation.acceptedAt) {
+      throw new ApiError(400, 'You have already accepted this invitation');
+    }
+
+    const member = await prisma.organizationMember.update({
+      where: { id: invitation.id },
+      data: { acceptedAt: new Date() },
+    });
+
+    res.json({
+      success: true,
+      message: `You have joined ${invitation.organization.name}`,
+      data: member,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /employer/invitations/:memberId/decline
+ * Say no. The row is removed rather than flagged, so the company can ask again
+ * later and so declining leaves nothing on her record.
+ */
+router.post('/invitations/:memberId/decline', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const invitation = await prisma.organizationMember.findUnique({
+      where: { id: req.params.memberId },
+    });
+
+    if (!invitation || invitation.userId !== req.user!.id) {
+      throw new ApiError(404, 'Invitation not found');
+    }
+
+    if (invitation.acceptedAt) {
+      throw new ApiError(400, 'You have already joined this organisation. Ask the team to remove you instead.');
+    }
+
+    await prisma.organizationMember.delete({ where: { id: invitation.id } });
+
+    res.json({
+      success: true,
+      message: 'Invitation declined',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 /**
  * DELETE /employer/organizations/:orgId/team/:memberId

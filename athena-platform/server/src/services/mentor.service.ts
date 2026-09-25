@@ -4,7 +4,7 @@
  */
 
 import { prisma } from '../utils/prisma';
-import { MentorPaymentStatus, MentorSessionStatus } from '@prisma/client';
+import { MentorPaymentStatus, MentorSessionStatus, Prisma } from '@prisma/client';
 import { ApiError } from '../middleware/errorHandler';
 import { hiddenMemberWhere, viewerContextFor } from './search.service';
 // import { sendNotification } from './socket.service'; // Deprecated
@@ -91,6 +91,86 @@ export interface MentorFilters {
 }
 
 /**
+ * The columns a mentor profile is served with.
+ *
+ * `select`, not `include`. An include returns every scalar on the model, and
+ * these three endpoints — the directory, the profile-by-user lookup and the
+ * profile-by-id lookup — are served to anonymous callers, so the mentor's
+ * Stripe connected account id went out with her public profile on every one of
+ * them. Fixing it on one of the three left the other two open.
+ *
+ * `stripeAccountId` is read here and then dropped in `toPublicMentorProfile`
+ * below, because whether a paid booking can be raised at all depends on it.
+ * It never reaches the response.
+ */
+const PUBLIC_MENTOR_PROFILE_SELECT = {
+  id: true,
+  userId: true,
+  specializations: true,
+  yearsExperience: true,
+  hourlyRate: true,
+  isAvailable: true,
+  sessionCount: true,
+  rating: true,
+  reviewCount: true,
+  isMonetized: true,
+  stripeAccountId: true,
+  createdAt: true,
+  user: {
+    select: {
+      id: true,
+      displayName: true,
+      avatar: true,
+      headline: true,
+      bio: true,
+      experience: true,
+      education: true,
+    },
+  },
+} as const;
+
+type MentorProfileRow = {
+  hourlyRate: Prisma.Decimal | null;
+  isAvailable: boolean;
+  stripeAccountId: string | null;
+};
+
+/**
+ * Whether a mentee can actually raise a booking against this profile.
+ *
+ * The mentor page has always drawn its booking form behind an `acceptsBookings`
+ * flag and fallen back to the raw `stripeAccountId` when the server did not
+ * send one. Once the account id was taken off the public payload — correctly —
+ * neither value was there any more, so the expression was `undefined` for
+ * everybody and the page told every visitor that every mentor "has not
+ * finished setting up bookings yet". Nobody on the platform could be booked.
+ * The server answers the question now instead of leaving the client to infer
+ * it from a column it should never have seen.
+ *
+ * A null rate means she has not decided what to charge; zero means she has, and
+ * the answer was nothing. See `requestSession` for why that is a real state
+ * rather than an unset one.
+ */
+export function mentorAcceptsBookings(profile: MentorProfileRow): boolean {
+  if (!profile.isAvailable || profile.hourlyRate === null) {
+    return false;
+  }
+
+  const rate = Number(profile.hourlyRate);
+  if (rate <= 0) {
+    return true;
+  }
+
+  return Boolean(profile.stripeAccountId);
+}
+
+/** Strips the connected account id and answers the bookability question in its place. */
+function toPublicMentorProfile<T extends MentorProfileRow>(profile: T) {
+  const { stripeAccountId, ...rest } = profile;
+  return { ...rest, acceptsBookings: mentorAcceptsBookings(profile) };
+}
+
+/**
  * Get mentors with filtering
  */
 export async function getMentors(
@@ -134,20 +214,19 @@ export async function getMentors(
   const [mentors, total] = await Promise.all([
     prisma.mentorProfile.findMany({
       where,
-      include: {
-        user: {
-          select: {
-            id: true,
-            displayName: true,
-            avatar: true,
-            headline: true,
-            bio: true,
-          },
-        },
-      },
+      select: PUBLIC_MENTOR_PROFILE_SELECT,
       skip,
       take: limit,
-      orderBy: { rating: 'desc' },
+      // Not by rating. `MentorProfile.rating` and `reviewCount` have no writer
+      // anywhere on the platform — there is no review model, no rating
+      // endpoint and no review form, so the column is null for every mentor
+      // who has ever existed. Ordering by it sorted the directory by nothing
+      // at all while looking like it ranked by quality, which is worse than an
+      // arbitrary order because it invites the reader to trust it. Sessions
+      // completed is a fact the platform actually records (see
+      // `updateSessionStatus`), and a mentor with none is newest-first rather
+      // than buried, so a woman who joined this morning is findable.
+      orderBy: [{ sessionCount: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.mentorProfile.count({ where }),
   ]);
@@ -163,7 +242,7 @@ export async function getMentors(
   }
 
   return {
-    mentors: filteredMentors,
+    mentors: filteredMentors.map(toPublicMentorProfile),
     pagination: {
       page,
       limit,
@@ -179,59 +258,19 @@ export async function getMentors(
 export async function getMentorProfile(userId: string) {
   const profile = await prisma.mentorProfile.findUnique({
     where: { userId },
-    include: {
-      user: {
-        select: {
-          id: true,
-          displayName: true,
-          avatar: true,
-          headline: true,
-          bio: true,
-          experience: true,
-          education: true,
-        },
-      },
-    },
+    select: PUBLIC_MENTOR_PROFILE_SELECT,
   });
 
-  return profile;
+  return profile ? toPublicMentorProfile(profile) : null;
 }
 
 export async function getMentorProfileById(mentorId: string) {
-  // `select`, not `include`. An include returns every scalar on the model, and
-  // this is served to anonymous callers — so the mentor's Stripe connected
-  // account id went out with her public profile. The user fields were already
-  // curated; the profile's were not.
-  return prisma.mentorProfile.findUnique({
+  const profile = await prisma.mentorProfile.findUnique({
     where: { id: mentorId },
-    select: {
-      id: true,
-      userId: true,
-      specializations: true,
-      yearsExperience: true,
-      hourlyRate: true,
-      isAvailable: true,
-      sessionCount: true,
-      rating: true,
-      reviewCount: true,
-      // isMonetized is here because the booking UI needs to know whether a
-      // paid session can be started at all. stripeAccountId is not: nothing
-      // outside the server has any use for it.
-      isMonetized: true,
-      createdAt: true,
-      user: {
-        select: {
-          id: true,
-          displayName: true,
-          avatar: true,
-          headline: true,
-          bio: true,
-          experience: true,
-          education: true,
-        },
-      },
-    },
+    select: PUBLIC_MENTOR_PROFILE_SELECT,
   });
+
+  return profile ? toPublicMentorProfile(profile) : null;
 }
 
 /**
@@ -401,14 +440,39 @@ export async function requestSession(
 
   const durationMinutes = data.durationMinutes || 60;
 
-  const hourlyRate = Number(mentor.hourlyRate || 0);
-  if (!hourlyRate || hourlyRate <= 0) {
+  if (!mentor.isAvailable) {
+    throw new ApiError(400, 'This mentor is not taking new sessions right now');
+  }
+
+  // A null rate and a zero rate used to be treated as the same thing, and they
+  // are not. Null means she has not said what she charges, and a booking
+  // against that has no amount to authorise. Zero means she has said, and the
+  // answer is nothing — a woman who wants to mentor without charging, which on
+  // a platform whose mentorship pitch is empowering the next generation of
+  // women leaders is the mode you would expect to work first. It did not: the
+  // check below rejected her rate as "not set" and the profile page hid her
+  // booking form, so she was published as a mentor and was quietly unbookable,
+  // with no explanation on her profile or in the wizard.
+  if (mentor.hourlyRate === null) {
     throw new ApiError(400, 'Mentor hourly rate not set');
   }
 
-  const mentorAccountId = await resolveConnectedAccountId(mentor.userId);
-  if (!mentorAccountId) {
-    throw new ApiError(400, 'Mentor is not enabled for payments');
+  const hourlyRate = Number(mentor.hourlyRate);
+  if (hourlyRate < 0) {
+    throw new ApiError(400, 'Mentor hourly rate not set');
+  }
+
+  const isFreeSession = hourlyRate === 0;
+
+  // Only a paid session needs somewhere for the money to land. Requiring a
+  // Stripe Express account before a free session could be booked would have
+  // made "I will do this for nothing" the one thing the marketplace could not
+  // arrange.
+  if (!isFreeSession) {
+    const mentorAccountId = await resolveConnectedAccountId(mentor.userId);
+    if (!mentorAccountId) {
+      throw new ApiError(400, 'Mentor is not enabled for payments');
+    }
   }
 
   const currency = await resolveSessionCurrency(menteeId);
@@ -429,9 +493,20 @@ export async function requestSession(
       sessionAmount,
       platformFee,
       mentorPayout,
-      paymentStatus: 'PENDING',
+      // A free session settles the moment it is booked: there is nothing to
+      // authorise, nothing to capture and nothing for the expiry sweeper to
+      // chase. MentorPaymentStatus has no value that says "nothing was owed",
+      // and CAPTURED is the one that means the session leaves no money
+      // outstanding, so it is the closest true statement the enum can make.
+      paymentStatus: isFreeSession ? 'CAPTURED' : 'PENDING',
+      paymentCapturedAt: isFreeSession ? new Date() : null,
     },
   });
+
+  if (isFreeSession) {
+    await notifyMentorOfRequest(mentor.userId, session.id, data.scheduledAt, data.note);
+    return { session, paymentIntentClientSecret: null };
+  }
 
   const amountCents = Math.max(1, Math.round(sessionAmount * 100));
   const feeCents = Math.max(0, Math.round(platformFee * 100));
@@ -484,31 +559,44 @@ export async function requestSession(
     data: { stripePaymentIntentId: hold.paymentIntentId },
   });
 
-  // Send notification to mentor
-  await notificationService.notify({
-    userId: mentor.userId,
-    type: 'MENTOR_SESSION',
-    title: 'New Mentorship Request',
-    message: `You have a new mentorship session request for ${data.scheduledAt.toLocaleDateString()}`,
-    link: `/dashboard/mentors/sessions?session=${session.id}`,
-    channels: ['in-app', 'email', 'push'],
-    emailTemplate: {
-      subject: 'New Mentorship Request',
-      html: `
-        <h2>New Mentorship Request</h2>
-        <p>You have a new session request for ${data.scheduledAt.toLocaleString()}.</p>
-        <p><strong>Note from mentee:</strong> ${data.note || 'No note provided'}</p>
-        <div style="margin: 20px 0;">
-          <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${session.id}" style="background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Request</a>
-        </div>
-      `
-    }
-  });
+  await notifyMentorOfRequest(mentor.userId, session.id, data.scheduledAt, data.note);
 
   return {
     session: updatedSession,
     paymentIntentClientSecret: hold.clientSecret,
   };
+}
+
+/**
+ * Tells the mentor a session has been requested. Shared by the paid path,
+ * which sends it once the hold is in place, and the free path, which has no
+ * hold to wait for.
+ */
+async function notifyMentorOfRequest(
+  mentorUserId: string,
+  sessionId: string,
+  scheduledAt: Date,
+  note?: string
+): Promise<void> {
+  await notificationService.notify({
+    userId: mentorUserId,
+    type: 'MENTOR_SESSION',
+    title: 'New Mentorship Request',
+    message: `You have a new mentorship session request for ${scheduledAt.toLocaleDateString()}`,
+    link: `/dashboard/mentors/sessions?session=${sessionId}`,
+    channels: ['in-app', 'email', 'push'],
+    emailTemplate: {
+      subject: 'New Mentorship Request',
+      html: `
+        <h2>New Mentorship Request</h2>
+        <p>You have a new session request for ${scheduledAt.toLocaleString()}.</p>
+        <p><strong>Note from mentee:</strong> ${note || 'No note provided'}</p>
+        <div style="margin: 20px 0;">
+          <a href="${process.env.CLIENT_URL}/dashboard/mentors/sessions?session=${sessionId}" style="background: #7c3aed; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Request</a>
+        </div>
+      `
+    }
+  });
 }
 
 /**
@@ -605,6 +693,49 @@ async function notifyUncollectedSession(mentorUserId: string, sessionId: string)
 }
 
 /**
+ * Who may move a session where.
+ *
+ * There was no state machine here at all: the route accepted CONFIRMED,
+ * CANCELED or COMPLETED, checked only that the caller was one of the two
+ * people in the session, and wrote it. Marking a session COMPLETED is what
+ * captures the mentee's card, so the absence of rules was a money hole in both
+ * directions.
+ *
+ * A mentor could take a REQUESTED session — one she had not even accepted, for
+ * a date next month — straight to COMPLETED and capture the hold that minute,
+ * for an hour that had not happened and that the mentee could no longer cancel
+ * out of. The mentee's side was the mirror image: she could let the session
+ * run and then CANCEL it afterwards, releasing the hold and leaving the mentor
+ * unpaid for work she had already done.
+ *
+ * So both moves are now tied to the clock as well as to the caller. Accepting
+ * a request is the mentor's move. Completing one can only happen once the hour
+ * booked has actually elapsed. Cancelling is free for either side right up to
+ * the moment the session is due to end, and after that it is the mentor's to
+ * make — she may waive her fee, but the mentee cannot void an hour that has
+ * already run.
+ */
+const SESSION_TRANSITIONS: Record<
+  'CONFIRMED' | 'CANCELED' | 'COMPLETED',
+  { from: MentorSessionStatus[]; by: ('mentor' | 'mentee')[] }
+> = {
+  CONFIRMED: { from: ['REQUESTED'], by: ['mentor'] },
+  CANCELED: { from: ['REQUESTED', 'CONFIRMED'], by: ['mentor', 'mentee'] },
+  COMPLETED: { from: ['CONFIRMED'], by: ['mentor', 'mentee'] },
+};
+
+/**
+ * When the booked hour is over. A session with no date on it has not been
+ * scheduled, so nothing about it has happened yet.
+ */
+function sessionHasEnded(scheduledAt: Date | null, durationMinutes: number, now: Date): boolean {
+  if (!scheduledAt) {
+    return false;
+  }
+  return scheduledAt.getTime() + durationMinutes * 60 * 1000 <= now.getTime();
+}
+
+/**
  * Update session status (Accept, Reject, Cancel, Complete)
  */
 export async function updateSessionStatus(
@@ -633,6 +764,35 @@ export async function updateSessionStatus(
   // State transitions validtion
   if (session.status === 'COMPLETED' || session.status === 'CANCELED') {
     throw new ApiError(400, 'Cannot update finished session');
+  }
+
+  const transition = SESSION_TRANSITIONS[status as keyof typeof SESSION_TRANSITIONS];
+  if (!transition) {
+    throw new ApiError(400, `A session cannot be moved to ${status}`);
+  }
+
+  if (!transition.from.includes(session.status)) {
+    throw new ApiError(400, `A ${session.status.toLowerCase()} session cannot be moved to ${status.toLowerCase()}`);
+  }
+
+  if (!transition.by.includes(actionBy)) {
+    throw new ApiError(403, 'Accepting a session request is the mentor\'s to make');
+  }
+
+  const now = new Date();
+  const hasEnded = sessionHasEnded(session.scheduledAt, session.durationMinutes, now);
+
+  if (status === 'COMPLETED' && !hasEnded) {
+    // Completing is what captures the card. Before this check a mentor could
+    // charge for an hour that had not happened yet.
+    throw new ApiError(400, 'A session can only be marked complete once the booked time has passed');
+  }
+
+  if (status === 'CANCELED' && hasEnded && actionBy === 'mentee') {
+    throw new ApiError(
+      400,
+      'This session\'s time has passed, so it can no longer be cancelled. If it did not go ahead, ask your mentor to cancel it or contact support.'
+    );
   }
 
   let paymentUpdates: Record<string, any> = {};
@@ -690,13 +850,31 @@ export async function updateSessionStatus(
     }
   }
 
-  const updated = await prisma.mentorSession.update({
-    where: { id: sessionId },
-    data: {
-      status,
-      ...paymentUpdates,
-    },
-  });
+  // `MentorProfile.sessionCount` is shown on the directory card and on the
+  // profile as "N sessions", and nothing on the live path had ever written it,
+  // so every mentor on ATHENA advertised zero however many hours she had
+  // actually given. The two writes go in one transaction because a counter
+  // that can drift from the sessions behind it is a number the mentor will be
+  // asked about and cannot explain. The transition rules above have already
+  // established that the session was CONFIRMED and that its booked time has
+  // passed, so this counts finished hours and nothing else.
+  const [updated] = await prisma.$transaction([
+    prisma.mentorSession.update({
+      where: { id: sessionId },
+      data: {
+        status,
+        ...paymentUpdates,
+      },
+    }),
+    ...(status === 'COMPLETED'
+      ? [
+          prisma.mentorProfile.update({
+            where: { id: session.mentorProfileId },
+            data: { sessionCount: { increment: 1 } },
+          }),
+        ]
+      : []),
+  ]);
 
   // Send notification to other party
   const recipientId = actionBy === 'mentor' ? session.menteeId : session.mentorProfile.userId;
@@ -849,6 +1027,12 @@ export async function getSessionPaymentSecret(sessionId: string, menteeId: strin
   }
   const base = { paymentStatus: session.paymentStatus, amount: Number(session.sessionAmount), currency: session.currency };
   if (session.paymentStatus !== 'PENDING') {
+    return { ...base, clientSecret: null };
+  }
+  // A session with a mentor who charges nothing has no card to authorise, and
+  // the 409 below would have read as an error on a booking that is perfectly
+  // fine.
+  if (Number(session.sessionAmount) === 0) {
     return { ...base, clientSecret: null };
   }
   if (!session.stripePaymentIntentId) {

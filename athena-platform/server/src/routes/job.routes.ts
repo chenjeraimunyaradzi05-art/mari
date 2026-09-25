@@ -10,8 +10,113 @@ import { parsePagination } from '../utils/pagination';
 import { indexDocument, deleteDocument, IndexNames } from '../utils/opensearch';
 import { getRecommendedJobs, search as searchService } from '../services/search.service';
 import { notificationService } from '../services/notification.service';
+import {
+  EMPLOYER_SETTABLE_STATUSES,
+  assertEmployerStatusMove,
+} from '../services/application-status.service';
 
 const router = Router();
+
+/**
+ * The columns an employer may write on her own listing.
+ *
+ * Both the create and the update handler used to spread the request body
+ * straight into Prisma. `Job` carries two placement columns the schema is
+ * explicit about — isSponsored means the employer paid and the placement has
+ * to be labelled as advertising, isFeatured is editorial curation with no
+ * money attached, and conflating the two "is how a marketplace loses trust" —
+ * so any employer could hand herself both by adding them to the PATCH body.
+ * The same spread let her set `organizationId` to any other organisation's id,
+ * which republishes her listing under that company's name, logo and safety
+ * score, and let her write `viewCount`, `applicationCount` and `publishedAt`,
+ * which are the platform's own counters and the employer analytics page reads
+ * them back as fact.
+ *
+ * The twin route in employer.routes.ts has had an allowlist since it was
+ * written; this is the same list, kept deliberately in the same order so the
+ * two can be read against each other. `deadline` and `skills` are handled
+ * separately below because they need converting rather than copying.
+ */
+const EMPLOYER_WRITABLE_JOB_FIELDS = [
+  'title', 'description', 'type', 'status', 'city', 'state', 'country',
+  'isRemote', 'salaryMin', 'salaryMax', 'salaryType', 'showSalary',
+  'experienceMin', 'experienceMax',
+] as const;
+
+/**
+ * Copy across only what the employer is allowed to write. An unknown key is
+ * dropped rather than refused, because a client sending back a whole job
+ * object it just fetched — which the edit form does — would otherwise have
+ * every save rejected over fields it never asked to change.
+ */
+function pickWritableJobFields(body: Record<string, unknown>): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const field of EMPLOYER_WRITABLE_JOB_FIELDS) {
+    if (body[field] !== undefined) {
+      data[field] = body[field];
+    }
+  }
+  return data;
+}
+
+/**
+ * Throws unless the caller may still post on this organisation's behalf.
+ *
+ * `Job.postedById` records who created the row and never changes, so a check
+ * on it alone is a permission that cannot be taken away: a recruiter who left
+ * the company, or whose canPostJobs flag was turned off, kept the ability to
+ * edit and publish every listing she had ever posted under the company's name.
+ * The employer console has always asked this question before creating a job
+ * (employer.routes.ts, POST /organizations/:orgId/jobs); it now gets asked
+ * again on every write that follows.
+ */
+/**
+ * A résumé on an application has to be a file this platform is holding for the
+ * woman who applied.
+ *
+ * `resumeUrl` was validated as "any http(s) URL" and the validator was never
+ * read, so the column would take anything at all. Two things go wrong with an
+ * arbitrary link. The employer's download button hands an off-platform URL
+ * straight to the browser, which turns a hiring team's click into a request to
+ * a server somebody else controls, with the referrer and the timing of every
+ * shortlisting decision in it. And a link to someone else's upload key would
+ * attach another member's résumé to an application in her name — the media
+ * download route authorises the reader, not whose file it is.
+ *
+ * The upload endpoint writes `resumes/<userId>/<file>`, and both the S3 and
+ * the local URL end with that path, so requiring the applicant's own id in it
+ * is the whole check.
+ */
+function assertOwnResumeUpload(resumeUrl: string | undefined, userId: string): void {
+  if (!resumeUrl) return;
+
+  const segments = resumeUrl.split(/[?#]/)[0].split('/');
+  const fileName = segments.pop();
+  const owner = segments.pop();
+  const folder = segments.pop();
+
+  if (folder !== 'resumes' || owner !== userId || !fileName) {
+    throw new ApiError(
+      400,
+      'Attach a résumé by uploading it here rather than linking to one elsewhere.'
+    );
+  }
+}
+
+async function assertCanPostForOrganization(organizationId: string, userId: string) {
+  const membership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId, userId } },
+    select: { role: true, canPostJobs: true },
+  });
+
+  if (!membership) {
+    throw new ApiError(403, 'You are no longer a member of the organisation that posted this job');
+  }
+
+  if (!membership.canPostJobs && membership.role !== 'OWNER' && membership.role !== 'ADMIN') {
+    throw new ApiError(403, 'You do not have permission to post jobs for this organisation');
+  }
+}
 
 // ===========================================
 // SEARCH JOBS
@@ -356,18 +461,37 @@ router.post(
         throw new ApiError(400, errors.array()[0].msg);
       }
 
-      const { skills, ...jobData } = req.body;
+      const {
+        skills, title, description, type, city, state, country, isRemote,
+        salaryMin, salaryMax, salaryType, showSalary,
+        experienceMin, experienceMax, deadline,
+      } = req.body;
 
       // Generate slug
-      const slug = `${jobData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${uuidv4().slice(0, 8)}`;
+      const slug = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${uuidv4().slice(0, 8)}`;
 
       const job = await prisma.job.create({
         data: {
-          ...jobData,
+          title,
+          description,
+          type,
+          city,
+          state,
+          country: country || 'Australia',
+          isRemote: isRemote ?? false,
+          salaryMin,
+          salaryMax,
+          salaryType,
+          showSalary: showSalary ?? true,
+          experienceMin,
+          experienceMax,
           slug,
           postedById: req.user!.id,
+          // A listing starts as a draft whatever the body says, so the publish
+          // route below — and the organisation permission check in it — cannot
+          // be skipped by posting `status: 'ACTIVE'` at creation time.
           status: 'DRAFT',
-          deadline: jobData.deadline ? new Date(jobData.deadline) : null,
+          deadline: deadline ? new Date(deadline) : null,
         },
       });
 
@@ -435,14 +559,34 @@ router.post(
 // ===========================================
 // UPDATE JOB
 // ===========================================
-router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
+router.patch(
+  '/:id',
+  authenticate,
+  [
+    body('title').optional().notEmpty().trim(),
+    body('description').optional().notEmpty(),
+    body('type').optional().isIn(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'CASUAL', 'INTERNSHIP', 'APPRENTICESHIP']),
+    body('status').optional().isIn(['DRAFT', 'ACTIVE', 'PAUSED', 'CLOSED', 'EXPIRED']),
+    body('isRemote').optional().isBoolean(),
+    body('showSalary').optional().isBoolean(),
+    body('salaryMin').optional({ nullable: true }).isInt({ min: 0 }),
+    body('salaryMax').optional({ nullable: true }).isInt({ min: 0 }),
+    body('experienceMin').optional({ nullable: true }).isInt({ min: 0 }),
+    body('experienceMax').optional({ nullable: true }).isInt({ min: 0 }),
+  ],
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
+    }
+
     const { id } = req.params;
 
     // Check ownership
     const existingJob = await prisma.job.findUnique({
       where: { id },
-      select: { postedById: true },
+      select: { postedById: true, organizationId: true, status: true },
     });
 
     if (!existingJob) {
@@ -453,7 +597,22 @@ router.patch('/:id', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(403, 'Not authorized to update this job');
     }
 
-    const { skills, ...updateData } = req.body;
+    // Posting rights belong to the organisation, not to whoever happened to
+    // create the row. A recruiter whose canPostJobs was revoked, or who was
+    // taken off the team entirely, kept full edit rights over every listing
+    // she had ever posted because this route only ever asked about postedById.
+    if (existingJob.organizationId && req.user!.role !== 'ADMIN') {
+      await assertCanPostForOrganization(existingJob.organizationId, req.user!.id);
+    }
+
+    const updateData = pickWritableJobFields(req.body);
+
+    // Taking a draft live through the generic update has to record the same
+    // publication timestamp the publish route does, or the listing sorts to
+    // the bottom of "most recent" forever.
+    if (updateData.status === 'ACTIVE' && existingJob.status !== 'ACTIVE') {
+      updateData.publishedAt = new Date();
+    }
 
     const job = await prisma.job.update({
       where: { id },
@@ -506,6 +665,14 @@ router.post('/:id/publish', authenticate, async (req: AuthRequest, res, next) =>
       throw new ApiError(403, 'Not authorized');
     }
 
+    // Publishing under an organisation's name needs the organisation's
+    // permission, the same check that gated the listing's creation. Without
+    // it, a recruiter who had been removed from the company could still take
+    // her old drafts live under that company's name and logo.
+    if (existingJob.organizationId && req.user!.role !== 'ADMIN') {
+      await assertCanPostForOrganization(existingJob.organizationId, req.user!.id);
+    }
+
     const job = await prisma.job.update({
       where: { id },
       data: {
@@ -549,13 +716,29 @@ router.post(
   '/:id/apply',
   authenticate,
   [
-    body('coverLetter').optional().trim(),
-    body('resumeUrl').optional().isURL({ protocols: ['http', 'https'] }),
+    body('coverLetter')
+      .optional()
+      .trim()
+      .isLength({ max: 20000 })
+      .withMessage('That cover letter is too long. Keep it under 20,000 characters.'),
+    body('resumeUrl')
+      .optional()
+      .isURL({ protocols: ['http', 'https'] })
+      .withMessage('That résumé link is not a file this platform is holding for you.'),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      // The validators above were declared and never read, so a malformed
+      // résumé link reached Prisma as-is.
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, errors.array()[0].msg);
+      }
+
       const { id } = req.params;
       const { coverLetter, resumeUrl } = req.body;
+
+      assertOwnResumeUpload(resumeUrl, req.user!.id);
 
       // Check if job exists and is active
       const job = await prisma.job.findUnique({
@@ -810,10 +993,15 @@ router.patch(
   '/:jobId/applications/:applicationId',
   authenticate,
   [
-    body('status').isIn(['PENDING', 'REVIEWED', 'SHORTLISTED', 'INTERVIEW', 'OFFERED', 'REJECTED']),
+    body('status').isIn(EMPLOYER_SETTABLE_STATUSES),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw new ApiError(400, 'That is not a stage an employer can set');
+      }
+
       const { jobId, applicationId } = req.params;
       const { status } = req.body;
 
@@ -829,6 +1017,32 @@ router.patch(
 
       if (job.postedById !== req.user!.id && req.user!.role !== 'ADMIN') {
         throw new ApiError(403, 'Not authorized');
+      }
+
+      // The ownership check above is about the job in the URL, and nothing tied
+      // the application to it: an employer who owned one listing could move a
+      // candidate through any other employer's pipeline — and tell her about
+      // it — simply by putting her own jobId in front of a foreign application
+      // id. A foreign application answers the same 404 a missing one does, so
+      // ids cannot be probed either.
+      const existing = await prisma.jobApplication.findUnique({
+        where: { id: applicationId },
+        select: { jobId: true, status: true },
+      });
+
+      if (!existing || existing.jobId !== jobId) {
+        throw new ApiError(404, 'Application not found');
+      }
+
+      const { changed } = assertEmployerStatusMove(existing.status, status);
+
+      if (!changed) {
+        const unchanged = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
+        return res.json({
+          success: true,
+          message: 'Application already at that stage',
+          data: unchanged,
+        });
       }
 
       const application = await prisma.jobApplication.update({
