@@ -18,11 +18,24 @@ import { computeBas, lodgeBas, parsePeriod } from '../services/bas.service';
 const router = Router();
 
 // Validation schemas
+//
+// `rate` is a fraction, never a percentage: 0.1 is ten per cent. That is what
+// the column stores and what every reader of it multiplies back up for display,
+// so it is what the wire carries too.
+//
+// Three layers used to disagree. The client posted the raw percentage from a
+// field labelled 'Rate (%)', this schema accepted anything up to 100, and
+// tax.service then refused anything above 1 — so creating a 10% GST rate always
+// failed with 'Tax rate must be between 0 and 1', while the edit form, which
+// divided by 100 before posting, saved the same rate without complaint. A rate
+// that could be edited but never created is the shape that disagreement took.
+const RATE_FRACTION = z.number().min(0).max(1, { message: 'Rate is a fraction: 0.1 means 10%' });
+
 const createTaxRateSchema = z.object({
   organizationId: z.string().uuid().optional(),
   name: z.string().min(1).max(200),
   type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING']),
-  rate: z.number().min(0).max(100),
+  rate: RATE_FRACTION,
   region: z.string().min(1).max(100).optional(),
   effectiveFrom: z.string().datetime().optional(),
   effectiveTo: z.string().datetime().optional(),
@@ -31,7 +44,7 @@ const createTaxRateSchema = z.object({
 const updateTaxRateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   type: z.enum(['VAT', 'GST', 'SALES_TAX', 'WITHHOLDING']).optional(),
-  rate: z.number().min(0).max(100).optional(),
+  rate: RATE_FRACTION.optional(),
   region: z.string().min(1).max(100).optional(),
   effectiveFrom: z.string().datetime().optional(),
   effectiveTo: z.string().datetime().optional(),

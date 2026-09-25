@@ -3,10 +3,17 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import BasWorksheet from '@/components/finance/BasWorksheet';
 
 export default function TaxPage() {
+  // Tax rates are platform configuration: /api/tax/rates is readable by anyone
+  // signed in but writable only by an admin. The page carried no role check at
+  // all, so every member was shown a create form, an Edit link and a Delete
+  // button for rates she could only ever be refused on — and the refusal, a
+  // bare 403, arrived after she had filled the form in.
+  const isAdmin = useAuthStore((state) => state.user?.role) === 'ADMIN';
   const [rates, setRates] = useState<any[]>([]);
   const [returns, setReturns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,8 +96,13 @@ export default function TaxPage() {
       return;
     }
     const rateValue = Number(rateForm.rate || 0);
-    if (!Number.isFinite(rateValue) || rateValue < 0) {
-      setFormError('Rate must be a valid number');
+    // The field is a percentage and the API is a fraction, so 10 goes over the
+    // wire as 0.1. This division is the one thing that was missing: the create
+    // path posted the raw percentage and the server, which stores fractions,
+    // refused every rate above 1% — while the edit path below already divided
+    // and worked, so the same 10% GST rate could be saved but never created.
+    if (!Number.isFinite(rateValue) || rateValue < 0 || rateValue > 100) {
+      setFormError('Rate must be a percentage between 0 and 100');
       return;
     }
     setSaving(true);
@@ -111,7 +123,7 @@ export default function TaxPage() {
         organizationId: rateForm.organizationId || undefined,
         name: rateForm.name,
         type: rateForm.type,
-        rate: rateValue,
+        rate: rateValue / 100,
         region: rateForm.region || undefined,
         effectiveFrom: rateForm.effectiveFrom || undefined,
       });
@@ -239,8 +251,8 @@ export default function TaxPage() {
       return;
     }
     const rateValue = Number(editingRate.rate || 0);
-    if (!Number.isFinite(rateValue) || rateValue < 0) {
-      setFormError('Rate must be a valid number');
+    if (!Number.isFinite(rateValue) || rateValue < 0 || rateValue > 100) {
+      setFormError('Rate must be a percentage between 0 and 100');
       return;
     }
     const prevRates = rates;
@@ -323,7 +335,9 @@ export default function TaxPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Tax & Returns</h1>
           <Link href="/dashboard/finance/tax/plan" className="mt-2 inline-flex text-sm font-medium text-primary-600 hover:underline">Plan this year’s tax, deductions and super</Link>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
-            Maintain tax rates and prepare returns.
+            {isAdmin
+              ? 'Maintain tax rates and prepare returns.'
+              : 'Prepare your returns. Tax rates are set by ATHENA and shown here for reference.'}
           </p>
         </div>
         <Link href="/dashboard/finance" className="text-sm text-primary-600 hover:underline">
@@ -361,6 +375,7 @@ export default function TaxPage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {isAdmin && (
         <div className="card space-y-4">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Tax Rate</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -403,6 +418,7 @@ export default function TaxPage() {
                 className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                 placeholder="10"
               />
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">A percentage — enter 10 for GST.</p>
             </div>
             <div>
               <label className="text-sm text-slate-600 dark:text-slate-400">Region</label>
@@ -427,6 +443,7 @@ export default function TaxPage() {
             {saving ? 'Saving...' : 'Create Tax Rate'}
           </button>
         </div>
+        )}
 
         <div className="card space-y-4">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">New Tax Return</h2>
@@ -671,7 +688,9 @@ export default function TaxPage() {
                     </td>
                     <td className="py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {editingRateId === rate.id ? (
+                        {!isAdmin ? (
+                          <span className="text-xs text-slate-400 dark:text-slate-500">Set by ATHENA</span>
+                        ) : editingRateId === rate.id ? (
                           <>
                             <button
                               onClick={handleUpdateRate}
@@ -687,19 +706,21 @@ export default function TaxPage() {
                             </button>
                           </>
                         ) : (
-                          <button
-                            onClick={() => startEditRate(rate)}
-                            className="text-xs text-slate-600 hover:underline"
-                          >
-                            Edit
-                          </button>
+                          <>
+                            <button
+                              onClick={() => startEditRate(rate)}
+                              className="text-xs text-slate-600 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRate(rate.id)}
+                              className="text-xs text-red-600 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </>
                         )}
-                        <button
-                          onClick={() => handleDeleteRate(rate.id)}
-                          className="text-xs text-red-600 hover:underline"
-                        >
-                          Delete
-                        </button>
                       </div>
                     </td>
                   </tr>

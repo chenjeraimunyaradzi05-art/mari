@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { getStripe } from '../utils/stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { logger } from '../utils/logger';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { getPriceIdForTier, SubscriptionTierKey } from '../config/regions';
 import { getCurrencyForUser } from '../utils/region';
@@ -35,6 +36,47 @@ const VALID_TIERS: SubscriptionTierKey[] = [
 ];
 
 // Price IDs for subscription tiers are resolved per currency in config/regions.ts
+//
+// Each of them falls back to a literal - 'price_career', 'price_professional'
+// and so on - when its STRIPE_PRICE_* variable is unset, and nothing validates
+// those at boot: env.ts checks STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET and
+// marks both optional, so a deployment with no Stripe configuration at all
+// starts cleanly and the first anyone hears of it is a member pressing Upgrade
+// and getting Stripe's 'No such price: price_career' back as a 500.
+//
+// These are the exact fallbacks in config/regions.ts. If a tier is added there
+// its placeholder belongs here too; a placeholder missing from this list is not
+// a crash, it is the old behaviour back again, which is why the list is written
+// out rather than inferred from a pattern that a real price id might also match.
+const PLACEHOLDER_PRICE_IDS = new Set([
+  'price_career',
+  'price_professional',
+  'price_entrepreneur',
+  'price_creator',
+]);
+
+/**
+ * Refuses a checkout that would be sent to Stripe with a price that does not
+ * exist, and says which environment variable is missing.
+ *
+ * A 503 rather than a 500: nothing is wrong with the request, the deployment is
+ * not finished, and an operator reading the log needs to be told that rather
+ * than left to decode a Stripe error.
+ */
+function assertRealPriceId(priceId: string, tier: SubscriptionTierKey, currency: string): void {
+  if (!PLACEHOLDER_PRICE_IDS.has(priceId)) return;
+
+  logger.error('A checkout was attempted against a placeholder Stripe price id', {
+    tier,
+    currency,
+    priceId,
+  });
+
+  throw new ApiError(
+    503,
+    'Paid memberships are not configured on this deployment yet, so this upgrade cannot be started.'
+  );
+}
 
 // ===========================================
 // GET CURRENT SUBSCRIPTION
@@ -78,6 +120,13 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
       throw new ApiError(404, 'User not found');
     }
 
+    // Resolved before the Stripe customer is created, so that an unconfigured
+    // deployment refuses the upgrade without first leaving a customer record
+    // behind at Stripe for a checkout that was never going to start.
+    const currency = getCurrencyForUser(user);
+    const priceId = getPriceIdForTier(tier as SubscriptionTierKey, currency);
+    assertRealPriceId(priceId, tier as SubscriptionTierKey, currency);
+
     // Get or create Stripe customer
     let customerId = user.subscription?.stripeCustomerId;
 
@@ -97,9 +146,6 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
         data: { stripeCustomerId: customerId },
       });
     }
-
-    const currency = getCurrencyForUser(user);
-    const priceId = getPriceIdForTier(tier as SubscriptionTierKey, currency);
 
     // Whether this customer has already used their trial. Stripe will happily
     // grant a fresh trial on every new subscription, so without this check

@@ -68,9 +68,20 @@ export const errorHandler = (
   // For operational errors (4xx) without an i18n key, use the original message
   // so validation messages like "Invalid or expired invite code" reach the client.
   // Only use the generic "An unexpected error occurred" for 5xx / unknown errors.
+  //
+  // 503 is the exception, and only when we raised it ourselves. An operational
+  // 503 is not a failure to hide: it is this deployment saying it cannot do the
+  // thing right now, and the thirteen places that raise one all write a sentence
+  // for the member — payments not configured, livestream webhooks not
+  // configured, the moderation provider missing. Every one of those reached her
+  // as "An unexpected error occurred. Please try again", which invites her to
+  // try again at something that cannot work until an operator changes the
+  // deployment. An unexpected crash is not operational and still gets the
+  // generic wording, so no internals leak by this route.
+  const keepsItsWording = operational && (statusCode < 500 || statusCode === 503);
   const message = i18nKey
     ? i18nService.tSync(i18nKey, err.i18nParams as Record<string, string | number> | undefined, locale)
-    : (operational && statusCode < 500)
+    : keepsItsWording
       ? rawMessage
       : i18nService.tSync(ERROR_KEYS.SERVER_INTERNAL_ERROR, undefined, locale);
   const requestId = (req as any).requestId as string | undefined;

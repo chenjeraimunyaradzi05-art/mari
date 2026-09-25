@@ -6,15 +6,32 @@ import { Activity, RefreshCw, Loader2, TrendingUp, TrendingDown, AlertCircle, Ch
 import { financeApi } from '@/lib/api';
 import { RoadmapStrip } from '@/components/strategy/RoadmapStrip';
 
+/**
+ * The shape the server actually sends.
+ *
+ * This type used to name `savingsScore`, `debtScore` and `investmentScore`.
+ * None of the three is ever written — two of them are not even columns on
+ * FinancialHealthScore — so three of the five tiles below rendered the word
+ * `undefined` over a bar of width `undefined%`, coloured red because that is
+ * what the threshold ladder returns for a number that is not one. Two real
+ * measurements were being shown alongside three blanks dressed as failing
+ * scores.
+ *
+ * `recommendations` is a JSON column holding `{ items, measures }`, not the
+ * bare array it was typed as here, so the list never rendered either.
+ */
 type HealthScore = {
   id: string;
   overallScore: number;
-  savingsScore: number;
-  debtScore: number;
-  emergencyFundScore: number;
-  investmentScore: number;
-  insuranceScore: number;
-  recommendations: string[];
+  emergencyFundScore: number | null;
+  superScore: number | null;
+  insuranceScore: number | null;
+  savingsRateScore: number | null;
+  recommendations: {
+    items?: string[];
+    /** One sentence per sub-score saying what it counts. */
+    measures?: Record<string, string>;
+  } | null;
   calculatedAt: string;
 };
 
@@ -97,14 +114,32 @@ export default function HealthScorePage() {
     }
   };
 
+  const measures = score?.recommendations?.measures ?? {};
+
+  // Four tiles, one per figure the server computes, each carrying the sentence
+  // that says what it counts. Three of the four are presence checks rather than
+  // measurements — ATHENA cannot see her income or spending — and saying so on
+  // the tile is the difference between a score she can act on and one that
+  // implies an analysis nobody did.
   const scoreComponents = score
     ? [
-        { label: 'Savings', value: score.savingsScore, icon: TrendingUp },
-        { label: 'Debt management', value: score.debtScore, icon: TrendingDown },
-        { label: 'Emergency fund', value: score.emergencyFundScore, icon: AlertCircle },
-        { label: 'Investments', value: score.investmentScore, icon: TrendingUp },
-        { label: 'Insurance', value: score.insuranceScore, icon: CheckCircle },
-      ]
+        {
+          key: 'emergencyFund',
+          label: 'Emergency fund',
+          value: score.emergencyFundScore,
+          icon: AlertCircle,
+        },
+        { key: 'super', label: 'Super', value: score.superScore, icon: TrendingUp },
+        { key: 'insurance', label: 'Insurance', value: score.insuranceScore, icon: CheckCircle },
+        {
+          key: 'savingsRate',
+          label: 'Savings habit',
+          value: score.savingsRateScore,
+          icon: TrendingDown,
+        },
+      ].filter((component): component is typeof component & { value: number } =>
+        typeof component.value === 'number'
+      )
     : [];
 
   return (
@@ -119,7 +154,7 @@ export default function HealthScorePage() {
             Your financial wellness
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
-            Get a personalized snapshot of your financial health
+            A snapshot built from what you have set up here — your emergency fund, your super, your cover. Each tile says what it counts.
           </p>
         </div>
         <button
@@ -189,12 +224,12 @@ export default function HealthScorePage() {
           </div>
 
           {/* Component scores */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {scoreComponents.map((component) => {
               const Icon = component.icon;
               return (
                 <div
-                  key={component.label}
+                  key={component.key}
                   className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4"
                 >
                   <div className="flex items-center gap-2 mb-3">
@@ -211,17 +246,20 @@ export default function HealthScorePage() {
                       style={{ width: `${component.value}%` }}
                     />
                   </div>
+                  {measures[component.key] && (
+                    <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{measures[component.key]}</p>
+                  )}
                 </div>
               );
             })}
           </div>
 
           {/* Recommendations */}
-          {score.recommendations && score.recommendations.length > 0 && (
+          {score.recommendations?.items && score.recommendations.items.length > 0 && (
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Personalized recommendations</h2>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">What would move this</h2>
               <ul className="space-y-3">
-                {score.recommendations.map((rec, idx) => (
+                {score.recommendations.items.map((rec, idx) => (
                   <li key={idx} className="flex items-start gap-3">
                     <div className="mt-1 w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center flex-shrink-0">
                       <span className="text-xs font-semibold text-emerald-600">{idx + 1}</span>

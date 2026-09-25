@@ -165,9 +165,20 @@ export default function MoneyPage() {
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Money Ledger</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Your money log</h1>
+          {/* This page used to be called the Money Ledger and offered to "review
+              payments, payouts and adjustments", which read as ATHENA's record
+              of what it had charged and paid. It is not: nothing on the
+              platform writes to it, every row here is one somebody typed, and
+              it can say a payment completed that never happened. So it says
+              what it is, and points at the record that is authoritative. */}
           <p className="text-slate-500 dark:text-slate-400 mt-1">
-            Review payments, payouts, and adjustments.
+            Money you record yourself, for your own books. ATHENA does not write to this — for what ATHENA
+            actually charged you, see{' '}
+            <Link href="/dashboard/finance/invoices" className="text-primary-600 hover:underline">
+              your invoices
+            </Link>
+            .
           </p>
         </div>
         <Link href="/dashboard/finance" className="text-sm text-primary-600 hover:underline">

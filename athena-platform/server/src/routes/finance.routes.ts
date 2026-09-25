@@ -53,7 +53,11 @@ router.post(
   [
     body('name').notEmpty().withMessage('Goal name is required'),
     body('type').isIn(['EMERGENCY_FUND', 'HOME_DEPOSIT', 'EDUCATION', 'BUSINESS', 'TRAVEL', 'OTHER']),
-    body('targetAmount').isNumeric().withMessage('Target amount is required'),
+    // gt: 0, not just isNumeric. A goal saved with a target of zero divided
+    // by zero in the health-score handler and left that member's score endpoint
+    // returning 500 for good; it is also not a goal anybody can make progress
+    // against, so it is refused at the door rather than guarded downstream.
+    body('targetAmount').isFloat({ gt: 0 }).withMessage('Target amount must be greater than 0'),
     body('targetDate').optional().isISO8601(),
     body('monthlyTarget').optional().isNumeric(),
     body('autoSaveEnabled').optional().isBoolean(),
@@ -175,7 +179,7 @@ router.patch(
   authenticate,
   [
     body('name').optional().isString(),
-    body('targetAmount').optional().isNumeric(),
+    body('targetAmount').optional().isFloat({ gt: 0 }).withMessage('Target amount must be greater than 0'),
     body('targetDate').optional().isISO8601(),
     body('monthlyTarget').optional().isNumeric(),
     body('autoSaveEnabled').optional().isBoolean(),
@@ -518,65 +522,97 @@ router.patch(
 // FINANCIAL HEALTH SCORE
 // ===========================================
 
+/**
+ * What the four sub-scores actually measure, in one place.
+ *
+ * This block existed twice, copied line for line between the GET handler and
+ * the recalculate handler, so every correction below had to be made in both
+ * places or the two endpoints would answer differently about the same member.
+ *
+ * Three of the four are presence checks rather than measurements, and the
+ * names do not admit it: `savingsRateScore` reads nothing about income or
+ * spending and is 50 if she has set any goal at all. Making them real needs
+ * income and transaction data the platform does not hold, so what is fixed
+ * here is the claim rather than the number — `measures` travels out with the
+ * score and says in a sentence what each figure is counting, and the page
+ * renders that instead of implying a calculation that did not happen.
+ */
+const SCORE_MEASURES = {
+  emergencyFund: 'How far along your emergency fund goal is.',
+  super: 'Whether you have linked a super account.',
+  insurance: 'Whether you have an active insurance application.',
+  savingsRate:
+    'Whether you have set any savings goal. ATHENA does not see your income or spending, so this is not a measured savings rate.',
+} as const;
+
+async function computeFinancialHealthScore(userId: string) {
+  const [savingsGoals, superAccounts, insuranceApps] = await Promise.all([
+    prisma.savingsGoal.findMany({ where: { userId, status: 'ACTIVE' } }),
+    prisma.superannuationAccount.findMany({ where: { userId } }),
+    prisma.insuranceApplication.findMany({ where: { userId, status: 'ACTIVE' } }),
+  ]);
+
+  let emergencyFundScore = 0;
+  const emergencyGoal = savingsGoals.find((g) => g.type === 'EMERGENCY_FUND');
+  if (emergencyGoal) {
+    // Guarded, unlike the version this replaces. A goal with a target of zero
+    // made this 0/0, and the NaN went through Math.round unchanged into an Int
+    // column, so the create threw and the endpoint returned 500 for that member
+    // on every request from then on. The savings-goals list handler has always
+    // guarded the same division; the score handler did not.
+    const target = emergencyGoal.targetAmount.toNumber();
+    const progress = target > 0 ? emergencyGoal.currentAmount.toNumber() / target : 0;
+    emergencyFundScore = Math.min(100, Math.max(0, Math.round(progress * 100)));
+  }
+
+  const superScore = superAccounts.length > 0 ? 60 : 20;
+  const insuranceScore = insuranceApps.length > 0 ? 70 : 30;
+  const savingsRateScore = savingsGoals.length > 0 ? 50 : 20;
+
+  const overallScore = Math.round(
+    (emergencyFundScore * 0.3) +
+    (superScore * 0.25) +
+    (insuranceScore * 0.25) +
+    (savingsRateScore * 0.2)
+  );
+
+  const data = {
+    overallScore,
+    emergencyFundScore,
+    superScore,
+    insuranceScore,
+    savingsRateScore,
+    recommendations: {
+      items: [
+        emergencyFundScore < 50 && 'Build your emergency fund to cover 3-6 months of expenses',
+        superScore < 70 && 'Consider salary sacrificing into your super',
+        insuranceScore < 50 && 'Review your income protection options',
+        savingsRateScore < 50 && 'Set up automatic savings transfers',
+      ].filter(Boolean),
+      measures: SCORE_MEASURES,
+    },
+  };
+
+  // Written on every read rather than only on the first one. The GET handler
+  // used to compute a score only when no row existed and return the stored row
+  // otherwise, so a member's score was frozen at whatever it was on her very
+  // first visit to the page: she could link her super, take out income
+  // protection and fund her emergency goal and the number would never move
+  // unless she happened to find the recalculate button.
+  return prisma.financialHealthScore.upsert({
+    where: { userId },
+    create: { userId, ...data },
+    update: data,
+  });
+}
+
 // GET /api/finance/health-score - Get or calculate financial health score
 router.get(
   '/health-score',
   authenticate,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user!.id;
-
-      // Get existing score or calculate new one
-      let score = await prisma.financialHealthScore.findUnique({
-        where: { userId },
-      });
-
-      if (!score) {
-        // Calculate initial score based on user data
-        const [savingsGoals, superAccounts, insuranceApps] = await Promise.all([
-          prisma.savingsGoal.findMany({ where: { userId, status: 'ACTIVE' } }),
-          prisma.superannuationAccount.findMany({ where: { userId } }),
-          prisma.insuranceApplication.findMany({ where: { userId, status: 'ACTIVE' } }),
-        ]);
-
-        // Simple scoring algorithm
-        let emergencyFundScore = 0;
-        const emergencyGoal = savingsGoals.find((g) => g.type === 'EMERGENCY_FUND');
-        if (emergencyGoal) {
-          const progress = emergencyGoal.currentAmount.toNumber() / emergencyGoal.targetAmount.toNumber();
-          emergencyFundScore = Math.min(100, Math.round(progress * 100));
-        }
-
-        const superScore = superAccounts.length > 0 ? 60 : 20;
-        const insuranceScore = insuranceApps.length > 0 ? 70 : 30;
-        const savingsRateScore = savingsGoals.length > 0 ? 50 : 20;
-
-        const overallScore = Math.round(
-          (emergencyFundScore * 0.3) +
-          (superScore * 0.25) +
-          (insuranceScore * 0.25) +
-          (savingsRateScore * 0.2)
-        );
-
-        score = await prisma.financialHealthScore.create({
-          data: {
-            userId,
-            overallScore,
-            emergencyFundScore,
-            superScore,
-            insuranceScore,
-            savingsRateScore,
-            recommendations: {
-              items: [
-                emergencyFundScore < 50 && 'Build your emergency fund to cover 3-6 months of expenses',
-                superScore < 70 && 'Consider salary sacrificing into your super',
-                insuranceScore < 50 && 'Review your income protection options',
-                savingsRateScore < 50 && 'Set up automatic savings transfers',
-              ].filter(Boolean),
-            },
-          },
-        });
-      }
+      const score = await computeFinancialHealthScore(req.user!.id);
 
       res.json({
         success: true,
@@ -589,59 +625,16 @@ router.get(
 );
 
 // POST /api/finance/health-score/recalculate - Force recalculation
+//
+// Kept, though the GET above now recomputes too, because the page has a button
+// that calls it and a member pressing it is entitled to a confirmation that
+// something happened.
 router.post(
   '/health-score/recalculate',
   authenticate,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user!.id;
-
-      // Delete existing and recalculate
-      await prisma.financialHealthScore.deleteMany({ where: { userId } });
-
-      // Redirect to GET which will create new score
-      const [savingsGoals, superAccounts, insuranceApps] = await Promise.all([
-        prisma.savingsGoal.findMany({ where: { userId, status: 'ACTIVE' } }),
-        prisma.superannuationAccount.findMany({ where: { userId } }),
-        prisma.insuranceApplication.findMany({ where: { userId, status: 'ACTIVE' } }),
-      ]);
-
-      let emergencyFundScore = 0;
-      const emergencyGoal = savingsGoals.find((g) => g.type === 'EMERGENCY_FUND');
-      if (emergencyGoal) {
-        const progress = emergencyGoal.currentAmount.toNumber() / emergencyGoal.targetAmount.toNumber();
-        emergencyFundScore = Math.min(100, Math.round(progress * 100));
-      }
-
-      const superScore = superAccounts.length > 0 ? 60 : 20;
-      const insuranceScore = insuranceApps.length > 0 ? 70 : 30;
-      const savingsRateScore = savingsGoals.length > 0 ? 50 : 20;
-
-      const overallScore = Math.round(
-        (emergencyFundScore * 0.3) +
-        (superScore * 0.25) +
-        (insuranceScore * 0.25) +
-        (savingsRateScore * 0.2)
-      );
-
-      const score = await prisma.financialHealthScore.create({
-        data: {
-          userId,
-          overallScore,
-          emergencyFundScore,
-          superScore,
-          insuranceScore,
-          savingsRateScore,
-          recommendations: {
-            items: [
-              emergencyFundScore < 50 && 'Build your emergency fund to cover 3-6 months of expenses',
-              superScore < 70 && 'Consider salary sacrificing into your super',
-              insuranceScore < 50 && 'Review your income protection options',
-              savingsRateScore < 50 && 'Set up automatic savings transfers',
-            ].filter(Boolean),
-          },
-        },
-      });
+      const score = await computeFinancialHealthScore(req.user!.id);
 
       res.json({
         success: true,

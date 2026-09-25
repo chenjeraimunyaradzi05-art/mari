@@ -221,6 +221,14 @@ router.get('/:invoiceId/pdf', authenticate, async (req: AuthRequest, res, next) 
  * @desc Issue (or re-issue) the invoice for a Payment row. Idempotent: a
  *       payment that already has an invoice gets that invoice back, with
  *       alreadyIssued true, never a second number.
+ *
+ *       `sendEmail` now sends one. It used to reach a single log line reading
+ *       "Invoice email queued" and stop, so an admin re-sending an invoice to
+ *       a member who had not received it got a 200 and the member got nothing.
+ *       The response carries `emailed` — 'sent', 'failed' or 'not_requested' —
+ *       because a mail server that is down must not un-issue a correctly filed
+ *       invoice, but the person who asked for the email is entitled to know it
+ *       did not go.
  * @access Private (Admin)
  */
 router.post('/payment/:paymentId', authenticate, requireRole('ADMIN'), async (req, res, next) => {
@@ -236,6 +244,7 @@ router.post('/payment/:paymentId', authenticate, requireRole('ADMIN'), async (re
         invoiceId: result.invoiceId,
         invoiceNumber: result.invoiceNumber,
         alreadyIssued: !result.created,
+        emailed: result.emailed,
       },
     });
   } catch (error) {

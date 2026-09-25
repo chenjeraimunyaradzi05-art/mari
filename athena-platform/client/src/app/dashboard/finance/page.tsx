@@ -101,8 +101,8 @@ const tiles = [
     icon: Package,
   },
   {
-    title: 'Money Ledger',
-    description: 'Payments, payouts, transfers, and adjustments.',
+    title: 'Your money log',
+    description: 'Payments, payouts and adjustments you record yourself.',
     href: '/dashboard/finance/money',
     icon: Banknote,
   },

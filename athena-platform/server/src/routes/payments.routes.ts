@@ -25,6 +25,15 @@ const SUPPORTED_CURRENCIES: Currency[] = [
 ];
 
 /**
+ * Where a caller is assumed to be when it does not say.
+ *
+ * Every route here defaulted to 'US'. ATHENA is a Queensland platform and the
+ * overwhelming majority of the women using it are in Australia, so the default
+ * was quietly pricing and routing the typical member as an American.
+ */
+const DEFAULT_REGION = 'AU';
+
+/**
  * @route GET /api/payments/methods
  * @desc Get available payment methods for user's region
  * @access Private
@@ -32,7 +41,7 @@ const SUPPORTED_CURRENCIES: Currency[] = [
 router.get('/methods', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region } = req.query;
-    const regionCode = (region as string) || 'US';
+    const regionCode = (region as string) || DEFAULT_REGION;
 
     const methods = paymentsService.getAvailablePaymentMethods(regionCode);
     res.json({ methods });
@@ -49,7 +58,7 @@ router.get('/methods', authenticate, async (req: Request, res: Response, next: N
 router.get('/best-provider', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region, paymentType } = req.query;
-    const regionCode = (region as string) || 'US';
+    const regionCode = (region as string) || DEFAULT_REGION;
 
     const provider = paymentsService.getBestProvider(
       regionCode,
@@ -70,7 +79,7 @@ router.get('/best-provider', authenticate, async (req: Request, res: Response, n
 router.get('/pricing', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region } = req.query;
-    const regionCode = (region as string) || 'US';
+    const regionCode = (region as string) || DEFAULT_REGION;
 
     const pricing = paymentsService.getRegionalPricing(regionCode);
     res.json(pricing);
@@ -185,7 +194,10 @@ router.post('/payout', authenticate, requireRole('CREATOR'), async (req: Request
 
 /**
  * @route POST /api/payments/convert
- * @desc Convert currency
+ * @desc Convert currency. A pair ATHENA holds no rate for comes back 422 from
+ *       convertCurrency rather than being quoted at parity, which is what it
+ *       used to do: A$100 to PHP returned 99 pesos. GET /currencies lists the
+ *       pairs that can be quoted, so a caller can ask before it offers.
  * @access Private
  */
 router.post('/convert', authenticate, async (req: Request, res: Response, next: NextFunction) => {
@@ -219,11 +231,16 @@ router.post('/convert', authenticate, async (req: Request, res: Response, next: 
 
 /**
  * @route GET /api/payments/currencies
- * @desc Get list of supported currencies
+ * @desc Get list of supported currencies, and the pairs /convert can quote
  * @access Public
  */
 router.get('/currencies', async (_req: Request, res: Response) => {
-  res.json({ currencies: SUPPORTED_CURRENCIES });
+  res.json({
+    currencies: SUPPORTED_CURRENCIES,
+    // A currency ATHENA can price in is not necessarily one it can convert to
+    // or from. Both lists go out so nothing has to guess at the difference.
+    conversions: paymentsService.supportedConversions(),
+  });
 });
 
 export default router;

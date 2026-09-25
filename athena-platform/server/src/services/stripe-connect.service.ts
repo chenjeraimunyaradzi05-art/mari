@@ -494,9 +494,11 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
     };
   }
 
+  let paymentIntent: Stripe.PaymentIntent;
+
   try {
     // Create payment intent with manual capture (escrow)
-    const paymentIntent = await getStripe().paymentIntents.create({
+    paymentIntent = await getStripe().paymentIntents.create({
       amount: input.amount,
       currency: input.currency,
       capture_method: 'manual', // Don't capture immediately - hold in escrow
@@ -513,8 +515,20 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
       },
       description: input.description,
     });
+  } catch (error) {
+    logger.error('Failed to create escrow payment', { error, input });
+    throw new ApiError(500, 'Failed to create payment');
+  }
 
-    // Store escrow record in database
+  // The intent now exists at Stripe and the row here does not. The two writes
+  // used to sit in one try block with nothing but a log between them, so a
+  // failed insert left a live intent that nothing in this platform knew about:
+  // no row for the expiry sweep to find, no row for either party to cancel, and
+  // a buyer who could still be asked for the money by a checkout page that had
+  // already been handed the client secret. The insert is separated out here so
+  // that its failure can be compensated — the intent we just created is
+  // cancelled again, and only then does the caller get its error.
+  try {
     const row = await prisma.escrowPayment.create({
       data: {
         paymentIntentId: paymentIntent.id,
@@ -545,7 +559,29 @@ export async function createEscrowPayment(input: EscrowPaymentInput): Promise<{
       platformFee,
     };
   } catch (error) {
-    logger.error('Failed to create escrow payment', { error, input });
+    // bestEffort rather than a bare catch: the cancel is allowed to fail — the
+    // intent may already have been confirmed by a buyer who was quick — but it
+    // must not fail silently, because an intent that survives this is money
+    // held against nothing and the id below is all anyone has to find it with.
+    const cancelled = await bestEffort(
+      'stripe-connect.cancel-orphaned-intent',
+      async () => {
+        await getStripe().paymentIntents.cancel(paymentIntent.id);
+        return true;
+      },
+      false
+    );
+
+    logger.error('Failed to record an escrow payment after Stripe created the hold', {
+      error,
+      paymentIntentId: paymentIntent.id,
+      orphanedIntentCancelled: cancelled,
+      buyerId: input.buyerId,
+      sellerId: input.sellerId,
+      amount: input.amount,
+      currency: input.currency,
+    });
+
     throw new ApiError(500, 'Failed to create payment');
   }
 }
@@ -588,6 +624,52 @@ function assertEscrowParty(
 }
 
 /**
+ * What Stripe says about a hold we are about to release, before we try.
+ *
+ * A row is written PENDING and only moves to AUTHORIZED when the buyer has
+ * actually put a card behind it — normally on the
+ * `payment_intent.amount_capturable_updated` webhook. Release used to accept
+ * PENDING as well, so a release attempted before authorisation went all the way
+ * to Stripe, was refused there because the intent was still
+ * requires_payment_method, and came back to the person pressing the button as a
+ * flat 500 'Failed to capture payment'. Every caller had copied the same
+ * permissive pair of statuses, so it had to be decided here.
+ *
+ * Asking Stripe rather than refusing outright on the local status is
+ * deliberate. The row is a copy of Stripe's answer and can be behind it — a
+ * webhook that has not landed, or a deployment with none configured, both leave
+ * a genuinely authorised hold reading PENDING here — and refusing those would
+ * strand money that is sitting there ready to be released.
+ *
+ * Returns 'capturable' when the hold is real, or 'already_captured' when the
+ * money has already moved and only the row is behind, which is the shape the
+ * ordering in captureEscrowPayment can leave behind: capture succeeds at Stripe
+ * and the update after it fails.
+ */
+async function readHoldStateAtStripe(
+  paymentIntentId: string
+): Promise<{ state: 'capturable' } | { state: 'already_captured'; amountCaptured: number }> {
+  const intent = await getStripe().paymentIntents.retrieve(paymentIntentId);
+
+  if (intent.status === 'requires_capture') {
+    return { state: 'capturable' };
+  }
+
+  if (intent.status === 'succeeded') {
+    return { state: 'already_captured', amountCaptured: intent.amount_received };
+  }
+
+  if (intent.status === 'canceled') {
+    throw new ApiError(409, 'This payment was cancelled, so there is nothing to release.');
+  }
+
+  throw new ApiError(
+    409,
+    'This payment has not been authorised yet, so there is nothing to release. Ask the buyer to complete the payment first.'
+  );
+}
+
+/**
  * Capture escrowed payment (release funds to seller after service delivered)
  */
 export async function captureEscrowPayment(
@@ -623,24 +705,117 @@ export async function captureEscrowPayment(
     };
   }
 
-  try {
-    const paymentIntent = await getStripe().paymentIntents.capture(paymentIntentId);
+  const hold = await readHoldStateAtStripe(paymentIntentId);
 
+  if (hold.state === 'already_captured') {
+    // The money is with the seller and only the row was left behind. Bringing
+    // it into line is the whole of the work here; capturing again would be
+    // refused by Stripe and reported to the buyer as a failure of a release
+    // that had in fact succeeded.
     await prisma.escrowPayment.update({
       where: { paymentIntentId },
-      data: { status: 'CAPTURED', capturedAt: new Date() },
+      data: { status: 'CAPTURED', capturedAt: escrow.capturedAt ?? new Date() },
     });
 
-    logger.info('Captured escrow payment', { paymentIntentId, amount: escrow.amount });
+    logger.warn('Escrow row was behind Stripe: the hold had already been captured', {
+      paymentIntentId,
+      escrowId: escrow.id,
+      amountCaptured: hold.amountCaptured,
+    });
 
-    return {
-      status: paymentIntent.status,
-      amountCaptured: paymentIntent.amount_received,
-    };
+    return { status: 'succeeded', amountCaptured: hold.amountCaptured };
+  }
+
+  if (escrow.status === 'PENDING') {
+    // Stripe says the hold is real, so the row is simply behind its webhook.
+    // Written before the capture rather than after it, so that the sequence
+    // holds even if the process dies between the two calls.
+    await prisma.escrowPayment.update({
+      where: { paymentIntentId },
+      data: { status: 'AUTHORIZED' },
+    });
+  }
+
+  let paymentIntent: Stripe.PaymentIntent;
+
+  try {
+    paymentIntent = await getStripe().paymentIntents.capture(paymentIntentId);
   } catch (error) {
     logger.error('Failed to capture escrow payment', { error, paymentIntentId });
     throw new ApiError(500, 'Failed to capture payment');
   }
+
+  try {
+    await prisma.escrowPayment.update({
+      where: { paymentIntentId },
+      data: { status: 'CAPTURED', capturedAt: new Date() },
+    });
+  } catch (error) {
+    // The money has moved. Failing the request here would tell the buyer her
+    // release did not happen when it did, and she would press the button
+    // again; the row is repaired instead on the next release attempt, by the
+    // already_captured branch above, and the id is logged so it can be found
+    // before anyone gets that far.
+    logger.error('Captured an escrow hold but could not record it', {
+      error,
+      paymentIntentId,
+      escrowId: escrow.id,
+      amountCaptured: paymentIntent.amount_received,
+    });
+  }
+
+  logger.info('Captured escrow payment', { paymentIntentId, amount: escrow.amount });
+
+  return {
+    status: paymentIntent.status,
+    amountCaptured: paymentIntent.amount_received,
+  };
+}
+
+/**
+ * What Stripe says about a hold we are about to give back, before we try.
+ *
+ * The sibling of readHoldStateAtStripe, and it exists for the same reason:
+ * cancellation decided what to do from the local row alone, and the local row
+ * can be behind Stripe in both directions. A refund that succeeded and whose
+ * row write then failed left the row reading CAPTURED, so the next attempt
+ * refunded a charge Stripe had already fully refunded, was refused, and came
+ * back as a flat 500 — for ever, because nothing ever moved the row. A buyer
+ * pressing "cancel" on an order she had already been refunded for would be
+ * told the cancellation had failed, on every attempt, while her money was
+ * already back on her card.
+ *
+ * `already_returned` is that case: the money is where it should be and only the
+ * row is behind, which is the whole of the work left to do. `refundable` and
+ * `cancelable` are the two ordinary paths, told apart by Stripe rather than by
+ * the row, so a capture whose row write failed is still refunded rather than
+ * being sent to paymentIntents.cancel, which Stripe refuses on a succeeded
+ * intent.
+ */
+async function readReturnStateAtStripe(
+  paymentIntentId: string
+): Promise<{ state: 'already_returned'; as: 'refunded' | 'canceled' } | { state: 'refundable' } | { state: 'cancelable' }> {
+  const intent = await getStripe().paymentIntents.retrieve(paymentIntentId, {
+    expand: ['latest_charge'],
+  });
+
+  if (intent.status === 'canceled') {
+    return { state: 'already_returned', as: 'canceled' };
+  }
+
+  if (intent.status === 'succeeded') {
+    // `latest_charge` is a bare id unless it is expanded, which is why the
+    // retrieve above asks for it. Without the expansion there is no way to see
+    // that a charge has already been given back, and the double refund this
+    // whole function exists to prevent goes ahead.
+    const charge = intent.latest_charge;
+    const refunded =
+      charge !== null && typeof charge === 'object' ? charge.refunded : false;
+
+    return refunded ? { state: 'already_returned', as: 'refunded' } : { state: 'refundable' };
+  }
+
+  return { state: 'cancelable' };
 }
 
 /**
@@ -674,63 +849,180 @@ export async function cancelEscrowPayment(
     return { status: 'canceled' };
   }
 
+  const at = await readReturnStateAtStripe(paymentIntentId);
+
+  if (at.state === 'already_returned') {
+    // Nothing is asked of Stripe. The money has already gone back and the row
+    // is simply behind it; repairing the row is the entire remaining job, and
+    // reporting a failure here would send the buyer round the same loop again.
+    await recordEscrowReturn(paymentIntentId, at.as, reason, escrow.id);
+
+    logger.warn('Escrow row was behind Stripe: the hold had already been given back', {
+      paymentIntentId,
+      escrowId: escrow.id,
+      as: at.as,
+    });
+
+    return { status: at.as };
+  }
+
   try {
-    // If captured, refund; if not captured, cancel
-    if (escrow.status === 'CAPTURED') {
-      await getStripe().refunds.create({
-        payment_intent: paymentIntentId,
-        reason: 'requested_by_customer',
-      });
-
-      await prisma.escrowPayment.update({
-        where: { paymentIntentId },
-        data: { status: 'REFUNDED', canceledAt: new Date(), cancelReason: reason },
-      });
-
-      return { status: 'refunded' };
+    if (at.state === 'refundable') {
+      await getStripe().refunds.create(
+        {
+          payment_intent: paymentIntentId,
+          reason: 'requested_by_customer',
+        },
+        {
+          // Derived from the escrow row rather than generated, so that two
+          // presses of the same cancel button inside Stripe's idempotency
+          // window are one refund rather than two. The read above is what
+          // covers the same two presses a week apart; this covers the two that
+          // arrive together, which is the far more likely pair.
+          idempotencyKey: `escrow-refund-${escrow.id}`,
+        }
+      );
     } else {
       await getStripe().paymentIntents.cancel(paymentIntentId);
-
-      await prisma.escrowPayment.update({
-        where: { paymentIntentId },
-        data: { status: 'CANCELED', canceledAt: new Date(), cancelReason: reason },
-      });
-
-      return { status: 'canceled' };
     }
   } catch (error) {
     logger.error('Failed to cancel escrow payment', { error, paymentIntentId });
     throw new ApiError(500, 'Failed to cancel payment');
   }
+
+  const as = at.state === 'refundable' ? 'refunded' : 'canceled';
+
+  try {
+    await recordEscrowReturn(paymentIntentId, as, reason, escrow.id);
+  } catch (error) {
+    // The money has already gone back. Failing the request here would tell the
+    // buyer her cancellation did not happen when it did, and the row would stay
+    // CAPTURED while her card had been credited — which is how the double
+    // refund used to become possible. The row is repaired instead on the next
+    // attempt, by the already_returned branch above, and the ids are logged so
+    // it can be found before anyone gets that far.
+    logger.error('Returned an escrow hold but could not record it', {
+      error,
+      paymentIntentId,
+      escrowId: escrow.id,
+      as,
+    });
+  }
+
+  return { status: as };
+}
+
+/** The one place the row is moved to its final returned state, so the repair path and the ordinary path cannot drift. */
+async function recordEscrowReturn(
+  paymentIntentId: string,
+  as: 'refunded' | 'canceled',
+  reason: string | undefined,
+  escrowId: string
+): Promise<void> {
+  await prisma.escrowPayment.update({
+    where: { paymentIntentId },
+    data: {
+      status: as === 'refunded' ? 'REFUNDED' : 'CANCELED',
+      canceledAt: new Date(),
+      cancelReason: reason,
+    },
+  });
+
+  logger.info('Escrow hold returned to the buyer', { paymentIntentId, escrowId, as });
+}
+
+/** Holds where the money has moved to the seller. */
+const EARNED_STATUSES = ['CAPTURED'];
+/** Holds where the money exists but has not moved yet. */
+const HELD_STATUSES = ['PENDING', 'AUTHORIZED'];
+
+export interface EarningsByCurrency {
+  currency: string;
+  totalEarnings: number;
+  pendingPayouts: number;
+}
+
+export interface EarningsDashboard {
+  /** The currency the flat totals below are counted in. */
+  currency: string;
+  /** Net of the platform fee, over every hold she has ever had in `currency`. */
+  totalEarnings: number;
+  pendingPayouts: number;
+  /**
+   * Null, not zero, when Stripe could not be asked. A member whose balance
+   * lookup failed has not been told she has no money; she has been told we do
+   * not know, and `balanceUnavailable` is what says which of the two it is.
+   */
+  availableBalance: number | null;
+  balanceUnavailable: boolean;
+  /** Every currency she has earned in, including the one above. */
+  byCurrency: EarningsByCurrency[];
+  recentTransactions: {
+    id: string;
+    amount: number;
+    currency: string;
+    status: string;
+    description: string | null;
+    createdAt: Date;
+    capturedAt: Date | null;
+  }[];
 }
 
 /**
- * Get seller's earnings dashboard data
+ * Get seller's earnings dashboard data.
+ *
+ * Both totals used to be reduced out of the same twenty rows the recent-activity
+ * list was drawn from, so "total earnings" quietly meant "earnings from my last
+ * twenty transactions" and shrank as a mentor did more work — the successful
+ * sellers were the ones it lied to. They are counted here by the database over
+ * every row, grouped by currency, because the reduce also added AUD cents to USD
+ * cents and called the result one number. The Stripe balance had the same defect
+ * on its own side, summing every currency bucket the connected account held.
  */
-export async function getEarningsDashboard(userId: string): Promise<{
-  totalEarnings: number;
-  pendingPayouts: number;
-  availableBalance: number;
-  recentTransactions: any[];
-}> {
+export async function getEarningsDashboard(userId: string): Promise<EarningsDashboard> {
   const connectedAccountId = await resolveConnectedAccountId(userId);
 
-  // Get escrow payments where user is seller
-  const escrowPayments = await prisma.escrowPayment.findMany({
-    where: { sellerId: userId },
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-  });
+  const [totals, recent] = await Promise.all([
+    prisma.escrowPayment.groupBy({
+      by: ['currency', 'status'],
+      where: { sellerId: userId, status: { in: [...EARNED_STATUSES, ...HELD_STATUSES] } },
+      _sum: { amount: true, platformFee: true },
+    }),
+    prisma.escrowPayment.findMany({
+      where: { sellerId: userId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    }),
+  ]);
 
-  const totalEarnings = escrowPayments
-    .filter((p) => p.status === 'CAPTURED')
-    .reduce((sum, p) => sum + (p.amount - p.platformFee), 0);
+  const byCurrencyMap = new Map<string, EarningsByCurrency>();
 
-  const pendingPayouts = escrowPayments
-    .filter((p) => p.status === 'PENDING' || p.status === 'AUTHORIZED')
-    .reduce((sum, p) => sum + (p.amount - p.platformFee), 0);
+  for (const group of totals) {
+    const currency = group.currency.toUpperCase();
+    const row = byCurrencyMap.get(currency) ?? { currency, totalEarnings: 0, pendingPayouts: 0 };
+    const net = (group._sum.amount ?? 0) - (group._sum.platformFee ?? 0);
 
-  let availableBalance = 0;
+    if (EARNED_STATUSES.includes(group.status)) {
+      row.totalEarnings += net;
+    } else {
+      row.pendingPayouts += net;
+    }
+
+    byCurrencyMap.set(currency, row);
+  }
+
+  const byCurrency = [...byCurrencyMap.values()].sort(
+    (a, b) => b.totalEarnings + b.pendingPayouts - (a.totalEarnings + a.pendingPayouts)
+  );
+
+  // The currency the headline figures are in: whichever she has the most money
+  // in, and AUD for a member with no holds at all, this being a Queensland
+  // platform. `byCurrency` carries the rest so nothing is hidden by the choice.
+  const primary = byCurrency[0]?.currency ?? 'AUD';
+  const primaryTotals = byCurrencyMap.get(primary);
+
+  let availableBalance: number | null = null;
+  let balanceUnavailable = false;
 
   if (isStripeConfigured() && connectedAccountId) {
     try {
@@ -738,22 +1030,37 @@ export async function getEarningsDashboard(userId: string): Promise<{
         stripeAccount: connectedAccountId,
       });
 
-      availableBalance = balance.available.reduce(
-        (sum, b) => sum + b.amount,
-        0
-      );
+      availableBalance = balance.available
+        .filter((b) => b.currency.toUpperCase() === primary)
+        .reduce((sum, b) => sum + b.amount, 0);
     } catch (error) {
+      // Left null rather than zero. Reporting zero here told a mentor during a
+      // Stripe outage that she had no money, which is a different and much
+      // worse statement than "we could not check".
+      balanceUnavailable = true;
       logger.warn('Failed to fetch Stripe balance', { error, userId });
     }
+  } else if (connectedAccountId) {
+    // No Stripe key in this environment: there is no balance to report, and
+    // saying so is better than showing a zero the member would read as real.
+    balanceUnavailable = true;
+  } else {
+    // No connected account yet, so nothing is being held for her anywhere. That
+    // genuinely is zero.
+    availableBalance = 0;
   }
 
   return {
-    totalEarnings,
-    pendingPayouts,
+    currency: primary,
+    totalEarnings: primaryTotals?.totalEarnings ?? 0,
+    pendingPayouts: primaryTotals?.pendingPayouts ?? 0,
     availableBalance,
-    recentTransactions: escrowPayments.map((p) => ({
+    balanceUnavailable,
+    byCurrency,
+    recentTransactions: recent.map((p) => ({
       id: p.id,
       amount: p.amount - p.platformFee,
+      currency: p.currency.toUpperCase(),
       status: p.status,
       description: p.description,
       createdAt: p.createdAt,
