@@ -16,6 +16,12 @@ import { prisma } from '../utils/prisma';
 import { normalizeOptionalUserText, normalizeSafeUrl } from '../utils/contentSafety';
 import { getBlockedRelationshipIds, isBlockedRelationship } from '../utils/safety-store';
 import { assertContentAllowed } from '../services/moderation.service';
+import { deleteStoriesWithMedia } from '../services/story-expiry.service';
+// Posting a story had no ceiling of its own, so the only thing standing
+// between a script and five hundred stories on the ring was the global tier
+// limit. A story is a post to everyone who follows you, so it counts against
+// the same ceiling posts do.
+import { postLimiter } from '../middleware/socialLimits';
 
 const router = Router();
 
@@ -157,7 +163,7 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
 // Posting a story is publishing to the network, so it carries both gates.
 // Viewing one does not: a member who has not yet given her date of birth can
 // still read, she just cannot broadcast.
-router.post('/', authenticate, requireWomanMember, requireAdultAccount, async (req: AuthRequest, res, next) => {
+router.post('/', authenticate, requireWomanMember, requireAdultAccount, postLimiter, async (req: AuthRequest, res, next) => {
   try {
     const type: StoryType = normalizeStoryType(req.body?.type);
     const mediaUrl = normalizeSafeUrl(req.body?.mediaUrl, {
@@ -289,12 +295,17 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const story = await prisma.status.findUnique({
       where: { id: req.params.id },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, mediaUrl: true },
     });
     if (!story) throw new ApiError(404, 'Story not found');
     if (story.userId !== req.user!.id) throw new ApiError(403, 'Not allowed');
 
-    await prisma.status.delete({ where: { id: story.id } });
+    // Deleting the row used to be the whole of it, which left the photo at its
+    // URL for anyone who already had the link. A member pressing delete on her
+    // own story is making the strongest version of the promise the product
+    // makes, so the file goes too — unless one of her own highlights is still
+    // showing it.
+    await deleteStoriesWithMedia([{ id: story.id, mediaUrl: story.mediaUrl }]);
     res.json({ success: true });
   } catch (err) {
     next(err);

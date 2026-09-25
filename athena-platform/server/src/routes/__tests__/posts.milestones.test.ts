@@ -41,7 +41,12 @@ describe('Reach milestones', () => {
     const data = prisma.notification.create.mock.calls[0][0].data;
     expect(data).toMatchObject({ userId: 'sarah', type: 'SYSTEM', title: 'Your post reached 1,000 people', link: '/posts/p1' });
     expect(data.message).toContain('Career changer notes');
-    expect(data.message).toContain('1,000 times');
+    // 'people', not 'times': impressionCount now moves once per viewer who had
+    // not seen the post before, so the number in a congratulation is a number of
+    // people that actually happened. It used to bump on every page load,
+    // including the author's own, so 'times' was both the wrong word and a
+    // wildly inflated figure.
+    expect(data.message).toContain('seen by 1,000 people');
     expect(data.data).toEqual({ milestone: 1000, postId: 'p1', kind: 'reach' });
   });
 

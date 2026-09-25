@@ -5,22 +5,50 @@
  *   GET  /api/posts/me/insights?days=30  totals across your recent posts, and the ones that carried furthest
  *   GET  /api/posts/:id/insights         one post: impressions, reach, engagement, where it was seen, reach by day
  *
- * Impressions count every showing (Post.impressionCount); reach is the number
- * of distinct people, one PostImpression row per viewer per post. Anonymous
- * readers count once per browser through a hashed key they generate
- * themselves. Your own posts never count when you look at them.
+ * Both impressions and reach count distinct viewers: one PostImpression row
+ * per viewer per post, and Post.impressionCount moves only when such a row is
+ * new. Anonymous readers count once per browser through a hashed key.
+ *
+ * impressionCount used to be incremented once per id in every batch, while
+ * the row behind it was deduplicated. The client sends each id once per page
+ * load, so every reload and every re-navigation bumped it again: an author
+ * was shown an "impressions" number that grew with her own scrolling, her
+ * engagement rate was divided by it and came out too low, and the milestone
+ * notice told her a post had "reached 1,000 people" when a few dozen had seen
+ * it. A number the product puts in a congratulation has to be a number that
+ * happened.
  *
  * Mounted ahead of post.routes.
  */
 
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { createHash } from 'crypto';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { bestEffort } from '../utils/best-effort';
+import { createRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
+
+/**
+ * The impression endpoint needs no account, so the only thing standing
+ * between it and a script minting viewers was the global tier limit. Keyed by
+ * address rather than by member, because the abuse is one caller pretending
+ * to be many browsers, and set far above what a real reader's page loads
+ * produce.
+ */
+const impressionLimiter = createRateLimiter({
+  max: 240,
+  windowMs: 10 * 60 * 1000,
+  skip: () => process.env.NODE_ENV === 'test' || !process.env.REDIS_URL,
+  keyGenerator: (req: Request) => `post:impressions:${(req as AuthRequest).user?.id || req.ip}`,
+  handler: (_req, res) => {
+    // Nothing the reader did is wrong and nothing on screen depends on the
+    // answer, so this is quiet: the batch is dropped, not reported.
+    res.status(204).end();
+  },
+});
 
 const SOURCES = new Set(['feed', 'home', 'profile', 'post', 'saved', 'search', 'topic']);
 const MAX_BATCH = 50;
@@ -30,10 +58,20 @@ function isId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
-/** A browser's own random key, hashed so the raw value is never stored. */
-function anonymousKey(anonId: unknown): string | null {
+/**
+ * A browser's own random key, hashed so the raw value is never stored.
+ *
+ * The caller's address is hashed in with it. The key alone comes from the
+ * browser and can be regenerated at will, so on its own it let one script
+ * present itself as a thousand separate readers and walk any post to a reach
+ * milestone. Neither input is recoverable from the twenty-four hex characters
+ * that get stored, and the row already existed; what changes is that minting
+ * a new viewer now takes a new address as well as a new key.
+ */
+function anonymousKey(anonId: unknown, ip: string | undefined): string | null {
   if (typeof anonId !== 'string' || anonId.length < 8 || anonId.length > 64) return null;
-  return `anon:${createHash('sha256').update(anonId).digest('hex').slice(0, 24)}`;
+  const digest = createHash('sha256').update(`${anonId}|${ip ?? ''}`).digest('hex').slice(0, 24);
+  return `anon:${digest}`;
 }
 
 function dayKey(date: Date): string {
@@ -52,8 +90,9 @@ function rate(engagements: number, impressions: number): number {
 }
 
 /**
- * Reach milestones. Each batch adds exactly one impression per post, so a
- * count that now equals a milestone has just crossed it. One notification
+ * Reach milestones. impressionCount now moves one at a time and only for a
+ * viewer who had not seen the post before, so a count that equals a milestone
+ * has just crossed it and the number is genuinely people. One notification
  * per milestone, pointing at the post's insights.
  */
 export const REACH_MILESTONES = [100, 1000, 10000, 100000];
@@ -79,8 +118,8 @@ export async function announceMilestones(postIds: string[]): Promise<void> {
           type: 'SYSTEM',
           title: `Your post reached ${post.impressionCount.toLocaleString('en-AU')} people`,
           message: excerpt
-            ? `"${excerpt}${post.content.trim().length > 60 ? '…' : ''}" has been seen ${post.impressionCount.toLocaleString('en-AU')} times. Open its insights to see who it reached.`
-            : `One of your posts has been seen ${post.impressionCount.toLocaleString('en-AU')} times. Open its insights to see who it reached.`,
+            ? `"${excerpt}${post.content.trim().length > 60 ? '…' : ''}" has been seen by ${post.impressionCount.toLocaleString('en-AU')} people. Open its insights to see where it travelled.`
+            : `One of your posts has been seen by ${post.impressionCount.toLocaleString('en-AU')} people. Open its insights to see where it travelled.`,
           link: `/posts/${post.id}`,
           data: { milestone: post.impressionCount, postId: post.id, kind: 'reach' },
         },
@@ -89,13 +128,13 @@ export async function announceMilestones(postIds: string[]): Promise<void> {
   });
 }
 
-router.post('/impressions', optionalAuth, async (req: AuthRequest, res, next) => {
+router.post('/impressions', optionalAuth, impressionLimiter, async (req: AuthRequest, res, next) => {
   try {
     const ids = Array.isArray(req.body?.ids)
       ? Array.from(new Set((req.body.ids as unknown[]).filter(isId))).slice(0, MAX_BATCH)
       : [];
     const source = SOURCES.has(req.body?.source) ? String(req.body.source) : null;
-    const viewerKey = req.user ? req.user.id : anonymousKey(req.body?.anonId);
+    const viewerKey = req.user ? req.user.id : anonymousKey(req.body?.anonId, req.ip);
 
     if (ids.length === 0 || !viewerKey) {
       res.status(204).end();
@@ -116,16 +155,41 @@ router.post('/impressions', optionalAuth, async (req: AuthRequest, res, next) =>
       return;
     }
 
-    await prisma.postImpression.createMany({
-      data: postIds.map((postId) => ({ postId, viewerKey, userId: req.user?.id ?? null, source })),
-      skipDuplicates: true,
-    });
-    await prisma.post.updateMany({ where: { id: { in: postIds } }, data: { impressionCount: { increment: 1 } } });
+    // Which of these this viewer has already been counted for. The unique on
+    // (postId, viewerKey) means createMany below silently drops those, and the
+    // counter has to drop them with it — incrementing for the whole batch
+    // regardless was the bug this file's header describes.
+    const alreadySeen = new Set(
+      (
+        await prisma.postImpression.findMany({
+          where: { postId: { in: postIds }, viewerKey },
+          select: { postId: true },
+        })
+      ).map((row) => row.postId)
+    );
+    const freshIds = postIds.filter((postId) => !alreadySeen.has(postId));
+
+    if (freshIds.length > 0) {
+      await prisma.postImpression.createMany({
+        data: freshIds.map((postId) => ({ postId, viewerKey, userId: req.user?.id ?? null, source })),
+        skipDuplicates: true,
+      });
+      // Two tabs of the same browser reporting the same post in the same
+      // instant can both read "not seen" and both increment, while the unique
+      // constraint keeps one row. That leaves the counter one ahead of reach
+      // for that post, which is a rounding error rather than the unbounded
+      // drift it replaces; closing it properly wants the counter derived from
+      // the rows rather than kept beside them.
+      await prisma.post.updateMany({
+        where: { id: { in: freshIds } },
+        data: { impressionCount: { increment: 1 } },
+      });
+    }
 
     res.status(204).end();
 
     // After answering: a post that just crossed a round number tells its author.
-    void announceMilestones(postIds);
+    if (freshIds.length > 0) void announceMilestones(freshIds);
   } catch (error) {
     next(error);
   }
