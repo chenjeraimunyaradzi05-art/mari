@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
@@ -91,12 +92,19 @@ function recommendedStudyModesFromSignals(remotePreference: unknown): string[] {
   return ['online', 'part-time', 'full-time'];
 }
 
+// Words that say nothing about what a course is for. "Analytics and insights"
+// used to yield "and" as a keyword, which matched half the catalogue and, once
+// the candidate pool is chosen by keyword, would fill it with noise.
+const KEYWORD_STOPWORDS = new Set([
+  'and', 'the', 'for', 'with', 'from', 'into', 'your', 'you', 'our', 'are', 'was', 'has', 'have', 'not', 'but', 'all', 'who', 'how', 'what',
+]);
+
 function extractKeywords(raw: Array<string | null | undefined>, limit = 12): string[] {
   const joined = raw.filter(Boolean).join(' ').toLowerCase();
   const tokens = joined
     .split(/[^a-z0-9+.#]+/g)
     .map((t) => t.trim())
-    .filter((t) => t.length >= 3);
+    .filter((t) => t.length >= 3 && !KEYWORD_STOPWORDS.has(t));
 
   const deduped: string[] = [];
   for (const t of tokens) {
@@ -106,12 +114,26 @@ function extractKeywords(raw: Array<string | null | undefined>, limit = 12): str
   return deduped;
 }
 
+/**
+ * A keyword counts when it appears as a word, not as a run of letters inside
+ * one. Plain substring matching scored "art" in "start" and "smart", "sale" in
+ * "wholesale" and "ease" in "disease", so a painter's profile pushed a
+ * business-launch course up her list for a reason nobody could see. The word
+ * boundary is anything that is not a letter, digit or one of the characters
+ * extractKeywords keeps (so "c++" and ".net" still match as themselves), and a
+ * plural still counts for its singular.
+ */
+function containsWord(hay: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9+.#])${escaped}s?($|[^a-z0-9+#])`).test(hay);
+}
+
 function keywordScore(text: string, keywords: string[], weight: number): number {
   if (!text || keywords.length === 0) return 0;
   const hay = text.toLowerCase();
   let score = 0;
   for (const k of keywords) {
-    if (hay.includes(k)) score += weight;
+    if (containsWord(hay, k)) score += weight;
   }
   return score;
 }
@@ -197,6 +219,20 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
 // ===========================================
 
 /**
+ * Who issued a course certificate, named the same way everywhere it is shown.
+ *
+ * The public verification page named the provider organisation first, while
+ * the learner's own wallet only ever looked at the free-text providerName and
+ * fell back to "ATHENA". Every course built in the provider's builder has an
+ * organisation and no providerName, so the same certificate told an employer
+ * it came from the provider and told the woman who earned it that ATHENA had
+ * issued it. One function, used by both, so they cannot drift apart again.
+ */
+function certificateIssuer(course: { providerName: string | null; organization: { name: string } | null }): string {
+  return course.organization?.name ?? course.providerName ?? 'ATHENA';
+}
+
+/**
  * GET /api/courses/me/certificates
  * The certificates the signed-in learner has earned, newest first, each with
  * the code an employer can check at /certificates/:code.
@@ -205,12 +241,30 @@ router.get('/me/certificates', authenticate, async (req: AuthRequest, res, next)
   try {
     const certificates = await prisma.courseCertificate.findMany({
       where: { userId: req.user!.id },
-      include: { course: { select: { id: true, title: true, slug: true, providerName: true, type: true, durationMonths: true } } },
+      include: {
+        course: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            providerName: true,
+            type: true,
+            durationMonths: true,
+            organization: { select: { name: true } },
+          },
+        },
+      },
       orderBy: { issuedAt: 'desc' },
     });
     res.json({
       success: true,
-      data: certificates.map((c) => ({ id: c.id, code: c.code, issuedAt: c.issuedAt, course: c.course })),
+      data: certificates.map((c) => ({
+        id: c.id,
+        code: c.code,
+        issuedAt: c.issuedAt,
+        course: c.course,
+        provider: certificateIssuer(c.course),
+      })),
     });
   } catch (error) {
     next(error);
@@ -307,6 +361,40 @@ router.get('/', async (req, res, next) => {
 });
 
 // ===========================================
+// CATALOGUE TOTALS
+// ===========================================
+//
+// The learning hub prints four tiles across the top: courses, providers,
+// listings with a reported outcome, and free courses. Only the first ever came
+// from the server; the other three were counted from whichever twenty courses
+// happened to be on the page, and sat beside a real total as though they were
+// totals too — "3 providers" on a catalogue with forty. These are the whole
+// published catalogue, counted where the rows are.
+router.get('/stats', async (_req, res, next) => {
+  try {
+    const live: Prisma.CourseWhereInput = { isActive: true };
+    const [courses, free, withOutcomes, organisations, namedProviders] = await Promise.all([
+      prisma.course.count({ where: live }),
+      prisma.course.count({ where: { ...live, cost: 0 } }),
+      prisma.course.count({
+        where: { ...live, OR: [{ employmentRate: { not: null } }, { avgStartingSalary: { not: null } }] },
+      }),
+      prisma.course.groupBy({ by: ['organizationId'], where: { ...live, organizationId: { not: null } } }),
+      // A course with no organisation names its provider in free text; each
+      // distinct name is one provider. A course with neither has no provider
+      // to count.
+      prisma.course.groupBy({ by: ['providerName'], where: { ...live, organizationId: null, providerName: { not: null } } }),
+    ]);
+    res.json({
+      success: true,
+      data: { courses, providers: organisations.length + namedProviders.length, withOutcomes, free },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
 // GET RECOMMENDED COURSES
 // ===========================================
 router.get('/recommendations/for-me', optionalAuth, async (req: AuthRequest, res, next) => {
@@ -391,44 +479,61 @@ router.get('/recommendations/for-me', optionalAuth, async (req: AuthRequest, res
       ...(userSkills || []).map((s) => s.skill?.name ?? null),
     ]);
 
-    const candidates = await prisma.course.findMany({
-      where: {
-        isActive: true,
-        ...(enrolledIds.length > 0 ? { id: { notIn: enrolledIds } } : {}),
-      },
-      include: {
-        organization: {
-          select: {
-            id: true,
-            name: true,
-            logo: true,
-          },
-        },
-      },
-      // Same reason as the anonymous branch: employmentRate is null across the
-      // catalogue and Postgres would put those nulls at the front, so the
-      // fifty-row pool the scorer ranks was being chosen arbitrarily. Nulls
-      // last means the pool is the courses with a reported outcome plus the
-      // newest of the rest, which is a defensible fifty.
-      orderBy: [{ employmentRate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
-      take: 50,
-    });
+    const baseWhere: Prisma.CourseWhereInput = {
+      isActive: true,
+      ...(enrolledIds.length > 0 ? { id: { notIn: enrolledIds } } : {}),
+    };
+    const organizationSelect = { organization: { select: { id: true, name: true, logo: true } } } as const;
+
+    // The scorer can only rank what it is handed, and it used to be handed
+    // the fifty newest courses and nothing else. employmentRate is null on
+    // every course (no screen writes it), so the "reported outcome first"
+    // ordering below does nothing in practice, and a course whose title is
+    // exactly her job — but which was listed before the latest fifty — never
+    // reached the scorer at all. The pool is now two halves: the courses the
+    // database can already tell are relevant to her (a type her persona
+    // prefers, or one of her own words in the title), and the newest of the
+    // rest so there is always something to rank. The scorer then decides.
+    const relevanceClauses: Prisma.CourseWhereInput[] = [
+      ...(preferredTypes.length > 0 ? [{ type: { in: preferredTypes } }] : []),
+      ...keywords.slice(0, 8).map((k) => ({ title: { contains: k, mode: 'insensitive' as const } })),
+    ];
+    const [relevant, newest] = await Promise.all([
+      relevanceClauses.length > 0
+        ? prisma.course.findMany({
+            where: { AND: [baseWhere, { OR: relevanceClauses }] },
+            include: organizationSelect,
+            orderBy: [{ enrollments: { _count: 'desc' } }, { createdAt: 'desc' }],
+            take: 150,
+          })
+        : Promise.resolve([]),
+      prisma.course.findMany({
+        where: baseWhere,
+        include: organizationSelect,
+        // Nulls last, because Postgres would otherwise put every course with no
+        // reported outcome at the front on a DESC order.
+        orderBy: [{ employmentRate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        take: 50,
+      }),
+    ]);
+    const seen = new Set<string>();
+    const candidates = [...relevant, ...newest].filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
 
     const ranked = candidates
       .map((c) => {
-        const studyModes = normalizeStudyModes((c as any).studyMode);
-        const type = normalizeCourseType((c as any).type);
+        const studyModes = normalizeStudyModes(c.studyMode);
+        const type = normalizeCourseType(c.type);
         return {
           course: c,
           score: scoreCourse({
-            courseEmploymentRate: (c as any).employmentRate ?? null,
+            courseEmploymentRate: c.employmentRate ?? null,
             courseType: type,
             courseStudyModes: studyModes,
             preferredTypes,
             preferredStudyModes,
             keywords,
-            title: String((c as any).title ?? ''),
-            description: String((c as any).description ?? ''),
+            title: String(c.title ?? ''),
+            description: String(c.description ?? ''),
           }),
         };
       })
@@ -499,6 +604,9 @@ router.post('/:courseId/enroll', authenticate, async (req: AuthRequest, res, nex
 // once every lesson is done.
 
 const LESSON_TYPES = ['VIDEO', 'ARTICLE', 'RESOURCE'];
+// A day. Nobody sits a single lesson longer than that, and anything larger is
+// a typo (minutes entered as seconds) rather than a real length.
+const LESSON_MAX_MINUTES = 24 * 60;
 
 const curriculumInclude = {
   modules: {
@@ -524,8 +632,13 @@ function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'course';
 }
 
+// Paths this router answers before GET /:slug, so a course whose title
+// slugified to one of them could never be opened by its slug.
+const RESERVED_SLUGS = new Set(['me', 'stats', 'recommendations', 'certificates', 'by-organization']);
+
 async function uniqueSlug(title: string): Promise<string> {
-  const base = slugify(title);
+  const slugged = slugify(title);
+  const base = RESERVED_SLUGS.has(slugged) ? `${slugged}-course` : slugged;
   let slug = base;
   for (let i = 2; await prisma.course.findUnique({ where: { slug }, select: { id: true } }); i += 1) {
     slug = `${base}-${i}`;
@@ -549,7 +662,7 @@ async function assertOrganizationMember(organizationId: string, user: { id: stri
 }
 
 async function assertCourseEditor(courseId: string, user: { id: string; role: string }) {
-  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { id: true, organizationId: true, title: true } });
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { id: true, organizationId: true, title: true, isActive: true } });
   if (!course) {
     throw new ApiError(404, 'Course not found');
   }
@@ -594,12 +707,51 @@ function pickLessonFields(bodyIn: Record<string, unknown>) {
         : null;
     }
   }
+  // A lesson's length went through a bare Number(), so "twelve" or "12 mins"
+  // became NaN and reached Prisma as a 500 the provider could do nothing
+  // with, and 12.5 failed the same way against an Int column. It is a whole
+  // number of minutes a person could sit through in one go, or nothing.
   if (bodyIn.durationMinutes !== undefined) {
-    data.durationMinutes = bodyIn.durationMinutes === null || bodyIn.durationMinutes === '' ? null : Number(bodyIn.durationMinutes);
+    const raw = bodyIn.durationMinutes;
+    if (raw === null || raw === '') {
+      data.durationMinutes = null;
+    } else {
+      const minutes = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
+      if (!Number.isInteger(minutes) || minutes < 0 || minutes > LESSON_MAX_MINUTES) {
+        throw new ApiError(400, `durationMinutes must be a whole number of minutes, up to ${LESSON_MAX_MINUTES}`);
+      }
+      data.durationMinutes = minutes;
+    }
   }
   if (typeof bodyIn.isPreview === 'boolean') data.isPreview = bodyIn.isPreview;
-  if (typeof bodyIn.position === 'number') data.position = bodyIn.position;
+  if (typeof bodyIn.position === 'number') {
+    if (!Number.isInteger(bodyIn.position) || bodyIn.position < 0) {
+      throw new ApiError(400, 'position must be a whole number from 0');
+    }
+    data.position = bodyIn.position;
+  }
   return data;
+}
+
+/**
+ * A published course has to keep at least one lesson.
+ *
+ * The rule that a course needs a lesson before it goes into the catalogue was
+ * enforced on the PATCH that publishes it and nowhere else, so a provider
+ * could publish with one lesson and then delete that lesson, or the module
+ * holding it, and the course stayed live with nothing in it. A learner could
+ * then enrol in an empty course and hold a nought-lesson enrolment — the exact
+ * state the publish gate exists to prevent. `removing` is the number of
+ * lessons the caller is about to delete; if that is all of them and the
+ * course is live, she has to unpublish first, which is one click in the
+ * builder and says what she means.
+ */
+async function assertKeepsALesson(course: { id: string; isActive: boolean }, removing: number) {
+  if (!course.isActive || removing === 0) return;
+  const total = await prisma.courseLesson.count({ where: { module: { courseId: course.id } } });
+  if (total - removing <= 0) {
+    throw new ApiError(409, 'This is the last lesson in a published course. Unpublish the course before removing it.');
+  }
 }
 
 // GET /api/courses/certificates/:code - Anyone can check that a certificate is real
@@ -624,7 +776,7 @@ router.get('/certificates/:code', async (req, res, next) => {
           id: certificate.course.id,
           title: certificate.course.title,
           slug: certificate.course.slug,
-          provider: certificate.course.organization?.name ?? certificate.course.providerName ?? 'ATHENA',
+          provider: certificateIssuer(certificate.course),
         },
         learner:
           certificate.user.displayName?.trim() ||
@@ -789,6 +941,31 @@ router.patch(
         data.intakeDates = b.intakeDates.map((d) => new Date(String(d)).toISOString());
       }
 
+      // A certificate does not carry its own copy of the course it was issued
+      // for: the public check at /certificates/:code reads the course's title
+      // and provider name live. So renaming a course after certificates had
+      // been issued rewrote every one of them — a woman who earned "Bookkeeping
+      // Foundations" could have an employer check her code and read "Advanced
+      // Financial Management", on a page that says ATHENA vouches for it.
+      // Until each certificate stores what it was issued for, the name on it
+      // is the name the course had when it was earned, and it stays that way.
+      if (data.title !== undefined || data.providerName !== undefined) {
+        const current = await prisma.course.findUnique({
+          where: { id: req.params.courseId },
+          select: { title: true, providerName: true, _count: { select: { certificates: true } } },
+        });
+        const renaming =
+          (data.title !== undefined && data.title !== current?.title) ||
+          (data.providerName !== undefined && data.providerName !== (current?.providerName ?? null));
+        const issued = current?._count?.certificates ?? 0;
+        if (renaming && issued > 0) {
+          throw new ApiError(
+            409,
+            `${issued} ${issued === 1 ? 'certificate has' : 'certificates have'} been issued under this course's current title and provider name, and ${issued === 1 ? 'it shows' : 'they show'} whatever the course is called. They cannot be changed now without changing what those certificates say.`
+          );
+        }
+      }
+
       if (typeof b.isActive === 'boolean') {
         if (b.isActive) {
           const lessons = await prisma.courseLesson.count({ where: { module: { courseId: req.params.courseId } } });
@@ -875,8 +1052,10 @@ router.patch('/:courseId/modules/:moduleId', authenticate, async (req: AuthReque
 router.delete('/:courseId/modules/:moduleId', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { courseId, moduleId } = req.params;
-    await assertCourseEditor(courseId, req.user!);
+    const course = await assertCourseEditor(courseId, req.user!);
     await loadModuleOf(courseId, moduleId);
+    // Deleting a module deletes its lessons with it (the relation cascades).
+    await assertKeepsALesson(course, await prisma.courseLesson.count({ where: { moduleId } }));
     await prisma.courseModule.delete({ where: { id: moduleId } });
     res.json({ success: true });
   } catch (error) {
@@ -931,8 +1110,9 @@ router.patch('/:courseId/lessons/:lessonId', authenticate, async (req: AuthReque
 router.delete('/:courseId/lessons/:lessonId', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { courseId, lessonId } = req.params;
-    await assertCourseEditor(courseId, req.user!);
+    const course = await assertCourseEditor(courseId, req.user!);
     await loadLessonOf(courseId, lessonId);
+    await assertKeepsALesson(course, 1);
     await prisma.courseLesson.delete({ where: { id: lessonId } });
     res.json({ success: true });
   } catch (error) {
@@ -1039,8 +1219,23 @@ router.get('/:slug', optionalAuth, async (req: AuthRequest, res, next) => {
       const row = await prisma.courseEnrollment.findUnique({ where: { userId_courseId: { userId: viewer.id, courseId: course.id } }, select: { id: true, progress: true } });
       enrollment = row ?? null;
       canEdit = course.organizationId ? await isOrganizationMember(course.organizationId, viewer) : viewer.role === 'ADMIN';
-      if (enrollment) progress = await progressFor(course.id, viewer.id);
     }
+
+    // A draft is the provider's own working copy, not a listing. This route
+    // used to serve any course to anyone who had its slug, published or not,
+    // and slugs are the title run through slugify — so a draft's description,
+    // its fee and every module and lesson title were one guessable URL away
+    // from an anonymous caller before the provider had decided to publish
+    // anything. An unpublished course is answered only for the people who
+    // already have a reason to see it: the provider's team (and staff), and a
+    // learner who enrolled while it was live and is still working through it.
+    // Everyone else is told it does not exist, which is what the catalogue
+    // says too.
+    if (!course.isActive && !canEdit && !enrollment) {
+      throw new ApiError(404, 'Course not found');
+    }
+
+    if (viewer && enrollment) progress = await progressFor(course.id, viewer.id);
     const modules = withLockedContent(course.modules ?? [], Boolean(enrollment) || canEdit);
 
     res.json({

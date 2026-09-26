@@ -20,6 +20,7 @@
 
 import { Router, Response, NextFunction, RequestHandler } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
@@ -308,6 +309,27 @@ router.patch('/accelerator/cohorts/:id', ...adminOnly, async (req: AuthRequest, 
         );
       }
 
+      // The places end with the cohort. Every enrolment used to stay ACTIVE (or
+      // PENDING) after a cancellation, which left three things open that should
+      // have closed: a paid founder could keep ticking weeks off, and once the
+      // end date passed the progress route made her COMPLETED and the public
+      // certificate said "the cohort ran to" a date for a cohort that never
+      // ran; an unpaid place still counted against a seat; and her dashboard
+      // still showed an active place. DROPPED is the enrolment's own word for a
+      // place that has ended without completion. The payment status is left
+      // exactly as it is — PAID here means money we owe back, and it only
+      // becomes REFUNDED when staff record that it has been returned.
+      //
+      // Completions are not touched. A cohort that genuinely ran and was then
+      // set to CANCELLED by mistake gets its certificates back when staff set
+      // it back; they are hidden, not destroyed, while it reads CANCELLED.
+      if (affected.length > 0) {
+        await prisma.acceleratorEnrollment.updateMany({
+          where: { cohortId: cohort.id, status: { in: ['PENDING', 'ACTIVE'] } },
+          data: { status: 'DROPPED' },
+        });
+      }
+
       const owedRefunds = affected.filter((e) => e.paymentStatus === 'PAID');
       if (owedRefunds.length > 0) {
         logger.warn('Accelerator cohort cancelled with paid enrolments awaiting refund', {
@@ -376,6 +398,145 @@ router.delete('/accelerator/cohorts/:id', ...adminOnly, async (req: AuthRequest,
     });
 
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ------------------------------------------------------------- enrolments
+//
+// Nothing on the server except the founder's own routes and the payment
+// service ever wrote an AcceleratorEnrollment, so staff could not see who was
+// in a cohort, could not free a seat held by someone who clicked "Enrol" and
+// never paid (the enrol route counts every row against the cap, so thirty
+// unpaid clicks closed a thirty-seat cohort for good), could not take back a
+// completion certificate that should not have been issued, and could not
+// record that a cancelled cohort's fee had been returned. These are those
+// four things. Each tells the founder what happened, and each is audited.
+
+router.get('/accelerator/cohorts/:id/enrollments', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const cohort = await prisma.acceleratorCohort.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, name: true, status: true, maxParticipants: true },
+    });
+    if (!cohort) throw new ApiError(404, 'Cohort not found');
+    const enrollments = await prisma.acceleratorEnrollment.findMany({
+      where: { cohortId: cohort.id },
+      select: {
+        id: true,
+        status: true,
+        paymentStatus: true,
+        paymentId: true,
+        completedWeeks: true,
+        enrolledAt: true,
+        completedAt: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+      orderBy: { enrolledAt: 'asc' },
+      take: 1000,
+    });
+    res.json({ success: true, data: { cohort, enrollments } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const ENROLLMENT_ACTIONS = ['release', 'revoke', 'record_refund'] as const;
+const enrollmentActionSchema = z.object({
+  action: z.enum(ENROLLMENT_ACTIONS),
+  // Said to the founder, and kept in the audit record, so it has to be real.
+  reason: z.string().trim().min(3).max(500),
+  // How the money went back: a Stripe refund id, a bank transfer reference.
+  reference: optionalText(200),
+});
+
+router.patch('/accelerator/enrollments/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const data = parseBody(enrollmentActionSchema, req.body);
+    const enrollment = await prisma.acceleratorEnrollment.findUnique({
+      where: { id: req.params.id },
+      include: { cohort: { select: { id: true, name: true } } },
+    });
+    if (!enrollment) throw new ApiError(404, 'Enrolment not found');
+    const cohortName = enrollment.cohort.name;
+    const completed = enrollment.status === 'COMPLETED' || enrollment.status === 'GRADUATED';
+
+    let result: unknown = null;
+    let line: string;
+    let link = '/dashboard/accelerator';
+
+    if (data.action === 'release') {
+      // An unpaid place, given back so someone else can have the seat. Deleted
+      // rather than marked, because the enrol route counts every row against
+      // the cap; a paid or completed place is a record of her money or her
+      // work and is never released this way.
+      if (enrollment.paymentStatus === 'PAID' || completed) {
+        throw new ApiError(409, 'Only an unpaid place can be released. A paid place needs its payment returned first.');
+      }
+      await prisma.acceleratorEnrollment.delete({ where: { id: enrollment.id } });
+      line = `Your unpaid place in the ${cohortName} accelerator cohort has been released so someone else can take it. You have not been charged. ${data.reason}`;
+    } else if (data.action === 'revoke') {
+      // A completion that should not stand. DROPPED, because the progress route
+      // would otherwise mark her COMPLETED again the next time she ticked a
+      // week of a cohort that has ended; the public certificate goes with it.
+      if (!completed) {
+        throw new ApiError(409, 'Only a completed place has a certificate to revoke.');
+      }
+      result = await prisma.acceleratorEnrollment.update({
+        where: { id: enrollment.id },
+        data: { status: 'DROPPED', completedAt: null },
+      });
+      line = `Your certificate of completion for the ${cohortName} accelerator cohort has been withdrawn. ${data.reason}`;
+      link = `/dashboard/accelerator/${enrollment.id}`;
+    } else {
+      // Staff returned the fee by hand — there is no refund path on the
+      // platform — and this is where they say so. A reference is required,
+      // because "refunded" with nothing to trace it by is not a record.
+      if (enrollment.paymentStatus !== 'PAID') {
+        throw new ApiError(409, 'Only a paid place can have a refund recorded against it.');
+      }
+      if (!data.reference) {
+        throw new ApiError(400, 'reference: say how the money was returned, such as the Stripe refund id or the bank transfer reference');
+      }
+      result = await prisma.acceleratorEnrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          paymentStatus: 'REFUNDED',
+          // A refund ends a place that had not been completed. A completed
+          // place keeps its completion; a goodwill refund does not undo work.
+          ...(completed ? {} : { status: 'DROPPED' as const }),
+        },
+      });
+      line = `ATHENA has returned your payment for the ${cohortName} accelerator cohort (reference ${data.reference}). ${data.reason}`;
+    }
+
+    await bestEffort(`accelerator enrolment ${enrollment.id} ${data.action} notice to ${enrollment.userId}`, () =>
+      tellMember(enrollment.userId, `An update on your ${cohortName} accelerator place`, line, link)
+    );
+
+    logger.info('Accelerator enrolment changed by staff', {
+      enrollmentId: enrollment.id,
+      cohortId: enrollment.cohortId,
+      action: data.action,
+      by: req.user!.id,
+    });
+
+    // There is no enrolment action in the audit vocabulary yet, so this is
+    // recorded as the change to the cohort's roster it is, with the enrolment
+    // and the member named.
+    await recordAdminAction(req, 'ACCELERATOR_COHORT_UPDATED', {
+      resourceType: 'AcceleratorEnrollment',
+      resourceId: enrollment.id,
+      targetUserId: enrollment.userId,
+      cohortId: enrollment.cohortId,
+      change: `ENROLLMENT_${data.action.toUpperCase()}`,
+      previousStatus: enrollment.status,
+      previousPaymentStatus: enrollment.paymentStatus,
+      ...(data.reference ? { reference: data.reference } : {}),
+    });
+
+    res.json({ success: true, data: result ?? { id: enrollment.id, released: true } });
   } catch (error) {
     next(error);
   }
@@ -940,6 +1101,80 @@ router.delete('/insurance/products/:id', ...adminOnly, async (req: AuthRequest, 
     });
 
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// COURSES
+// ============================================================================
+//
+// A provider's course listing prints its fee and, where she gives them, an
+// employment rate and a starting salary, on a page with ATHENA's name on it.
+// Staff had no way to see those listings as a whole: GET /api/courses returns
+// only what is published, and the drafts list needs an organisation id, so the
+// only way to look at a listing was to already know it was there. This is the
+// whole catalogue, drafts included, newest first, with the numbers a reviewer
+// needs to decide whether a listing stays up. Taking one down is the existing
+// PATCH /api/courses/:id with `isActive: false`, which staff may already make
+// on any course.
+
+const courseListQuery = z.object({
+  status: z.enum(['live', 'draft', 'all']).optional(),
+  search: z.string().trim().max(120).optional(),
+  organizationId: z.string().trim().max(64).optional(),
+  page: z.coerce.number().int().min(1).max(10_000).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+router.get('/courses', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = parseBody(courseListQuery, req.query);
+    const page = q.page ?? 1;
+    const limit = q.limit ?? 50;
+    const where: Prisma.CourseWhereInput = {
+      ...(q.status === 'live' ? { isActive: true } : q.status === 'draft' ? { isActive: false } : {}),
+      ...(q.organizationId ? { organizationId: q.organizationId } : {}),
+      ...(q.search
+        ? {
+            OR: [
+              { title: { contains: q.search, mode: 'insensitive' } },
+              { providerName: { contains: q.search, mode: 'insensitive' } },
+              { organization: { name: { contains: q.search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+    const [courses, total] = await Promise.all([
+      prisma.course.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          type: true,
+          isActive: true,
+          cost: true,
+          employmentRate: true,
+          avgStartingSalary: true,
+          providerName: true,
+          createdAt: true,
+          updatedAt: true,
+          organization: { select: { id: true, name: true, isVerified: true } },
+          _count: { select: { enrollments: true, certificates: true, modules: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.course.count({ where }),
+    ]);
+    res.json({
+      success: true,
+      data: courses,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
     next(error);
   }

@@ -11,7 +11,9 @@ import {
   ChevronDown,
   TrendingUp,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useCourses } from '@/lib/hooks';
+import { api } from '@/lib/api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { CardSkeleton } from '@/components/ui/loading';
 
@@ -31,8 +33,9 @@ type CourseSummary = {
   cost?: number | null;
   employmentRate?: number | null;
   avgStartingSalary?: number | null;
-  featured?: boolean;
 };
+
+type CatalogueStats = { courses: number; providers: number; withOutcomes: number; free: number };
 
 const courseTypes = [
   { value: '', label: 'All Types' },
@@ -126,23 +129,32 @@ export default function LearnPage() {
     setPage(1);
   }, [searchQuery, selectedType, selectedStudyMode]);
 
-  const { data, isLoading } = useCourses({
+  const { data, isLoading, isError, refetch } = useCourses({
     page,
     search: searchQuery,
     type: selectedType || undefined,
     studyMode: selectedStudyMode || undefined,
   });
 
+  // The four tiles are the whole published catalogue, counted by the server.
+  // Three of them used to be counted from whichever twenty courses were on
+  // the current page, and sat next to a real total as though they were
+  // totals too. There was also a "Featured Courses" block keyed on a
+  // `featured` flag no course has and the API never sends, so it could not
+  // render; it has gone rather than wait for a column nobody plans to add.
+  const stats = useQuery({
+    queryKey: ['course-catalogue-stats'],
+    queryFn: () => api.get('/courses/stats'),
+    select: (response) => response.data.data as CatalogueStats,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const courses = (data?.courses || []) as CourseSummary[];
-  const featuredCourses = courses.filter((course) => course.featured).slice(0, 3);
   const totalPages = data?.totalPages ?? 0;
-  const providerCount = new Set(courses.map(providerNameFor).filter((name) => name !== 'Provider not listed')).size;
-  const outcomeCount = courses.filter(
-    (course) =>
-      typeof course.employmentRate === 'number' ||
-      typeof course.avgStartingSalary === 'number'
-  ).length;
-  const freeCourseCount = courses.filter((course) => course.cost === 0).length;
+  const filtersOn = Boolean(searchQuery || selectedType || selectedStudyMode);
+  // A tile whose number did not load shows a dash, not a nought: nought is a
+  // claim about the catalogue and a dash is a claim about the request.
+  const tile = (value: number | undefined) => (stats.isLoading ? '…' : stats.isError || value === undefined ? '–' : value);
 
   return (
     <div className="p-6 space-y-6">
@@ -184,7 +196,7 @@ export default function LearnPage() {
               <BookOpen className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{data?.totalCourses || 0}</p>
+              <p className="text-2xl font-bold">{tile(stats.data?.courses)}</p>
               <p className="text-sm text-white/80">Courses</p>
             </div>
           </div>
@@ -195,7 +207,7 @@ export default function LearnPage() {
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{providerCount}</p>
+              <p className="text-2xl font-bold">{tile(stats.data?.providers)}</p>
               <p className="text-sm text-white/80">Providers</p>
             </div>
           </div>
@@ -206,7 +218,7 @@ export default function LearnPage() {
               <Award className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{outcomeCount}</p>
+              <p className="text-2xl font-bold">{tile(stats.data?.withOutcomes)}</p>
               <p className="text-sm text-white/80">Outcome Listings</p>
             </div>
           </div>
@@ -217,53 +229,12 @@ export default function LearnPage() {
               <TrendingUp className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{freeCourseCount}</p>
+              <p className="text-2xl font-bold">{tile(stats.data?.free)}</p>
               <p className="text-sm text-white/80">Free Courses</p>
             </div>
           </div>
         </div>
       </div>
-
-      {featuredCourses.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Featured Courses
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {featuredCourses.map((course) => (
-              <Link
-                key={course.id}
-                href={`/dashboard/learn/${course.id}`}
-                className="card group hover:shadow-lg transition-all overflow-hidden"
-              >
-                <div className="relative h-40 -mx-6 -mt-6 mb-4 overflow-hidden">
-                  <CourseArtwork course={course} />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                  <div className="absolute bottom-3 left-3 right-3">
-                    <span className="px-2 py-1 text-xs font-medium bg-primary-500 text-white rounded-full">
-                      Featured
-                    </span>
-                  </div>
-                </div>
-                <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-primary-600 transition mb-2">
-                  {course.title}
-                </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 mb-3">
-                  {course.description || 'No description provided.'}
-                </p>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-500 dark:text-slate-400">
-                    {providerNameFor(course)}
-                  </span>
-                  <span className="font-semibold text-primary-600">
-                    {costLabelFor(course)}
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
@@ -318,6 +289,19 @@ export default function LearnPage() {
             <CardSkeleton />
             <CardSkeleton />
           </>
+        ) : isError ? (
+          <div className="col-span-full card text-center py-12" role="alert">
+            <BookOpen className="w-12 h-12 mx-auto text-slate-400 mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+              The catalogue did not load
+            </h3>
+            <p className="text-slate-500 dark:text-slate-400 mb-4">
+              This is a problem on our side or with the connection, not an empty catalogue.
+            </p>
+            <button type="button" onClick={() => refetch()} className="btn-outline px-4 py-2">
+              Try again
+            </button>
+          </div>
         ) : courses.length ? (
           courses.map((course) => {
             const duration = formatDuration(course.durationMonths);
@@ -412,44 +396,72 @@ export default function LearnPage() {
           <div className="col-span-full card text-center py-12">
             <BookOpen className="w-12 h-12 mx-auto text-slate-400 mb-4" />
             <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
-              No courses found
+              {filtersOn ? 'No courses match' : 'No courses listed yet'}
             </h3>
             <p className="text-slate-500 dark:text-slate-400 mb-4">
-              Try adjusting your search or filters
+              {filtersOn
+                ? 'Loosen the search or pick another type or study mode.'
+                : 'Providers list their own courses here once they publish them.'}
             </p>
-            <button
-              onClick={() => {
-                setSearchQuery('');
-                setSelectedType('');
-                setSelectedStudyMode('');
-              }}
-              className="btn-outline px-4 py-2"
-            >
-              Clear Filters
-            </button>
+            {filtersOn && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedType('');
+                  setSelectedStudyMode('');
+                }}
+                className="btn-outline px-4 py-2"
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-center space-x-2">
-          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setPage(i + 1)}
-              aria-current={i + 1 === page ? 'page' : undefined}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium transition',
-                i + 1 === page
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-              )}
-            >
-              {i + 1}
-            </button>
-          ))}
-        </div>
+        // A window of five pages around the current one, with previous and
+        // next. The buttons used to stop at page five, so a catalogue past a
+        // hundred courses had pages nobody could reach.
+        <nav aria-label="Course pages" className="flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-4 py-2 rounded-lg font-medium transition bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 disabled:opacity-50"
+          >
+            Previous
+          </button>
+          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+            const first = Math.min(Math.max(1, page - 2), Math.max(1, totalPages - 4));
+            const n = first + i;
+            return (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setPage(n)}
+                aria-current={n === page ? 'page' : undefined}
+                className={cn(
+                  'px-4 py-2 rounded-lg font-medium transition',
+                  n === page
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                )}
+              >
+                {n}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="px-4 py-2 rounded-lg font-medium transition bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </nav>
       )}
     </div>
   );

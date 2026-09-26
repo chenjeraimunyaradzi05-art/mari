@@ -43,7 +43,13 @@ jest.mock('../../utils/prisma', () => ({
       update: jest.fn(async () => ({})),
       delete: jest.fn(async () => ({})),
     },
-    acceleratorEnrollment: { findMany: jest.fn(async () => []) },
+    acceleratorEnrollment: {
+      findMany: jest.fn(async () => []),
+      findUnique: jest.fn(),
+      update: jest.fn(async ({ data }: any) => ({ id: 'e1', ...data })),
+      updateMany: jest.fn(async () => ({ count: 0 })),
+      delete: jest.fn(async () => ({})),
+    },
     notification: { create: jest.fn(async () => ({})), createMany: jest.fn(async () => ({ count: 1 })) },
     user: {
       findUnique: jest.fn(async () => ({ email: 'fern@example.com', firstName: 'Fern' })),
@@ -230,6 +236,13 @@ describe('Admin catalogue: cohorts, investors, insurance products, introductions
 
       const audit = prisma.auditLog.create.mock.calls[0][0].data;
       expect(JSON.stringify(audit)).toContain('refundsOwedEnrollmentIds');
+
+      // The places end with the cohort, so a paid founder cannot tick her way to
+      // a certificate for a cohort that never ran. Completions are left alone.
+      expect(prisma.acceleratorEnrollment.updateMany).toHaveBeenCalledWith({
+        where: { cohortId: 'c1', status: { in: ['PENDING', 'ACTIVE'] } },
+        data: { status: 'DROPPED' },
+      });
     });
 
     it('an ordinary cohort edit tells nobody anything', async () => {

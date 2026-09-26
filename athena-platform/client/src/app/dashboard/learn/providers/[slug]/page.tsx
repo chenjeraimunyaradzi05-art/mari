@@ -1,26 +1,85 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ExternalLink, GraduationCap } from 'lucide-react';
-import { useCreateEducationApplication, useEducationProvider } from '@/lib/hooks';
+import { useCreateEducationApplication } from '@/lib/hooks';
+import { api } from '@/lib/api';
 import { CardSkeleton } from '@/components/ui/loading';
 import { safeHref } from '@/lib/safe-href';
+
+type Provider = {
+  id: string;
+  name: string;
+  description: string | null;
+  logo: string | null;
+  website: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+};
+
+type ProviderCourse = { id: string; title: string; type: string | null };
+
+type ProviderPayload = { provider: Provider; courses: ProviderCourse[]; coursesTotal?: number };
+
+const PAGE_SIZE = 50;
 
 export default function EducationProviderDetailPage() {
   const params = useParams<{ slug: string }>();
   const slug = params?.slug;
+  const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useEducationProvider(slug);
+  // Paged here rather than through the shared hook, because the provider route
+  // now pages its courses and says how many there are. It used to hand back the
+  // newest fifty and stop, and this page printed "50 available" for a provider
+  // with sixty.
+  const query = useQuery({
+    queryKey: ['education-provider', slug, page],
+    queryFn: () => api.get(`/education/providers/${encodeURIComponent(slug!)}`, { params: { page, limit: PAGE_SIZE } }),
+    enabled: !!slug,
+    placeholderData: keepPreviousData,
+    select: (response) => response.data.data as ProviderPayload,
+  });
   const createApplication = useCreateEducationApplication();
 
-  const provider = data?.provider;
-  const courses = data?.courses ?? [];
+  const provider = query.data?.provider;
+  const courses = query.data?.courses ?? [];
+  const total = query.data?.coursesTotal ?? courses.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  if (isLoading) {
+  if (query.isLoading) {
     return (
       <div className="p-6">
         <CardSkeleton />
+      </div>
+    );
+  }
+
+  // A 404 is "not found"; anything else is a failed load, and saying the
+  // provider does not exist because the network dropped would be untrue.
+  const status =
+    typeof query.error === 'object' && query.error !== null && 'response' in query.error
+      ? (query.error as { response?: { status?: number } }).response?.status
+      : undefined;
+
+  if (query.isError && status !== 404) {
+    return (
+      <div className="p-6">
+        <div className="card p-10 text-center" role="alert">
+          <p className="text-slate-900 dark:text-white font-medium">We could not load this provider</p>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Try again in a moment.</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <button type="button" onClick={() => query.refetch()} className="btn-outline px-6 py-2.5">
+              Try again
+            </button>
+            <Link href="/dashboard/learn/providers" className="btn-outline px-6 py-2.5">
+              Back to Providers
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -96,7 +155,7 @@ export default function EducationProviderDetailPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Courses</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              {courses.length} available
+              {total} available{pages > 1 ? ` · page ${page} of ${pages}` : ''}
             </p>
           </div>
           <button
@@ -120,7 +179,7 @@ export default function EducationProviderDetailPage() {
           <div className="mt-6 text-sm text-slate-500 dark:text-slate-400">No courses listed.</div>
         ) : (
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {courses.map((c: any) => (
+            {courses.map((c) => (
               <div key={c.id} className="card border border-slate-200 dark:border-slate-800">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
@@ -149,6 +208,27 @@ export default function EducationProviderDetailPage() {
             ))}
           </div>
         )}
+
+        {pages > 1 ? (
+          <div className="mt-6 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="btn-outline px-4 py-2"
+              disabled={page <= 1 || query.isFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="btn-outline px-4 py-2"
+              disabled={page >= pages || query.isFetching}
+              onClick={() => setPage((p) => Math.min(pages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

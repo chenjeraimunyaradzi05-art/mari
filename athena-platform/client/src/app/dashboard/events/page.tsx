@@ -23,6 +23,7 @@ import toast from 'react-hot-toast';
 import { useEvents, useRegisterEvent, useSaveEvent, useUnsaveEvent } from '@/lib/hooks';
 import { HostEventDialog } from '@/components/events/HostEventDialog';
 import { ReportEventDialog } from './ReportEventDialog';
+import { HostingPanel } from './HostingPanel';
 
 // The system share sheet where there is one; a copied link everywhere else.
 async function shareEvent(event: { id: string; title: string; description: string }) {
@@ -71,6 +72,8 @@ interface Event {
   price: number;
   isRegistered: boolean;
   isSaved: boolean;
+  /** A member published it, so she sees who registered. */
+  memberHosted?: boolean;
   /** True on your own listing. Only you and an admin ever see it. */
   isHost?: boolean;
   /** Your listing is written but not published until a moderator reads it. */
@@ -112,7 +115,7 @@ export default function EventsPage() {
     setIsHydrated(true);
   }, []);
 
-  const { data: rawEvents = [] } = useEvents({
+  const { data: rawEvents = [], isLoading: eventsLoading, isError: eventsFailed, refetch: refetchEvents } = useEvents({
     type: selectedType === 'all' ? 'all' : selectedType,
     q: searchQuery || undefined,
   });
@@ -157,6 +160,8 @@ export default function EventsPage() {
       </div>
 
       <HostEventDialog open={hosting} onClose={() => setHosting(false)} />
+
+      <HostingPanel />
 
       {reporting && (
         <ReportEventDialog
@@ -281,7 +286,22 @@ export default function EventsPage() {
       </div>
 
       {/* Events List */}
-      {filteredEvents.length === 0 ? (
+      {eventsLoading ? (
+        <div className="grid md:grid-cols-2 gap-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-72 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+          ))}
+        </div>
+      ) : eventsFailed ? (
+        // A failed load is not an empty calendar. Saying "No events found"
+        // here told a woman the event she registered for had gone.
+        <div className="card text-center py-16" role="alert">
+          <Calendar className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">The events did not load</h3>
+          <p className="text-slate-500 dark:text-slate-400 mb-4">Nothing has changed on your registrations. Try again in a moment.</p>
+          <button type="button" onClick={() => refetchEvents()} className="btn-outline px-4 py-2">Try again</button>
+        </div>
+      ) : filteredEvents.length === 0 ? (
         <div className="card text-center py-16">
           <Calendar className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
@@ -290,7 +310,9 @@ export default function EventsPage() {
           <p className="text-slate-500 dark:text-slate-400">
             {selectedDate
               ? `No events on ${format(selectedDate, 'MMMM d, yyyy')}`
-              : 'Try adjusting your filters'}
+              : selectedType !== 'all' || searchQuery
+                ? 'Try adjusting your filters'
+                : 'Nothing is listed yet. You can host one.'}
           </p>
         </div>
       ) : (
@@ -470,6 +492,12 @@ export default function EventsPage() {
                       {event.price > 0 && (
                         <span className="mt-1 max-w-[16rem] text-right text-xs text-slate-500 dark:text-slate-400">
                           The organiser charges ${event.price} for this event. You pay them, not ATHENA.
+                        </span>
+                      )}
+                      {/* She should know before she clicks who will see it. */}
+                      {event.memberHosted && event.isHost !== true && (
+                        <span className="mt-1 max-w-[16rem] text-right text-xs text-slate-500 dark:text-slate-400">
+                          The host sees the name you show on ATHENA. With Safe Mode on or a private profile, you are counted but not named.
                         </span>
                       )}
                       {event.linkRequiresRegistration && (

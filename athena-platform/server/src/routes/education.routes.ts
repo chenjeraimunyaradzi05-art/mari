@@ -4,6 +4,9 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { parsePagination } from '../utils/pagination';
+import { body, validationResult } from 'express-validator';
+import { bestEffort } from '../utils/best-effort';
+import { notificationService } from '../services/notification.service';
 
 const router = Router();
 
@@ -186,20 +189,36 @@ router.get('/providers/:slug', async (req, res, next) => {
       throw new ApiError(404, 'Provider not found');
     }
 
-    const courses = await prisma.course.findMany({
-      where: {
-        isActive: true,
-        organizationId: provider.id,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+    // Paged, with the total. This used to return the newest fifty and stop, with
+    // no count, so a TAFE with sixty courses listed showed fifty and the page
+    // had no way to know — or to say — that there were more. Fifty stays the
+    // default page so a caller that asks for nothing gets what it always got.
+    const query = req.query as { page?: string; limit?: string };
+    const { page, limit } = parsePagination({ page: query.page, limit: query.limit ?? '50' });
+    const courseWhere: Prisma.CourseWhereInput = { isActive: true, organizationId: provider.id };
+    const [courses, total] = await Promise.all([
+      prisma.course.findMany({
+        where: courseWhere,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.course.count({ where: courseWhere }),
+    ]);
 
     res.json({
       success: true,
       data: {
         provider,
         courses,
+        // Inside `data` as well, because the page reads `data` and nothing else.
+        coursesTotal: total,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -248,27 +267,58 @@ router.get('/applications/me', authenticate, async (req: AuthRequest, res, next)
 // ===========================================
 // CREATE EDUCATION APPLICATION
 // ===========================================
-router.post('/applications', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const { organizationId, courseId, programName, intakeDate, notes } = req.body;
+//
+// This took whatever arrived. programName and notes had no length limit, and
+// the intake date went through `new Date(...)`, so "next February" was stored
+// as Invalid Date and came back as a 500. Nothing stopped the same course
+// being applied for five times over, and nobody was told anything happened:
+// the provider found out only by opening her dashboard, and the applicant
+// found out she had been accepted or turned down only by coming back to look.
+const applicationValidators = [
+  body('organizationId').isString().trim().notEmpty().withMessage('organizationId is required'),
+  body('courseId').optional({ values: 'null' }).isString().trim(),
+  body('programName').optional({ values: 'null' }).isString().isLength({ max: 200 }).withMessage('programName is limited to 200 characters'),
+  body('intakeDate')
+    .optional({ values: 'falsy' })
+    .isISO8601()
+    .withMessage('intakeDate must be a date, such as 2027-02-15'),
+  body('notes').optional({ values: 'null' }).isString().isLength({ max: 2000 }).withMessage('notes are limited to 2000 characters'),
+];
 
-    if (!organizationId) {
-      throw new ApiError(400, 'organizationId is required');
+/** The applications still waiting on, or already given, a provider's answer. */
+const OPEN_APPLICATION_STATUSES: EducationApplicationStatus[] = [
+  EducationApplicationStatus.SUBMITTED,
+  EducationApplicationStatus.IN_REVIEW,
+  EducationApplicationStatus.ACCEPTED,
+];
+
+router.post('/applications', authenticate, applicationValidators, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ApiError(400, errors.array()[0].msg);
     }
+    const organizationId = String(req.body.organizationId).trim();
+    const courseId = typeof req.body.courseId === 'string' && req.body.courseId.trim() ? req.body.courseId.trim() : null;
+    const programName =
+      typeof req.body.programName === 'string' && req.body.programName.trim() ? req.body.programName.trim() : null;
+    const intakeDate = typeof req.body.intakeDate === 'string' && req.body.intakeDate ? new Date(req.body.intakeDate) : null;
+    const notes = typeof req.body.notes === 'string' && req.body.notes.trim() ? req.body.notes.trim() : null;
 
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, type: true },
+      select: { id: true, type: true, name: true },
     });
 
     if (!organization || !['university', 'tafe'].includes(organization.type || '')) {
       throw new ApiError(404, 'Provider not found');
     }
 
+    let courseTitle: string | null = null;
     if (courseId) {
       const course = await prisma.course.findUnique({
         where: { id: courseId },
-        select: { id: true, organizationId: true, isActive: true },
+        select: { id: true, organizationId: true, isActive: true, title: true },
       });
 
       if (!course || !course.isActive) {
@@ -278,17 +328,63 @@ router.post('/applications', authenticate, async (req: AuthRequest, res, next) =
       if (course.organizationId && course.organizationId !== organizationId) {
         throw new ApiError(400, 'Course does not belong to provider');
       }
+      courseTitle = course.title;
+    }
+
+    // One open application per course (or per named programme, or per
+    // provider when she names neither). Withdrawn and declined ones do not
+    // count, so she can apply again after either.
+    const duplicate = await prisma.educationApplication.findFirst({
+      where: {
+        userId: req.user!.id,
+        organizationId,
+        courseId,
+        ...(courseId ? {} : { programName }),
+        status: { in: OPEN_APPLICATION_STATUSES },
+      },
+      select: { id: true, status: true },
+    });
+    if (duplicate) {
+      throw new ApiError(
+        409,
+        duplicate.status === EducationApplicationStatus.ACCEPTED
+          ? 'This provider has already accepted your application for this.'
+          : 'You already have an application in for this. You can follow it, or withdraw it, from My Applications.'
+      );
     }
 
     const created = await prisma.educationApplication.create({
       data: {
         userId: req.user!.id,
         organizationId,
-        courseId: courseId || null,
-        programName: programName || null,
-        intakeDate: intakeDate ? new Date(intakeDate) : null,
-        notes: notes || null,
+        courseId,
+        programName,
+        intakeDate,
+        notes,
       },
+    });
+
+    // Tell the people who can decide it. These are the same people the
+    // decision route lets through: the recruiting flag, or an owner or admin
+    // of the organisation. It never fails her application — it is already in,
+    // and the provider's list shows it whether or not anyone was pinged.
+    const what = courseTitle ?? programName ?? 'a place';
+    await bestEffort(`education application ${created.id} notice to provider ${organizationId}`, async () => {
+      const deciders = await prisma.organizationMember.findMany({
+        where: { organizationId, OR: [{ canPostJobs: true }, { role: { in: ['OWNER', 'ADMIN'] } }] },
+        select: { userId: true },
+        take: 50,
+      });
+      for (const member of deciders) {
+        await notificationService.notify({
+          userId: member.userId,
+          type: 'APPLICATION_UPDATE',
+          title: 'A new application',
+          message: `Someone has applied to ${organization.name} for ${what}.`,
+          link: `/employer/organizations/${organizationId}/education/applications`,
+          data: { kind: 'EDUCATION_APPLICATION_RECEIVED', applicationId: created.id },
+        });
+      }
     });
 
     res.status(201).json({
@@ -321,6 +417,9 @@ router.patch('/applications/:id', authenticate, async (req: AuthRequest, res, ne
         403,
         'Only the provider can decide an application. You can withdraw it or update your own notes.'
       );
+    }
+    if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 2000)) {
+      throw new ApiError(400, 'notes are limited to 2000 characters');
     }
 
     const existing = await prisma.educationApplication.findUnique({
@@ -412,6 +511,49 @@ router.patch(
         data: { status: parsedStatus },
       });
 
+      // She hears the decision from us, not by happening to reopen the page.
+      // Only a real change is news; re-saving the same status tells her nothing.
+      // All of it is best-effort: the decision is already saved, and a notice
+      // that cannot be written must not turn that into a 500.
+      if (existing.status !== parsedStatus) {
+        await bestEffort(`education application ${applicationId} decision notice`, async () => {
+          const names = await prisma.educationApplication.findUnique({
+            where: { id: applicationId },
+            select: { programName: true, organization: { select: { name: true } }, course: { select: { title: true } } },
+          });
+          const provider = names?.organization?.name ?? 'The provider';
+          const what = names?.course?.title ?? names?.programName ?? 'your application';
+          const notice: Record<string, { title: string; message: string }> = {
+            IN_REVIEW: {
+              title: 'Your application is being reviewed',
+              message: `${provider} has started reviewing your application for ${what}.`,
+            },
+            ACCEPTED: {
+              title: 'Your application was accepted',
+              message: `${provider} has accepted your application for ${what}. They will be in touch about next steps.`,
+            },
+            REJECTED: {
+              title: 'An update on your application',
+              message: `${provider} has decided not to offer you a place for ${what} this time.`,
+            },
+          };
+          const chosen = notice[parsedStatus];
+          if (!chosen) return;
+          await notificationService.notify({
+            userId: updated.userId,
+            type: 'APPLICATION_UPDATE',
+            title: chosen.title,
+            message: chosen.message,
+            link: '/dashboard/learn/applications',
+            // In-app only. The email fallback in notification.service puts the
+            // provider's own course title into HTML unescaped, and an applicant's
+            // inbox is not always hers alone to read.
+            channels: ['in-app'],
+            data: { kind: 'EDUCATION_APPLICATION_DECIDED', applicationId, status: parsedStatus },
+          });
+        });
+      }
+
       res.json({
         success: true,
         data: updated,
@@ -486,42 +628,43 @@ router.get(
     try {
       const { organizationId } = req.params;
 
-      const [applications, courses] = await Promise.all([
-        prisma.educationApplication.findMany({
+      // Counted and averaged in the database. This used to read every
+      // application row and every enrolment row for the organisation's live
+      // courses into memory and add them up in JavaScript, which is fine for a
+      // pilot and a slow, memory-hungry page for a TAFE with forty thousand
+      // enrolments. The figures are the same; only where they are worked out
+      // has moved.
+      const enrollmentWhere: Prisma.CourseEnrollmentWhereInput = { course: { organizationId, isActive: true } };
+      const [statusGroups, totalCourses, enrollmentStats, totalCompleted] = await Promise.all([
+        prisma.educationApplication.groupBy({
+          by: ['status'],
           where: { organizationId },
-          select: { status: true },
+          _count: { _all: true },
         }),
-        prisma.course.findMany({
-          where: { organizationId, isActive: true },
-          select: { id: true, title: true },
+        prisma.course.count({ where: { organizationId, isActive: true } }),
+        prisma.courseEnrollment.aggregate({
+          where: enrollmentWhere,
+          _count: { _all: true },
+          _avg: { progress: true },
         }),
+        prisma.courseEnrollment.count({ where: { ...enrollmentWhere, progress: { gte: 100 } } }),
       ]);
 
-      const byStatus = applications.reduce<Record<string, number>>((acc, a) => {
-        acc[a.status] = (acc[a.status] || 0) + 1;
-        return acc;
-      }, {});
+      const byStatus: Record<string, number> = {};
+      let totalApplications = 0;
+      for (const group of statusGroups) {
+        byStatus[group.status] = group._count._all;
+        totalApplications += group._count._all;
+      }
 
-      const courseIds = courses.map((c) => c.id);
-      const enrollments = courseIds.length
-        ? await prisma.courseEnrollment.findMany({
-            where: { courseId: { in: courseIds } },
-            select: { courseId: true, progress: true },
-          })
-        : [];
-
-      const totalEnrollments = enrollments.length;
-      const totalCompleted = enrollments.filter((e) => e.progress >= 100).length;
-      const avgProgress =
-        totalEnrollments > 0
-          ? Math.round(enrollments.reduce((sum, e) => sum + (e.progress || 0), 0) / totalEnrollments)
-          : 0;
+      const totalEnrollments = enrollmentStats._count._all;
+      const avgProgress = totalEnrollments > 0 ? Math.round(enrollmentStats._avg.progress ?? 0) : 0;
 
       res.json({
         success: true,
         data: {
           applications: {
-            total: applications.length,
+            total: totalApplications,
             byStatus,
           },
           enrollments: {
@@ -531,7 +674,7 @@ router.get(
             avgProgress,
           },
           courses: {
-            total: courses.length,
+            total: totalCourses,
           },
         },
       });

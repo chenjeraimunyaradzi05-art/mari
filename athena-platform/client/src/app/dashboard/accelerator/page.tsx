@@ -43,6 +43,26 @@ type AcceleratorEnrollment = {
   cohort: AcceleratorCohort;
 };
 
+// What a place means to her, in words. The row used to print the raw enum —
+// "Status DROPPED" beside a green "PAID" — which after a cancellation read as
+// though she still had a paid place in a cohort that was not going to run.
+function placeLabel(e: AcceleratorEnrollment): { text: string; tone: 'ok' | 'wait' | 'ended' } {
+  if (e.status === 'COMPLETED' || e.status === 'GRADUATED') return { text: 'Completed', tone: 'ok' };
+  if (e.status === 'DROPPED') {
+    if (e.paymentStatus === 'PAID') return { text: 'Place ended · payment still to be returned', tone: 'wait' };
+    if (e.paymentStatus === 'REFUNDED') return { text: 'Place ended · payment returned', tone: 'ended' };
+    return { text: 'Place ended', tone: 'ended' };
+  }
+  if (e.paymentStatus === 'PAID') return { text: 'Paid · place confirmed', tone: 'ok' };
+  return { text: 'Not paid yet · place not confirmed', tone: 'wait' };
+}
+
+const toneClass = {
+  ok: 'bg-emerald-50 text-emerald-700',
+  wait: 'bg-amber-50 text-amber-800',
+  ended: 'bg-slate-100 text-slate-600',
+} as const;
+
 export default function AcceleratorPage() {
   const [status, setStatus] = useState('');
   const [upcomingOnly, setUpcomingOnly] = useState(false);
@@ -51,6 +71,9 @@ export default function AcceleratorPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Kept apart from `error`, which an enrolment attempt also sets: only a failed
+  // load means the lists below are not an answer.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const headerLabel = useMemo(() => {
     if (upcomingOnly) return 'Upcoming cohorts';
@@ -61,6 +84,7 @@ export default function AcceleratorPage() {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const [cohortsRes, enrollmentsRes] = await Promise.all([
         businessApi.getAccelerators({ status: status || undefined, upcoming: upcomingOnly || undefined }),
@@ -70,6 +94,7 @@ export default function AcceleratorPage() {
       setEnrollments(enrollmentsRes.data?.data || []);
     } catch (err: any) {
       setError(err?.response?.data?.error || 'Failed to load accelerator cohorts.');
+      setLoadFailed(true);
       setCohorts([]);
       setEnrollments([]);
     } finally {
@@ -154,7 +179,7 @@ export default function AcceleratorPage() {
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading accelerator cohorts...
         </div>
-      ) : cohorts.length === 0 ? (
+      ) : loadFailed ? null : cohorts.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-sm text-slate-500">
           No cohorts found. Adjust your filters or check back soon.
         </div>
@@ -207,7 +232,9 @@ export default function AcceleratorPage() {
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Your enrollments</h2>
-        {enrollments.length === 0 ? (
+        {loading ? null : loadFailed ? (
+          <p className="text-sm text-slate-500">Your enrolments could not be loaded just now, so they are not shown.</p>
+        ) : enrollments.length === 0 ? (
           <p className="text-sm text-slate-500">No enrollments yet.</p>
         ) : (
           <div className="space-y-3">
@@ -219,15 +246,16 @@ export default function AcceleratorPage() {
                       {enrollment.cohort.name}
                     </div>
                     <div className="text-xs text-slate-500">
-                      Enrolled {formatDate(enrollment.enrolledAt)} · Status {enrollment.status}
+                      Enrolled {formatDate(enrollment.enrolledAt)}
+                      {enrollment.cohort.status === 'CANCELLED' ? ' · this cohort was cancelled' : ''}
                     </div>
                     <Link href={`/dashboard/accelerator/${enrollment.id}`} className="mt-1 mr-3 inline-block text-xs font-medium text-primary-600 hover:underline">Week by week</Link>
                     {enrollment.status === 'COMPLETED' && (
                       <Link href={`/certificates/accelerator/${enrollment.id}`} className="mt-1 inline-block text-xs font-medium text-primary-600 hover:underline">Certificate of completion</Link>
                     )}
                   </div>
-                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-                    {enrollment.paymentStatus}
+                  <span className={`text-xs font-semibold px-2 py-1 rounded-full ${toneClass[placeLabel(enrollment).tone]}`}>
+                    {placeLabel(enrollment).text}
                   </span>
                 </div>
               </div>

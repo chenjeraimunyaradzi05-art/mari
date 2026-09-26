@@ -26,6 +26,10 @@ type Certificate = {
   code: string;
   issuedAt: string;
   course: { id: string; title: string; slug: string; providerName: string | null; type: string | null; durationMonths: number | null };
+  // Who issued it, resolved by the server the same way the public check at
+  // /certificates/:code resolves it: the provider organisation first, then the
+  // provider's own name for itself, then ATHENA.
+  provider: string;
 };
 
 type Course = {
@@ -97,6 +101,15 @@ export default function CertificationsPage() {
         <Section icon={Award} title="Your certificates" description="Newest first. Share the link; the code is checkable by anyone.">
           {mine.isLoading ? (
             <TileSkeleton count={2} />
+          ) : mine.isError ? (
+            // A failed load is not "no certificates". Telling a woman who has
+            // earned one that she has none is the one thing this list must not do.
+            <EmptyState
+              icon={Award}
+              reason="empty"
+              title="Your certificates did not load"
+              description="Nothing has happened to them. Try again in a moment."
+            />
           ) : (mine.data?.length ?? 0) === 0 ? (
             <EmptyState
               icon={Award}
@@ -117,7 +130,7 @@ export default function CertificationsPage() {
                     <div className="min-w-0 flex-1">
                       <h3 className="font-semibold text-slate-900 dark:text-white">{c.course.title}</h3>
                       <p className="text-sm text-slate-500">
-                        {c.course.providerName || 'ATHENA'} · issued {issued(c.issuedAt)}
+                        {c.provider} · issued {issued(c.issuedAt)}
                       </p>
                       <p className="mt-2 font-mono text-sm tracking-widest text-slate-700 dark:text-slate-300">{c.code}</p>
                       <Link href={`/certificates/${c.code}`} className="mt-2 inline-block text-sm text-primary-600 hover:underline">
@@ -140,6 +153,8 @@ export default function CertificationsPage() {
       >
         {courses.isLoading ? (
           <TileSkeleton count={3} />
+        ) : courses.isError ? (
+          <EmptyState icon={BookOpen} reason="empty" title="These courses did not load" description="Try again in a moment." primaryAction={{ label: 'Browse all courses', href: '/courses' }} />
         ) : (courses.data?.length ?? 0) === 0 ? (
           <EmptyState
             icon={BookOpen}
@@ -154,7 +169,7 @@ export default function CertificationsPage() {
               <li key={course.id}>
                 <Link href={`/courses/${course.slug}`} className="surface block h-full p-5 transition hover:shadow-md">
                   <h3 className="font-semibold text-slate-900 dark:text-white">{course.title}</h3>
-                  <p className="text-sm text-slate-500">{course.providerName || course.organization?.name || 'Provider not stated'}</p>
+                  <p className="text-sm text-slate-500">{course.organization?.name || course.providerName || 'Provider not stated'}</p>
                   <p className="mt-2 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">{course.description}</p>
                   <p className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
                     {duration(course.durationMonths) && (

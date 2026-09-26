@@ -107,7 +107,11 @@ export default function CohortProgressPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  const unpaid = progress.paymentStatus !== 'PAID';
+  // A place that has ended — the cohort was cancelled, or staff released or
+  // refunded it — is not one she can pay for or work through. It used to show
+  // "Pay for my place" on a cancelled cohort, which the server then refused.
+  const ended = progress.status === 'DROPPED';
+  const unpaid = !ended && progress.paymentStatus !== 'PAID';
   const graduated = progress.status === 'COMPLETED' && progress.completedAt;
 
   return (
@@ -140,6 +144,24 @@ export default function CohortProgressPage({ params }: { params: Promise<{ id: s
           </Link>
         )}
       </div>
+
+      {ended && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-900" role="status">
+          <h2 className="font-semibold text-slate-900 dark:text-white">This place has ended</h2>
+          <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">
+            {progress.paymentStatus === 'PAID'
+              ? 'You paid for this place and the payment has not been returned yet. Tell us how to return it and we will.'
+              : progress.paymentStatus === 'REFUNDED'
+                ? 'Your payment for this place has been returned.'
+                : 'You were not charged for this place.'}
+          </p>
+          {progress.paymentStatus === 'PAID' && (
+            <Link href="/contact" className="mt-3 inline-block text-sm font-semibold text-rose-600 hover:underline dark:text-rose-400">
+              Ask for your payment back
+            </Link>
+          )}
+        </div>
+      )}
 
       {unpaid && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 dark:border-amber-900/40 dark:bg-amber-900/10">
@@ -194,7 +216,7 @@ export default function CohortProgressPage({ params }: { params: Promise<{ id: s
                     {done && week.completedAt && <p className="mt-1 text-xs text-slate-400">Marked done {formatDate(week.completedAt)}</p>}
                   </div>
                 </div>
-                {!done && !unpaid && (
+                {!done && !unpaid && !ended && (
                   <button type="button" onClick={() => setOpenWeek(open ? null : week.weekNumber)} className="btn-secondary shrink-0 text-sm">
                     {open ? 'Cancel' : 'Mark done'}
                   </button>

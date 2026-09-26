@@ -102,8 +102,11 @@ describe('Course curriculum: builder, classroom, certificates', () => {
   });
 
   it('someone not enrolled sees the outline and the preview lessons, not the rest', async () => {
+    // Published: a draft is answered only to its team and its enrolled learners
+    // (course.drafts-and-publish-gate.test.ts).
     prisma.course.findFirst.mockResolvedValue({
       ...course,
+      isActive: true,
       organization: null,
       modules: [
         {

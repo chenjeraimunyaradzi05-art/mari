@@ -83,7 +83,10 @@ describe('Events routes (Prisma-backed)', () => {
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].type).toBe('webinar');
     expect(res.body.data[0].format).toBe('virtual');
-    expect(res.body.data[0].attendees).toBe(13);
+    // The ten the organiser reported from elsewhere are not attendance ATHENA
+    // can vouch for; they come off the places instead (events.host-manage.test.ts).
+    expect(res.body.data[0].attendees).toBe(3);
+    expect(res.body.data[0].maxAttendees).toBe(90);
     expect(res.body.data[0].isRegistered).toBe(false);
     expect(res.body.data[0].isSaved).toBe(false);
   });

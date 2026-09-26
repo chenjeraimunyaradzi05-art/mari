@@ -639,16 +639,27 @@ router.post('/business/deck-outline', async (req: AuthRequest, res: Response, ne
 // this payload that implies otherwise, and nothing about her payment belongs
 // here either — the route is unauthenticated by design, so an investor can
 // check a code, and her financial standing is not part of the claim.
+//
+// And the cohort has to have run. The page says "the cohort ran to" its end
+// date; a cohort staff cancelled did not run, and until the cancellation
+// ended its places, a paid founder in one could tick every week and be made
+// COMPLETED once the end date passed. Cancelling now drops those places
+// (admin-catalogue.routes.ts), and this refuses the certificate outright for
+// a cancelled cohort, so the claim cannot be made whichever way the row got
+// there. Staff withdraw a single certificate the same way: the enrolment
+// stops being COMPLETED, and this answers "no certificate".
 router.get('/business/accelerator-certificates/:enrollmentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const enrollment = await prisma.acceleratorEnrollment.findUnique({
       where: { id: req.params.enrollmentId },
       include: {
-        cohort: { select: { name: true, startDate: true, endDate: true, curriculum: true, _count: { select: { sessions: true } } } },
+        cohort: { select: { name: true, status: true, startDate: true, endDate: true, curriculum: true, _count: { select: { sessions: true } } } },
         user: { select: { firstName: true, lastName: true } },
       },
     });
-    if (!enrollment || enrollment.status !== 'COMPLETED' || !enrollment.completedAt) throw new ApiError(404, 'No certificate for that enrolment');
+    if (!enrollment || enrollment.status !== 'COMPLETED' || !enrollment.completedAt || enrollment.cohort.status === 'CANCELLED') {
+      throw new ApiError(404, 'No certificate for that enrolment');
+    }
     const holder = [enrollment.user.firstName, enrollment.user.lastName].filter(Boolean).join(' ') || 'A founder';
     ok(res, { code: enrollment.id, holder, cohort: { name: enrollment.cohort.name, startDate: enrollment.cohort.startDate, endDate: enrollment.cohort.endDate }, completedAt: enrollment.completedAt, weeks: enrollment.cohort._count?.sessions || enrollment.completedWeeks });
   } catch (error) {
