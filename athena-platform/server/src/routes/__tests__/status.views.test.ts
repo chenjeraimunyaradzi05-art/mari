@@ -74,11 +74,12 @@ describe('Stories: seen state and views', () => {
   });
 
   it('orders your own bucket first, then unseen, and marks what you have watched', async () => {
+    // Newest first, as the query asks the database for them.
     prisma.status.findMany.mockResolvedValue([
-      story('s1', 'u-a', 50),
-      story('s2', 'u-b', 40),
-      story('s3', VIEWER, 30, { viewCount: 7 }),
       story('s4', 'u-a', 20),
+      story('s3', VIEWER, 30, { viewCount: 7 }),
+      story('s2', 'u-b', 40),
+      story('s1', 'u-a', 50),
     ]);
     prisma.statusView.findMany.mockResolvedValue([{ statusId: 's2' }]);
 
@@ -91,6 +92,19 @@ describe('Stories: seen state and views', () => {
     expect(buckets[2].hasUnseen).toBe(false);
     expect(buckets[2].stories[0].viewed).toBe(true);
     expect(buckets[2].stories[0].viewCount).toBeUndefined();
+    // Within a member's bucket they play in the order she posted them.
+    expect(buckets[1].stories.map((s: any) => s.id)).toEqual(['s1', 's4']);
+  });
+
+  // The ring took the first 500 oldest-first, so once more than that were
+  // live the newest stories — including one she had just posted — were cut.
+  it('builds the ring from the newest stories when there are more than it holds', async () => {
+    prisma.status.findMany.mockResolvedValue([]);
+    await request(app).get('/api/status/feed').set(as(VIEWER)).expect(200);
+    expect(prisma.status.findMany.mock.calls[0][0]).toMatchObject({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 500,
+    });
   });
 
   it('a view is recorded once per viewer and never for the author', async () => {

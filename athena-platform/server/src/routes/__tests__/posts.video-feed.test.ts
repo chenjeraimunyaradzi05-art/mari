@@ -124,6 +124,22 @@ describe('Posts video feed', () => {
     );
   });
 
+  // Blocked authors used to be filtered out of the page after the limit was
+  // taken, so a member who had blocked a busy poster got short or empty pages
+  // while the cursor still moved on.
+  it('leaves blocked authors out of the query, so a page is full', async () => {
+    (prisma.userSafetySettings.findUnique as any).mockResolvedValue({ blockedUsers: ['blocked-by-me'] });
+    (prisma.userSafetySettings.findMany as any).mockResolvedValue([{ userId: 'blocked-me' }]);
+    (prisma.post.findMany as any).mockResolvedValue([]);
+    (prisma.like.findMany as any).mockResolvedValue([]);
+
+    await request(app).get('/api/posts/video-feed?limit=2').set('x-test-auth', '1').expect(200);
+
+    const videoQuery = (prisma.post.findMany as any).mock.calls.find((call: any[]) => call[0]?.where?.type === 'VIDEO')[0];
+    expect(videoQuery.take).toBe(3);
+    expect(videoQuery.where.AND).toContainEqual({ authorId: { notIn: ['blocked-by-me', 'blocked-me'] } });
+  });
+
   it('POST /api/posts/:id/view returns 204 and increments viewCount', async () => {
     (prisma.post.update as any).mockResolvedValue({ id: 'p1' });
 

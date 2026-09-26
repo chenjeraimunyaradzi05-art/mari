@@ -811,16 +811,25 @@ export async function getTrendingPosts(
 export async function getVideoFeed(
   userId?: string,
   cursor?: string,
-  limit = 10
+  limit = 10,
+  options: { excludeAuthorIds?: string[] } = {}
 ): Promise<{
   videos: FeedPost[];
   nextCursor: string | null;
 }> {
+  // Blocked authors are left out in the query, before the limit+1 is taken,
+  // for the reason given on FeedOptions.excludeAuthorIds. The route used to
+  // drop them from the page this returned, so a member who had blocked a busy
+  // poster got short or empty pages while the cursor still moved on.
+  const excluded = [...new Set(options.excludeAuthorIds ?? [])].filter(Boolean);
   const where: any = {
     type: 'VIDEO',
     isPublic: true,
     isHidden: false,
-    AND: [authorAudienceWhere(userId, await followingIdsOf(userId))],
+    AND: [
+      authorAudienceWhere(userId, await followingIdsOf(userId)),
+      ...(excluded.length > 0 ? [{ authorId: { notIn: excluded } }] : []),
+    ],
   };
 
   if (cursor) {

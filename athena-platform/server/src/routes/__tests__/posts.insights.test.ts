@@ -72,6 +72,31 @@ describe('Post impressions and insights', () => {
     expect(row.userId).toBeNull();
   });
 
+  // The key comes from the browser and can be regenerated at will. It used to
+  // be hashed in with the address, so a new key from the same address was a
+  // new viewer, and one script could walk any post to a reach milestone.
+  it('a new browser key from the same address is the same anonymous viewer', async () => {
+    prisma.post.findMany.mockResolvedValue([{ id: 'p1' }]);
+    const from = (address: string, anonId: string) =>
+      request(app).post('/api/posts/impressions').set('X-Forwarded-For', address).send({ ids: ['p1'], anonId }).expect(204);
+
+    await from('203.0.113.7', 'browser-key-aaaa');
+    await from('203.0.113.7', 'browser-key-bbbb');
+    await from('198.51.100.20', 'browser-key-aaaa');
+
+    const keys = prisma.postImpression.createMany.mock.calls.map((call: any[]) => call[0].data[0].viewerKey);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
+    // What is stored is neither the address nor anything that contains it.
+    for (const key of keys) {
+      expect(key).toMatch(/^anon:[0-9a-f]{24}$/);
+      expect(key).not.toContain('203.0.113.7');
+    }
+    // And the dedupe asks about that one key, so the second browser from the
+    // same address finds the first one's row and adds nothing.
+    expect(prisma.postImpression.findMany.mock.calls[1][0].where).toEqual({ postId: { in: ['p1'] }, viewerKey: keys[0] });
+  });
+
   it('nothing is written without a viewer key', async () => {
     await request(app).post('/api/posts/impressions').send({ ids: ['p1'] }).expect(204);
     expect(prisma.postImpression.createMany).not.toHaveBeenCalled();

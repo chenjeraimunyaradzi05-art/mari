@@ -33,7 +33,7 @@ import { authorAudienceWhere, canViewAuthor, canViewGroupPosts } from '../servic
 import { mutedWordMatcher } from '../utils/muted-words';
 import { emitToUserRoom, isUserOnline } from '../services/socket.service';
 import { commentLimiter, postLimiter } from '../middleware/socialLimits';
-import { checkContentAchievements, updateStreak } from '../services/engagement.service';
+import { recordPublishedPost } from '../services/engagement.service';
 import { bestEffort } from '../utils/best-effort';
 
 const router = Router();
@@ -171,6 +171,10 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
           limit,
           total,
           pages: Math.ceil(total / limit),
+          // The ranked tab below answers hasMore and this one did not, so a
+          // client paging the feed had to know which tab it was on to tell
+          // whether there was a next page. One field, both tabs.
+          hasMore: page * limit < total,
         },
       });
       return;
@@ -235,13 +239,14 @@ router.get('/video-feed', optionalAuth, async (req: AuthRequest, res, next) => {
     const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, limitRaw!)) : 10;
 
-    const result = await getVideoFeed(req.user?.id, cursor, limit);
-
-    const blocked = new Set(req.user ? await getBlockedRelationshipIds(req.user.id) : []);
+    // Blocks go into the query, as on /feed above, so a page is full and the
+    // cursor only moves past videos she could have been shown.
+    const blockedIds = req.user ? await getBlockedRelationshipIds(req.user.id) : [];
+    const result = await getVideoFeed(req.user?.id, cursor, limit, { excludeAuthorIds: blockedIds });
 
     res.json({
       success: true,
-      data: result.videos.filter((video) => !blocked.has(video.authorId)),
+      data: result.videos,
       nextCursor: result.nextCursor,
     });
   } catch (error) {
@@ -543,13 +548,10 @@ router.post(
       // them, and updateStreak was only ever called with 'login', so the two
       // posting-streak badges had no streak to read. Showing a member a goal
       // she cannot reach is worse than not offering it, so posting now counts
-      // towards both. A scheduled post counts when the publisher runs it, not
-      // when it is queued.
+      // towards both. A post queued for later is not counted here: it has not
+      // gone out yet, and the day that counts is the day it does.
       if (!scheduledFor) {
-        await bestEffort('post.achievements', async () => {
-          await updateStreak(req.user!.id, 'post');
-          await checkContentAchievements(req.user!.id);
-        });
+        await bestEffort('post.achievements', () => recordPublishedPost(req.user!.id));
       }
 
       res.status(201).json({

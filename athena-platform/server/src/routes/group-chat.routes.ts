@@ -7,7 +7,7 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { groupChatService, validatePermission, type GroupRole } from '../services/group-chat.service';
-import { chatStorageService } from '../services/chat-storage.service';
+import { chatStorageService, messageTypeForAttachments } from '../services/chat-storage.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireWomanMember } from '../middleware/account-gates';
 import { ApiError } from '../middleware/errorHandler';
@@ -161,7 +161,9 @@ router.post('/:groupId/chat/message', authenticate, requireWomanMember, messageL
       conversationId: groupId,
       senderId: req.user!.id,
       content,
-      type: attachments ? 'IMAGE' : 'TEXT',
+      // Was `attachments ? 'IMAGE' : 'TEXT'`: a PDF, a voice note, or an
+      // empty list all came back labelled a picture.
+      type: messageTypeForAttachments(attachments),
       replyToId,
       metadata: { groupId, attachments },
     });

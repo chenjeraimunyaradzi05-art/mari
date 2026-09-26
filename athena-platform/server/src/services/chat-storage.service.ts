@@ -19,13 +19,39 @@ const MAX_MESSAGES_PER_QUERY = 100;
 // TYPES
 // ==========================================
 
+export type StoredMessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'SYSTEM';
+
 export interface MessageInput {
   conversationId: string;
   senderId: string;
   content: string;
-  type?: 'TEXT' | 'IMAGE' | 'FILE' | 'SYSTEM';
+  type?: StoredMessageType;
   metadata?: Record<string, any>;
   replyToId?: string;
+}
+
+/**
+ * Message.type drives how a client renders the row, so it has to describe
+ * the payload rather than the endpoint that produced it. One answer for
+ * direct messages and group chat alike.
+ *
+ * The two used to disagree with each other and with the clients. Group chat
+ * stamped 'IMAGE' on anything that carried an attachments field at all — a
+ * PDF, a voice note, even an empty list — and direct messages called a video
+ * 'FILE', which both clients draw as a download link although both know how
+ * to play a video (chat.store maps 'VIDEO'). Only the kinds are looked at,
+ * and only when every attachment is of the same kind; a mixed set is a FILE.
+ */
+export function messageTypeForAttachments(
+  attachments: ReadonlyArray<{ contentType?: string }> | undefined
+): Extract<StoredMessageType, 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE'> {
+  if (!attachments || attachments.length === 0) return 'TEXT';
+  const all = (prefix: string) => attachments.every((attachment) => attachment.contentType?.startsWith(prefix));
+  if (all('image/')) return 'IMAGE';
+  if (all('video/')) return 'VIDEO';
+  // A voice note: one recording and nothing else.
+  if (all('audio/')) return 'AUDIO';
+  return 'FILE';
 }
 
 export interface MessageQuery {

@@ -606,9 +606,13 @@ const VIRAL_VIEW_THRESHOLD = 1000;
  * be earned by posting ten videos.
  */
 export async function checkContentAchievements(userId: string): Promise<void> {
-  const [postCount, videoPostCount, reelCount, viralPost, viralReel] = await Promise.all([
-    prisma.post.count({ where: { authorId: userId } }),
-    prisma.post.count({ where: { authorId: userId, type: 'VIDEO' } }),
+  // A post waiting in the schedule queue has not been published, so it does
+  // not count towards "Published your first post" until the publisher runs it
+  // (which clears scheduledFor).
+  const published = { authorId: userId, scheduledFor: null };
+  const [postCount, videoPostCount, reelCount, viralPost, viralReel, postStreak] = await Promise.all([
+    prisma.post.count({ where: published }),
+    prisma.post.count({ where: { ...published, type: 'VIDEO' } }),
     prisma.video.count({ where: { authorId: userId, status: 'PUBLISHED' } }),
     prisma.post.findFirst({
       where: { authorId: userId, viewCount: { gte: VIRAL_VIEW_THRESHOLD } },
@@ -617,6 +621,10 @@ export async function checkContentAchievements(userId: string): Promise<void> {
     prisma.video.findFirst({
       where: { authorId: userId, viewCount: { gte: VIRAL_VIEW_THRESHOLD } },
       select: { id: true },
+    }),
+    prisma.userStreak.findUnique({
+      where: { userId_type: { userId, type: 'post' } },
+      select: { longestStreak: true },
     }),
   ]);
 
@@ -629,6 +637,34 @@ export async function checkContentAchievements(userId: string): Promise<void> {
   if (viralPost || viralReel) {
     await awardAchievement(userId, 'VIRAL_POST');
   }
+
+  // The posting-streak badges used to be awarded only inside updateStreak, on
+  // the exact day the run reached 7 or 30. If that one award failed — it runs
+  // under bestEffort, after the post is already stored — the badge was gone
+  // until she built a fresh seven-day run, and the reconcile in the
+  // achievements panel never looked at streaks. The longest run is on the
+  // streak row, so it is read like any other total.
+  const longestPostingRun = postStreak?.longestStreak ?? 0;
+  if (longestPostingRun >= 7) {
+    await awardAchievement(userId, 'POST_STREAK_7');
+  }
+  if (longestPostingRun >= 30) {
+    await awardAchievement(userId, 'POST_STREAK_30');
+  }
+}
+
+/**
+ * Everything that follows from a post going out: the posting streak moves on
+ * for today, and whatever the member's posting has now earned is awarded.
+ *
+ * Call it at the moment a post becomes visible, from whichever path made it
+ * visible, so that every way of publishing counts the same. The day that
+ * counts is the day she appears in the feed, which for a post queued for
+ * later is the day it is released, not the day it was written.
+ */
+export async function recordPublishedPost(userId: string): Promise<void> {
+  await updateStreak(userId, 'post');
+  await checkContentAchievements(userId);
 }
 
 /**

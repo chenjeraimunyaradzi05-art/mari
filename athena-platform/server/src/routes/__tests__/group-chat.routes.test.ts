@@ -103,6 +103,22 @@ describe('Group chat', () => {
     );
   });
 
+  // Anything carrying an attachments field used to be stored as IMAGE: a PDF,
+  // a voice note, even an empty list next to plain text.
+  it('labels a message by what it carries, not by whether it carries anything', async () => {
+    const send = (body: Record<string, unknown>) =>
+      request(app).post(`/api/groups/${GROUP}/chat/message`).set(as('member-1')).send(body).expect(200);
+    const file = (name: string, contentType: string) => ({ url: `/uploads/posts/member-1/${name}`, name, contentType });
+
+    await send({ content: 'Just words', attachments: [] });
+    await send({ attachments: [file('agenda.pdf', 'application/pdf')] });
+    await send({ attachments: [file('note.m4a', 'audio/mp4')] });
+    await send({ attachments: [file('clip.mp4', 'video/mp4')] });
+    await send({ attachments: [file('a.webp', 'image/webp'), file('b.webp', 'image/webp')] });
+
+    expect(prisma.message.create.mock.calls.map((call: any[]) => call[0].data.type)).toEqual(['TEXT', 'FILE', 'AUDIO', 'VIDEO', 'IMAGE']);
+  });
+
   it('refuses a non-member, and never creates a conversation for them', async () => {
     prisma.groupMember.findUnique.mockResolvedValue(null);
     await request(app).post(`/api/groups/${GROUP}/chat/message`).set(as('stranger')).send({ content: 'Let me in' }).expect(403);

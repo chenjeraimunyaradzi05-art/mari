@@ -4,11 +4,12 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireAdultAccount, requireWomanMember } from '../middleware/account-gates';
-import { emitToUserRoom, sendRealTimeMessage } from '../services/socket.service';
-import { parsePagination } from '../utils/pagination';
+import { emitToUserRoom, isUserOnline, sendRealTimeMessage } from '../services/socket.service';
+import { onlineCounterpartsFor } from '../services/presence.service';
+import { messageTypeForAttachments } from '../services/chat-storage.service';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 import {
   CONTENT_LIMITS,
-  SanitizedAttachment,
   normalizeMessageAttachments,
   normalizeUserText,
   parseOptionalDate,
@@ -34,16 +35,6 @@ import {
 const router = Router();
 
 type RawReaction = { emoji: string; userId: string };
-
-// Message.type drives how clients render a row, so it has to describe the
-// payload rather than the endpoint that produced it.
-function messageTypeFor(attachments: SanitizedAttachment[] | undefined): 'TEXT' | 'IMAGE' | 'AUDIO' | 'FILE' {
-  if (!attachments || attachments.length === 0) return 'TEXT';
-  if (attachments.every((attachment) => attachment.contentType?.startsWith('image/'))) return 'IMAGE';
-  // A voice note: one recording and nothing else.
-  if (attachments.every((attachment) => attachment.contentType?.startsWith('audio/'))) return 'AUDIO';
-  return 'FILE';
-}
 
 // The client renders one chip per emoji with a count and whether the viewer
 // reacted, so collapse the raw rows into that shape here (same contract the
@@ -85,45 +76,95 @@ async function loadReactableMessage(messageId: string, userId: string) {
 // ===========================================
 // GET CONVERSATIONS
 // ===========================================
+
+/**
+ * How many threads one page of the inbox carries. The list used to have no
+ * page at all: every thread a member had ever opened, each joined to the
+ * other participant and its latest message, on every inbox open and again on
+ * every thirty-second refetch, so the cost of opening Messages grew without
+ * limit with how long she had been here.
+ *
+ * A caller that does not ask for a page gets the largest one. Both clients
+ * still read this list whole, and the web chat window finds the thread it
+ * has open in it, so a small default would have hidden a member's older
+ * threads from a client that does not page yet; a hundred covers nearly
+ * every inbox, and the pagination block says when it does not.
+ */
+const CONVERSATION_PAGE_MAX = 100;
+const CONVERSATION_PAGE_SIZE = CONVERSATION_PAGE_MAX;
+
 router.get('/conversations', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const userId = req.user!.id;
+    const query = req.query as { page?: string; limit?: string };
+    const { page, limit, skip } = parsePagination(
+      { page: query.page, limit: query.limit ?? String(CONVERSATION_PAGE_SIZE) },
+      CONVERSATION_PAGE_MAX
+    );
 
-    // Use the new efficient Conversation model
-    const conversations = await prisma.conversationParticipant.findMany({
-      // A request this person declined is gone from their side; the opener
-      // still sees it, closed.
-      where: { userId, conversation: { OR: [{ requestDeclinedAt: null }, { requestedById: userId }] } },
-      include: {
-        conversation: {
-          include: {
-            participants: {
-              where: { userId: { not: userId } },
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    displayName: true,
-                    avatar: true,
-                    isVerified: true,
+    // A request this person declined is gone from their side; the opener
+    // still sees it, closed.
+    const where: Prisma.ConversationParticipantWhereInput = {
+      userId,
+      conversation: { OR: [{ requestDeclinedAt: null }, { requestedById: userId }] },
+    };
+
+    // The unread badge is a total over every thread, not over the page on
+    // screen, so it is worked out here from the threads that have anything
+    // unread (a handful, where the whole list may be hundreds) under the same
+    // rules the clients apply: muted and archived threads, and requests not
+    // yet accepted, stay off it.
+    const [conversations, total, unreadRows] = await Promise.all([
+      prisma.conversationParticipant.findMany({
+        where,
+        include: {
+          conversation: {
+            include: {
+              participants: {
+                where: { userId: { not: userId } },
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      displayName: true,
+                      avatar: true,
+                      isVerified: true,
+                    },
                   },
                 },
               },
-            },
-            messages: {
-              // A message past its expiry is gone as far as the reader is
-              // concerned, even if the sweep has not deleted the row yet.
-              where: unexpiredMessageWhere(),
-              orderBy: { createdAt: 'desc' },
-              take: 1,
+              messages: {
+                // A message past its expiry is gone as far as the reader is
+                // concerned, even if the sweep has not deleted the row yet.
+                where: unexpiredMessageWhere(),
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+              },
             },
           },
         },
-      },
-      orderBy: [{ isPinned: 'desc' }, { conversation: { lastMessageAt: 'desc' } }],
-    });
+        // The id last, so two threads with the same lastMessageAt keep one
+        // order and a page boundary never shows a thread twice or skips one.
+        orderBy: [{ isPinned: 'desc' }, { conversation: { lastMessageAt: 'desc' } }, { id: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.conversationParticipant.count({ where }),
+      prisma.conversationParticipant.findMany({
+        where: { ...where, unreadCount: { gt: 0 }, isMuted: false, isArchived: false },
+        select: {
+          unreadCount: true,
+          conversation: { select: { requestedById: true, requestAcceptedAt: true, requestDeclinedAt: true } },
+        },
+      }),
+    ]);
+
+    const unreadTotal = unreadRows.reduce(
+      (sum, row) => (requestStateFor(row.conversation, userId).isRequest ? sum : sum + row.unreadCount),
+      0
+    );
 
     const formatted = conversations.map((cp) => {
       const conv = cp.conversation;
@@ -161,7 +202,35 @@ router.get('/conversations', authenticate, async (req: AuthRequest, res, next) =
     res.json({
       success: true,
       data: formatted,
+      pagination: buildPaginationMeta(total, page, limit),
+      unreadTotal,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// PRESENCE
+// ===========================================
+
+/**
+ * GET /api/messages/presence
+ *
+ * Which of the people in your threads are online right now. A client that
+ * has just connected learns this here and then follows the presence events;
+ * before, nothing told it who was already on, so a chat with someone who had
+ * been online for an hour read "Offline" until she happened to reconnect.
+ *
+ * The answer follows exactly the rule the live events follow (see
+ * presence.service): established threads only, never across a block, and
+ * never a member who has hidden her online status or turned on Safe Mode —
+ * she reads as offline, which is what hiding is for.
+ */
+router.get('/presence', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const online = await onlineCounterpartsFor(req.user!.id, isUserOnline);
+    res.json({ success: true, data: { online } });
   } catch (error) {
     next(error);
   }
@@ -383,7 +452,7 @@ router.post(
             senderId: userId,
             receiverId,
             content,
-            type: messageTypeFor(attachments),
+            type: messageTypeForAttachments(attachments),
             replyToId,
             expiresAt,
             ...(attachments ? { metadata: { attachments } } : {}),

@@ -156,6 +156,27 @@ describe('Direct message attachments, replies and reactions', () => {
       ]);
     });
 
+    // A video used to be labelled FILE, which both clients draw as a download
+    // link although both can play it.
+    it('labels a video-only message VIDEO and a mixed set FILE', async () => {
+      await request(app)
+        .post(`/api/messages/conversations/${CONVERSATION}/messages`)
+        .send({ attachments: [{ url: '/uploads/posts/user-123/clip.mp4', name: 'clip.mp4', contentType: 'video/mp4' }] })
+        .expect(201);
+      expect((prisma.message.create as any).mock.calls[0][0].data.type).toBe('VIDEO');
+
+      await request(app)
+        .post(`/api/messages/conversations/${CONVERSATION}/messages`)
+        .send({
+          attachments: [
+            { url: '/uploads/posts/user-123/clip.mp4', name: 'clip.mp4', contentType: 'video/mp4' },
+            { url: '/uploads/posts/user-123/photo.webp', name: 'photo.webp', contentType: 'image/webp' },
+          ],
+        })
+        .expect(201);
+      expect((prisma.message.create as any).mock.calls[1][0].data.type).toBe('FILE');
+    });
+
     it('rejects an attachment that is not one of our own uploads', async () => {
       await request(app)
         .post(`/api/messages/conversations/${CONVERSATION}/messages`)

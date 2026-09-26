@@ -118,6 +118,8 @@ describe('Reactions', () => {
     expect(res.body.data[0].myReaction).toBe('CELEBRATE');
     expect(res.body.data[0].isLiked).toBe(true);
     expect(res.body.data[0].reasons).toEqual(['Someone you follow']);
+    // The same paging signal the ranked tab gives, so a client pages both alike.
+    expect(res.body.pagination).toMatchObject({ page: 1, total: 1, hasMore: false });
   });
 });
 

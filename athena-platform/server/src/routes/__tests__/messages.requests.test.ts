@@ -13,7 +13,7 @@ jest.mock('../../utils/prisma', () => ({
       findUnique: jest.fn(),
       update: jest.fn(),
     },
-    conversationParticipant: { findMany: jest.fn(async () => []), findUnique: jest.fn(), update: jest.fn() },
+    conversationParticipant: { findMany: jest.fn(async () => []), findUnique: jest.fn(), update: jest.fn(), count: jest.fn(async () => 0) },
     message: { count: jest.fn(async () => 0) },
   },
 }));
@@ -99,6 +99,49 @@ describe('Message requests and thread preferences', () => {
     expect(res.body.data[0]).toMatchObject({ id: 'c1', isPinned: true, isMuted: false, isRequest: true, requestPending: false });
     const where = prisma.conversationParticipant.findMany.mock.calls[0][0].where;
     expect(where.conversation.OR).toEqual([{ requestDeclinedAt: null }, { requestedById: 'me' }]);
+  });
+
+  // The inbox used to load every thread she had ever opened, joined, on every
+  // open and every thirty-second refetch.
+  it('the list comes a page at a time and says whether there is more', async () => {
+    prisma.conversationParticipant.count.mockResolvedValue(260);
+
+    // A client that does not page gets the largest page, and is told there is more.
+    const first = await request(app).get('/api/messages/conversations').expect(200);
+    const firstArgs = prisma.conversationParticipant.findMany.mock.calls[0][0];
+    expect(firstArgs).toMatchObject({ skip: 0, take: 100 });
+    expect(firstArgs.orderBy).toEqual([{ isPinned: 'desc' }, { conversation: { lastMessageAt: 'desc' } }, { id: 'asc' }]);
+    expect(first.body.pagination).toMatchObject({ page: 1, limit: 100, total: 260, hasMore: true });
+
+    prisma.conversationParticipant.findMany.mockClear();
+    const second = await request(app).get('/api/messages/conversations?page=2&limit=30').expect(200);
+    expect(prisma.conversationParticipant.findMany.mock.calls[0][0]).toMatchObject({ skip: 30, take: 30 });
+    expect(second.body.pagination).toMatchObject({ page: 2, limit: 30, hasMore: true });
+
+    prisma.conversationParticipant.findMany.mockClear();
+    const third = await request(app).get('/api/messages/conversations?page=3&limit=500').expect(200);
+    // The ceiling holds whatever the caller asks for.
+    expect(prisma.conversationParticipant.findMany.mock.calls[0][0]).toMatchObject({ skip: 200, take: 100 });
+    expect(third.body.pagination).toMatchObject({ page: 3, limit: 100, hasMore: false });
+  });
+
+  it('the unread total covers every thread, not the page, and leaves requests off', async () => {
+    const unread = (unreadCount: number, requestedById: string | null, requestAcceptedAt: Date | null = null) => ({
+      unreadCount,
+      conversation: { requestedById, requestAcceptedAt, requestDeclinedAt: null },
+    });
+    // The page itself is empty; the badge still counts what is waiting.
+    prisma.conversationParticipant.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([unread(3, null), unread(2, 'them'), unread(4, 'them', new Date()), unread(1, 'me')]);
+
+    const res = await request(app).get('/api/messages/conversations').expect(200);
+
+    // 3 in an ordinary thread, 4 in an accepted request, 1 in a request she
+    // opened; the 2 in a request someone sent her wait in her Requests tab.
+    expect(res.body.unreadTotal).toBe(8);
+    const unreadWhere = prisma.conversationParticipant.findMany.mock.calls[1][0].where;
+    expect(unreadWhere).toMatchObject({ userId: 'me', unreadCount: { gt: 0 }, isMuted: false, isArchived: false });
   });
 
   it('preferences change only your own row', async () => {

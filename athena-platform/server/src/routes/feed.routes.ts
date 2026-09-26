@@ -1,11 +1,12 @@
 /**
  * Feed Routes (OpportunityVerse)
- * API endpoints for personalized feed mixing
- * Phase 2: Backend Logic & Integrations
+ *
+ * The cold-start endpoints, and the two retired mixed-feed routes that now
+ * answer 410 (see retiredMixedFeed). The member feed itself is served by
+ * post.routes at GET /api/posts/feed.
  */
 
-import { Router, Response, NextFunction } from 'express';
-import { opportunityVerseMixer, getMixedFeed } from '../services/opportunity-verse.service';
+import { Router, Request, Response, NextFunction } from 'express';
 import { coldStartAlgorithm } from '../services/cold-start.service';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
@@ -13,30 +14,41 @@ const router = Router();
 
 /**
  * @route GET /api/feed
- * @desc Get personalized mixed feed
- * @access Private
+ * @route GET /api/feed/opportunities
+ * @access none — both answer 410 Gone
+ *
+ * ## Retired: the mixed feed served numbers nobody had worked out
+ *
+ * Both routes served `getMixedFeed` from opportunity-verse.service.ts, and
+ * what that mixes in as "opportunities" is not matched to anyone:
+ * `getRelevantOpportunities` takes the most recently created active jobs and
+ * courses and stamps every job `matchScore: 70` ("Would be calculated by
+ * CareerCompass") and every course 60, and the mixer then presents them with
+ * reasons like "Job opportunity". A member reading that would be told a job
+ * was a 70% fit for her when nothing had looked at her at all. The warning
+ * that used to sit on /opportunities said not to build a screen on it, but
+ * the bare /api/feed served the same mix with no warning on it.
+ *
+ * It also ignored blocks. The mixer calls generateFeed and getTrendingPosts
+ * without the viewer's block list, so a woman who had blocked someone could
+ * be served his posts here, where every feed the clients actually read
+ * leaves them out.
+ *
+ * Neither client ever called either route. The feed the web and the app
+ * read is GET /api/posts/feed; opportunities that are actually scored against
+ * a member live at /api/ai-algorithms/*. Answering 410 with those pointers,
+ * rather than serving the mix, is what stops a new screen being built on it.
  */
-router.get('/', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const {
-      page = '1',
-      limit = '20',
-    } = req.query;
-    
-    const feed = await getMixedFeed(
-      req.user!.id,
-      parseInt(page as string, 10),
-      parseInt(limit as string, 10)
-    );
-    
-    res.json({
-      success: true,
-      data: feed,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+function retiredMixedFeed(_req: Request, res: Response) {
+  res.status(410).json({
+    success: false,
+    deprecated: true,
+    message:
+      'This mixed feed has been retired. Read the feed at GET /api/posts/feed; opportunities scored against a member are at /api/ai-algorithms.',
+  });
+}
+
+router.get('/', retiredMixedFeed);
 
 /**
  * @route GET /api/feed/cold-start
@@ -119,41 +131,11 @@ router.get('/onboarding', authenticate, async (req: AuthRequest, res: Response, 
 
 /**
  * @route GET /api/feed/opportunities
- * @desc Get job/gig opportunities feed
- * @access Private
- *
- * ## Not personalised, and deliberately not surfaced
- *
- * `getRelevantOpportunities` in opportunity-verse.service.ts does not match
- * anything to anyone: it takes the most recently created active jobs and
- * courses and stamps every one with a hardcoded `matchScore` of 70 or 60,
- * under its own comment "Would be calculated by CareerCompass". Putting that
- * on a screen would tell a member an opportunity is a 70% fit for her when
- * nothing has looked at her at all.
- *
+ * Retired with GET /api/feed; see retiredMixedFeed at the top of this file.
  * Opportunities that are actually scored against a member live at
  * `/api/ai-algorithms/*`, behind /dashboard/ai/opportunity-radar and
- * /dashboard/ai/opportunity-scan. Point new work there. Wire this route up
- * only once the mixer computes a real score.
+ * /dashboard/ai/opportunity-scan.
  */
-router.get('/opportunities', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { page = '1', limit = '20' } = req.query;
-    
-    // Get opportunities-focused feed
-    const feed = await getMixedFeed(
-      req.user!.id,
-      parseInt(page as string, 10),
-      parseInt(limit as string, 10)
-    );
-    
-    res.json({
-      success: true,
-      data: feed,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+router.get('/opportunities', retiredMixedFeed);
 
 export default router;

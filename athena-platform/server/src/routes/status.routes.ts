@@ -29,6 +29,8 @@ type StoryType = 'image' | 'video';
 
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 const CAPTION_MAX = 200;
+/** How many live stories the ring is built from, newest first. */
+const STORY_FEED_CAP = 500;
 
 /**
  * Which stories a viewer may see: everyone's public ones, their own, and the
@@ -96,7 +98,12 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
     // so the one list drops her stories from his feed and his from hers.
     const blockedIds = viewerId ? await getBlockedRelationshipIds(viewerId) : [];
 
-    const stories = await prisma.status.findMany({
+    // The newest STORY_FEED_CAP stories, put back into the order they were
+    // posted. This took the first 500 oldest-first, so once more than that
+    // were live the cap cut the newest ones — the stories most worth seeing,
+    // and the one a member had just posted — and kept the ones about to
+    // expire.
+    const newestFirst = await prisma.status.findMany({
       // Close-friends stories reach the author's list and the author. The
       // block exclusion is a top-level key, so it ANDs with the audience OR
       // above rather than widening it.
@@ -108,9 +115,10 @@ router.get('/feed', optionalAuth, async (req: AuthRequest, res, next) => {
       include: {
         user: { select: { id: true, displayName: true, firstName: true, lastName: true, avatar: true } },
       },
-      orderBy: { createdAt: 'asc' },
-      take: 500,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: STORY_FEED_CAP,
     });
+    const stories = newestFirst.reverse();
 
     const seen = new Set(
       viewerId && stories.length

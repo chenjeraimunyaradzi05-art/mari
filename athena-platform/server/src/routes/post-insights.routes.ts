@@ -7,7 +7,8 @@
  *
  * Both impressions and reach count distinct viewers: one PostImpression row
  * per viewer per post, and Post.impressionCount moves only when such a row is
- * new. Anonymous readers count once per browser through a hashed key.
+ * new. Anonymous readers count once per network address, through a keyed
+ * hash of it (see anonymousKey).
  *
  * impressionCount used to be incremented once per id in every batch, while
  * the row behind it was deduplicated. The client sends each id once per page
@@ -22,8 +23,9 @@
  */
 
 import { Router, type Request } from 'express';
-import { createHash } from 'crypto';
+import { createHmac } from 'crypto';
 import { prisma } from '../utils/prisma';
+import { getJwtSecretOrThrow } from '../utils/jwt';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { bestEffort } from '../utils/best-effort';
@@ -59,18 +61,36 @@ function isId(value: unknown): value is string {
 }
 
 /**
- * A browser's own random key, hashed so the raw value is never stored.
+ * Who an anonymous reader is, for counting: her network address, keyed with
+ * the server's secret so the stored value cannot be turned back into it.
  *
- * The caller's address is hashed in with it. The key alone comes from the
- * browser and can be regenerated at will, so on its own it let one script
- * present itself as a thousand separate readers and walk any post to a reach
- * milestone. Neither input is recoverable from the twenty-four hex characters
- * that get stored, and the row already existed; what changes is that minting
- * a new viewer now takes a new address as well as a new key.
+ * This used to hash the browser's own random key together with the address,
+ * and said that minting a new viewer therefore took a new address as well as
+ * a new key. It did not: a new key from the same address was a new digest,
+ * so one script behind one address could rotate `anonId` and add a viewer to
+ * fifty posts a request, walking any of them to a "Your post reached 1,000
+ * people" notice. Only the address counts now, so one address is at most one
+ * anonymous viewer of a post, however many keys it presents.
+ *
+ * Several people behind one address — a household, an office, a phone
+ * carrier's shared address — read as one. That is an undercount of people who
+ * were not signed in, which is the direction a number put in a congratulation
+ * is allowed to err. Signed-in readers are counted by account and are
+ * unaffected.
+ *
+ * The browser's key is still required: it is how this site's own client
+ * identifies a reader, and a bare request without one is not counted at all.
+ * It no longer takes part in who the reader is. The keyed hash matters because
+ * the address space is small enough that a plain hash of an address can be
+ * reversed by trying them all; without the secret, these cannot.
  */
 function anonymousKey(anonId: unknown, ip: string | undefined): string | null {
   if (typeof anonId !== 'string' || anonId.length < 8 || anonId.length > 64) return null;
-  const digest = createHash('sha256').update(`${anonId}|${ip ?? ''}`).digest('hex').slice(0, 24);
+  if (!ip) return null;
+  const digest = createHmac('sha256', getJwtSecretOrThrow())
+    .update(`post-impression-reader|${ip}`)
+    .digest('hex')
+    .slice(0, 24);
   return `anon:${digest}`;
 }
 
