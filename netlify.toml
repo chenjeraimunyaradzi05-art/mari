@@ -29,7 +29,11 @@
 #
 # Redirects in this file cannot read environment variables, so proxying to the
 # backend from here would mean hardcoding the API host. Both paths are
-# proxied in-app instead, reading NEXT_PUBLIC_API_URL at request time:
+# proxied in-app instead, to the NEXT_PUBLIC_API_URL the site was *built*
+# with. It is not read at request time, whatever earlier versions of this note
+# said: Next.js replaces every NEXT_PUBLIC_* reference with its build-time
+# value in the server route handlers too, so changing the variable in the
+# Netlify dashboard does nothing until the next deploy builds the site again.
 #
 #   /api/auth/*   app/api/auth/*        (forwards Set-Cookie itself)
 #   /api/*        app/api/[...path]     (all verbs, generic pass-through)

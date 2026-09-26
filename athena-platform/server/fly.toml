@@ -11,7 +11,28 @@
 #   cd athena-platform/server
 #   fly launch --no-deploy --copy-config   # first time only, creates the app
 #   fly secrets set DATABASE_URL=... JWT_SECRET=...   # see DEPLOYMENT_GUIDE.md
-#   fly deploy
+#   fly deploy --ha=false
+#   fly scale count 1                      # then `fly status` must list one machine
+#
+# One machine, and it has to stay one machine. `--ha=false` is not optional:
+# Fly's first `fly deploy` of an app with an [http_service] creates two
+# machines for availability unless told otherwise, and nothing in this file
+# can cap the count — Fly has no max-machines setting, only the
+# min_machines_running floor below. render.yaml says the same thing for
+# Render, for the same reason, and the reason is correctness rather than cost.
+#
+# Socket.IO keeps each room's membership in the process that owns the
+# connection, and no @socket.io/redis-adapter is installed. With two machines,
+# a message emitted on one never reaches a socket connected to the other:
+# chat, presence, typing indicators and live notifications half-work for half
+# the members, and nothing is logged anywhere, because the emit succeeds — it
+# reaches an empty room. The scheduled sweeps (retention, reminders, escrow
+# expiry) also run in this process on setInterval, and without REDIS_URL their
+# locks are per machine, so a second machine runs each of them twice.
+#
+# If one machine is not enough, give it more memory or CPU under [[vm]]
+# below. Scaling out needs the Redis adapter first. `fly status` lists the
+# machines; if it shows two, `fly scale count 1` removes one.
 #
 # Everything secret is set with `fly secrets set`, which stores it encrypted and
 # restarts the machines. Nothing secret belongs in the [env] block below: this
@@ -31,9 +52,16 @@ primary_region = "syd"
   CLIENT_URL = "https://athena-empress.netlify.app"
   FRONTEND_URL = "https://athena-empress.netlify.app"
   ALLOWED_ORIGINS = "https://athena-empress.netlify.app"
-  # Netlify deploy previews get a new hostname each time, so allowing them
-  # would let any preview build call the production API with production
-  # cookies.
+  # Leave this "false". Turned on, it does not admit this site's deploy
+  # previews: it admits every https://<anything>.netlify.app origin, and a
+  # netlify.app subdomain is free to anyone who signs up. The API answers those
+  # origins with credentialed CORS (Access-Control-Allow-Credentials: true) and
+  # the socket accepts them. Wherever the browser holds a cookie for this API's
+  # own origin — COOKIE_SAMESITE=none, the setup where the browser calls the
+  # API directly rather than through the web app's proxy — a page on a
+  # stranger's Netlify site can then call the API as the signed-in member and
+  # read what comes back. Preview builds belong against a staging API, not
+  # this one.
   CORS_ALLOW_PREVIEW_ORIGINS = "false"
   JWT_EXPIRES_IN = "15m"
   JWT_REFRESH_EXPIRES_IN = "7d"

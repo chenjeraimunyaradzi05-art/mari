@@ -1,0 +1,15 @@
+{
+  "//": "Type-checks the suites under tests/, which `npm run build` never sees (its rootDir is src/). jest.config.cjs transpiles without type-checking, so this is where a type error in one of these files is reported; CI runs it with `npx tsc -p tests/tsconfig.json`. src/types is listed because its ambient declarations (the optional @sendgrid/mail module, for one) are reached by include, not by import.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "./**/*.ts",
+    "../src/types/**/*.d.ts"
+  ]
+}

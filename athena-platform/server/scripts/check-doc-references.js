@@ -230,7 +230,21 @@ function ignoredByGit(targets) {
   // `__pycache__/` does not match a file called `__pycache__`. Trimming the
   // slash first — the obvious thing to do — silently answers "not ignored" for
   // every directory rule there is.
-  const list = [...new Set(targets.filter(Boolean))];
+  //
+  // The one exception is a LEADING slash. resolves() reads "/openapi.json" as
+  // repository-root-relative, but git reads it as the root of the filesystem,
+  // refuses it as "outside repository", and exits 128 — which took the whole
+  // check down over a sentence in the ML README naming a URL route. So the
+  // leading slash is dropped for the question and mapped back for the answer;
+  // the trailing slash, which is what the paragraph above is about, is kept.
+  const asked = new Map();
+  for (const target of targets.filter(Boolean)) {
+    const forGit = target.replace(/^\/+/, '');
+    if (forGit === '') continue;
+    if (!asked.has(forGit)) asked.set(forGit, []);
+    asked.get(forGit).push(target);
+  }
+  const list = [...asked.keys()];
   if (list.length === 0) return new Set();
 
   let out = '';
@@ -249,7 +263,11 @@ function ignoredByGit(targets) {
     if (error.status !== 0) fail(`git check-ignore failed: ${error.message}`);
   }
 
-  return new Set(out.split('\0').filter(Boolean));
+  const ignored = new Set();
+  for (const forGit of out.split('\0').filter(Boolean)) {
+    for (const original of asked.get(forGit) || [forGit]) ignored.add(original);
+  }
+  return ignored;
 }
 
 // -------------------------------------------------------------------- baseline

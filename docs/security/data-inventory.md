@@ -26,7 +26,7 @@ _*Bases are indicative; **[FOUNDER: confirm with counsel]**._
 | Stripe / PayPal | payment identity, transactions | payments | global |
 | OpenAI / AI providers | prompt text (may contain PII) | AI features | US **[FOUNDER: confirm provider list + DPA]** |
 | Email provider (SendGrid types present) | email, name | transactional mail | **[FOUNDER: confirm provider + domain auth]** |
-| Sentry (when enabled) | errors incl. possible PII in context | monitoring | configure PII scrubbing |
+| Sentry (when enabled) | API 5xx errors with request id, status, method and path (no bodies, query strings or headers — `errorHandler.ts` attaches none); process crashes; client crash reports. Error messages and paths can still carry ids or PII | monitoring | configure PII scrubbing |
 
 ## Where data must NOT be
 

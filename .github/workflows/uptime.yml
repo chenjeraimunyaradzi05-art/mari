@@ -1,0 +1,162 @@
+name: Uptime
+
+# The one thing in this repository that notices an outage before a member does.
+#
+# Until this existed nothing did. /metrics was produced and nothing scraped it,
+# the runbook's "External uptime check on /readyz" row said "Not configured",
+# and the only unprompted notification anywhere was an issue opened when a
+# production migration failed. If the API fell over at 2am, the first report
+# came from a woman who could not reach her safety plan.
+#
+# Every fifteen minutes this asks the API's /readyz — the endpoint that proves
+# Neon is reachable, which the host's own health check on /livez does not — and,
+# when PRODUCTION_SITE_URL is set, the web app's /api/health, which proves the
+# Netlify proxy was built with the right NEXT_PUBLIC_API_URL. Three failed
+# attempts a minute apart open one issue titled "Production is down", which
+# GitHub emails to everyone watching the repository. It is not commented on
+# again while it stays open, so an outage is one notification rather than one
+# every quarter of an hour; the failed runs themselves are listed under
+# Actions. The first run that passes closes it and says how long it was open.
+#
+# What this is not, and docs/runbooks/ONCALL.md says the same: it is not a
+# pager, it is only as alive as GitHub Actions on this repository (a billing
+# lock, or sixty days without a commit, stops scheduled workflows without a
+# word), and GitHub runs schedules late under load. A hosted uptime service on
+# a one-minute interval is still the recommendation. This is the floor, and
+# the floor used to be nothing.
+#
+# Configure it with two repository variables (Settings → Secrets and
+# variables → Actions → Variables), not secrets — both are public URLs:
+#   PRODUCTION_API_URL   the API origin, e.g. https://athena-api.onrender.com
+#   PRODUCTION_SITE_URL  the web app, e.g. https://athena-empress.netlify.app
+# Until PRODUCTION_API_URL is set the job is skipped, and a skipped run is shown
+# as skipped rather than as a pass.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe production
+    runs-on: ubuntu-latest
+    if: ${{ vars.PRODUCTION_API_URL != '' }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Ask /readyz and the web proxy
+        id: probe
+        env:
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+          SITE_URL: ${{ vars.PRODUCTION_SITE_URL }}
+        run: |
+          # A deploy drains traffic by answering 503 on /readyz for a few
+          # seconds, and a single dropped connection is not an outage, so each
+          # target gets three attempts a minute apart before it counts as down.
+          probe() {
+            local name="$1" url="$2" code=000
+            for attempt in 1 2 3; do
+              code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$url" || true)"
+              if [ "$code" = "200" ]; then
+                echo "$name answered 200 on attempt $attempt."
+                return 0
+              fi
+              echo "$name answered ${code} on attempt $attempt."
+              [ "$attempt" -lt 3 ] && sleep 60
+            done
+            echo "- $name (\`$url\`) answered \`$code\` three times, a minute apart." >> "$RUNNER_TEMP/failures.md"
+            return 1
+          }
+
+          api="${API_URL%/}"
+          down=0
+          probe "The API's /readyz" "$api/readyz" || down=1
+          if [ -n "$SITE_URL" ]; then
+            probe "The web app's /api/health" "${SITE_URL%/}/api/health" || down=1
+          else
+            echo "::notice::PRODUCTION_SITE_URL is not set, so the web app's proxy is not being checked."
+          fi
+
+          if [ "$down" = "1" ]; then
+            {
+              echo 'failures<<EOF_FAILURES'
+              cat "$RUNNER_TEMP/failures.md"
+              echo 'EOF_FAILURES'
+            } >> "$GITHUB_OUTPUT"
+            echo "::error::Production is not answering. See the issue this run opened or kept open."
+            exit 1
+          fi
+
+      - name: Open the outage issue
+        if: ${{ failure() && steps.probe.outputs.failures != '' }}
+        uses: actions/github-script@v7
+        env:
+          FAILURES: ${{ steps.probe.outputs.failures }}
+        with:
+          script: |
+            const title = 'Production is down';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 100,
+            });
+            if (open.some((issue) => issue.title === title && !issue.pull_request)) {
+              core.info('An outage issue is already open; not notifying again.');
+              return;
+            }
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['outage'],
+              body: [
+                process.env.FAILURES,
+                '',
+                'Work the failure modes in `athena-platform/docs/runbooks/ONCALL.md`, starting with "`/readyz` is 503".',
+                'This issue closes itself on the first check that passes.',
+                '',
+                `Run: ${run}`,
+              ].join('\n'),
+            });
+
+      - name: Close the outage issue on recovery
+        if: ${{ success() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Production is down';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+              per_page: 100,
+            });
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            for (const issue of open.filter((i) => i.title === title && !i.pull_request)) {
+              const minutes = Math.round((Date.now() - new Date(issue.created_at).getTime()) / 60000);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Answering again. Open for about ${minutes} minutes, measured from the check that opened this issue.\n\nRun: ${run}`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }

@@ -88,6 +88,17 @@ jobs:
 
   # EAS builds cost real build minutes, so a pull request stops at the type
   # check. Merges and manual runs are what actually produce a binary.
+  #
+  # `eas build` and `eas submit` both evaluate app.config.js here, on the
+  # runner, before anything is sent to EAS — that is how they learn which
+  # project and which bundle they are working on. app.config.js throws when
+  # API_URL is unset, and without EAS_PROJECT_ID it describes an app that
+  # belongs to no Expo project, which a --non-interactive run refuses. Neither
+  # was ever given to these jobs, so as committed both would stop before
+  # reaching EAS — the EAS project's secrets are available to the build
+  # server, not to this runner. The EAS project's own API_URL secret is what
+  # the binary is built with; the copy here only lets the runner read the
+  # config, and it should hold the same origin.
   preflight:
     name: Resolve Expo credentials
     runs-on: ubuntu-latest
@@ -99,13 +110,27 @@ jobs:
         id: probe
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID || vars.EAS_PROJECT_ID }}
+          API_URL: ${{ vars.MOBILE_API_URL }}
         run: |
-          if [ -n "$EXPO_TOKEN" ]; then
-            echo "expo=true" >> "$GITHUB_OUTPUT"
-          else
+          if [ -z "$EXPO_TOKEN" ]; then
             echo "expo=false" >> "$GITHUB_OUTPUT"
             echo "EXPO_TOKEN is not configured; skipping the EAS build."
+            exit 0
           fi
+          # EXPO_TOKEN says someone means these builds to run, so a missing
+          # companion value is a failure to name now, not a skip.
+          missing=0
+          if [ -z "$EAS_PROJECT_ID" ]; then
+            echo "::error::EAS_PROJECT_ID is not set. Run 'eas init' in athena-platform/mobile on the Expo account that owns the app and store the id it prints as the EAS_PROJECT_ID repository secret. See athena-platform/mobile/EAS-SETUP.md, section 1."
+            missing=1
+          fi
+          if [ -z "$API_URL" ]; then
+            echo "::error::MOBILE_API_URL is not set. Add it as a repository variable holding the deployed API origin (the same value as the EAS project's API_URL secret); app.config.js refuses to evaluate without it."
+            missing=1
+          fi
+          if [ "$missing" = "1" ]; then exit 1; fi
+          echo "expo=true" >> "$GITHUB_OUTPUT"
 
   build:
     name: EAS build
@@ -120,6 +145,9 @@ jobs:
       # form offers.
       EAS_PLATFORM: ${{ inputs.platform || 'all' }}
       EAS_PROFILE: ${{ inputs.profile || 'preview' }}
+      # For app.config.js on this runner; see the note above preflight.
+      EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID || vars.EAS_PROJECT_ID }}
+      API_URL: ${{ vars.MOBILE_API_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +178,28 @@ jobs:
       - name: Build
         run: eas build --platform "$EAS_PLATFORM" --profile "$EAS_PROFILE" --non-interactive
 
+  # eas.json carries no store credentials, deliberately (mobile/EAS-SETUP.md
+  # says why), and this job used to run `eas submit --non-interactive` against
+  # it anyway. That cannot succeed: a non-interactive iOS submission needs the
+  # App Store Connect app id in the submit profile, and an Android one needs a
+  # Google Play service-account key that nothing here provided. So the job
+  # failed on every run, after a production build had already been paid for.
+  #
+  # The values are now supplied from the repository at run time and written
+  # into this runner's copy of eas.json, which is thrown away with the runner;
+  # nothing is committed. A platform whose values are missing stops the job
+  # before `eas submit` runs, naming what to set.
+  #
+  #   iOS      ASC_APP_ID variable (App Store Connect → the app → App
+  #            Information → Apple ID, a number). Optional: APPLE_TEAM_ID and
+  #            APPLE_ID variables, and the EXPO_APPLE_APP_SPECIFIC_PASSWORD
+  #            secret when signing in with an Apple ID rather than with an App
+  #            Store Connect API key stored on the EAS project.
+  #   Android  GOOGLE_SERVICE_ACCOUNT_KEY secret (the JSON key itself), or the
+  #            EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT variable set to "true" once the
+  #            key has been uploaded with `eas credentials`. The variable is
+  #            the owner saying so: nothing on this runner can ask EAS whether
+  #            a key is there.
   submit:
     name: Submit to stores
     runs-on: ubuntu-latest
@@ -160,6 +210,9 @@ jobs:
         working-directory: athena-platform/mobile
     env:
       EAS_PLATFORM: ${{ inputs.platform }}
+      # For app.config.js on this runner; see the note above preflight.
+      EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID || vars.EAS_PROJECT_ID }}
+      API_URL: ${{ vars.MOBILE_API_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -168,6 +221,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: athena-platform/mobile/package-lock.json
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -175,5 +230,72 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Supply the store credentials
+        env:
+          ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ vars.APPLE_ID }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT: ${{ vars.EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT }}
+        run: |
+          wants_ios=0; wants_android=0
+          case "$EAS_PLATFORM" in
+            ios) wants_ios=1 ;;
+            android) wants_android=1 ;;
+            all) wants_ios=1; wants_android=1 ;;
+            *) echo "::error::Unknown platform '$EAS_PLATFORM'."; exit 1 ;;
+          esac
+
+          missing=0
+          if [ "$wants_ios" = "1" ] && ! printf '%s' "$ASC_APP_ID" | grep -Eq '^[0-9]+$'; then
+            echo "::error::ASC_APP_ID is not set to a number. Add the App Store Connect app id (App Store Connect → the app → App Information → Apple ID) as a repository variable. See athena-platform/mobile/EAS-SETUP.md, section 2."
+            missing=1
+          fi
+
+          key_path=""
+          if [ "$wants_android" = "1" ]; then
+            if [ -n "$GOOGLE_SERVICE_ACCOUNT_KEY" ]; then
+              # Outside the checkout, so no later step can pick it up by
+              # accident, and readable by this user only.
+              key_path="$RUNNER_TEMP/google-service-account.json"
+              umask 077
+              printf '%s' "$GOOGLE_SERVICE_ACCOUNT_KEY" > "$key_path"
+              if ! node -e 'const k = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (k.type !== "service_account") process.exit(1)' "$key_path"; then
+                echo "::error::GOOGLE_SERVICE_ACCOUNT_KEY is not a Google service-account JSON key."
+                missing=1
+              fi
+            elif [ "$EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT" != "true" ]; then
+              echo "::error::No Google Play service-account key. Store the JSON key as the GOOGLE_SERVICE_ACCOUNT_KEY secret, or upload it with 'eas credentials' and set the EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT variable to true. See athena-platform/mobile/EAS-SETUP.md, section 3."
+              missing=1
+            fi
+          fi
+          if [ "$missing" = "1" ]; then exit 1; fi
+
+          # Written into this runner's eas.json only. The committed file keeps
+          # its track and rollout decisions and gains nothing else.
+          WANTS_IOS="$wants_ios" KEY_PATH="$key_path" node -e '
+            const fs = require("fs");
+            const eas = JSON.parse(fs.readFileSync("eas.json", "utf8"));
+            eas.submit = eas.submit || {};
+            const profile = (eas.submit.production = eas.submit.production || {});
+            if (process.env.WANTS_IOS === "1") {
+              profile.ios = {
+                ...(profile.ios || {}),
+                ascAppId: process.env.ASC_APP_ID,
+                ...(process.env.APPLE_TEAM_ID ? { appleTeamId: process.env.APPLE_TEAM_ID } : {}),
+                ...(process.env.APPLE_ID ? { appleId: process.env.APPLE_ID } : {}),
+              };
+            }
+            if (process.env.KEY_PATH) {
+              profile.android = { ...(profile.android || {}), serviceAccountKeyPath: process.env.KEY_PATH };
+            }
+            fs.writeFileSync("eas.json", JSON.stringify(eas, null, 2) + "\n");
+          '
+
       - name: Submit
-        run: eas submit --platform "$EAS_PLATFORM" --latest --non-interactive
+        env:
+          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_APP_SPECIFIC_PASSWORD }}
+        run: eas submit --platform "$EAS_PLATFORM" --profile production --latest --non-interactive

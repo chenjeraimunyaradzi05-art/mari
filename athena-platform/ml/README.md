@@ -31,14 +31,23 @@ Create a Python environment and install dependencies from `requirements.txt`.
 
 Each algorithm provides a standalone training script.
 
-**If no dataset is provided, a synthetic one is generated.** That is a smoke
-test for the pipeline, not a way to produce a model: the synthetic target is a
-hand-typed weight vector over the features plus Gaussian noise, so an artefact
-trained on it will load and score and mean nothing. Do not ship one.
+**Synthetic data is a smoke test for the pipeline, not a way to produce a
+model.** The synthetic target is a hand-typed weight vector over the features
+plus Gaussian noise, so an artefact trained on it will load and score and mean
+nothing. The two kinds of trainer treat it differently:
+
+- CareerCompass refuses to train without `--data` unless you pass
+  `--allow-synthetic-data`, and an artefact trained that way is stamped
+  `"trained_on": "synthetic"` in its `model_card.json`, which the API's model
+  loader refuses to serve.
+- The light and heavy rankers still fall back to a generated dataset when no
+  `--data` is given, and write no model card. Nothing in the API loads either
+  of them today (`MODEL_CONSUMERS` in `src/api/services/model_loader.py` names
+  only CareerCompass), but do not ship one.
 
 - CareerCompass (XGBoost regressor) → `artifacts/career_compass/model.joblib`
   ```bash
-  python -m src.algorithms.career_compass.train --output-dir artifacts/career_compass
+  python -m src.algorithms.career_compass.train --data path/to/career_data.csv --output-dir artifacts/career_compass
   ```
 - Light Ranker (fast linear model) → `artifacts/light_ranker/model.joblib`
 - Heavy Ranker (deep neural net) → `artifacts/heavy_ranker/model.pt`
@@ -53,6 +62,9 @@ the runbook lists it.
 
 - `GET /health` — `healthy` only when every model some endpoint reads is loaded,
   `degraded` otherwise, with `models` naming what is missing and why it matters.
+  The Node API's feed ranker runs against either word, because the feed router
+  reads no model; a Node caller that needs a model asks for it by name
+  (`mlService.isReady('career_compass')`) and is refused until it is loaded.
 - `GET /ready` — 503 while any such model is missing.
 - `POST /api/v1/career-compass/*` — the only endpoints that read a model. 503
   while there is no artefact, with the full account in the body.
@@ -68,8 +80,18 @@ Set `ATHENA_REQUIRE_MODEL_ARTIFACTS=true` once real artefacts exist: a model an
 endpoint reads that has no artefact then stops the service at startup, with a
 message naming it, instead of degrading quietly.
 
-`ML_SERVICE_KEY` must match the value the Node API sends as `X-ML-Key`. Without
-it, every endpoint except `/health` is open to anything that can reach the port.
+`ML_SERVICE_KEY` must match the value the Node API sends as `X-ML-Key`. With it
+set, every path except `/health` needs the key, `/docs`, `/redoc` and the
+`GET /openapi.json` schema route included. Without it every endpoint is open to anything that can
+reach the port, so the service refuses to start without one when the environment
+name (`ATHENA_ENV`, `ENVIRONMENT`, `APP_ENV` or `NODE_ENV`) is `production`.
+
+`DEBUG=true` makes an unhandled error return its exception text. It is read as a
+boolean (`DEBUG=false` is off) and ignored in production.
+
+The repository's `docker-compose.yml` is a development stack: it builds the
+`development` image with `--reload`, sets `DEBUG=true`, sets no key and
+publishes port 8000. Do not deploy this service with it.
 
 ## Notes
 

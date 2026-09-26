@@ -76,6 +76,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The Jest project transpiles without type-checking (jest.config.cjs
+      # says why: the type-checking preset is what made each worker several
+      # gigabytes). `npm run build` above covers src/ and its __tests__
+      # suites; this covers the suites under tests/, which build never sees.
+      - name: Type check the tests/ suites
+        run: npx tsc -p tests/tsconfig.json
+
       # Static check, so it needs no database and no client install. Catches a
       # client call whose server route was never built, sits behind a `/:id`
       # route, or answers a different verb.

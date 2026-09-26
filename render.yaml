@@ -84,9 +84,16 @@ services:
         value: https://athena-empress.netlify.app
       - key: ALLOWED_ORIGINS
         value: https://athena-empress.netlify.app
-      # Netlify deploy previews get a new hostname each time. Allowing them
-      # would mean any preview build could call the production API with
-      # production cookies.
+      # Leave this "false". Turned on, it does not admit this site's deploy
+      # previews: it admits every https://<anything>.netlify.app origin, and
+      # a netlify.app subdomain is free to anyone who signs up. The API
+      # answers those origins with credentialed CORS and the socket accepts
+      # them. Wherever the browser holds a cookie for this API's own origin —
+      # COOKIE_SAMESITE=none, the setup where the browser calls the API
+      # directly rather than through the web app's proxy — a page on a
+      # stranger's Netlify site can then call the API as the signed-in member
+      # and read what comes back. Preview builds belong against a staging
+      # API, not this one.
       - key: CORS_ALLOW_PREVIEW_ORIGINS
         value: "false"
 
