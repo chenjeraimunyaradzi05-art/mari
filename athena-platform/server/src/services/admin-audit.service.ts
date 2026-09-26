@@ -62,9 +62,14 @@ export type AdminAuditAction =
   | 'BLOG_ARTICLE_CREATED'
   | 'BLOG_ARTICLE_UPDATED'
   | 'BLOG_ARTICLE_DELETED'
-  // Funding
+  // Funding. The decisions are about a named member and move money or cover
+  // towards her, so they carry targetUserId; the catalogue edits do not.
   | 'GRANT_CREATED'
   | 'GRANT_UPDATED'
+  | 'GRANT_APPLICATION_DECIDED'
+  | 'INSURANCE_APPLICATION_DECIDED'
+  | 'COMPANY_FORMATION_DECIDED'
+  | 'COMPANY_FORMATION_FEE_REFUNDED'
   // Catalogue
   | 'ACCELERATOR_COHORT_CREATED'
   | 'ACCELERATOR_COHORT_UPDATED'
@@ -104,6 +109,14 @@ export type AdminAuditAction =
   | 'CREDENTIAL_ASSESSMENT_UPDATED'
   // Member-facing queues
   | 'FEEDBACK_UPDATED'
+  // A data-subject request taken, handed on, noted or closed by staff
+  | 'DSAR_REQUEST_UPDATED'
+  // Public disclosures: who compiled and published the transparency report,
+  // and who changed the register of providers members are pointed to
+  | 'TRANSPARENCY_REPORT_COMPILED'
+  | 'TRANSPARENCY_REPORT_PUBLISHED'
+  | 'SUBPROCESSOR_CREATED'
+  | 'SUBPROCESSOR_UPDATED'
   // Seeding. Hard-blocked in production, but a demo or CI environment that
   // mints an administrator account and hands back its password should still be
   // able to say when that happened and from where.
@@ -124,6 +137,24 @@ export interface AdminAuditDetail {
    * member wrote, which belongs on the row itself rather than in the log.
    */
   [key: string]: unknown;
+}
+
+/**
+ * Write an AuditLog row for a change that has already committed.
+ *
+ * logAudit throws when the insert fails, and the routers that call it directly
+ * — admin, appeal and the privacy routes — awaited it bare, after the write it
+ * records. A failed audit insert therefore turned a finished suspension, appeal
+ * decision or data export into a 500: the person was told the work had failed
+ * when it had not, and the obvious next move, trying again, is the wrong one
+ * for most of these. The admin hard delete made it certain rather than
+ * possible, because it wrote a row pointing at the account it had just erased
+ * and the foreign key refused it every time. bestEffort keeps the response true
+ * to what happened and still puts the missing row in the log under the action
+ * it was for.
+ */
+export async function auditAfterCommit(entry: Parameters<typeof logAudit>[0]): Promise<void> {
+  await bestEffort(`audit ${entry.action}`, () => logAudit(entry));
 }
 
 /**

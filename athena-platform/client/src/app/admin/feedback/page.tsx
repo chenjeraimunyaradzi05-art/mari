@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, Bug, Lightbulb, Loader2, MessageSquare, ThumbsUp } from 'lucide-react';
+import { ArrowLeft, Bug, ChevronLeft, ChevronRight, Lightbulb, Loader2, MessageSquare, ThumbsUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -37,11 +37,19 @@ const errorMessage = (e: unknown) => (e as { response?: { data?: { message?: str
 export default function AdminFeedbackPage() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<'' | Status>('NEW');
+  const [page, setPage] = useState(1);
 
+  // Paged on the server, so the counts on the filter buttons and the list
+  // underneath describe the same rows.
   const feedback = useQuery({
-    queryKey: ['admin-feedback', status],
-    queryFn: () => api.get('/admin/feedback', { params: status ? { status } : {} }),
-    select: (r) => ({ items: (Array.isArray(r.data?.data) ? r.data.data : []) as Item[], counts: (r.data?.counts ?? {}) as Partial<Record<Status, number>> }),
+    queryKey: ['admin-feedback', status, page],
+    queryFn: () => api.get('/admin/feedback', { params: { ...(status ? { status } : {}), page, limit: 50 } }),
+    select: (r) => ({
+      items: (Array.isArray(r.data?.data) ? r.data.data : []) as Item[],
+      counts: (r.data?.counts ?? {}) as Partial<Record<Status, number>>,
+      totalPages: Number(r.data?.pagination?.totalPages ?? 1),
+      total: Number(r.data?.pagination?.total ?? 0),
+    }),
   });
   const move = useMutation({
     mutationFn: ({ id, next }: { id: string; next: Status }) => api.patch(`/admin/feedback/${id}`, { status: next }),
@@ -63,7 +71,7 @@ export default function AdminFeedbackPage() {
 
       <div className="mb-4 flex flex-wrap gap-2">
         {(['', ...STATUSES] as Array<'' | Status>).map((s) => (
-          <button key={s || 'all'} type="button" onClick={() => setStatus(s)} className={cn('rounded-full border px-3 py-1 text-xs font-medium', status === s ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300')}>
+          <button key={s || 'all'} type="button" onClick={() => { setStatus(s); setPage(1); }} className={cn('rounded-full border px-3 py-1 text-xs font-medium', status === s ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300')}>
             {s ? `${s.toLowerCase()} · ${counts[s] ?? 0}` : 'all'}
           </button>
         ))}
@@ -72,6 +80,10 @@ export default function AdminFeedbackPage() {
       {feedback.isLoading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+        </div>
+      ) : feedback.isError ? (
+        <div className="card p-10 text-center text-slate-500">
+          Feedback could not be loaded. That is not the same as there being none — refresh to try again.
         </div>
       ) : (feedback.data?.items.length ?? 0) === 0 ? (
         <div className="card p-10 text-center text-slate-500">Nothing here.</div>
@@ -109,6 +121,22 @@ export default function AdminFeedbackPage() {
             );
           })}
         </ul>
+      )}
+
+      {feedback.data && feedback.data.totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
+          <span>
+            Page {page} of {feedback.data.totalPages} · {feedback.data.total} items
+          </span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="btn-outline px-2 py-1" aria-label="Previous page">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => setPage((p) => p + 1)} disabled={page >= feedback.data.totalPages} className="btn-outline px-2 py-1" aria-label="Next page">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

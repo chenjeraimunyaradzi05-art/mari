@@ -7,6 +7,7 @@ jest.mock('../../utils/prisma', () => ({
       create: jest.fn(async ({ data }: any) => ({ id: 'f1', ...data })),
       findMany: jest.fn(async () => []),
       groupBy: jest.fn(async () => []),
+      count: jest.fn(async () => 0),
       findUnique: jest.fn(async () => null),
       update: jest.fn(async ({ data }: any) => ({ id: 'f1', ...data })),
     },
@@ -80,4 +81,28 @@ describe('Feedback from the help centre', () => {
     expect(done.body.data.status).toBe('DONE');
     await request(app).patch('/api/admin/feedback/f1').set('x-test-user', 'staff').set('x-test-role', 'ADMIN').send({ status: 'LATER' }).expect(400);
   });
+
+  // The list used to stop at the newest 500 with no way past them, while the
+  // counts beside it covered the whole table, so the oldest items vanished and
+  // the numbers stopped matching the list.
+  it('pages the list, so nothing past the first screenful silently disappears', async () => {
+    prisma.feedback.findMany.mockResolvedValue([]);
+    prisma.feedback.count.mockResolvedValue(612);
+
+    const list = await request(app)
+      .get('/api/admin/feedback?status=NEW&page=3&limit=100')
+      .set('x-test-user', 'staff')
+      .set('x-test-role', 'ADMIN')
+      .expect(200);
+
+    const call = prisma.feedback.findMany.mock.calls[0][0];
+    expect(call.skip).toBe(200);
+    expect(call.take).toBe(100);
+    expect(list.body.pagination).toEqual({ page: 3, limit: 100, total: 612, totalPages: 7 });
+
+    // A page size past the ceiling is held to it rather than trusted.
+    await request(app).get('/api/admin/feedback?limit=100000').set('x-test-user', 'staff').set('x-test-role', 'ADMIN').expect(200);
+    expect(prisma.feedback.findMany.mock.calls[1][0].take).toBe(100);
+  });
 });
+

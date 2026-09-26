@@ -86,6 +86,17 @@ interface User {
   persona: string;
   emailVerified: boolean;
   isSuspended: boolean;
+  /**
+   * Why the account is locked, read back from the audit row that locked it.
+   * null when no reason was ever recorded; absent when the reasons could not
+   * be read this time, which the table says rather than showing a blank.
+   */
+  suspension?: {
+    reason: string | null;
+    source: 'admin' | 'moderation';
+    moderationAction: string | null;
+    at: string;
+  } | null;
   createdAt: string;
   lastLoginAt: string | null;
   _count: {
@@ -128,15 +139,32 @@ export default function AdminUsersPage() {
     },
   });
 
+  // A suspension has to say why. The reason is what an appeal is reviewed
+  // against and what the next admin reads on this screen, and the server now
+  // refuses a suspension without one.
   const suspendMutation = useMutation({
-    mutationFn: async ({ userId, isSuspended }: { userId: string; isSuspended: boolean }) => {
-      await api.patch(`/admin/users/${userId}`, { isSuspended });
+    mutationFn: async ({ userId, isSuspended, suspensionReason }: { userId: string; isSuspended: boolean; suspensionReason?: string }) => {
+      await api.patch(`/admin/users/${userId}`, { isSuspended, ...(suspensionReason ? { suspensionReason } : {}) });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       setSelectedUser(null);
     },
+    onError: (err: unknown) => {
+      const message = (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
+      window.alert(message?.error || message?.message || 'The change could not be saved.');
+    },
   });
+
+  const suspend = (user: User) => {
+    const reason = window.prompt(`Why are you suspending ${user.firstName} ${user.lastName}? This is kept with the suspension and read on appeal.`);
+    if (reason === null) return;
+    if (!reason.trim()) {
+      window.alert('A suspension needs a reason.');
+      return;
+    }
+    suspendMutation.mutate({ userId: user.id, isSuspended: true, suspensionReason: reason.trim() });
+  };
 
   const updateRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
@@ -298,8 +326,15 @@ export default function AdminUsersPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         {user.isSuspended ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                            <XCircle className="h-3 w-3" /> Suspended
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800"
+                            title={
+                              user.suspension === undefined
+                                ? 'The reason could not be loaded'
+                                : user.suspension?.reason ?? 'No reason was recorded'
+                            }
+                          >
+                            <XCircle className="h-3 w-3" /> {user.suspension?.moderationAction === 'ban' ? 'Banned' : 'Suspended'}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -313,7 +348,16 @@ export default function AdminUsersPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {user.isSuspended && (
+                        <div className="mb-1 max-w-xs whitespace-normal text-xs text-red-700 dark:text-red-300">
+                          {user.suspension === undefined
+                            ? 'Suspension reason could not be loaded.'
+                            : user.suspension?.reason
+                              ? `${user.suspension.source === 'moderation' ? 'From a report' : 'By an admin'}: ${user.suspension.reason}`
+                              : 'No reason was recorded for this suspension.'}
+                        </div>
+                      )}
                       <div>{user._count.posts} posts</div>
                       <div>{user._count.applications} applications</div>
                     </td>
@@ -350,7 +394,7 @@ export default function AdminUsersPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => suspendMutation.mutate({ userId: user.id, isSuspended: true })}
+                            onClick={() => suspend(user)}
                             className="p-2 text-red-600 hover:text-red-800"
                             title="Suspend User"
                           >

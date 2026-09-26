@@ -29,6 +29,7 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 import { prisma as prismaTyped } from '../../utils/prisma';
+import { sendEmail as sendEmailTyped } from '../../utils/email';
 import {
   listAnonymousReports,
   getAnonymousReport,
@@ -36,6 +37,7 @@ import {
 } from '../content-report.service';
 
 const prisma: any = prismaTyped;
+const sendEmail = sendEmailTyped as unknown as jest.Mock<(...args: any[]) => Promise<boolean>>;
 
 const REPORTED = 'reported-user-1';
 const MODERATOR = 'moderator-1';
@@ -80,7 +82,7 @@ describe('Anonymous reports reach a moderator', () => {
     ]);
   });
 
-  it('lists only anonymous reports, newest first, with the account they are about', async () => {
+  it('lists only anonymous reports, with the account they are about', async () => {
     const result = await listAnonymousReports({ status: 'PENDING' });
 
     const where = prisma.safetyIncident.findMany.mock.calls[0][0].where;
@@ -89,7 +91,8 @@ describe('Anonymous reports reach a moderator', () => {
       metadata: { path: ['anonymous'], equals: true },
       resolvedAt: null,
     });
-    expect(prisma.safetyIncident.findMany.mock.calls[0][0].orderBy).toEqual({ createdAt: 'desc' });
+    // The open queue is read oldest first and then put in deadline order.
+    expect(prisma.safetyIncident.findMany.mock.calls[0][0].orderBy).toEqual({ createdAt: 'asc' });
 
     expect(result.reports[0]).toMatchObject({
       id: 'inc-1',
@@ -101,6 +104,91 @@ describe('Anonymous reports reach a moderator', () => {
       reportedUser: { id: REPORTED, email: 'ada@athena.com' },
     });
     expect(result.openCount).toBe(1);
+  });
+
+  it('works the open queue by review deadline, not by arrival, and says which are late', async () => {
+    // A harassment report from yesterday (48-hour clock) and a CSAM report from
+    // this morning (24-hour clock, stamped): the second is due first.
+    const yesterday = new Date(Date.now() - 20 * 60 * 60 * 1000);
+    const thisMorning = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    prisma.safetyIncident.findMany.mockResolvedValue([
+      incident({ id: 'harassment', reason: 'HARASSMENT', createdAt: yesterday, metadata: { anonymous: true } }),
+      incident({
+        id: 'csam',
+        reason: 'CSAM',
+        createdAt: thisMorning,
+        metadata: { anonymous: true, reviewDeadline: new Date(thisMorning.getTime() + 24 * 3600 * 1000).toISOString() },
+      }),
+      incident({
+        id: 'late',
+        reason: 'SPAM',
+        createdAt: new Date(Date.now() - 72 * 3600 * 1000),
+        metadata: { anonymous: true },
+      }),
+    ]);
+
+    const result = await listAnonymousReports({ status: 'PENDING' });
+
+    expect(result.reports.map((report) => report.id)).toEqual(['late', 'csam', 'harassment']);
+    expect(result.reports[0].overdue).toBe(true);
+    expect(result.reports[1].overdue).toBe(false);
+    // A row with no stamped deadline is given the one its reason runs on.
+    expect(new Date(result.reports[2].reviewDeadline!).getTime()).toBe(yesterday.getTime() + 48 * 3600 * 1000);
+  });
+
+  it('writes the outcome to an anonymous reporter who left an address', async () => {
+    prisma.safetyIncident.findFirst.mockResolvedValue(
+      incident({
+        metadata: {
+          anonymous: true,
+          ticketId: 'RPT-ABC-1234',
+          contactEmail: 'reporter@example.org',
+          description: 'He posted my address',
+        },
+      })
+    );
+
+    const outcome = await resolveAnonymousReport('inc-1', 'remove', MODERATOR);
+
+    const mail = sendEmail.mock.calls.map((call: any[]) => call[0]);
+    expect(mail).toHaveLength(1);
+    expect(mail[0].to).toBe('reporter@example.org');
+    // She is given back the reference her acknowledgment quoted.
+    expect(mail[0].subject).toContain('RPT-ABC-1234');
+    expect(mail[0].html).toContain('removed the reported content');
+    expect(outcome.ticketId).toBe('RPT-ABC-1234');
+  });
+
+  it('never tells a reporter an account was removed for good when it was banned', async () => {
+    prisma.safetyIncident.findFirst.mockResolvedValue(
+      incident({ metadata: { anonymous: true, contactEmail: 'reporter@example.org' } })
+    );
+
+    await resolveAnonymousReport('inc-1', 'ban', MODERATOR);
+
+    const html = String((sendEmail.mock.calls[0][0] as { html: string }).html);
+    expect(html).toContain('banned the account');
+    expect(html).not.toMatch(/permanent/i);
+  });
+
+  it('a bounced outcome email does not undo or fail the decision', async () => {
+    prisma.safetyIncident.findFirst.mockResolvedValue(
+      incident({ metadata: { anonymous: true, contactEmail: 'reporter@example.org' } })
+    );
+    sendEmail.mockRejectedValueOnce(new Error('mailbox full'));
+
+    const outcome = await resolveAnonymousReport('inc-1', 'warn', MODERATOR);
+
+    expect(outcome.status).toBe('RESOLVED');
+    expect(prisma.safetyIncident.update).toHaveBeenCalled();
+  });
+
+  it('sends nothing when the reporter left no address', async () => {
+    prisma.safetyIncident.findFirst.mockResolvedValue(incident());
+
+    await resolveAnonymousReport('inc-1', 'dismiss', MODERATOR);
+
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it('reads an actioned report back with the outcome the decision wrote', async () => {

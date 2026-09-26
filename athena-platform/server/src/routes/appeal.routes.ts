@@ -4,7 +4,9 @@ import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { reverseEnforcement } from '../services/content-report.service';
-import { logAudit } from '../utils/audit';
+// Audit rows here follow a committed change, so a failed insert is logged
+// rather than turned into a 500 for work that succeeded.
+import { auditAfterCommit } from '../services/admin-audit.service';
 
 const router = Router();
 
@@ -38,7 +40,7 @@ router.post(
         },
       });
 
-      await logAudit({
+      await auditAfterCommit({
         action: 'USER_APPEAL_SUBMIT',
         actorUserId: req.user?.id ?? null,
         targetUserId: req.user?.id ?? null,
@@ -161,7 +163,7 @@ router.patch(
         });
       }
 
-      await logAudit({
+      await auditAfterCommit({
         action: 'ADMIN_APPEAL_DECISION',
         actorUserId: req.user?.id ?? null,
         targetUserId: appeal.userId,

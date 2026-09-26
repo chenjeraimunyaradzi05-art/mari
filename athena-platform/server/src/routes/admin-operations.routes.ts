@@ -24,9 +24,11 @@ import {
   ndbApplies,
   seventyTwoHourClockApplies,
 } from '../services/breach.service';
+import { z } from 'zod';
 import {
   ESCALATION_STATUSES,
   EscalationStatus,
+  compileTransparencyReport,
   listAuthorityEscalations,
   getAuthorityEscalation,
   updateAuthorityEscalationStatus,
@@ -1001,6 +1003,227 @@ router.get('/ops/summary', ...adminOnly, async (_req: AuthRequest, res: Response
       legalHolds: { active: activeLegalHolds },
       authorityEscalations: { awaitingFiling: unfiledReferrals },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// PUBLIC DISCLOSURES: TRANSPARENCY REPORT AND SUBPROCESSOR REGISTER
+// ============================================================================
+// Both public pages read tables that nothing in the repository wrote. The
+// transparency report — which the Basic Online Safety Expectations ask an
+// Australian service for — could only ever show its empty state, and the
+// privacy statement sent members to a list of providers that could never be
+// published, which also left /data-transfers unable to name any overseas
+// destination. These routes are the writers, and every write is attributed.
+
+function zodOr400<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new ApiError(400, issue ? `${issue.path.join('.') || 'input'}: ${issue.message}` : 'Invalid input');
+  }
+  return parsed.data;
+}
+
+/** GET /admin/transparency-reports — drafts and published, newest period first. */
+router.get('/transparency-reports', ...adminOnly, async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const reports = await prisma.transparencyReport.findMany({ orderBy: { endDate: 'desc' }, take: 40 });
+    res.json({ reports });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /admin/transparency-reports { period: 'Q3_2026' }
+ * Count a finished quarter into a draft. A draft can be recompiled; a
+ * published report is never quietly rewritten under the people who read it.
+ */
+router.post('/transparency-reports', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { period } = zodOr400(z.object({ period: z.string().trim().max(10) }).strict(), req.body ?? {});
+
+    const existing = await prisma.transparencyReport.findUnique({ where: { period } });
+    if (existing?.publishedAt) {
+      throw new ApiError(409, 'That report has been published and cannot be recompiled');
+    }
+
+    let compiled;
+    try {
+      compiled = await compileTransparencyReport(period);
+    } catch (error) {
+      throw new ApiError(400, error instanceof Error ? error.message : 'That period cannot be compiled');
+    }
+
+    const data = {
+      startDate: compiled.startDate,
+      endDate: compiled.endDate,
+      totalReports: compiled.totalReports,
+      reportsByCategory: compiled.reportsByCategory,
+      actionsTotal: compiled.actionsTotal,
+      actionsByType: compiled.actionsByType,
+      avgResponseHours: compiled.avgResponseHours,
+      under24Hours: compiled.under24Hours,
+      under72Hours: compiled.under72Hours,
+      over72Hours: compiled.over72Hours,
+      totalAppeals: compiled.totalAppeals,
+      appealsUpheld: compiled.appealsUpheld,
+      appealsOverturned: compiled.appealsOverturned,
+    };
+
+    const report = await prisma.transparencyReport.upsert({
+      where: { period },
+      create: { period, ...data },
+      update: data,
+    });
+
+    await recordAdminAction(req, 'TRANSPARENCY_REPORT_COMPILED', {
+      resourceType: 'TransparencyReport',
+      resourceId: report.id,
+      period,
+      totalReports: report.totalReports,
+    });
+
+    res.status(existing ? 200 : 201).json({ report });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /admin/transparency-reports/:id/publish — put a compiled draft in front of the public. */
+router.post('/transparency-reports/:id/publish', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const existing = await prisma.transparencyReport.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      throw new ApiError(404, 'Report not found');
+    }
+    if (existing.publishedAt) {
+      throw new ApiError(409, 'That report is already published');
+    }
+
+    const report = await prisma.transparencyReport.update({
+      where: { id: existing.id },
+      data: { publishedAt: new Date() },
+    });
+
+    await recordAdminAction(req, 'TRANSPARENCY_REPORT_PUBLISHED', {
+      resourceType: 'TransparencyReport',
+      resourceId: report.id,
+      period: report.period,
+    });
+
+    res.json({ report });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const optionalDate = z
+  .union([z.string().trim().min(1), z.null()])
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined || value === null) return value;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'must be a date' });
+      return z.NEVER;
+    }
+    return date;
+  });
+
+const shortList = (max: number, length: number) => z.array(z.string().trim().min(1).max(length)).max(max);
+
+const subprocessorFields = {
+  name: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(1000).nullable().optional(),
+  contactName: z.string().trim().max(200).nullable().optional(),
+  contactEmail: z.string().trim().email().max(254).nullable().optional(),
+  // Where the provider holds the data. Published as written, and it is what
+  // /data-transfers decides "overseas" from, so it is required.
+  country: z.string().trim().min(2).max(100),
+  isEUAdequate: z.boolean().optional(),
+  transferMechanism: z.string().trim().max(200).nullable().optional(),
+  services: shortList(20, 100).optional(),
+  dataCategories: z.array(z.nativeEnum(DataCategory)).max(Object.keys(DataCategory).length).optional(),
+  // A signed data processing agreement is only published when it has a date;
+  // resolveDpaStatus reports NOT_RECORDED otherwise, never a signature we
+  // cannot show.
+  dpaSignedAt: optionalDate,
+  dpaExpiresAt: optionalDate,
+  sccVersion: z.string().trim().max(50).nullable().optional(),
+  lastAuditDate: optionalDate,
+  nextAuditDate: optionalDate,
+  securityCertifications: shortList(20, 100).optional(),
+  isActive: z.boolean().optional(),
+};
+
+const createSubprocessorSchema = z.object(subprocessorFields).strict();
+const updateSubprocessorSchema = z
+  .object({ ...subprocessorFields, name: subprocessorFields.name.optional(), country: subprocessorFields.country.optional() })
+  .strict();
+
+/** GET /admin/subprocessors — the whole register, retired providers included. */
+router.get('/subprocessors', ...adminOnly, async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const subprocessors = await prisma.subprocessor.findMany({ orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+    res.json({ subprocessors });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /admin/subprocessors — add a provider to the register members are shown. */
+router.post('/subprocessors', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const body = zodOr400(createSubprocessorSchema, req.body ?? {});
+    const subprocessor = await prisma.subprocessor.create({
+      data: {
+        ...body,
+        services: body.services ?? [],
+        dataCategories: body.dataCategories ?? [],
+        securityCertifications: body.securityCertifications ?? [],
+      },
+    });
+
+    await recordAdminAction(req, 'SUBPROCESSOR_CREATED', {
+      resourceType: 'Subprocessor',
+      resourceId: subprocessor.id,
+      name: subprocessor.name,
+      country: subprocessor.country,
+    });
+
+    res.status(201).json({ subprocessor });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /admin/subprocessors/:id — correct an entry or retire it.
+ * Retiring (isActive false) rather than deleting keeps the record that the
+ * provider was once disclosed, which a member asking "who had my data" is owed.
+ */
+router.patch('/subprocessors/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const body = zodOr400(updateSubprocessorSchema, req.body ?? {});
+    const existing = await prisma.subprocessor.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!existing) {
+      throw new ApiError(404, 'Provider not found');
+    }
+
+    const subprocessor = await prisma.subprocessor.update({ where: { id: existing.id }, data: body });
+
+    await recordAdminAction(req, 'SUBPROCESSOR_UPDATED', {
+      resourceType: 'Subprocessor',
+      resourceId: subprocessor.id,
+      changedFields: Object.keys(body),
+      isActive: subprocessor.isActive,
+    });
+
+    res.json({ subprocessor });
   } catch (error) {
     next(error);
   }

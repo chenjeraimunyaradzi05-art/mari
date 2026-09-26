@@ -15,7 +15,16 @@ export const metadata: Metadata = {
  * scheme. It sits beside the general policy and the UK addendum.
  */
 
-const PRINCIPLES: Array<{ app: string; title: string; body: string[] }> = [
+const providersLink = (
+  <Link href="/privacy/subprocessors" className="text-primary hover:underline">
+    service providers page
+  </Link>
+);
+
+// This statement pointed members to "the subprocessors page" twice, and no such
+// page existed. It does now, and it says plainly when the list has not been
+// published rather than implying there is no one to list.
+const PRINCIPLES: Array<{ app: string; title: string; body: React.ReactNode[] }> = [
   {
     app: 'APP 1',
     title: 'Open and transparent management of personal information',
@@ -37,19 +46,30 @@ const PRINCIPLES: Array<{ app: string; title: string; body: string[] }> = [
     title: 'Use and disclosure',
     body: [
       'Your information is used for the purpose you gave it for, and for related purposes you would reasonably expect: running the platform, keeping members safe, meeting legal obligations. It is not sold.',
-      'It is disclosed to providers who act for us (hosting, payments, email, push notifications), to the people you choose to share it with on the platform, and where the law requires it. The current list of providers is published on the subprocessors page.',
+      <>
+        It is disclosed to providers who act for us (hosting, payments, email, push notifications), to the people you
+        choose to share it with on the platform, and where the law requires it. The providers are listed on our{' '}
+        {providersLink}; if that list has not been published yet, the page says so and tells you how to ask us instead.
+      </>,
     ],
   },
   {
     app: 'APP 7',
     title: 'Direct marketing',
-    body: ['Marketing email is opt-in and every message carries an unsubscribe link. You can change every notification kind, including marketing, in Settings, and we act on it at once.'],
+    body: [
+      'We do not send marketing email unless you have opted in, and any marketing message carries an unsubscribe link. You can say yes or no to marketing in the Privacy Center, and the newsletter switch in notification Settings follows what you choose there; turning either off takes effect before the next message is sent.',
+    ],
   },
   {
     app: 'APP 8',
     title: 'Cross-border disclosure',
     body: [
-      'Some of our providers store data outside Australia. Before we rely on one we check that it is bound by contract to protect your information to a standard at least as high as the APPs, and we say where each one operates on the subprocessors page. If you would rather we did not disclose your information overseas, you can close your account and export your data first from the Privacy Center.',
+      <>
+        Some of our providers store data outside Australia. Before we rely on one we check that it is bound by contract to
+        protect your information to a standard at least as high as the APPs. The {providersLink} says where each one holds
+        data and whether a data processing agreement is on record. If you would rather we did not disclose your
+        information overseas, you can close your account and export your data first from the Privacy Center.
+      </>,
     ],
   },
   {
@@ -57,7 +77,7 @@ const PRINCIPLES: Array<{ app: string; title: string; body: string[] }> = [
     title: 'Quality and security',
     body: [
       'You can correct your own profile at any time. We protect information with encryption in transit and at rest, access controls, audit logging of privileged actions, and security testing; DV Safe Mode data is additionally encrypted with its own key.',
-      'When information is no longer needed for a purpose we are allowed to keep it for, it is deleted or de-identified. Deleting your account removes your personal information within 30 days, apart from records the law requires us to keep.',
+      'When information is no longer needed for a purpose we are allowed to keep it for, it is deleted or de-identified on a fixed schedule that a nightly clean-up carries out, and the schedule we publish is the one it runs. Deleting your account removes your personal information within 30 days, apart from records the law requires us to keep.',
     ],
   },
   {

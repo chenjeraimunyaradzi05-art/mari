@@ -9,12 +9,14 @@
  * member by GET /api/compliance/online-safety.
  */
 
+import crypto from 'crypto';
 import type { ContentReport, Prisma, SafetyIncident } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { sendEmail } from '../utils/email';
 import { logger } from '../utils/logger';
 import { recordFailure } from '../utils/ops-metrics';
-import { resolveContactEmail } from '../config/region.config';
+import { AU_ONLINE_SAFETY_CONFIG, resolveContactEmail } from '../config/region.config';
+import { notifyAdmins } from './admin-notify.service';
 
 export type ContentType = 'post' | 'message' | 'profile' | 'comment' | 'job' | 'other';
 export type ReportReason = 'illegal' | 'harmful' | 'harassment' | 'hate_speech' | 'spam' | 'misinformation' | 'csam' | 'terrorism' | 'fraud' | 'other';
@@ -79,15 +81,19 @@ interface ContentReportInput {
   reportedUserId?: string;
 }
 
-interface ReportResult {
-  ticketId: string;
-  status: ReportStatus;
-  expectedResponse: string;
-  priority: ReportPriority;
-}
-
-// Priority mapping based on reason
-const REASON_PRIORITY: Record<ReportReason, ReportPriority> = {
+/**
+ * How urgent each reason is, for alerting.
+ *
+ * The public form and the in-app dialog grew separate vocabularies — the form
+ * says hate_speech, the dialog says hate; the dialog has violence, sexual and
+ * impersonation, which the form does not — and only the form's words were
+ * listed here, so every report from the dialog fell through to medium. A member
+ * reporting "Violence or threats" from inside the app raised no alert at all.
+ * Both vocabularies are listed now, so the priority a report gets depends on
+ * what it is about and never on which door it came through.
+ */
+const REASON_PRIORITY: Record<string, ReportPriority> = {
+  // The public report form (client/src/app/report)
   csam: 'critical',
   terrorism: 'critical',
   illegal: 'high',
@@ -98,15 +104,31 @@ const REASON_PRIORITY: Record<ReportReason, ReportPriority> = {
   misinformation: 'medium',
   spam: 'low',
   other: 'medium',
+  // The in-app report dialogs (ReportDialog, ReportEventDialog)
+  hate: 'high',
+  violence: 'high',
+  sexual: 'high',
+  // Impersonation is how a controlling ex-partner gets back into a woman's
+  // feed after she has blocked him, so it is not treated as a nuisance.
+  impersonation: 'high',
+  unsafe: 'high',
+  // Somebody at risk of harming herself is the most time-critical report there
+  // is, whoever it is filed by.
+  self_harm: 'critical',
 };
 
-// Expected response times by priority
-const RESPONSE_TIMES: Record<ReportPriority, string> = {
-  critical: 'within 1 hour',
-  high: 'within 24 hours',
-  medium: 'within 48 hours',
-  low: 'within 72 hours',
-};
+/** Every reason either door may file under, lower-case. Anything else is refused at intake. */
+export const REPORTABLE_REASONS: ReadonlySet<string> = new Set(Object.keys(REASON_PRIORITY));
+
+export function isReportableReason(reason: unknown): reason is string {
+  return typeof reason === 'string' && REPORTABLE_REASONS.has(reason.trim().toLowerCase());
+}
+
+/**
+ * Reasons that are about illegal content rather than harmful content, and so
+ * run on the shorter of the two review clocks.
+ */
+const ILLEGAL_CONTENT_REASONS: ReadonlySet<string> = new Set(['illegal', 'csam', 'terrorism']);
 
 // ============================================
 // Intake, shared by every way in
@@ -126,7 +148,7 @@ const RESPONSE_TIMES: Record<ReportPriority, string> = {
  * so a new door cannot quietly get a different set of consequences again.
  */
 export function reportPriorityFor(reason: string, isUrgent?: boolean): ReportPriority {
-  const normalized = reason.toLowerCase() as ReportReason;
+  const normalized = reason.trim().toLowerCase();
   const base = REASON_PRIORITY[normalized] ?? 'medium';
   // An urgency flag can only raise the priority. A reporter ticking the box on
   // a spam report does not make it critical, but she can pull a report forward
@@ -135,9 +157,54 @@ export function reportPriorityFor(reason: string, isUrgent?: boolean): ReportPri
   return base === 'critical' ? 'critical' : base === 'high' ? 'critical' : 'high';
 }
 
-/** The response time this priority is promised, in the words the member is shown. */
-export function expectedResponseFor(priority: ReportPriority): string {
-  return RESPONSE_TIMES[priority];
+/**
+ * The review clock a report runs on, in hours.
+ *
+ * There are two, and only two: the Online Safety Act targets the platform
+ * already publishes at GET /api/compliance/online-safety — 24 hours for illegal
+ * content, 48 for harmful. Three different sets of numbers used to be in play.
+ * The route stamped 24 hours only on a critical priority, so an "Illegal
+ * content" report (priority high) was stamped 48; the acknowledgment email read
+ * from a table that promised a CSAM reporter an answer within one hour and a
+ * spam reporter one within 72, neither of which any clock on the server
+ * measured; and the confirmation screen said 24-72. The one function below is
+ * now what stamps the deadline and what the email quotes, so the two cannot
+ * disagree again.
+ *
+ * Anything the reporter has marked urgent runs on the 24-hour clock as well,
+ * which is what the report form has always told her.
+ */
+export function reviewHoursFor(reason: string, isUrgent?: boolean): number {
+  const normalized = reason.trim().toLowerCase();
+  return ILLEGAL_CONTENT_REASONS.has(normalized) || isUrgent
+    ? AU_ONLINE_SAFETY_CONFIG.illegalContentRemovalHours
+    : AU_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours;
+}
+
+/** The review clock in the words the reporter is shown. */
+export function expectedResponseFor(reviewHours: number): string {
+  return `within ${reviewHours} hours`;
+}
+
+/**
+ * When a report is due, for rows that carry no stamped deadline.
+ *
+ * Reports filed through the in-app dialog were never stamped, so the queue
+ * works their deadline out from when they arrived and the clock their reason
+ * runs on. A stamped deadline always wins: it is what the reporter was told.
+ */
+export function reviewDeadlineFor(input: {
+  createdAt: Date;
+  reason: string | null;
+  stamped?: unknown;
+  isUrgent?: unknown;
+}): Date {
+  if (typeof input.stamped === 'string') {
+    const stamped = new Date(input.stamped);
+    if (!Number.isNaN(stamped.getTime())) return stamped;
+  }
+  const hours = reviewHoursFor(input.reason ?? 'other', input.isUrgent === true);
+  return new Date(input.createdAt.getTime() + hours * 60 * 60 * 1000);
 }
 
 /** A reference a reporter can quote back to us. */
@@ -145,10 +212,38 @@ export function newReportTicketId(): string {
   return generateTicketId();
 }
 
+/**
+ * Everything a report needs stamped on it before it is written, from either
+ * door: the reference, the priority, the clock and the deadline.
+ *
+ * The public form computed these inline and the in-app dialog never computed
+ * them at all, so a report filed from inside the app had no reference, no
+ * deadline and no alert. A route that files a report calls this first, writes
+ * `evidence` onto the row, and then hands the same numbers to
+ * runReportIntakeConsequences.
+ */
+export function openReportIntake(input: { reason: string; isUrgent?: boolean; now?: Date }): {
+  ticketId: string;
+  priority: ReportPriority;
+  reviewHours: number;
+  reviewDeadline: Date;
+} {
+  const now = input.now ?? new Date();
+  const reviewHours = reviewHoursFor(input.reason, input.isUrgent);
+  return {
+    ticketId: generateTicketId(),
+    priority: reportPriorityFor(input.reason, input.isUrgent),
+    reviewHours,
+    reviewDeadline: new Date(now.getTime() + reviewHours * 60 * 60 * 1000),
+  };
+}
+
 export interface IntakeRecord {
   ticketId: string;
   reason: string;
   priority: ReportPriority;
+  /** The clock the deadline was stamped from, so the acknowledgment quotes the same number. */
+  reviewHours: number;
   contentType: string;
   contentId: string;
   description?: string;
@@ -177,7 +272,7 @@ export async function runReportIntakeConsequences(record: IntakeRecord): Promise
       await sendReportAcknowledgment(
         record.contactEmail,
         record.ticketId,
-        expectedResponseFor(record.priority)
+        expectedResponseFor(record.reviewHours)
       );
     } catch (error) {
       logger.warn('Report acknowledgment could not be sent', {
@@ -216,129 +311,14 @@ export async function runReportIntakeConsequences(record: IntakeRecord): Promise
   }
 }
 
-/**
- * Submit a content report
- */
-export async function submitContentReport(report: ContentReportInput): Promise<ReportResult> {
-  const ticketId = generateTicketId();
-  const priority = report.isUrgent ? 'critical' : REASON_PRIORITY[report.reason];
-  const expectedResponse = RESPONSE_TIMES[priority];
-
-  try {
-    // Get a system user ID for anonymous reports
-    const systemUserId = report.reporterId || 'system-anonymous';
-    const reportedUserId = report.reportedUserId || 'unknown';
-
-    // Store report in database using existing ContentReport model
-    await prisma.contentReport.create({
-      data: {
-        reporterId: systemUserId,
-        contentType: report.contentType.toUpperCase(),
-        contentId: report.contentId,
-        reportedUserId: reportedUserId,
-        reason: report.reason.toUpperCase(),
-        description: report.description || '',
-        evidence: {
-          urls: report.evidenceUrls || [],
-          contactEmail: report.contactEmail,
-          isUrgent: report.isUrgent || false,
-          ticketId,
-          priority,
-        },
-        status: 'PENDING',
-      },
-    });
-
-    // Send acknowledgment email if contact provided
-    if (report.contactEmail) {
-      await sendReportAcknowledgment(report.contactEmail, ticketId, expectedResponse);
-    }
-
-    // Alert Trust & Safety team for critical/high priority
-    if (priority === 'critical' || priority === 'high') {
-      await alertTrustAndSafety(ticketId, priority, report);
-    }
-
-    // CSAM and terrorism are the two categories we are obliged to refer on
-    // rather than merely moderate. escalateToAuthorities already picked the
-    // right body for each, but only CSAM ever reached it.
-    if (AUTHORITY_REPORTABLE_REASONS.includes(report.reason)) {
-      await escalateToAuthorities(ticketId, report);
-    }
-
-    return {
-      ticketId,
-      status: 'PENDING',
-      expectedResponse,
-      priority,
-    };
-  } catch (error) {
-    logger.error('Failed to submit content report:', error);
-    throw new Error('Failed to submit report');
-  }
-}
-
-/**
- * Get report status by searching evidence JSON for ticketId
- */
-export async function getReportStatus(ticketId: string): Promise<{
-  status: ReportStatus;
-  lastUpdated: Date;
-  resolution?: string;
-} | null> {
-  // Find report by ticketId stored in evidence JSON
-  const reports = await prisma.contentReport.findMany({
-    where: {
-      evidence: {
-        path: ['ticketId'],
-        equals: ticketId,
-      },
-    },
-    select: {
-      status: true,
-      updatedAt: true,
-      reviewNotes: true,
-    },
-    take: 1,
-  });
-
-  const report = reports[0];
-  if (!report) return null;
-
-  return {
-    status: report.status as ReportStatus,
-    lastUpdated: report.updatedAt,
-    resolution: report.reviewNotes || undefined,
-  };
-}
-
-/**
- * Process a content report (for moderators)
- */
-export async function processContentReport(
-  ticketId: string,
-  action: ModerationAction,
-  moderatorId: string,
-  notes?: string
-): Promise<void> {
-  // Find report by ticketId
-  const reports = await prisma.contentReport.findMany({
-    where: {
-      evidence: {
-        path: ['ticketId'],
-        equals: ticketId,
-      },
-    },
-    take: 1,
-  });
-
-  const report = reports[0];
-  if (!report) {
-    throw new Error('Report not found');
-  }
-
-  await applyReportDecision(report, action, moderatorId, notes);
-}
+// submitContentReport, getReportStatus and processContentReport used to live
+// here: a ticket-based reporting path from before either door existed, with no
+// production caller. It wrote the literal 'system-anonymous' and 'unknown' into
+// the two required User foreign keys, so the first real call would have thrown,
+// and the escalation tests exercised the referral through it rather than
+// through the intake the routes actually run — coverage that described code
+// nobody calls. The status lookup lives at GET /api/compliance/report-status and
+// decisions go through processReportById and resolveAnonymousReport.
 
 /**
  * Process a report straight from the moderation queue, where the row id is what
@@ -489,7 +469,10 @@ function appealUrl(): string {
  */
 function generateTicketId(): string {
   const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substr(2, 4).toUpperCase();
+  // The reference now opens a public status lookup, so the suffix comes from
+  // the CSPRNG rather than Math.random: a reference somebody could guess is a
+  // reference somebody could use to watch another woman's report.
+  const random = crypto.randomBytes(4).toString('hex').toUpperCase();
   return `RPT-${timestamp}-${random}`;
 }
 
@@ -535,12 +518,19 @@ async function sendReportAcknowledgment(
  * the decision half applied — the enforcement has already happened by the time
  * this runs.
  */
+// What a reporter is told. A ban used to be described to her as the account
+// having been "removed" and "permanently banned". Neither was true: a ban locks
+// the account exactly as a suspension does, the row stays, an appeal can lift
+// it, and nothing stops the same person registering again under another
+// address. On a platform where the reported account may belong to a woman's
+// abuser, telling her he is gone for good when he is not is the most dangerous
+// sentence this file could send, so the wording says only what happened.
 const OUTCOME_SUMMARY: Record<ModerationAction, string> = {
   dismiss: 'We reviewed the content you reported and did not find a breach of the community guidelines.',
   warn: 'We reviewed your report and warned the member responsible.',
   remove: 'We reviewed your report and removed the content.',
-  suspend: 'We reviewed your report and suspended the account responsible.',
-  ban: 'We reviewed your report and removed the account responsible.',
+  suspend: 'We reviewed your report and suspended the account responsible. It can no longer sign in.',
+  ban: 'We reviewed your report and banned the account responsible. It can no longer sign in.',
   escalate: 'Your report has gone to our senior Trust & Safety reviewers. We will come back to you.',
 };
 
@@ -600,12 +590,14 @@ async function sendReportOutcome(
   ticketId: string,
   action: string
 ): Promise<void> {
+  // See OUTCOME_SUMMARY: "temporarily" and "permanently" were both claims no
+  // clock or record on the server backed, so neither is made.
   const actionMessages: Record<string, string> = {
     dismiss: 'After careful review, we determined that the reported content does not violate our Community Guidelines.',
     warn: 'We have issued a warning to the user responsible for the content.',
     remove: 'We have removed the reported content as it violated our Community Guidelines.',
-    suspend: 'We have temporarily suspended the account responsible for the content.',
-    ban: 'We have permanently banned the account responsible for the content.',
+    suspend: 'We have suspended the account responsible for the content. It can no longer sign in.',
+    ban: 'We have banned the account responsible for the content. It can no longer sign in.',
     escalate: 'Your report has been escalated to our senior Trust & Safety team for further review.',
   };
 
@@ -870,6 +862,12 @@ async function warnUser(userId: string, contentType: string, contentId: string):
   });
 }
 
+// Suspend and ban both come here, and that is deliberate rather than an
+// oversight to be hidden: the schema has no ban record, no permanence and no
+// way to refuse the same person a new account, so the only enforcement either
+// verb can carry is the lock. What distinguishes a ban is the record —
+// ContentReport.action BAN, the ModerationLog verb and the audit metadata — and
+// every screen and message that describes one now says exactly that much.
 async function suspendUser(userId: string): Promise<void> {
   logger.info(`Suspending user ${userId}`);
 
@@ -930,6 +928,8 @@ export interface AnonymousReportView {
   reviewNotes: string | null;
   reviewerId: string | null;
   reviewDeadline: string | null;
+  /** True while the report is open and its review deadline has passed. */
+  overdue: boolean;
   actionTakenAt: Date | null;
   createdAt: Date;
   reportedUser: {
@@ -982,13 +982,26 @@ export async function listAnonymousReports(filters: {
   // was filed, so match loosely, the way the named-report queue does.
   if (filters.reason) where.reason = { contains: filters.reason, mode: 'insensitive' };
 
+  // The open queue is worked in deadline order, not arrival order: a 24-hour
+  // CSAM report that came in this morning is due before a 48-hour harassment
+  // report from yesterday. The deadline lives in the metadata JSON, which the
+  // database cannot sort on, so the open set is read oldest first and ordered
+  // here. Every other view is history and stays newest first.
+  const deadlineOrdered = filters.status === 'PENDING';
+
   const [incidents, total, openCount] = await Promise.all([
-    prisma.safetyIncident.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
+    deadlineOrdered
+      ? prisma.safetyIncident
+          .findMany({ where, orderBy: { createdAt: 'asc' }, take: DEADLINE_SORT_WINDOW })
+          .then((rows) =>
+            sortByDeadline(rows, (incident) => anonymousDeadline(incident)).slice((page - 1) * limit, page * limit)
+          )
+      : prisma.safetyIncident.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
     prisma.safetyIncident.count({ where }),
     prisma.safetyIncident.count({ where: { ...ANONYMOUS_REPORT_WHERE, resolvedAt: null } }),
   ]);
@@ -1017,11 +1030,37 @@ export async function listAnonymousReports(filters: {
   };
 }
 
+/**
+ * How many open reports the queue will order by deadline in one pass. Every
+ * deadline is arrival plus 24 or 48 hours, so reading the oldest first means
+ * anything past this window is at most a day out of order — and an open queue
+ * this long is an emergency the overdue count will already be shouting about.
+ */
+export const DEADLINE_SORT_WINDOW = 2000;
+
+export function sortByDeadline<T>(rows: T[], deadlineOf: (row: T) => Date): T[] {
+  return rows
+    .map((row) => ({ row, due: deadlineOf(row).getTime() }))
+    .sort((a, b) => a.due - b.due)
+    .map((entry) => entry.row);
+}
+
+function anonymousDeadline(incident: SafetyIncident): Date {
+  const meta = incidentMetadata(incident.metadata);
+  return reviewDeadlineFor({
+    createdAt: incident.createdAt,
+    reason: incident.reason,
+    stamped: meta.reviewDeadline,
+    isUrgent: meta.isUrgent,
+  });
+}
+
 function toAnonymousReportView(
   incident: SafetyIncident,
   reportedUser: AnonymousReportView['reportedUser']
 ): AnonymousReportView {
   const meta = incidentMetadata(incident.metadata);
+  const deadline = anonymousDeadline(incident);
   return {
     id: incident.id,
     anonymous: true,
@@ -1038,7 +1077,8 @@ function toAnonymousReportView(
     action: metadataString(meta, 'action'),
     reviewNotes: metadataString(meta, 'reviewNotes'),
     reviewerId: incident.resolvedById,
-    reviewDeadline: metadataString(meta, 'reviewDeadline'),
+    reviewDeadline: deadline.toISOString(),
+    overdue: !incident.resolvedAt && deadline.getTime() < Date.now(),
     actionTakenAt: incident.resolvedAt,
     createdAt: incident.createdAt,
     reportedUser,
@@ -1072,9 +1112,14 @@ export async function getAnonymousReport(id: string): Promise<AnonymousReportVie
  * The enforcement is the same as a named report's — the account the content
  * belongs to is recorded on the incident, so nothing has to be guessed back out
  * of the content — and the decision is written to ModerationLog under the
- * incident id, which is where the transparency figures are counted from. There
- * is nobody to email an outcome to, which is the one thing an anonymous report
- * cannot have.
+ * incident id, which is where the transparency figures are counted from.
+ *
+ * This used to say there was nobody to email an outcome to. There often was:
+ * the public form asks for a contact address, the intake emails her an
+ * acknowledgment promising "an update once we've completed our review", and the
+ * address is sitting in the incident metadata this function has just read. The
+ * reporter with no account is the one who has no other way to hear back, so
+ * she is written to exactly as a named reporter with an address is.
  */
 export async function resolveAnonymousReport(
   incidentId: string,
@@ -1155,9 +1200,26 @@ export async function resolveAnonymousReport(
 
   logger.info('Anonymous report actioned', { incidentId: incident.id, action, status });
 
+  const originalMeta = incidentMetadata(incident.metadata);
+  const ticketId = metadataString(originalMeta, 'ticketId');
+  const contactEmail = metadataString(originalMeta, 'contactEmail');
+  if (contactEmail) {
+    // The decision is already applied; a bounced email must not undo it or
+    // report it as failed, but it must not vanish either.
+    try {
+      await sendReportOutcome(contactEmail, ticketId || incident.id, action);
+    } catch (error) {
+      logger.error('Could not email an anonymous reporter the outcome of her report', {
+        incidentId: incident.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.reporter-outcome-email', error);
+    }
+  }
+
   return {
     reportId: incident.id,
-    ticketId: null,
+    ticketId,
     status,
     action,
     contentType,
@@ -1342,14 +1404,310 @@ export async function updateAuthorityEscalationStatus(
   return { escalation, previousStatus };
 }
 
+// ============================================
+// Review deadlines
+// ============================================
+
+/**
+ * Tell Trust & Safety when reports have passed their review deadline.
+ *
+ * The platform promises reporters 24 hours for illegal content and 48 for
+ * everything else, and until the queue sorted by deadline it had no way to
+ * know whether it had kept either. The queue now shows it to whoever opens it;
+ * this is for when nobody does. One alert per sweep, naming how many are late
+ * and the oldest few, to the same mailbox the intake alerts use, plus an
+ * in-app notice to the admins.
+ *
+ * Built to be run on a schedule by the scheduled-tasks worker. It never throws
+ * on a failed send: the count it returns is the truth either way, and a
+ * missing mailbox is put on the operations screen.
+ */
+export async function alertOverdueReports(now: Date = new Date()): Promise<{ overdue: number; alerted: boolean }> {
+  const [named, anonymous] = await Promise.all([
+    prisma.contentReport.findMany({
+      where: { status: { in: ['PENDING', 'REVIEWING'] } },
+      select: { id: true, createdAt: true, reason: true, evidence: true },
+      orderBy: { createdAt: 'asc' },
+      take: DEADLINE_SORT_WINDOW,
+    }),
+    prisma.safetyIncident.findMany({
+      where: { ...ANONYMOUS_REPORT_WHERE, resolvedAt: null },
+      orderBy: { createdAt: 'asc' },
+      take: DEADLINE_SORT_WINDOW,
+    }),
+  ]);
+
+  const late: Array<{ reference: string; reason: string; due: Date; anonymous: boolean }> = [];
+  for (const report of named) {
+    const evidence = (report.evidence ?? null) as { reviewDeadline?: unknown; isUrgent?: unknown; ticketId?: unknown } | null;
+    const due = reviewDeadlineFor({
+      createdAt: report.createdAt,
+      reason: report.reason,
+      stamped: evidence?.reviewDeadline,
+      isUrgent: evidence?.isUrgent,
+    });
+    if (due.getTime() < now.getTime()) {
+      late.push({
+        reference: typeof evidence?.ticketId === 'string' ? evidence.ticketId : report.id,
+        reason: report.reason,
+        due,
+        anonymous: false,
+      });
+    }
+  }
+  for (const incident of anonymous) {
+    const due = anonymousDeadline(incident);
+    if (due.getTime() < now.getTime()) {
+      late.push({
+        reference: metadataString(incidentMetadata(incident.metadata), 'ticketId') ?? incident.id,
+        reason: incident.reason ?? 'OTHER',
+        due,
+        anonymous: true,
+      });
+    }
+  }
+
+  if (late.length === 0) return { overdue: 0, alerted: false };
+
+  late.sort((a, b) => a.due.getTime() - b.due.getTime());
+  const hoursLate = (due: Date) => Math.max(1, Math.round((now.getTime() - due.getTime()) / (60 * 60 * 1000)));
+  const oldest = late.slice(0, 10);
+
+  const to = trustAndSafetyMailbox();
+  let alerted = false;
+  if (!to) {
+    reportAlertUndeliverable('overdue-reports', `${late.length} overdue`);
+  } else {
+    try {
+      await sendEmail({
+        to,
+        subject: `[OVERDUE] ${late.length} report${late.length === 1 ? '' : 's'} past the review deadline`,
+        html: `
+          <h2>${late.length} report${late.length === 1 ? ' is' : 's are'} past the review deadline</h2>
+          <p>Reporters were told 24 hours for illegal content and 48 hours for everything else. The oldest:</p>
+          <ul>
+            ${oldest
+              .map(
+                (item) =>
+                  `<li>${item.reference} — ${item.reason}${item.anonymous ? ' (filed without an account)' : ''} — ${hoursLate(item.due)} hours late</li>`
+              )
+              .join('')}
+          </ul>
+          <p>Work them from the report queue in the admin console, soonest due first.</p>
+        `,
+      });
+      alerted = true;
+    } catch (error) {
+      logger.error('Overdue-report alert could not be sent', {
+        overdue: late.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      recordFailure('content-report.overdue-alert', error);
+    }
+  }
+
+  await notifyAdmins({
+    title: `${late.length} report${late.length === 1 ? '' : 's'} past the review deadline`,
+    message: `The oldest is ${hoursLate(oldest[0].due)} hours late.`,
+    link: '/admin/moderation',
+    data: { overdue: late.length },
+  });
+
+  return { overdue: late.length, alerted };
+}
+
+// ============================================
+// Transparency reporting
+// ============================================
+
+/**
+ * The public transparency report is read from TransparencyReport rows, and
+ * nothing in the repository ever wrote one: no route, no job, no seed. So
+ * /help/transparency-report — a page whose own header cites the Act that asks
+ * an Australian service for it — could only ever show its empty state. This
+ * compiles a quarter from the records the platform already keeps, so the
+ * report is counted rather than typed in, and an administrator then publishes
+ * it. A compiled report is a draft until publishTransparencyReport stamps it.
+ */
+
+/** 'Q3_2026' — the period key the public route and the unique index both use. */
+const PERIOD_PATTERN = /^Q([1-4])_(\d{4})$/;
+
+/**
+ * Queensland keeps no daylight saving, so a quarter here is a fixed +10:00
+ * offset from UTC. A report for "Q3" starts at midnight on 1 July in Brisbane,
+ * which is 14:00 UTC on 30 June.
+ */
+const BRISBANE_OFFSET_MS = 10 * 60 * 60 * 1000;
+
+export function transparencyPeriodBounds(period: string): { startDate: Date; endDate: Date } | null {
+  const match = PERIOD_PATTERN.exec(period);
+  if (!match) return null;
+  const quarter = Number(match[1]);
+  const year = Number(match[2]);
+  if (year < 2020 || year > 2100) return null;
+  const startMonth = (quarter - 1) * 3;
+  return {
+    startDate: new Date(Date.UTC(year, startMonth, 1) - BRISBANE_OFFSET_MS),
+    endDate: new Date(Date.UTC(year, startMonth + 3, 1) - BRISBANE_OFFSET_MS),
+  };
+}
+
+/**
+ * Which published category a stored reason counts under. The public form's
+ * codes map to themselves; the in-app dialog's words are folded into the
+ * nearest published category, and anything unrecognised is counted as other
+ * rather than dropped, so the categories always add up to the total.
+ */
+const TRANSPARENCY_CATEGORY_FOR_REASON: Record<string, string> = {
+  illegal: 'illegal',
+  harmful: 'harmful',
+  harassment: 'harassment',
+  hate_speech: 'hate_speech',
+  spam: 'spam',
+  misinformation: 'misinformation',
+  csam: 'csam',
+  terrorism: 'terrorism',
+  fraud: 'fraud',
+  other: 'other',
+  hate: 'hate_speech',
+  violence: 'harmful',
+  sexual: 'harmful',
+  self_harm: 'harmful',
+  unsafe: 'harmful',
+  impersonation: 'other',
+};
+
+const TRANSPARENCY_ACTION_FOR_MODERATION: Record<string, string> = {
+  remove: 'contentRemoved',
+  suspend: 'accountsSuspended',
+  ban: 'accountsBanned',
+  warn: 'warnings',
+  dismiss: 'noAction',
+};
+
+export interface CompiledTransparencyReport {
+  period: string;
+  startDate: Date;
+  endDate: Date;
+  totalReports: number;
+  reportsByCategory: Record<string, number>;
+  actionsTotal: number;
+  actionsByType: Record<string, number>;
+  avgResponseHours: number;
+  under24Hours: number;
+  under72Hours: number;
+  over72Hours: number;
+  totalAppeals: number;
+  appealsUpheld: number;
+  appealsOverturned: number;
+}
+
+/**
+ * Count a quarter.
+ *
+ * - Reports: every named report and every report filed without an account that
+ *   arrived in the quarter, by category.
+ * - Actions: every moderator decision logged in the quarter, by what it did.
+ *   Senior-review referrals and authority-referral progress are not actions on
+ *   content or accounts and are left out of these buckets.
+ * - Timing: for reports that arrived in the quarter and have been decided, how
+ *   long the decision took. The three buckets — under 24 hours, 24 to 72, over
+ *   72 — add up to the reports decided, not to all reports, because an
+ *   undecided report has no response time yet.
+ * - Appeals: appeals against moderation or a suspension lodged in the quarter;
+ *   "upheld" is the original decision standing (the appeal was rejected) and
+ *   "overturned" is the appeal succeeding.
+ */
+export async function compileTransparencyReport(period: string, now: Date = new Date()): Promise<CompiledTransparencyReport> {
+  const bounds = transparencyPeriodBounds(period);
+  if (!bounds) {
+    throw new Error('Period must look like Q3_2026');
+  }
+  // A quarter still running would publish a number that is wrong by tomorrow.
+  if (bounds.endDate.getTime() > now.getTime()) {
+    throw new Error('That quarter has not ended yet');
+  }
+
+  const inPeriod = { gte: bounds.startDate, lt: bounds.endDate };
+
+  const [named, anonymous, decisions, appeals] = await Promise.all([
+    prisma.contentReport.findMany({
+      where: { createdAt: inPeriod },
+      select: { reason: true, createdAt: true, actionTakenAt: true },
+    }),
+    prisma.safetyIncident.findMany({
+      where: { ...ANONYMOUS_REPORT_WHERE, createdAt: inPeriod },
+      select: { reason: true, createdAt: true, resolvedAt: true },
+    }),
+    prisma.moderationLog.groupBy({
+      by: ['action'],
+      where: { timestamp: inPeriod },
+      _count: { _all: true },
+    }),
+    prisma.appeal.groupBy({
+      by: ['status'],
+      where: { createdAt: inPeriod, type: { in: ['CONTENT_MODERATION', 'ACCOUNT_SUSPENSION'] } },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const reportsByCategory: Record<string, number> = {};
+  for (const category of new Set(Object.values(TRANSPARENCY_CATEGORY_FOR_REASON))) reportsByCategory[category] = 0;
+  const responseHours: number[] = [];
+
+  const count = (reason: string | null, createdAt: Date, decidedAt: Date | null) => {
+    const category = TRANSPARENCY_CATEGORY_FOR_REASON[(reason ?? 'other').trim().toLowerCase()] ?? 'other';
+    reportsByCategory[category] += 1;
+    if (decidedAt) responseHours.push((decidedAt.getTime() - createdAt.getTime()) / (60 * 60 * 1000));
+  };
+  for (const report of named) count(report.reason, report.createdAt, report.actionTakenAt);
+  for (const incident of anonymous) count(incident.reason, incident.createdAt, incident.resolvedAt);
+
+  const actionsByType: Record<string, number> = {
+    contentRemoved: 0,
+    accountsSuspended: 0,
+    accountsBanned: 0,
+    warnings: 0,
+    noAction: 0,
+  };
+  for (const row of decisions) {
+    const bucket = TRANSPARENCY_ACTION_FOR_MODERATION[row.action];
+    if (bucket) actionsByType[bucket] += row._count._all;
+  }
+
+  const appealsBy = new Map(appeals.map((row) => [row.status, row._count._all]));
+  const totalAppeals = appeals.reduce((sum, row) => sum + row._count._all, 0);
+
+  const avg = responseHours.length
+    ? responseHours.reduce((sum, hours) => sum + hours, 0) / responseHours.length
+    : 0;
+
+  return {
+    period,
+    ...bounds,
+    totalReports: named.length + anonymous.length,
+    reportsByCategory,
+    actionsTotal: Object.values(actionsByType).reduce((sum, n) => sum + n, 0),
+    actionsByType,
+    avgResponseHours: Math.round(avg * 10) / 10,
+    under24Hours: responseHours.filter((hours) => hours < 24).length,
+    under72Hours: responseHours.filter((hours) => hours >= 24 && hours < 72).length,
+    over72Hours: responseHours.filter((hours) => hours >= 72).length,
+    totalAppeals,
+    appealsUpheld: appealsBy.get('REJECTED') ?? 0,
+    appealsOverturned: appealsBy.get('APPROVED') ?? 0,
+  };
+}
+
 export default {
-  submitContentReport,
   reportPriorityFor,
+  reviewHoursFor,
+  reviewDeadlineFor,
   expectedResponseFor,
   newReportTicketId,
+  openReportIntake,
   runReportIntakeConsequences,
-  getReportStatus,
-  processContentReport,
   processReportById,
   reverseEnforcement,
   listAnonymousReports,
@@ -1358,4 +1716,7 @@ export default {
   listAuthorityEscalations,
   getAuthorityEscalation,
   updateAuthorityEscalationStatus,
+  transparencyPeriodBounds,
+  compileTransparencyReport,
+  alertOverdueReports,
 };

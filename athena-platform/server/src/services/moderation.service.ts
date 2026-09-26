@@ -9,6 +9,7 @@ import { ApiError } from '../middleware/errorHandler';
 import { recordFailure } from '../utils/ops-metrics';
 import { logger } from '../utils/logger';
 import { cacheGet, cacheSet } from '../utils/cache';
+import { prisma } from '../utils/prisma';
 
 // Initialize OpenAI client (optional - will skip AI moderation if not configured).
 //
@@ -220,6 +221,9 @@ export async function moderatePost(content: string): Promise<{
   shouldHide: boolean;
   needsReview: boolean;
   reason?: string;
+  /** What the provider actually flagged; empty when it flagged nothing or never answered. */
+  categories: string[];
+  scores: Record<string, number>;
 }> {
   const result = await moderateText(content);
 
@@ -228,6 +232,8 @@ export async function moderatePost(content: string): Promise<{
     shouldHide: shouldAutoHide(result),
     needsReview: needsManualReview(result),
     reason: result.reason,
+    categories: result.categories,
+    scores: result.scores,
   };
 }
 
@@ -343,20 +349,31 @@ export async function assertContentAllowed(
   }
 
   try {
-    const verdict = CONVERSATIONAL_SURFACES.has(context.kind)
-      ? await moderateMessage(content)
-      : await moderatePost(content);
+    if (CONVERSATIONAL_SURFACES.has(context.kind)) {
+      // Anything the provider flags in a conversation is refused outright, so
+      // there is no "review" outcome to queue here.
+      const message = await moderateMessage(content);
+      if (!message.allowed) {
+        throw new ApiError(400, message.reason || 'This content violates our community guidelines');
+      }
+      return;
+    }
+
+    const verdict = await moderatePost(content);
 
     if (!verdict.allowed) {
       throw new ApiError(400, verdict.reason || 'This content violates our community guidelines');
     }
 
-    if ('needsReview' in verdict && verdict.needsReview) {
-      logger.warn('Content published pending review', {
-        kind: context.kind,
-        userId: context.userId,
-        reason: verdict.reason,
-      });
+    if (verdict.needsReview) {
+      if (verdict.categories.length > 0) {
+        await queueForReview(content, context, verdict);
+      } else {
+        // moderateText answers "review" with no categories when the provider
+        // itself could not be reached. That is an outage, not a judgement about
+        // this post, so it is counted as one rather than filed against a member.
+        recordFailure('moderation.provider_unavailable', new Error(verdict.reason || 'provider did not answer'));
+      }
     }
   } catch (error) {
     if (error instanceof ApiError) {
@@ -365,6 +382,81 @@ export async function assertContentAllowed(
 
     recordFailure('moderation.provider_unavailable', error);
     logger.warn('Text moderation unavailable, allowing content', { kind: context.kind, error });
+  }
+}
+
+/**
+ * The flag type a borderline post is queued under. The moderation console reads
+ * open AdminFlags into its first section and labels this type.
+ */
+export const CONTENT_REVIEW_FLAG = 'CONTENT_REVIEW';
+
+/** How much of the text a moderator is shown on the flag. */
+const REVIEW_EXCERPT_LENGTH = 500;
+
+/**
+ * Put content the provider thought borderline in front of a person.
+ *
+ * This branch used to write a logger.warn and nothing else. The post was
+ * published, the provider's judgement that somebody ought to look at it went
+ * into a log line, and no queue, flag or report ever carried it anywhere a
+ * moderator would see it: content the screening said was borderline was
+ * published and forgotten.
+ *
+ * It is filed as an AdminFlag rather than a ContentReport because a report must
+ * name a member as its reporter and there is none, and because the gate runs
+ * before the write, so the content has no id yet. The flag names the author,
+ * the surface, what was flagged and an excerpt, which is what a moderator needs
+ * to find it; the conversational surfaces never reach here, because anything
+ * the provider flags on those is refused outright. MEDIUM rather than HIGH: the
+ * safety queue pulls HIGH flags — crisis language, a collapsing safety score —
+ * above everything else, and a borderline post must not push one of those down.
+ *
+ * Filing the flag must not cost the member her post, so a failure is counted
+ * and logged rather than thrown.
+ */
+async function queueForReview(
+  content: string,
+  context: { kind: ModeratedSurface; userId?: string },
+  verdict: { reason?: string; categories: string[]; scores: Record<string, number> }
+): Promise<void> {
+  if (!context.userId) {
+    // Every write surface passes the author; one that does not has nothing a
+    // moderator could act on, and that is itself worth seeing on the ops screen.
+    recordFailure('moderation.review_unattributed', new Error(`no author for ${context.kind}`));
+    logger.error('Content flagged for review with no author to file it against', {
+      kind: context.kind,
+      categories: verdict.categories,
+    });
+    return;
+  }
+
+  const excerpt = content.length > REVIEW_EXCERPT_LENGTH ? `${content.slice(0, REVIEW_EXCERPT_LENGTH)}…` : content;
+  const topScores = Object.entries(verdict.scores)
+    .filter(([category]) => verdict.categories.includes(category))
+    .map(([category, score]) => `${category} ${score.toFixed(2)}`)
+    .join(', ');
+
+  try {
+    await prisma.adminFlag.create({
+      data: {
+        userId: context.userId,
+        type: CONTENT_REVIEW_FLAG,
+        severity: 'MEDIUM',
+        // The safety-score service raises its flags under the same name; the
+        // console presents it as the platform itself.
+        flaggedById: 'system',
+        reason: `Published ${context.kind} flagged by automated screening for ${verdict.categories.join(', ')}`,
+        notes: `Surface: ${context.kind}\nScores: ${topScores || 'not reported'}\n\n${excerpt}`,
+      },
+    });
+  } catch (error) {
+    recordFailure('moderation.review_queue', error);
+    logger.error('Borderline content could not be queued for review', {
+      kind: context.kind,
+      userId: context.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

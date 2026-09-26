@@ -1,19 +1,37 @@
 import { Router, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
-import { UserRole, JobStatus, SubscriptionTier, SubscriptionStatus, EventType, EventFormat } from '@prisma/client';
+import {
+  AuditAction,
+  DSARStatus,
+  DSARType,
+  Prisma,
+  UserRole,
+  JobStatus,
+  SubscriptionTier,
+  SubscriptionStatus,
+  EventType,
+  EventFormat,
+} from '@prisma/client';
 import { z } from 'zod';
 import { ApiError } from '../middleware/errorHandler';
 import {
+  DEADLINE_SORT_WINDOW,
   ModerationAction,
   getAnonymousReport,
   listAnonymousReports,
   processReportById,
   resolveAnonymousReport,
+  reviewDeadlineFor,
+  sortByDeadline,
 } from '../services/content-report.service';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
-import { logAudit } from '../utils/audit';
+// Every audit row on this router is written after the change it records has
+// committed, so it goes through auditAfterCommit: a failed insert must not turn
+// a finished suspension or erasure into a 500. See admin-audit.service.
+import { auditAfterCommit, recordAdminAction } from '../services/admin-audit.service';
+import { bestEffort } from '../utils/best-effort';
 import { logger } from '../utils/logger';
 import { sendEmail } from '../utils/email';
 import crypto from 'crypto';
@@ -250,8 +268,21 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
       prisma.user.count({ where }),
     ]);
 
+    const suspensions = await bestEffort(
+      'admin users suspension reasons',
+      () => latestSuspensions(users.filter((user) => user.isSuspended).map((user) => user.id)),
+      null
+    );
+
     res.json({
-      users,
+      users: users.map((user) => ({
+        ...user,
+        // Left undefined when the reasons could not be read, so the screen can
+        // say so rather than showing a suspended account as though no reason
+        // had ever been given.
+        suspension: user.isSuspended ? (suspensions ? suspensions.get(user.id) ?? null : undefined) : null,
+      })),
+      suspensionReasonsUnavailable: suspensions === null,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -263,6 +294,67 @@ router.get('/users', async (req: AuthRequest, res: Response, next: NextFunction)
     next(error);
   }
 });
+
+type SuspensionRecord = {
+  reason: string | null;
+  source: 'admin' | 'moderation';
+  moderationAction: string | null;
+  at: Date;
+  byUserId: string | null;
+};
+
+/**
+ * Why each of these accounts was suspended, from the audit trail.
+ *
+ * suspensionReason used to go to logger.info and nowhere a person could read
+ * it back: User has no column for it, so no admin screen, moderation view or
+ * appeal could say why an account had been locked. The reason is written into
+ * the audit row that records the suspension — by PATCH /users/:id here, and by
+ * the report decision routes as the moderator's notes — so the latest such row
+ * for each account is the answer. Until User carries a reason of its own, this
+ * is the one place it is kept.
+ */
+async function latestSuspensions(userIds: string[]): Promise<Map<string, SuspensionRecord>> {
+  const found = new Map<string, SuspensionRecord>();
+  if (userIds.length === 0) return found;
+
+  const rows = await prisma.auditLog.findMany({
+    where: { targetUserId: { in: userIds }, action: 'ADMIN_USER_UPDATE' },
+    orderBy: { createdAt: 'desc' },
+    select: { targetUserId: true, actorUserId: true, createdAt: true, metadata: true },
+    take: Math.min(userIds.length * 25, 2000),
+  });
+
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+
+  for (const row of rows) {
+    if (!row.targetUserId || found.has(row.targetUserId)) continue;
+    const meta = (row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+      ? row.metadata
+      : {}) as Record<string, unknown>;
+    const moderationAction = text(meta.moderationAction);
+
+    if (meta.isSuspended === true) {
+      found.set(row.targetUserId, {
+        reason: text(meta.suspensionReason),
+        source: 'admin',
+        moderationAction: null,
+        at: row.createdAt,
+        byUserId: row.actorUserId,
+      });
+    } else if (moderationAction === 'suspend' || moderationAction === 'ban') {
+      found.set(row.targetUserId, {
+        reason: text(meta.notes) ?? `Decided on a ${text(meta.contentType)?.toLowerCase() ?? 'content'} report with no notes`,
+        source: 'moderation',
+        moderationAction,
+        at: row.createdAt,
+        byUserId: row.actorUserId,
+      });
+    }
+  }
+
+  return found;
+}
 
 /**
  * GET /admin/users/:id
@@ -329,7 +421,11 @@ router.get('/users/:id', async (req: AuthRequest, res: Response, next: NextFunct
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(user);
+    const suspension = user.isSuspended
+      ? await bestEffort('admin user suspension reason', async () => (await latestSuspensions([user.id])).get(user.id) ?? null, undefined)
+      : null;
+
+    res.json({ ...user, suspension });
   } catch (error) {
     next(error);
   }
@@ -358,12 +454,25 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
       updateData.role = role;
     }
 
+    let reason: string | undefined;
     if (isSuspended !== undefined) {
-      updateData.isSuspended = isSuspended;
-      if (isSuspended && suspensionReason) {
-        // Store suspension reason in metadata or log
-        logger.info('User suspended', { userId: id, reason: suspensionReason, adminId: req.user?.id });
+      if (typeof isSuspended !== 'boolean') {
+        throw new ApiError(400, 'isSuspended must be true or false');
       }
+      // A suspension nobody can explain afterwards cannot be reviewed on appeal
+      // or answered for, so locking an account now requires saying why. The
+      // reason is kept on the audit row below, which is where latestSuspensions
+      // reads it back for the admin screens.
+      if (isSuspended) {
+        reason = typeof suspensionReason === 'string' ? suspensionReason.trim().slice(0, 1000) : '';
+        if (!reason) {
+          throw new ApiError(400, 'Say why the account is being suspended');
+        }
+        if (req.params.id === req.user!.id) {
+          throw new ApiError(400, 'You cannot suspend your own account');
+        }
+      }
+      updateData.isSuspended = isSuspended;
     }
 
     if (emailVerified !== undefined) {
@@ -384,7 +493,7 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
       },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_USER_UPDATE',
       actorUserId: req.user?.id ?? null,
       targetUserId: id,
@@ -395,7 +504,7 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response, next: NextFun
         role,
         isSuspended,
         emailVerified,
-        suspensionReason,
+        suspensionReason: reason,
       },
     });
 
@@ -424,11 +533,22 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
     const isHard = hard === 'true';
 
     if (isHard) {
-      const outcome = await gdprService.eraseAccountByAdmin(id, {
-        adminId: req.user?.id ?? null,
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent') || undefined,
-      });
+      let outcome: Awaited<ReturnType<typeof gdprService.eraseAccountByAdmin>>;
+      try {
+        outcome = await gdprService.eraseAccountByAdmin(id, {
+          adminId: req.user?.id ?? null,
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') || undefined,
+        });
+      } catch (error) {
+        // The retry after an erasure that did finish lands here, and so does a
+        // mistyped id. Either way there is no account to erase, which is a 404
+        // an administrator can read, not a 500 that sends her looking for a bug.
+        if (error instanceof Error && error.message === 'User not found') {
+          throw new ApiError(404, 'There is no account with that id. If you have just erased it, the erasure finished.');
+        }
+        throw error;
+      }
 
       if (outcome.status === 'REJECTED') {
         // A hold is a court's claim on this data, not a preference, so the
@@ -436,13 +556,17 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
         throw new ApiError(409, outcome.reason || 'This account is under a legal hold and cannot be deleted.');
       }
 
-      await logAudit({
+      await auditAfterCommit({
         action: 'ADMIN_USER_DELETE',
         actorUserId: req.user?.id ?? null,
-        targetUserId: id,
+        // A removed account cannot be a foreign key any more; the erasure's own
+        // privacy-log entry already carries the reference, so this row points at
+        // the account only while the account still exists.
+        targetUserId: outcome.accountRemoved ? null : id,
         ipAddress: req.ip,
         userAgent: req.get('user-agent') || undefined,
         metadata: {
+          erasureReference: outcome.requestId,
           hard: true,
           accountRemoved: outcome.accountRemoved,
           retainedSections: outcome.retainedSections,
@@ -474,7 +598,7 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
       },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_USER_DELETE',
       actorUserId: req.user?.id ?? null,
       targetUserId: id,
@@ -614,7 +738,7 @@ router.patch('/content/posts/:id', async (req: AuthRequest, res: Response, next:
         : null;
 
     if (auditAction) {
-      await logAudit({
+      await auditAfterCommit({
         action: auditAction,
         actorUserId: req.user?.id ?? null,
         ipAddress: req.ip,
@@ -707,7 +831,7 @@ router.delete('/content/comments/:id', async (req: AuthRequest, res: Response, n
 
     await prisma.comment.delete({ where: { id } });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_COMMENT_DELETE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -760,37 +884,70 @@ const reportQueueSelect = {
   },
 };
 
+const OPEN_REPORT_STATUSES = ['PENDING', 'REVIEWING'];
+
+type EvidenceClock = { reviewDeadline?: unknown; isUrgent?: unknown } | null;
+
+/** When a report is due and whether it is late, from what was stamped on it or the clock its reason runs on. */
+function reportClock(report: { createdAt: Date; reason: string; status: string; evidence: unknown }) {
+  const evidence = (report.evidence ?? null) as EvidenceClock;
+  const deadline = reviewDeadlineFor({
+    createdAt: report.createdAt,
+    reason: report.reason,
+    stamped: evidence?.reviewDeadline,
+    isUrgent: evidence?.isUrgent,
+  });
+  return {
+    reviewDeadline: deadline.toISOString(),
+    overdue: OPEN_REPORT_STATUSES.includes(report.status) && deadline.getTime() < Date.now(),
+  };
+}
+
+const moderationQueueQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.string().trim().toUpperCase().optional(),
+  contentType: z.string().trim().max(40).optional(),
+  reason: z.string().trim().max(60).optional(),
+  assigned: z.enum(['me', 'unclaimed']).optional(),
+});
+
 /**
  * GET /admin/moderation/reports
- * Work queue of user reports, newest first
+ * Work queue of user reports.
+ *
+ * The open queue (?status=open) is ordered by review deadline, soonest first,
+ * and every row says when it is due and whether it is already late. It used to
+ * be newest first with no deadline at all: the platform promised reporters 24
+ * and 48 hours and had no screen that could say whether it had kept either, and
+ * the page asked for "open" by fetching the newest fifty of everything and
+ * filtering on the client, so a busy day of resolved reports pushed older open
+ * ones off the page entirely. The deadline lives in the evidence JSON, which
+ * Postgres cannot sort on through Prisma, so the open set is read and ordered
+ * here; every other view is history and stays newest first.
  */
 router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const {
-      page = '1',
-      limit = '20',
-      status,
-      contentType,
-      reason,
-      assigned,
-    } = req.query;
+    const { page: pageNum, limit: limitNum, status, contentType, reason, assigned } = parseOr400(
+      moderationQueueQuerySchema,
+      req.query
+    );
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
-    const skip = (pageNum - 1) * limitNum;
+    const where: Prisma.ContentReportWhereInput = {};
+    const openView = status === 'OPEN';
 
-    const where: any = {};
-
-    if (status && REPORT_STATUSES.includes(String(status).toUpperCase())) {
-      where.status = String(status).toUpperCase();
+    if (openView) {
+      where.status = { in: OPEN_REPORT_STATUSES };
+    } else if (status && REPORT_STATUSES.includes(status)) {
+      where.status = status;
     }
     if (contentType) {
-      where.contentType = String(contentType).toUpperCase();
+      where.contentType = contentType.toUpperCase();
     }
     // Reasons arrive both as codes and as free text depending on where the
     // report was filed, so match loosely rather than on an exact value.
     if (reason) {
-      where.reason = { contains: String(reason), mode: 'insensitive' };
+      where.reason = { contains: reason, mode: 'insensitive' };
     }
     if (assigned === 'me') {
       where.reviewerId = req.user?.id;
@@ -798,21 +955,64 @@ router.get('/moderation/reports', async (req: AuthRequest, res: Response, next: 
       where.reviewerId = null;
     }
 
-    const [reports, total, openCount] = await Promise.all([
-      prisma.contentReport.findMany({
+    const openWhere: Prisma.ContentReportWhereInput = { status: { in: OPEN_REPORT_STATUSES } };
+
+    // Every open report's clock, oldest first, so the overdue count covers the
+    // whole queue rather than the page on screen.
+    const openClocks = await prisma.contentReport.findMany({
+      where: openWhere,
+      select: { id: true, createdAt: true, reason: true, status: true, evidence: true },
+      orderBy: { createdAt: 'asc' },
+      take: DEADLINE_SORT_WINDOW,
+    });
+    const overdueCount = openClocks.filter((row) => reportClock(row).overdue).length;
+
+    let reports;
+    let total: number;
+    if (openView) {
+      const matching = await prisma.contentReport.findMany({
         where,
-        select: reportQueueSelect,
-        skip,
-        take: limitNum,
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.contentReport.count({ where }),
-      prisma.contentReport.count({ where: { status: { in: ['PENDING', 'REVIEWING'] } } }),
-    ]);
+        select: { id: true, createdAt: true, reason: true, status: true, evidence: true },
+        orderBy: { createdAt: 'asc' },
+        take: DEADLINE_SORT_WINDOW,
+      });
+      total = await prisma.contentReport.count({ where });
+      const pageIds = sortByDeadline(matching, (row) => new Date(reportClock(row).reviewDeadline))
+        .slice((pageNum - 1) * limitNum, pageNum * limitNum)
+        .map((row) => row.id);
+      const rows = await prisma.contentReport.findMany({
+        where: { id: { in: pageIds } },
+        select: { ...reportQueueSelect, evidence: true },
+      });
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      reports = pageIds.map((id) => byId.get(id)).filter((row): row is (typeof rows)[number] => Boolean(row));
+    } else {
+      [reports, total] = await Promise.all([
+        prisma.contentReport.findMany({
+          where,
+          select: { ...reportQueueSelect, evidence: true },
+          skip: (pageNum - 1) * limitNum,
+          take: limitNum,
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.contentReport.count({ where }),
+      ]);
+    }
+
+    const openCount = await prisma.contentReport.count({ where: openWhere });
 
     res.json({
-      reports,
+      // The evidence JSON is read for its clock and not sent on: it carries the
+      // reporter's contact address, which the queue list has no need to show.
+      reports: reports.map(({ evidence, ...report }) => ({
+        ...report,
+        ...reportClock({ ...report, evidence }),
+      })),
       openCount,
+      overdueCount,
+      // True when the open queue is longer than one deadline pass reads, so the
+      // overdue figure is a floor rather than the whole count.
+      overdueCountIsPartial: openCount > openClocks.length,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -926,7 +1126,7 @@ router.post('/moderation/reports/:id/action', async (req: AuthRequest, res: Resp
 
     const outcome = await processReportById(id, action, req.user!.id, notes);
 
-    await logAudit({
+    await auditAfterCommit({
       action: REPORT_AUDIT_ACTIONS[action as ModerationAction],
       actorUserId: req.user?.id ?? null,
       targetUserId: outcome.reportedUserId,
@@ -1033,7 +1233,7 @@ router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest,
 
     const outcome = await resolveAnonymousReport(req.params.id, action, req.user!.id, notes);
 
-    await logAudit({
+    await auditAfterCommit({
       action: REPORT_AUDIT_ACTIONS[action as ModerationAction],
       actorUserId: req.user?.id ?? null,
       targetUserId: outcome.reportedUserId,
@@ -1074,16 +1274,43 @@ router.post('/moderation/anonymous-reports/:id/action', async (req: AuthRequest,
  * GET /admin/audit-logs
  * List compliance audit log entries
  */
+/**
+ * The query this viewer accepts, checked before any of it reaches Prisma.
+ *
+ * page and limit went through a bare parseInt: ?limit=abc became NaN, ?page=0 a
+ * negative skip, and ?limit=1000000 one unbounded query with two user joins per
+ * row. An action the enum does not know reached the column and came back as a
+ * Prisma 500 rather than a 400 that says what was wrong.
+ *
+ * adminAction filters on the verb recordAdminAction writes into metadata. Those
+ * rows are filed under DATA_ACCESS until the enum has platform-admin verbs of
+ * its own, so without it a privacy officer asking for data-access events gets
+ * blog edits and flag flips mixed in and has no way to separate them.
+ */
+const auditLogQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  action: z.nativeEnum(AuditAction).optional(),
+  adminAction: z.string().trim().regex(/^[A-Z][A-Z_]{1,63}$/).optional(),
+  actorUserId: z.string().trim().min(1).max(100).optional(),
+  targetUserId: z.string().trim().min(1).max(100).optional(),
+});
+
 router.get('/audit-logs', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '50', action, actorUserId, targetUserId } = req.query;
-
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
+    const {
+      page: pageNum,
+      limit: limitNum,
+      action,
+      adminAction,
+      actorUserId,
+      targetUserId,
+    } = parseOr400(auditLogQuerySchema, req.query);
     const skip = (pageNum - 1) * limitNum;
 
-    const where: any = {};
+    const where: Prisma.AuditLogWhereInput = {};
     if (action) where.action = action;
+    if (adminAction) where.metadata = { path: ['adminAction'], equals: adminAction };
     if (actorUserId) where.actorUserId = actorUserId;
     if (targetUserId) where.targetUserId = targetUserId;
 
@@ -1256,6 +1483,253 @@ router.get('/gdpr/consents', async (req: AuthRequest, res: Response, next: NextF
 });
 
 // ============================================================================
+// DATA SUBJECT REQUESTS (the APP 12 / GDPR Art 12 queue)
+// ============================================================================
+
+/**
+ * The staff queue for access, correction, erasure and restriction requests.
+ *
+ * Every DSARRequest carries a due date — 30 days, the period the OAIC reads APP
+ * 12.4 as reasonable and the month GDPR Art 12(3) allows — an assignee and
+ * processing notes. Nothing read them. There was no route that listed the
+ * table, assignedTo had no writer, and the compliance screen counted requests
+ * off AuditLog, so a privacy officer could not see which were open, who had
+ * them or which were about to run out of time. Export and erasure finish on
+ * their own, which is the common case; the ones that need a person — an
+ * erasure refused under a legal hold, a correction the self-service path could
+ * not apply — waited in a queue nobody could see. These two routes are it.
+ */
+const DSAR_OPEN_STATUSES: DSARStatus[] = [DSARStatus.PENDING, DSARStatus.IN_PROGRESS];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const dsarQueueQuerySchema = z.object({
+  status: z.union([z.literal('open'), z.literal('all'), z.nativeEnum(DSARStatus)]).default('open'),
+  type: z.nativeEnum(DSARType).optional(),
+  assigned: z.enum(['me', 'unassigned']).optional(),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+function dsarClock(request: { status: DSARStatus; dueDate: Date }) {
+  const open = DSAR_OPEN_STATUSES.includes(request.status);
+  const msLeft = request.dueDate.getTime() - Date.now();
+  return {
+    // Whole days either side of the deadline, rounded towards it: "0" is
+    // due within the day, or overdue by less than one.
+    daysRemaining: open ? Math.trunc(msLeft / DAY_MS) : null,
+    overdue: open && msLeft < 0,
+  };
+}
+
+/**
+ * GET /admin/gdpr/dsar-requests
+ * Open requests by due date, soonest first; any other view newest first.
+ */
+router.get('/gdpr/dsar-requests', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { status, type, assigned, page, limit } = parseOr400(dsarQueueQuerySchema, req.query);
+
+    const where: Prisma.DSARRequestWhereInput = {};
+    if (status === 'open') where.status = { in: DSAR_OPEN_STATUSES };
+    else if (status !== 'all') where.status = status;
+    if (type) where.type = type;
+    if (assigned === 'me') where.assignedTo = req.user!.id;
+    if (assigned === 'unassigned') where.assignedTo = null;
+
+    const openWhere: Prisma.DSARRequestWhereInput = { status: { in: DSAR_OPEN_STATUSES } };
+    const now = new Date();
+
+    const [requests, total, open, overdue, dueWithinWeek, unassigned] = await Promise.all([
+      prisma.dSARRequest.findMany({
+        where,
+        orderBy: status === 'open' ? { dueDate: 'asc' } : { requestedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        // exportUrl is a live download link to a member's whole data file, and
+        // a queue has no reason to hand it round.
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          requestDetails: true,
+          assignedTo: true,
+          processingNotes: true,
+          requestedAt: true,
+          acknowledgedAt: true,
+          dueDate: true,
+          completedAt: true,
+          user: { select: { id: true, email: true, firstName: true, lastName: true, region: true } },
+        },
+      }),
+      prisma.dSARRequest.count({ where }),
+      prisma.dSARRequest.count({ where: openWhere }),
+      prisma.dSARRequest.count({ where: { ...openWhere, dueDate: { lt: now } } }),
+      prisma.dSARRequest.count({
+        where: { ...openWhere, dueDate: { gte: now, lt: new Date(now.getTime() + 7 * DAY_MS) } },
+      }),
+      prisma.dSARRequest.count({ where: { ...openWhere, assignedTo: null } }),
+    ]);
+
+    const assigneeIds = Array.from(new Set(requests.map((r) => r.assignedTo).filter((id): id is string => Boolean(id))));
+    const assignees = assigneeIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: assigneeIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+    const assigneeById = new Map(assignees.map((a) => [a.id, a]));
+
+    res.json({
+      requests: requests.map((request) => ({
+        ...request,
+        ...dsarClock(request),
+        assignee: request.assignedTo ? assigneeById.get(request.assignedTo) ?? null : null,
+      })),
+      summary: { open, overdue, dueWithinWeek, unassigned },
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const dsarUpdateSchema = z
+  .object({
+    // 'me' takes the request; null gives it back; an id hands it to another admin.
+    assignedTo: z.union([z.literal('me'), z.string().uuid(), z.null()]).optional(),
+    status: z.enum([DSARStatus.IN_PROGRESS, DSARStatus.COMPLETED, DSARStatus.REJECTED]).optional(),
+    note: z.string().trim().min(1).max(4000).optional(),
+    // What the member is told. APP 12.9 requires written reasons for a refusal,
+    // so a rejection cannot be recorded without one.
+    memberMessage: z.string().trim().min(1).max(2000).optional(),
+  })
+  .strict();
+
+const DSAR_TRANSITIONS: Record<DSARStatus, DSARStatus[]> = {
+  PENDING: [DSARStatus.IN_PROGRESS, DSARStatus.COMPLETED, DSARStatus.REJECTED],
+  IN_PROGRESS: [DSARStatus.COMPLETED, DSARStatus.REJECTED],
+  COMPLETED: [],
+  REJECTED: [],
+  EXPIRED: [],
+};
+
+/**
+ * PATCH /admin/gdpr/dsar-requests/:id
+ * Take a request, hand it on, add a note, or close it with a reason.
+ */
+router.patch('/gdpr/dsar-requests/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const body = parseOr400(dsarUpdateSchema, req.body ?? {});
+    if (body.assignedTo === undefined && !body.status && !body.note) {
+      throw new ApiError(400, 'Nothing to change');
+    }
+
+    const existing = await prisma.dSARRequest.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true, type: true, status: true, assignedTo: true, processingNotes: true },
+    });
+    if (!existing) {
+      throw new ApiError(404, 'Request not found');
+    }
+
+    if (body.status && body.status !== existing.status) {
+      if (!DSAR_TRANSITIONS[existing.status].includes(body.status)) {
+        throw new ApiError(409, `A ${existing.status.toLowerCase()} request cannot be moved to ${body.status.toLowerCase()}`);
+      }
+      // An erasure is completed by running it. Marking one done by hand would
+      // record a deletion that never happened, which is the one false entry
+      // this queue must never be able to make.
+      if (body.status === DSARStatus.COMPLETED && existing.type === DSARType.DELETION) {
+        throw new ApiError(409, 'An erasure request is completed by running the erasure, not by marking it done here.');
+      }
+      if (body.status === DSARStatus.REJECTED && !body.memberMessage) {
+        throw new ApiError(400, 'Say why the request is refused; the member is told the reason.');
+      }
+      if (body.status === DSARStatus.COMPLETED && !body.note) {
+        throw new ApiError(400, 'Record what was done before closing the request.');
+      }
+    }
+
+    let assignedTo: string | null | undefined;
+    if (body.assignedTo === 'me') {
+      assignedTo = req.user!.id;
+    } else if (body.assignedTo === null) {
+      assignedTo = null;
+    } else if (body.assignedTo) {
+      const assignee = await prisma.user.findUnique({ where: { id: body.assignedTo }, select: { role: true } });
+      if (!assignee || assignee.role !== 'ADMIN') {
+        throw new ApiError(400, 'A request can only be assigned to a platform admin');
+      }
+      assignedTo = body.assignedTo;
+    }
+
+    const stamp = `[${new Date().toISOString()} ${req.user!.id}]`;
+    const noteLines = [
+      body.note ? `${stamp} ${body.note}` : null,
+      body.status && body.status !== existing.status ? `${stamp} Status ${existing.status} → ${body.status}` : null,
+      body.memberMessage ? `${stamp} Told the member: ${body.memberMessage}` : null,
+    ].filter((line): line is string => Boolean(line));
+
+    const closing = body.status === DSARStatus.COMPLETED || body.status === DSARStatus.REJECTED;
+    const updated = await prisma.dSARRequest.update({
+      where: { id: existing.id },
+      data: {
+        ...(assignedTo !== undefined ? { assignedTo } : {}),
+        ...(body.status ? { status: body.status } : {}),
+        ...(closing ? { completedAt: new Date() } : {}),
+        ...(noteLines.length
+          ? { processingNotes: [existing.processingNotes, ...noteLines].filter(Boolean).join('\n') }
+          : {}),
+      },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        assignedTo: true,
+        processingNotes: true,
+        dueDate: true,
+        completedAt: true,
+      },
+    });
+
+    await recordAdminAction(req, 'DSAR_REQUEST_UPDATED', {
+      resourceType: 'DSARRequest',
+      resourceId: existing.id,
+      targetUserId: existing.userId,
+      requestType: existing.type,
+      previousStatus: existing.status,
+      status: updated.status,
+      ...(assignedTo !== undefined ? { assignedTo } : {}),
+    });
+
+    if (closing) {
+      // The member hears the outcome of her own request in the place she made
+      // it. Best effort: the decision is recorded, and a notification that
+      // fails must not report the decision as failed.
+      const kind = existing.type.toLowerCase();
+      await bestEffort('dsar outcome notification', () =>
+        prisma.notification.create({
+          data: {
+            userId: existing.userId,
+            type: 'SYSTEM',
+            title: body.status === DSARStatus.REJECTED ? 'We could not complete your privacy request' : 'Your privacy request is complete',
+            message:
+              body.memberMessage ??
+              `We have completed your ${kind} request. You can see your requests in the Privacy Centre.`,
+            link: '/dashboard/settings/privacy',
+            data: { dsarRequestId: existing.id, status: updated.status },
+          },
+        })
+      );
+    }
+
+    res.json({ request: { ...updated, ...dsarClock(updated) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
 // JOB MANAGEMENT
 // ============================================================================
 
@@ -1361,7 +1835,7 @@ router.patch('/jobs/:id', async (req: AuthRequest, res: Response, next: NextFunc
       data: updateData,
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_JOB_UPDATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -1470,7 +1944,7 @@ router.patch('/subscriptions/:id', async (req: AuthRequest, res: Response, next:
       data: updateData,
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_SUBSCRIPTION_UPDATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -1515,7 +1989,7 @@ router.post('/subscriptions/grant', async (req: AuthRequest, res: Response, next
       },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_SUBSCRIPTION_GRANT',
       actorUserId: req.user?.id ?? null,
       targetUserId: userId,
@@ -1602,7 +2076,7 @@ router.post('/invite-codes', async (req: AuthRequest, res: Response, next: NextF
       orderBy: { createdAt: 'desc' },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_USER_UPDATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -1634,7 +2108,7 @@ router.patch('/invite-codes/:id', async (req: AuthRequest, res: Response, next: 
       data: { isActive },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_USER_UPDATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -1726,7 +2200,7 @@ router.patch('/woman-verifications/:userId', async (req: AuthRequest, res: Respo
       },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: status === 'VERIFIED' ? 'ADMIN_VERIFICATION_APPROVE' : 'ADMIN_VERIFICATION_REJECT',
       actorUserId: req.user?.id ?? null,
       targetUserId: userId,
@@ -2010,7 +2484,7 @@ router.post('/groups', async (req: AuthRequest, res: Response, next: NextFunctio
       return { group };
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_GROUP_CREATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2054,7 +2528,7 @@ router.patch('/groups/:id', async (req: AuthRequest, res: Response, next: NextFu
 
     const group = await prisma.group.update({ where: { id }, data });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_GROUP_UPDATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2076,7 +2550,7 @@ router.delete('/groups/:id', async (req: AuthRequest, res: Response, next: NextF
     const { id } = req.params;
     await prisma.group.delete({ where: { id } });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_GROUP_DELETE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2116,7 +2590,7 @@ router.patch('/groups/:id/members/:userId', async (req: AuthRequest, res: Respon
       create: { groupId, userId, role },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_GROUP_MEMBER_ROLE_UPDATE',
       actorUserId: req.user?.id ?? null,
       targetUserId: userId,
@@ -2141,7 +2615,7 @@ router.delete('/groups/:id/posts/:postId', async (req: AuthRequest, res: Respons
     if (!post || post.groupId !== groupId) return res.status(404).json({ error: 'Post not found' });
     await prisma.groupPost.delete({ where: { id: postId } });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_GROUP_POST_DELETE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2280,7 +2754,7 @@ router.post('/events', async (req: AuthRequest, res: Response, next: NextFunctio
       },
     });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_EVENT_CREATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2355,7 +2829,7 @@ router.patch('/events/:id', async (req: AuthRequest, res: Response, next: NextFu
 
     const event = await prisma.event.update({ where: { id }, data });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_EVENT_UPDATE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2377,7 +2851,7 @@ router.delete('/events/:id', async (req: AuthRequest, res: Response, next: NextF
     const { id } = req.params;
     await prisma.event.delete({ where: { id } });
 
-    await logAudit({
+    await auditAfterCommit({
       action: 'ADMIN_EVENT_DELETE',
       actorUserId: req.user?.id ?? null,
       ipAddress: req.ip,
@@ -2472,6 +2946,20 @@ router.patch('/grants/applications/:id', async (req: AuthRequest, res: Response,
       AWARDED: `Your application for ${name} was successful${amount !== undefined && Number.isFinite(amount) ? `: ${aud(amount)}` : ''}.`,
       REJECTED: `Your application for ${name} was not successful this time.`,
     };
+    // Recorded before the applicant is told, so a notification that fails
+    // cannot take the record of the decision down with it. An award is money
+    // going to a named member; who recorded it, and what it was, has to
+    // outlive the log line.
+    await recordAdminAction(req, 'GRANT_APPLICATION_DECIDED', {
+      resourceType: 'GrantApplication',
+      resourceId: application.id,
+      targetUserId: application.userId,
+      grantId: application.grantId,
+      previousStatus: application.status,
+      status: updated.status,
+      ...(amount !== undefined && Number.isFinite(amount) ? { amountAwarded: amount } : {}),
+    });
+
     await tellApplicant(application.userId, 'Update on your grant application', `${line[status]}${notes ? ` ${String(notes).trim()}` : ''}`, '/dashboard/grants');
 
     logger.info('Grant application decided', { applicationId: application.id, status, by: req.user!.id });
@@ -2538,6 +3026,17 @@ router.patch('/insurance/applications/:id', async (req: AuthRequest, res: Respon
       ACTIVE: `Your ${name} policy is now active${typeof policyNumber === 'string' && policyNumber ? ` (policy ${policyNumber})` : ''}.`,
       LAPSED: `Your ${name} policy has lapsed.`,
     };
+    await recordAdminAction(req, 'INSURANCE_APPLICATION_DECIDED', {
+      resourceType: 'InsuranceApplication',
+      resourceId: application.id,
+      targetUserId: application.userId,
+      productId: application.productId,
+      previousStatus: application.status,
+      status: updated.status,
+      ...(num(premiumQuoted) !== undefined ? { premiumQuoted: num(premiumQuoted) } : {}),
+      ...(num(coverageAmount) !== undefined ? { coverageAmount: num(coverageAmount) } : {}),
+    });
+
     await tellApplicant(application.userId, 'Update on your insurance application', `${line[status]}${typeof note === 'string' && note.trim() ? ` ${note.trim()}` : ''}`, '/dashboard/finance/insurance');
 
     logger.info('Insurance application decided', { applicationId: application.id, status, by: req.user!.id });

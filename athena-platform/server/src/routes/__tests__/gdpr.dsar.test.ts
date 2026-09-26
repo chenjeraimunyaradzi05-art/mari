@@ -98,41 +98,32 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+// These used to hold the route to the RetentionPolicy table, including a test
+// that an empty table published an empty list. Nothing wrote that table and the
+// purge never read it, so that test was pinning the bug: an empty disclosure in
+// every deployment beside a purge that ran every night. The route now publishes
+// the schedule the purge executes; gdpr.retention-schedule.test.ts holds each
+// line to the purge job it describes.
 describe('GET /api/gdpr/retention-policies', () => {
-  it('serves the retention policies actually on record', async () => {
-    prisma.retentionPolicy.findMany.mockResolvedValue([
-      {
-        dataType: 'audit_logs',
-        description: 'System and admin audit logs',
-        dataCategory: 'TECHNICAL',
-        retentionDays: 2555,
-        retentionReason: 'Legal compliance requirement',
-        legalBasis: 'LEGAL_OBLIGATION',
-        anonymizeInstead: false,
-        purgeJobName: 'anonymizeOldAuditLogs',
-        lastPurgeAt: new Date('2026-01-01T00:00:00.000Z'),
-      },
-    ]);
-
-    const res = await request(app).get('/api/gdpr/retention-policies').expect(200);
-
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0]).toMatchObject({
-      dataType: 'audit_logs',
-      retentionDays: 2555,
-      legalBasis: 'LEGAL_OBLIGATION',
-    });
-    // Which job runs the purge is operational detail, not transparency.
-    expect(res.body.data[0].purgeJobName).toBeUndefined();
-    expect(res.body.data[0].lastPurgeAt).toBeUndefined();
-  });
-
-  it('returns an empty list rather than inventing policies', async () => {
+  it('publishes the schedule the purge runs, not the unwritten policy table', async () => {
     prisma.retentionPolicy.findMany.mockResolvedValue([]);
 
     const res = await request(app).get('/api/gdpr/retention-policies').expect(200);
 
-    expect(res.body.data).toEqual([]);
+    expect(prisma.retentionPolicy.findMany).not.toHaveBeenCalled();
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dataType: 'direct_messages', retentionDays: 1095, trigger: 'age' }),
+        expect.objectContaining({ dataType: 'audit_logs', retentionDays: 365, anonymizeInstead: true }),
+      ])
+    );
+    expect(res.body.meta.legalHold).toMatch(/legal hold/i);
+    // Which job runs the purge is operational detail, not transparency.
+    for (const policy of res.body.data) {
+      expect(policy.purgeJobName).toBeUndefined();
+      expect(policy.lastPurgeAt).toBeUndefined();
+    }
   });
 });
 

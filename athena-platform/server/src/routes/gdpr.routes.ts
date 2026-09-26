@@ -38,7 +38,9 @@ import {
 } from '../middleware/gdpr.middleware';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../utils/prisma';
-import { logAudit } from '../utils/audit';
+// Audit rows here follow a committed change, so a failed insert is logged
+// rather than turned into a 500 for work that succeeded.
+import { auditAfterCommit } from '../services/admin-audit.service';
 import { parsePagination, buildPaginationMeta } from '../utils/pagination';
 import { AuditAction, DataCategory, DSARType, ConsentType, LegalBasis, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
@@ -296,14 +298,24 @@ router.get('/data-categories', async (_req: AuthRequest, res: Response) => {
  * GET /api/gdpr/retention-policies
  * Get data retention policies (for transparency)
  *
- * Served from the RetentionPolicy table, which is what the purge jobs actually
- * run on. An empty table means nothing has been committed to yet, and saying so
- * is honest; publishing a list the purge jobs have never seen would not be.
+ * This said it was served from the RetentionPolicy table "which is what the
+ * purge jobs actually run on". Neither half was true: nothing ever wrote the
+ * table, so every deployment published an empty list, and the nightly purge
+ * runs on its own constants and never reads it. The list is now the schedule
+ * the purge executes (EXECUTED_RETENTION_SCHEDULE in gdpr.service), held to the
+ * purge jobs by a test, so what is published is what is done.
  */
 router.get('/retention-policies', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const policies = await gdprService.getRetentionPolicies();
-    res.json({ success: true, data: policies });
+    res.json({
+      success: true,
+      data: policies,
+      meta: {
+        source: 'purge_schedule',
+        legalHold: 'Anything covered by an active legal hold is kept until the hold is lifted.',
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -332,7 +344,7 @@ router.get('/dsar/rectify/confirm-email', async (req: AuthRequest, res: Response
       : ({ status: 'INVALID' } as const);
 
     if (outcome.status === 'CONFIRMED') {
-      await logAudit({
+      await auditAfterCommit({
         action: AuditAction.DATA_ACCESS,
         actorUserId: outcome.userId,
         targetUserId: outcome.userId,
@@ -457,7 +469,7 @@ router.post('/dsar/export', exportRateLimit, async (req: AuthRequest, res: Respo
 
     // The compliance dashboard counts DSARs off AuditLog, so a request handled
     // without a row here is a request the platform cannot show it handled.
-    await logAudit({
+    await auditAfterCommit({
       action: AuditAction.DSAR_EXPORT,
       actorUserId: userId,
       targetUserId: userId,
@@ -532,7 +544,7 @@ router.post('/dsar/delete', erasureRateLimit, async (req: AuthRequest, res: Resp
     // naming the member on a row about erasing them defeats the exercise. The
     // address is left off for the same reason — this row exists to show a
     // regulator the request was handled, not to keep the member on file.
-    await logAudit({
+    await auditAfterCommit({
       action: AuditAction.ACCOUNT_DELETE,
       metadata: {
         requestId: outcome.requestId,
@@ -641,7 +653,7 @@ router.post(
 
       // DATA_ACCESS is the only value AuditAction carries for a data-subject right
       // other than export and erasure; the metadata says which right it was.
-      await logAudit({
+      await auditAfterCommit({
         action: AuditAction.DATA_ACCESS,
         actorUserId: userId,
         targetUserId: userId,
@@ -728,7 +740,7 @@ router.post('/dsar/restrict', restrictRateLimit, async (req: AuthRequest, res: R
 
     const applied = await gdprService.applyProcessingRestriction(dsar.id, requested);
 
-    await logAudit({
+    await auditAfterCommit({
       action: AuditAction.DATA_ACCESS,
       actorUserId: userId,
       targetUserId: userId,
@@ -774,7 +786,7 @@ router.delete('/dsar/restrict/:requestId', async (req: AuthRequest, res: Respons
       throw new ApiError(404, 'Active restriction not found');
     }
 
-    await logAudit({
+    await auditAfterCommit({
       action: AuditAction.DATA_ACCESS,
       actorUserId: req.user!.id,
       targetUserId: req.user!.id,

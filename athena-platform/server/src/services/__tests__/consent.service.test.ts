@@ -13,8 +13,10 @@
 
 jest.mock('../../utils/prisma', () => ({
   prisma: {
-    consentRecord: { findUnique: jest.fn(), groupBy: jest.fn() },
+    consentRecord: { findUnique: jest.fn(), groupBy: jest.fn(), updateMany: jest.fn() },
     dSARRequest: { findMany: jest.fn() },
+    user: { findUnique: jest.fn(), update: jest.fn() },
+    privacyAuditLog: { create: jest.fn() },
   },
 }));
 
@@ -98,6 +100,54 @@ describe('The record of consent', () => {
       const where = prismaAny.consentRecord.groupBy.mock.calls[0][0].where;
       expect(where.status).toBe(ConsentStatus.GRANTED);
       expect(where.OR).toEqual([{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }]);
+    });
+  });
+
+  // The Privacy Centre writes the ledger; every sender reads the newsletter
+  // switch in notification settings, which defaults on. A withdrawal in the
+  // one used to leave the other saying yes.
+  describe('syncMarketingEmailPreference', () => {
+    it('turns the newsletter switch off when marketing consent is withdrawn, keeping her other settings', async () => {
+      prismaAny.user.findUnique.mockResolvedValue({
+        notificationPreferences: { email: { newsletter: true, messages: false }, push: { messages: true } },
+      });
+
+      await consentService.syncMarketingEmailPreference('member-1', false);
+
+      expect(prismaAny.user.update).toHaveBeenCalledWith({
+        where: { id: 'member-1' },
+        data: {
+          notificationPreferences: { email: { newsletter: false, messages: false }, push: { messages: true } },
+        },
+      });
+    });
+
+    it('writes nothing when the switch already agrees', async () => {
+      prismaAny.user.findUnique.mockResolvedValue({ notificationPreferences: { email: { newsletter: false } } });
+
+      await consentService.syncMarketingEmailPreference('member-1', false);
+
+      expect(prismaAny.user.update).not.toHaveBeenCalled();
+    });
+
+    it('treats a member with no saved settings as opted in by default, and turns that off', async () => {
+      prismaAny.user.findUnique.mockResolvedValue({ notificationPreferences: null });
+
+      await consentService.syncMarketingEmailPreference('member-1', false);
+
+      expect(prismaAny.user.update.mock.calls[0][0].data.notificationPreferences).toEqual({ email: { newsletter: false } });
+    });
+
+    it('turns the switch off first when every optional consent is withdrawn', async () => {
+      prismaAny.user.findUnique.mockResolvedValue({ notificationPreferences: { email: { newsletter: true } } });
+      const order: string[] = [];
+      prismaAny.user.update.mockImplementation(async () => order.push('switch'));
+      prismaAny.consentRecord.updateMany.mockImplementation(async () => order.push('ledger'));
+      prismaAny.privacyAuditLog.create.mockResolvedValue({});
+
+      await consentService.withdrawAllOptionalConsents('member-1', {});
+
+      expect(order).toEqual(['switch', 'ledger']);
     });
   });
 });

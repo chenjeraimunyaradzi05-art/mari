@@ -13,6 +13,7 @@
  * CSAM or terrorism.
  */
 
+import express from 'express';
 import request from 'supertest';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
@@ -65,12 +66,20 @@ jest.mock('../../services/trust.service', () => {
   return { ...actual, recordSafetyReport: jest.fn(async () => undefined) };
 });
 
-import { app } from '../../index';
+import complianceRoutes from '../compliance.routes';
+import { errorHandler } from '../../middleware/errorHandler';
 import { prisma as prismaTyped } from '../../utils/prisma';
 import { runReportIntakeConsequences } from '../../services/content-report.service';
 import { reviewReportedContent } from '../../services/moderation-threshold.service';
 import { handleUserReport } from '../../services/safety-score.service';
 import { recordSafetyReport } from '../../services/trust.service';
+
+// The compliance router on its own, so these tests answer for this route and
+// are not taken down by a module elsewhere in the app failing to load.
+const app = express();
+app.use(express.json());
+app.use('/api/compliance', complianceRoutes);
+app.use(errorHandler);
 
 const prisma: any = prismaTyped;
 const intakeConsequences = runReportIntakeConsequences as jest.Mock;
@@ -188,6 +197,62 @@ describe('POST /api/compliance/report-content', () => {
     // There is no reporter to weigh, so no trust score moves.
     expect(trustScore).not.toHaveBeenCalled();
   });
+
+  it('puts an illegal-content report on the 24-hour clock, and tells the acknowledgment the same', async () => {
+    currentUser = null;
+    const before = Date.now();
+
+    const res = await request(app)
+      .post('/api/compliance/report-content')
+      .send(body({ reason: 'illegal', contactEmail: 'reporter@example.test' }));
+
+    expect(res.status).toBe(201);
+    // Priority high, and the deadline used to follow the priority: 48 hours.
+    expect(res.body.data.priority).toBe('high');
+    expect(res.body.message).toContain('24 hours');
+    const deadline = new Date(res.body.data.reviewDeadline).getTime();
+    expect(Math.round((deadline - before) / 3_600_000)).toBe(24);
+    expect(intakeConsequences).toHaveBeenCalledWith(expect.objectContaining({ reviewHours: 24 }));
+  });
+
+  it('refuses a reason that is not one either report door offers', async () => {
+    currentUser = { id: 'member-1', role: 'USER', email: 'member-1@example.com' };
+
+    const res = await request(app)
+      .post('/api/compliance/report-content')
+      .send(body({ reason: 'i just do not like her' }));
+
+    expect(res.status).toBe(400);
+    expect(prisma.contentReport.create).not.toHaveBeenCalled();
+    expect(intakeConsequences).not.toHaveBeenCalled();
+  });
+
+  it('refuses a description past the cap instead of mailing it to Trust & Safety', async () => {
+    currentUser = null;
+
+    const res = await request(app)
+      .post('/api/compliance/report-content')
+      .send(body({ details: 'x'.repeat(5001) }));
+
+    expect(res.status).toBe(400);
+    expect(prisma.safetyIncident.create).not.toHaveBeenCalled();
+  });
+
+  it('holds a signed-in member to the in-app report limit, with or without Redis', async () => {
+    // The Redis limiters stand down in tests exactly as they do in a deployment
+    // with no REDIS_URL, so this is the floor under them doing the work.
+    currentUser = { id: 'flooder', role: 'USER', email: 'flooder@example.com' };
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 16; i += 1) {
+      statuses.push((await request(app).post('/api/compliance/report-content').send(body({ reason: 'csam' }))).status);
+    }
+
+    expect(statuses.slice(0, 15).every((status) => status === 201)).toBe(true);
+    expect(statuses[15]).toBe(429);
+    // The sixteenth never reached the referral queue.
+    expect(intakeConsequences).toHaveBeenCalledTimes(15);
+  });
 });
 
 describe('GET /api/compliance/report-status/:reference', () => {
@@ -228,6 +293,26 @@ describe('GET /api/compliance/report-status/:reference', () => {
 
     expect(JSON.stringify(res.body)).not.toMatch(/reviewNotes/);
     expect(prisma.contentReport.findFirst.mock.calls[0][0].select.reviewNotes).toBeUndefined();
+  });
+
+  it('finds an anonymous report by the RPT- reference her acknowledgment quoted', async () => {
+    prisma.safetyIncident.findFirst.mockImplementation(async (args: any) =>
+      JSON.stringify(args.where).includes('RPT-ANON-1')
+        ? {
+            id: 'incident-1',
+            resolvedAt: null,
+            updatedAt: new Date('2026-09-20T00:00:00.000Z'),
+            metadata: { anonymous: true, ticketId: 'RPT-ANON-1', reviewDeadline: '2026-09-21T00:00:00.000Z' },
+          }
+        : null
+    );
+
+    const res = await request(app).get('/api/compliance/report-status/RPT-ANON-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ reference: 'RPT-ANON-1', status: 'PENDING' });
+    // Looked up through the metadata, never by treating the reference as a row id.
+    expect(JSON.stringify(prisma.safetyIncident.findFirst.mock.calls[0][0].where)).toContain('ticketId');
   });
 
   it('says so plainly when the reference is not one of ours', async () => {

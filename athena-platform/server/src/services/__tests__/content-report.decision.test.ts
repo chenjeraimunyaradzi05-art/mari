@@ -35,7 +35,7 @@ jest.mock('../../utils/ops-metrics', () => ({
 
 import { prisma } from '../../utils/prisma';
 import { sendEmail } from '../../utils/email';
-import { processReportById } from '../content-report.service';
+import { processReportById, reverseEnforcement } from '../content-report.service';
 
 const prismaAny: any = prisma;
 const sendEmailMock = sendEmail as jest.Mock;
@@ -112,5 +112,85 @@ describe('Deciding a report', () => {
       data: { isHidden: true },
     });
     expect(outcome.action).toBe('remove');
+  });
+
+  // Ban runs the same lock as suspend — there is no ban record, no permanence
+  // and nothing that stops a new registration — so what distinguishes it is
+  // the record and what everybody is told. It used to tell the reporter the
+  // account had been "removed" and "permanently banned".
+  it('bans by locking the account, records it as a ban, and tells the reporter no more than that', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({
+      ...REPORT,
+      evidence: { ticketId: 'RPT-X-1', contactEmail: 'reporter@example.org' },
+    });
+
+    const outcome = await processReportById('report-1', 'ban', 'moderator-1', 'Stalking across accounts');
+
+    expect(prismaAny.user.update).toHaveBeenCalledWith({
+      where: { id: 'reported-1' },
+      data: { isSuspended: true },
+    });
+    expect(prismaAny.contentReport.update.mock.calls[0][0].data).toMatchObject({ status: 'RESOLVED', action: 'BAN' });
+    expect(prismaAny.moderationLog.create.mock.calls[0][0].data).toMatchObject({ action: 'ban', ticketId: 'RPT-X-1' });
+    expect(outcome.action).toBe('ban');
+
+    const inApp = prismaAny.notification.create.mock.calls
+      .map((call: any[]) => call[0].data)
+      .find((data: any) => data.userId === 'reporter-1');
+    expect(inApp.message).toContain('banned');
+    expect(inApp.message).not.toMatch(/removed the account|permanent/i);
+
+    const email = sendEmailMock.mock.calls.map((call: any[]) => call[0]).find((mail: any) => mail.to === 'reporter@example.org');
+    expect(email.html).toContain('banned the account');
+    expect(email.html).not.toMatch(/permanent/i);
+  });
+});
+
+/**
+ * Appeal reversal. appeal.routes.test.ts approves an appeal that is not a
+ * reversible type, so the undo path itself had no test: what it lifts, what it
+ * restores, and what it admits it cannot bring back.
+ */
+describe('Reversing enforcement on a successful appeal', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaAny.post.updateMany = jest.fn(async () => ({ count: 1 }));
+    prismaAny.contentReport.update.mockResolvedValue({ ...REPORT });
+  });
+
+  it('lifts the suspension, restores hidden content and clears the report', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue({ ...REPORT, status: 'RESOLVED', action: 'BAN' });
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: true });
+
+    const result = await reverseEnforcement({ userId: 'reported-1', reportId: 'report-1' });
+
+    expect(result).toEqual({ suspensionLifted: true, contentRestored: true, reportCleared: true });
+    expect(prismaAny.user.update).toHaveBeenCalledWith({ where: { id: 'reported-1' }, data: { isSuspended: false } });
+    expect(prismaAny.post.updateMany).toHaveBeenCalledWith({ where: { id: 'post-1' }, data: { isHidden: false } });
+    expect(prismaAny.contentReport.update.mock.calls[0][0].data).toMatchObject({
+      status: 'DISMISSED',
+      action: 'NO_ACTION',
+    });
+  });
+
+  it('does not claim to have lifted a suspension that was not there', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'reported-1', contentType: 'POST', contentId: 'post-1' });
+
+    expect(result.suspensionLifted).toBe(false);
+    expect(prismaAny.user.update).not.toHaveBeenCalled();
+    expect(result.contentRestored).toBe(true);
+    expect(result.reportCleared).toBe(false);
+  });
+
+  it('says a deleted message could not be restored rather than pretending it was', async () => {
+    prismaAny.contentReport.findUnique.mockResolvedValue(null);
+    prismaAny.user.findUnique.mockResolvedValue({ isSuspended: false });
+
+    const result = await reverseEnforcement({ userId: 'reported-1', contentType: 'MESSAGE', contentId: 'msg-1' });
+
+    expect(result.contentRestored).toBe(false);
   });
 });

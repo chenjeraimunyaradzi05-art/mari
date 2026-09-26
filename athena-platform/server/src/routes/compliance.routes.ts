@@ -20,14 +20,15 @@ import { ConsentType, Prisma, Region } from '@prisma/client';
 import { gdprService } from '../services/gdpr.service';
 import { consentService } from '../services/consent.service';
 import {
-  newReportTicketId,
-  reportPriorityFor,
+  isReportableReason,
+  openReportIntake,
+  REPORTABLE_REASONS,
   runReportIntakeConsequences,
 } from '../services/content-report.service';
 import { reviewReportedContent, type ReportableContent } from '../services/moderation-threshold.service';
 import { handleUserReport } from '../services/safety-score.service';
 import { recordSafetyReport } from '../services/trust.service';
-import { publicFormLimiter } from '../middleware/socialLimits';
+import { createMemoryThrottle, publicFormLimiter, reportLimiter, SOCIAL_LIMITS } from '../middleware/socialLimits';
 import { bestEffort } from '../utils/best-effort';
 import { prisma } from '../utils/prisma';
 import {
@@ -330,6 +331,48 @@ function parseContactEmail(value: unknown): string | null | undefined {
   return trimmed;
 }
 
+/**
+ * The longest account of what happened one report may carry. Enough for a
+ * woman to say everything she needs to; not enough for the 10mb JSON limit to
+ * be the only ceiling on what lands in the moderation queue and in the Trust &
+ * Safety alert email.
+ */
+const MAX_REPORT_DETAILS = 5000;
+
+/**
+ * A ceiling on the public report door that holds whatever the deployment.
+ *
+ * publicFormLimiter and reportLimiter both stand down entirely when REDIS_URL
+ * is unset, and this door is the one that matters most to flood: every CSAM or
+ * terrorism report writes an AuthorityEscalation row — a legal filing duty — and
+ * sends two emails. So there is an in-process floor under the Redis limiters: a
+ * signed-in member is held to the same fifteen an hour the in-app dialog holds
+ * her to (she could otherwise post here to get round it), and an address with
+ * no account gets twice that, because a refuge's shared connection is exactly
+ * where several women might report from in the same hour.
+ */
+const memberReportThrottle = createMemoryThrottle(SOCIAL_LIMITS.report.max, SOCIAL_LIMITS.report.windowMs);
+const anonymousReportThrottle = createMemoryThrottle(SOCIAL_LIMITS.report.max * 2, SOCIAL_LIMITS.report.windowMs);
+
+function reportIntakeCeiling(req: AuthRequest, res: Response, next: NextFunction) {
+  const allowed = req.user?.id
+    ? memberReportThrottle.allow(`member:${req.user.id}`)
+    : anonymousReportThrottle.allow(`ip:${req.ip}`);
+  if (!allowed) {
+    return res.status(429).json({
+      success: false,
+      error:
+        'We have received a lot of reports from you in the last hour. If someone is in immediate danger, call 000. Otherwise please try again a little later.',
+    });
+  }
+  next();
+}
+
+/** A signed-in member is held to the in-app report limit here too; anyone else to the public-form one. */
+function reportRateLimit(req: AuthRequest, res: Response, next: NextFunction) {
+  return req.user?.id ? reportLimiter(req, res, next) : publicFormLimiter(req, res, next);
+}
+
 /** Content types the three-reporter auto-hide understands. */
 const AUTO_HIDEABLE: Record<string, ReportableContent> = {
   POST: 'post',
@@ -356,9 +399,11 @@ function describeReportOutcome(action: string | null): string | null {
     case 'CONTENT_REMOVED':
       return 'We reviewed your report and removed the content.';
     case 'SUSPENSION':
-      return 'We reviewed your report and suspended the account responsible.';
+      return 'We reviewed your report and suspended the account responsible. It can no longer sign in.';
     case 'BAN':
-      return 'We reviewed your report and removed the account responsible.';
+      // Not "removed": a ban locks the account and keeps the row, and an
+      // appeal can lift it. See OUTCOME_SUMMARY in content-report.service.
+      return 'We reviewed your report and banned the account responsible. It can no longer sign in.';
     case 'ESCALATED':
       return 'Your report is with our senior Trust & Safety reviewers.';
     default:
@@ -793,7 +838,7 @@ router.get('/legal-documents', (req: Request, res: Response) => {
  * Deliberately open to people without an account: somebody who has just been
  * targeted may have no way to sign in, and neither Act lets us insist.
  */
-router.post('/report-content', optionalAuth, publicFormLimiter, async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/report-content', optionalAuth, reportRateLimit, reportIntakeCeiling, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { contentType, contentId, reason, details, evidenceUrls, contactEmail, isUrgent } = req.body;
 
@@ -804,8 +849,32 @@ router.post('/report-content', optionalAuth, publicFormLimiter, async (req: Auth
       });
     }
 
+    // Any string used to be accepted, upper-cased and stored, so the queue's
+    // reason filter ran over whatever a caller chose to type and the priority
+    // mapping quietly treated every unknown word as medium.
+    if (!isReportableReason(reason)) {
+      return res.status(400).json({
+        success: false,
+        error: `reason must be one of: ${Array.from(REPORTABLE_REASONS).join(', ')}`,
+      });
+    }
+
+    if (details !== undefined && details !== null && typeof details !== 'string') {
+      return res.status(400).json({ success: false, error: 'details must be text' });
+    }
+    if (typeof details === 'string' && details.length > MAX_REPORT_DETAILS) {
+      return res.status(400).json({
+        success: false,
+        error: `Please keep the description to ${MAX_REPORT_DETAILS} characters. Evidence links can carry the rest.`,
+      });
+    }
+
+    if (typeof contentId !== 'string' || contentId.length > 100) {
+      return res.status(400).json({ success: false, error: 'contentId must be the id of the content you are reporting' });
+    }
+
     const normalizedType = String(contentType).toUpperCase();
-    const normalizedReason = String(reason).toUpperCase();
+    const normalizedReason = String(reason).trim().toUpperCase();
     const resolveOwner = REPORT_CONTENT_OWNERS[normalizedType];
 
     if (!resolveOwner) {
@@ -850,20 +919,17 @@ router.post('/report-content', optionalAuth, publicFormLimiter, async (req: Auth
 
     // Two clocks, the ones the product already promises: 24 hours for illegal
     // content, CSAM and terrorism — and for anything a reporter has marked
-    // urgent — and 48 hours for everything else. One uniform 48 was stamped on
-    // every report, including the ones the confirmation screen tells a reporter
-    // we answer in a day.
-    const priority = reportPriorityFor(normalizedReason, urgent);
-    const reviewHours =
-      priority === 'critical'
-        ? AU_ONLINE_SAFETY_CONFIG.illegalContentRemovalHours
-        : AU_ONLINE_SAFETY_CONFIG.harmfulContentReviewHours;
-    const reviewDeadline = new Date(Date.now() + reviewHours * 60 * 60 * 1000);
+    // urgent — and 48 hours for everything else. The deadline used to follow
+    // the priority instead, and "Illegal content" is priority high, so it was
+    // stamped with 48 hours under a confirmation screen promising 24.
+    // openReportIntake is the one place the clock is chosen, and the
+    // acknowledgment email quotes the same number.
+    const { ticketId, priority, reviewHours, reviewDeadline } = openReportIntake({
+      reason: normalizedReason,
+      isUrgent: urgent,
+    });
     const reporterId = req.user?.id;
-    const description = typeof details === 'string' ? details : undefined;
-    // A reference a reporter can quote, and the key the status lookup and the
-    // authority-referral queue both find the report by.
-    const ticketId = newReportTicketId();
+    const description = typeof details === 'string' && details.trim() ? details.trim() : undefined;
 
     const evidence = {
       ticketId,
@@ -923,6 +989,7 @@ router.post('/report-content', optionalAuth, publicFormLimiter, async (req: Auth
           ticketId,
           reason: normalizedReason,
           priority,
+          reviewHours,
           contentType: normalizedType,
           contentId: String(contentId),
           description,
@@ -966,6 +1033,7 @@ router.post('/report-content', optionalAuth, publicFormLimiter, async (req: Auth
         ticketId,
         reason: normalizedReason,
         priority,
+        reviewHours,
         contentType: normalizedType,
         contentId: String(contentId),
         description,
@@ -1032,10 +1100,26 @@ router.get('/report-status/:reference', publicFormLimiter, async (req: Request, 
       });
     }
 
-    const incident = await prisma.safetyIncident.findFirst({
-      where: { type: 'USER_REPORT', metadata: { path: ['anonymous'], equals: true }, id: reference },
-      select: { id: true, resolvedAt: true, updatedAt: true, metadata: true },
-    });
+    // An anonymous report was found only by its incident id, but the reference
+    // her acknowledgment email quotes is the RPT- one, so the reporter who had
+    // no account — the one this lookup exists for — got a 404 for the number we
+    // gave her. Both are tried, the emailed reference first.
+    const anonymousSelect = { id: true, resolvedAt: true, updatedAt: true, metadata: true } as const;
+    const incident =
+      (await prisma.safetyIncident.findFirst({
+        where: {
+          type: 'USER_REPORT',
+          AND: [
+            { metadata: { path: ['anonymous'], equals: true } },
+            { metadata: { path: ['ticketId'], equals: reference } },
+          ],
+        },
+        select: anonymousSelect,
+      })) ??
+      (await prisma.safetyIncident.findFirst({
+        where: { type: 'USER_REPORT', metadata: { path: ['anonymous'], equals: true }, id: reference },
+        select: anonymousSelect,
+      }));
 
     if (!incident) {
       return res.status(404).json({

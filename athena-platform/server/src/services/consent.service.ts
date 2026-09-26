@@ -11,7 +11,7 @@
  * this file is gated by region.
  */
 
-import { ConsentType, ConsentStatus, DSARStatus, DSARType } from '@prisma/client';
+import { ConsentType, ConsentStatus, DSARStatus, DSARType, Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 // Consent type groupings for UI
@@ -479,6 +479,49 @@ export class ConsentService {
   }
 
   /**
+   * Keep the newsletter switch in Settings in step with the marketing-email
+   * consent in the Privacy Centre.
+   *
+   * They are two stores. The Privacy Centre writes the ConsentRecord ledger;
+   * the notification settings page writes User.notificationPreferences, and
+   * that is the one every sender on this server reads. So a member who
+   * withdrew marketing consent in the Privacy Centre had changed a record no
+   * sender would ever consult, under a privacy statement saying withdrawal is
+   * acted on at once — and the newsletter switch, which defaults on, still said
+   * yes. The ledger is the authority, so a change there is carried across to
+   * the switch the senders read.
+   *
+   * The callers order the two writes so a failure part-way always leaves the
+   * stricter answer standing: a withdrawal turns the switch off before the
+   * ledger records it, and a grant turns it on only after.
+   */
+  async syncMarketingEmailPreference(userId: string, granted: boolean): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { notificationPreferences: true },
+    });
+    if (!user) return;
+
+    const current =
+      user.notificationPreferences && typeof user.notificationPreferences === 'object' && !Array.isArray(user.notificationPreferences)
+        ? (user.notificationPreferences as Record<string, unknown>)
+        : {};
+    const email =
+      current.email && typeof current.email === 'object' && !Array.isArray(current.email)
+        ? (current.email as Record<string, unknown>)
+        : {};
+
+    if (email.newsletter === granted) return;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        notificationPreferences: { ...current, email: { ...email, newsletter: granted } } as Prisma.InputJsonObject,
+      },
+    });
+  }
+
+  /**
    * Withdraw all non-essential consents
    */
   async withdrawAllOptionalConsents(
@@ -488,6 +531,9 @@ export class ConsentService {
     const optionalTypes = Object.entries(CONSENT_DESCRIPTIONS)
       .filter(([_, config]) => !config.required)
       .map(([type]) => type as ConsentType);
+
+    // Marketing email included, so the switch the senders read goes off first.
+    await this.syncMarketingEmailPreference(userId, false);
 
     await prisma.consentRecord.updateMany({
       where: {

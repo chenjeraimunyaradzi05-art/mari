@@ -406,6 +406,20 @@ router.post('/impact/dv-services', ...adminOnly, async (req: AuthRequest, res: R
     // a woman will ring in an emergency would otherwise never say how old it is.
     const service = await prisma.dVSupportService.create({ data: { ...body, lastCheckedAt: new Date() } });
     logger.info('DV support service created', { serviceId: service.id, by: req.user!.id });
+
+    // The DV directory is the list a woman rings from in an emergency. The
+    // vocabulary for auditing it was written when the other impact routes were
+    // wired, and then the directory itself — the one surface that most needed a
+    // name against every change — was the one left writing nothing.
+    await recordAdminAction(req, 'DV_SERVICE_CREATED', {
+      resourceType: 'DVSupportService',
+      resourceId: service.id,
+      name: service.name,
+      phone: service.phone,
+      state: service.state,
+      isNational: service.isNational,
+    });
+
     res.status(201).json({ success: true, data: service });
   } catch (error) {
     next(error);
@@ -418,6 +432,19 @@ router.patch('/impact/dv-services/:id', ...adminOnly, async (req: AuthRequest, r
     const existing = await mustExist(await prisma.dVSupportService.findUnique({ where: { id: idParam(req) } }), 'Service');
     checkCoverage(body.state === undefined ? existing.state : body.state, body.isNational === undefined ? existing.isNational : body.isNational);
     const service = await prisma.dVSupportService.update({ where: { id: existing.id }, data: { ...body, lastCheckedAt: new Date() } });
+
+    // A changed phone number is the edit that matters most here, so the old and
+    // new numbers are both kept: if a listing is ever found pointing somewhere it
+    // should not, the log says who changed it and what it said before.
+    await recordAdminAction(req, 'DV_SERVICE_UPDATED', {
+      resourceType: 'DVSupportService',
+      resourceId: service.id,
+      changedFields: Object.keys(body),
+      ...(body.phone !== undefined ? { previousPhone: existing.phone, phone: service.phone } : {}),
+      ...(body.website !== undefined ? { previousWebsite: existing.website, website: service.website } : {}),
+      isActive: service.isActive,
+    });
+
     res.json({ success: true, data: service });
   } catch (error) {
     next(error);
@@ -426,8 +453,21 @@ router.patch('/impact/dv-services/:id', ...adminOnly, async (req: AuthRequest, r
 
 router.delete('/impact/dv-services/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await mustExist(await prisma.dVSupportService.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Service');
-    await prisma.dVSupportService.delete({ where: { id: idParam(req) } });
+    const service = await mustExist(
+      await prisma.dVSupportService.findUnique({ where: { id: idParam(req) }, select: { id: true, name: true, phone: true } }),
+      'Service'
+    );
+    await prisma.dVSupportService.delete({ where: { id: service.id } });
+
+    // The row is gone, so this entry is the only record that the listing
+    // existed and who took it down.
+    await recordAdminAction(req, 'DV_SERVICE_DELETED', {
+      resourceType: 'DVSupportService',
+      resourceId: service.id,
+      name: service.name,
+      phone: service.phone,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -470,6 +510,14 @@ router.post('/impact/partners', ...adminOnly, async (req: AuthRequest, res: Resp
       data: { ...body, focusAreas: body.focusAreas ?? [], partnerSince: toDate(body.partnerSince) ?? null },
     });
     logger.info('Impact partner created', { partnerId: partner.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'IMPACT_PARTNER_CREATED', {
+      resourceType: 'ImpactPartner',
+      resourceId: partner.id,
+      name: partner.name,
+      type: partner.type,
+    });
+
     res.status(201).json({ success: true, data: partner });
   } catch (error) {
     next(error);
@@ -481,6 +529,14 @@ router.patch('/impact/partners/:id', ...adminOnly, async (req: AuthRequest, res:
     const body = parse(partnerSchema.partial(), req.body);
     await mustExist(await prisma.impactPartner.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Partner');
     const partner = await prisma.impactPartner.update({ where: { id: idParam(req) }, data: { ...body, partnerSince: toDate(body.partnerSince) } });
+
+    await recordAdminAction(req, 'IMPACT_PARTNER_UPDATED', {
+      resourceType: 'ImpactPartner',
+      resourceId: partner.id,
+      changedFields: Object.keys(body),
+      isActive: partner.isActive,
+    });
+
     res.json({ success: true, data: partner });
   } catch (error) {
     next(error);
@@ -492,6 +548,14 @@ router.delete('/impact/partners/:id', ...adminOnly, async (req: AuthRequest, res
   try {
     await mustExist(await prisma.impactPartner.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Partner');
     const partner = await prisma.impactPartner.update({ where: { id: idParam(req) }, data: { isActive: false } });
+
+    await recordAdminAction(req, 'IMPACT_PARTNER_DELETED', {
+      resourceType: 'ImpactPartner',
+      resourceId: partner.id,
+      name: partner.name,
+      retired: true,
+    });
+
     res.json({ success: true, data: partner });
   } catch (error) {
     next(error);
@@ -534,6 +598,14 @@ router.post('/impact/indigenous/communities', ...adminOnly, async (req: AuthRequ
     const body = parse(communitySchema, req.body);
     const community = await prisma.indigenousCommunityPage.create({ data: { ...body, moderatorIds: body.moderatorIds ?? [] } });
     logger.info('First Nations community page created', { communityId: community.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INDIGENOUS_COMMUNITY_CREATED', {
+      resourceType: 'IndigenousCommunityPage',
+      resourceId: community.id,
+      name: community.name,
+      isWomenOnly: community.isWomenOnly,
+    });
+
     res.status(201).json({ success: true, data: community });
   } catch (error) {
     next(error);
@@ -545,6 +617,17 @@ router.patch('/impact/indigenous/communities/:id', ...adminOnly, async (req: Aut
     const body = parse(communitySchema.partial(), req.body);
     await mustExist(await prisma.indigenousCommunityPage.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Community page');
     const community = await prisma.indigenousCommunityPage.update({ where: { id: idParam(req) }, data: body });
+
+    // Moderator appointments ride on this route, and who was given moderation
+    // of a community's page is exactly the kind of change the community is owed
+    // a record of.
+    await recordAdminAction(req, 'INDIGENOUS_COMMUNITY_UPDATED', {
+      resourceType: 'IndigenousCommunityPage',
+      resourceId: community.id,
+      changedFields: Object.keys(body),
+      ...(body.moderatorIds !== undefined ? { moderatorIds: community.moderatorIds } : {}),
+    });
+
     res.json({ success: true, data: community });
   } catch (error) {
     next(error);
@@ -565,6 +648,14 @@ router.delete('/impact/indigenous/communities/:id', ...adminOnly, async (req: Au
       await prisma.indigenousResource.updateMany({ where: { communityId: community.id }, data: { communityId: null } });
     }
     await prisma.indigenousCommunityPage.delete({ where: { id: community.id } });
+
+    await recordAdminAction(req, 'INDIGENOUS_COMMUNITY_DELETED', {
+      resourceType: 'IndigenousCommunityPage',
+      resourceId: community.id,
+      name: community.name,
+      resourcesDetached: community._count.resources,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -607,6 +698,14 @@ router.post('/impact/indigenous/resources', ...adminOnly, async (req: AuthReques
     }
     const resource = await prisma.indigenousResource.create({ data: body });
     logger.info('First Nations resource created', { resourceId: resource.id, by: req.user!.id });
+
+    await recordAdminAction(req, 'INDIGENOUS_RESOURCE_CREATED', {
+      resourceType: 'IndigenousResource',
+      resourceId: resource.id,
+      title: resource.title,
+      communityId: resource.communityId,
+    });
+
     res.status(201).json({ success: true, data: resource });
   } catch (error) {
     next(error);
@@ -621,6 +720,13 @@ router.patch('/impact/indigenous/resources/:id', ...adminOnly, async (req: AuthR
       await mustExist(await prisma.indigenousCommunityPage.findUnique({ where: { id: body.communityId }, select: { id: true } }), 'Community page');
     }
     const resource = await prisma.indigenousResource.update({ where: { id: idParam(req) }, data: body });
+
+    await recordAdminAction(req, 'INDIGENOUS_RESOURCE_UPDATED', {
+      resourceType: 'IndigenousResource',
+      resourceId: resource.id,
+      changedFields: Object.keys(body),
+    });
+
     res.json({ success: true, data: resource });
   } catch (error) {
     next(error);
@@ -629,8 +735,18 @@ router.patch('/impact/indigenous/resources/:id', ...adminOnly, async (req: AuthR
 
 router.delete('/impact/indigenous/resources/:id', ...adminOnly, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await mustExist(await prisma.indigenousResource.findUnique({ where: { id: idParam(req) }, select: { id: true } }), 'Resource');
-    await prisma.indigenousResource.delete({ where: { id: idParam(req) } });
+    const resource = await mustExist(
+      await prisma.indigenousResource.findUnique({ where: { id: idParam(req) }, select: { id: true, title: true } }),
+      'Resource'
+    );
+    await prisma.indigenousResource.delete({ where: { id: resource.id } });
+
+    await recordAdminAction(req, 'INDIGENOUS_RESOURCE_DELETED', {
+      resourceType: 'IndigenousResource',
+      resourceId: resource.id,
+      title: resource.title,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -728,6 +844,18 @@ router.patch('/credentials/:id', ...adminOnly, async (req: AuthRequest, res: Res
     await tellMember(credential.userId, 'Update on your overseas credential', `${line[body.status]}${note ? ` ${note}` : ''}`, '/dashboard/impact/migrant');
 
     logger.info('Credential outcome recorded', { credentialId: credential.id, status: body.status, by: req.user!.id });
+
+    // A decision about a member's qualification, which she is told about, is a
+    // decision somebody has to be able to answer for. The notes stay on the
+    // credential row, where she reads them; the log records the outcome.
+    await recordAdminAction(req, 'CREDENTIAL_ASSESSMENT_UPDATED', {
+      resourceType: 'InternationalCredential',
+      resourceId: updated.id,
+      targetUserId: credential.userId,
+      previousStatus: credential.status,
+      status: updated.status,
+    });
+
     res.json({ success: true, data: updated });
   } catch (error) {
     next(error);

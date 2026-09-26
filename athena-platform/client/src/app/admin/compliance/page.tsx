@@ -7,6 +7,7 @@ import { ChevronLeft, ShieldCheck, FileText, Users, Globe, Clock } from 'lucide-
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DsarQueue } from './DsarQueue';
 
 interface GdprSummary {
   totalUsers: number;
@@ -110,6 +111,8 @@ export default function AdminCompliancePage() {
       { label: 'Australia / NZ Users', value: summary?.auUsers ?? 0, icon: Globe },
       { label: 'UK Users', value: summary?.ukUsers ?? 0, icon: Globe },
       { label: 'EU Users', value: summary?.euUsers ?? 0, icon: Globe },
+      // Counted off the audit log: what was done in the window. What is still
+      // open, and how long it has left, is the request queue below.
       { label: `DSAR Exports (${days}d)`, value: summary?.dsarExportsLastWindow ?? 0, icon: FileText },
       { label: `Account Deletes (${days}d)`, value: summary?.accountDeletesLastWindow ?? 0, icon: ShieldCheck },
       { label: `Consent Updates (${days}d)`, value: summary?.consentUpdatesLastWindow ?? 0, icon: Clock },
@@ -151,6 +154,12 @@ export default function AdminCompliancePage() {
           </div>
         </div>
 
+        {summaryQuery.isError && (
+          <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+            The figures below could not be loaded, so they are not zero — they are unknown. Refresh to try again.
+          </p>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {cards.map((card) => (
             <div key={card.label} className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
@@ -161,13 +170,15 @@ export default function AdminCompliancePage() {
                 <div>
                   <p className="text-sm text-slate-600 dark:text-slate-400">{card.label}</p>
                   <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                    {card.value.toLocaleString()}
+                    {summary ? card.value.toLocaleString() : '—'}
                   </p>
                 </div>
               </div>
             </div>
           ))}
         </div>
+
+        <DsarQueue />
 
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
           <div className="mb-4">

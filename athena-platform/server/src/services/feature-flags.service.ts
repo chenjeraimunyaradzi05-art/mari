@@ -110,7 +110,11 @@ export async function upsertFeatureFlag(data: FeatureFlagInput) {
       name: data.name,
       description: data.description,
       enabled: data.enabled,
-      rolloutPercentage: clampPercentage(rollout),
+      // The 100 default is for a new flag only. Applied here as well, a POST
+      // that re-saved an existing flag without naming a rollout quietly put it
+      // in front of every member, whatever share it had been held to.
+      rolloutPercentage:
+        data.rolloutPercentage !== undefined ? clampPercentage(data.rolloutPercentage) : undefined,
       allowList: data.allowList,
       denyList: data.denyList,
       tags: data.tags,
