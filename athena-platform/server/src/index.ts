@@ -121,7 +121,7 @@ import { startWellnessCatalogue } from './services/wellness/wellness-catalogue';
 import complianceRoutes from './routes/compliance.routes';
 
 // Import middleware
-import { errorHandler } from './middleware/errorHandler';
+import { ApiError, errorHandler } from './middleware/errorHandler';
 import { requestIdMiddleware } from './middleware/requestId';
 import { responseTimeMiddleware } from './middleware/responseTime';
 import { localeMiddleware } from './middleware/locale';
@@ -131,6 +131,8 @@ import { logger } from './utils/logger';
 import { bestEffort } from './utils/best-effort';
 import { register } from './utils/metrics';
 import { getAllowedOrigins, isCorsOriginAllowed } from './utils/origins';
+import { probeMediaStorage } from './utils/media-storage';
+import { parseClientCrashReport, recordClientCrash } from './utils/client-crash-report';
 import { getMaintenanceState } from './services/feature-flags.service';
 
 // Import services
@@ -211,6 +213,19 @@ function logCorsRejection(origin: string | undefined) {
   logger.warn('CORS rejected origin', { origin, allowedOrigins: getAllowedOrigins() });
 }
 
+/**
+ * What a refused origin is answered with. Both callbacks used to reject with a
+ * bare Error('Not allowed by CORS'), which carries no status, so the error
+ * handler answered 500 and logged it at error level with a stack: every
+ * scanner, every stale preview deploy and every mis-set ALLOWED_ORIGINS read
+ * as the server breaking. A refused origin is a 403 — the caller is not
+ * allowed, nothing of ours failed — and logCorsRejection has already said
+ * which origin it was.
+ */
+function corsRefusal(): ApiError {
+  return new ApiError(403, 'This origin is not allowed to call the ATHENA API');
+}
+
 // Initialize Socket.IO
 const io = new SocketIOServer(httpServer, {
   cors: {
@@ -219,7 +234,10 @@ const io = new SocketIOServer(httpServer, {
         callback(null, true);
       } else {
         logCorsRejection(origin);
-        callback(new Error('Not allowed by CORS'));
+        // Engine.IO answers any refusal from here as a 400 handshake failure
+        // of its own; the status is set anyway so this error means the same
+        // thing wherever it surfaces.
+        callback(corsRefusal());
       }
     },
     methods: ['GET', 'POST'],
@@ -240,7 +258,7 @@ app.use(cors({
     }
     // Log rejected origins for debugging
     logCorsRejection(origin);
-    callback(new Error('Not allowed by CORS'));
+    callback(corsRefusal());
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -526,6 +544,35 @@ app.get('/api/maintenance', async (_req: Request, res: Response) => {
   res.status(200).json(await getMaintenanceState());
 });
 
+// Crash reports from the mobile app (utils/client-crash-report.ts explains
+// why the phone reports here rather than to a crash SDK of its own).
+// Unauthenticated on purpose — the sign-in screen can crash too, and a report
+// must never depend on a session that may be the thing that broke — and
+// ahead of the maintenance gate, because a crash during maintenance is still
+// worth knowing about. Its own tight budget per address, so a phone stuck in
+// a crash loop, or a stranger, cannot fill the error log.
+const crashReportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Too many crash reports from this address.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+  store: new SharedRateLimitStore('rl:crash:'),
+});
+app.post(
+  '/api/client-errors',
+  ...(rateLimitEnabled ? [crashReportLimiter] : []),
+  (req: Request, res: Response) => {
+    const report = parseClientCrashReport(req.body);
+    if (!report) {
+      return res.status(400).json({ success: false, message: 'A crash report needs a message' });
+    }
+    recordClientCrash(report, req.requestId);
+    return res.status(202).json({ success: true, message: 'Crash report received' });
+  }
+);
+
 // Paths that stay open while the platform is closed. Operators have to be able
 // to sign in and turn maintenance back off, and the client has to be able to
 // find out why it is being refused; everything else waits.
@@ -775,6 +822,13 @@ export async function startServer() {
 
   // Initialize Sentry now that secrets/DSN may be available
   initSentry();
+
+  // Whether the media bucket answers. Not awaited and never throws: S3 being
+  // briefly unreachable is not a reason to keep the API down, and what an
+  // operator needs is the gauge on /health/detailed and the error line, which
+  // the probe records either way. Until this, nothing ever asked, and bad
+  // credentials surfaced only as one warning per failed upload.
+  void probeMediaStorage();
 
   await initializeSearchIfConfigured();
 

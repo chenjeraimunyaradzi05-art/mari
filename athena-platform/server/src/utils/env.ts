@@ -142,6 +142,41 @@ const ENV_VALIDATIONS: EnvValidation[] = [
       'API_URL must be the absolute address this API answers on from the outside (not localhost): locally stored ' +
       'uploads bake it into the URL saved on the row, so a wrong value is permanent for that file.',
   },
+  // Media storage.
+  //
+  // The Dockerfile, fly.toml and the launch-readiness check all say S3 is
+  // required in production, and until now the boot sequence did not: without
+  // the credentials every avatar, post image, résumé and reel was written to
+  // the container's own disk, which the next deploy wipes and which a second
+  // instance cannot read. Presence alone is not enough either — the env
+  // template ships AWS_ACCESS_KEY_ID="your_aws_access_key", which is
+  // non-empty — so the values are held to the shape AWS actually issues, and
+  // the bucket is named rather than left to the default, which is a name this
+  // platform does not own. Whether the bucket answers is asked at startup by
+  // probeMediaStorage (utils/media-storage.ts), since a variable cannot say.
+  {
+    name: 'AWS_ACCESS_KEY_ID',
+    required: true,
+    productionOnly: true,
+    validator: (v) => /^[A-Z0-9]{16,128}$/.test(v.trim()),
+    errorMessage:
+      'AWS_ACCESS_KEY_ID must be a real access key id (upper-case letters and digits, as AWS issues them). Without S3, ' +
+      'uploaded media is written to the container disk and lost at the next deploy.',
+  },
+  {
+    name: 'AWS_SECRET_ACCESS_KEY',
+    required: true,
+    productionOnly: true,
+    validator: (v) => /^[A-Za-z0-9/+=]{30,}$/.test(v.trim()),
+    errorMessage: 'AWS_SECRET_ACCESS_KEY must be a real secret access key, not a placeholder.',
+  },
+  {
+    name: 'S3_BUCKET',
+    required: true,
+    productionOnly: true,
+    validator: (v) => /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(v.trim()),
+    errorMessage: 'S3_BUCKET must name the bucket media is stored in (a valid S3 bucket name).',
+  },
   // Operator tokens: a short one is guessable, so a short one is reported.
   {
     name: 'METRICS_TOKEN',

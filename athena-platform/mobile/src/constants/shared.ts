@@ -24,13 +24,14 @@
  * being a re-export of the shared package.
  */
 
-/** Mirrors `Persona` in shared/src/index.ts. */
+/**
+ * Mirrors `Persona` in shared/src/index.ts, which is exactly Prisma's enum.
+ * The three aliases it used to carry (CAREER_CHANGER, RETURNING_PROFESSIONAL,
+ * STUDENT) named personas the server does not have and would refuse.
+ */
 export enum Persona {
   EARLY_CAREER = 'EARLY_CAREER',
   MID_CAREER = 'MID_CAREER',
-  CAREER_CHANGER = 'MID_CAREER',
-  RETURNING_PROFESSIONAL = 'MID_CAREER',
-  STUDENT = 'EARLY_CAREER',
   ENTREPRENEUR = 'ENTREPRENEUR',
   CREATOR = 'CREATOR',
   EMPLOYER = 'EMPLOYER',
@@ -43,12 +44,11 @@ export enum Persona {
 /** Mirrors `APPLICATION_STATUS_DISPLAY` in shared/src/utils.ts. */
 export const APPLICATION_STATUS_DISPLAY = {
   PENDING: 'Pending Review',
-  REVIEWING: 'Under Review',
   REVIEWED: 'Reviewed',
   SHORTLISTED: 'Shortlisted',
   INTERVIEW: 'Interview',
-  OFFER: 'Offer Extended',
   OFFERED: 'Offer Extended',
   REJECTED: 'Not Selected',
   WITHDRAWN: 'Withdrawn',
+  ACCEPTED: 'Offer accepted',
 };

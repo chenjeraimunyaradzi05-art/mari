@@ -10,11 +10,10 @@ import * as Notifications from 'expo-notifications';
 import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator, type RootStackParamList } from './src/navigation/AppNavigator';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { syncPushToken } from './src/services/pushNotifications';
 import { UnreplayableAction, startOfflineSync } from './src/services/offlineSync';
 import { api, webUrl } from './src/services/api';
 import { destinationForNotification } from './src/services/notificationRouting';
-import { track } from './src/services/analytics';
+import { flushCrashReports, installGlobalCrashHandler, reportCrash } from './src/services/crashReporter';
 
 // The web's four plan pages map onto one Strategy screen, and a screen can
 // only own one path, so these are rewritten to it before the default matcher
@@ -52,13 +51,27 @@ function followNotification(response: Notifications.NotificationResponse | null 
 
 export default function App() {
   useEffect(() => {
-    track('app_open');
-    // Deliberately not awaited: registering for push must never hold up the
-    // first render, and syncPushToken swallows its own failures for exactly
-    // that reason. It used to be able to reject here — a build with no EAS
-    // project id threw on every cold start — which surfaced as an unhandled
-    // rejection nobody could act on.
-    void syncPushToken();
+    // No analytics call here. There used to be track('app_open'), which read
+    // as if app opens were being counted; the analytics module has no
+    // provider SDK behind it and every send in it is commented out, so it
+    // counted nothing, and a line that looks like measurement is worse than
+    // none when someone goes looking for the numbers.
+    //
+    // Push registration is not started here either. It used to be, and
+    // AuthContext registered again after a sign-in, so a cold start that ended
+    // in one sent two registrations at once; the server wrote a row for each
+    // and the phone buzzed twice for every notification. AuthContext now
+    // registers once whenever a session begins — restored at launch or
+    // freshly signed in — which also means a phone with nobody signed in no
+    // longer asks for notification permission before anyone has an account
+    // to receive them.
+
+    // Errors nothing else caught go to the crash reporter as well as to the
+    // handler that was there before; and any report a previous launch wrote
+    // down but could not send — a fatal crash ends the process before the
+    // request finishes — goes now.
+    const uninstallCrashHandler = installGlobalCrashHandler();
+    void flushCrashReports();
 
     const unsubscribe = startOfflineSync(async (action) => {
       if (action.type !== 'api') return;
@@ -77,7 +90,10 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      uninstallCrashHandler();
+    };
   }, []);
 
   const linking: LinkingOptions<RootStackParamList> = {
@@ -170,11 +186,13 @@ export default function App() {
   // and the fallback's "Try again" remounts everything below it.
   return (
     <ErrorBoundary
-      onError={(error) => {
-        // There is no crash reporter in this app yet, so the console is where
-        // this goes. Saying so plainly is better than a silent catch: a
-        // white-screened build with nothing in its log tells nobody anything.
+      onError={(error, errorInfo) => {
+        // To the API, which logs it and hands it to Sentry beside the web's
+        // and the server's crashes (services/crashReporter.ts). This used to
+        // stop at the console, with a comment admitting there was no crash
+        // reporter, so a crash in a store build reached nobody.
         console.error('[app] Unhandled render error:', error?.message, error?.stack);
+        void reportCrash(error, 'render', errorInfo?.componentStack);
       }}
     >
       <SafeAreaProvider>

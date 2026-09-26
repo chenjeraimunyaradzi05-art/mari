@@ -1,12 +1,16 @@
 /**
- * Analytics Service - Mobile
- * Phase 5: Mobile Parity & Production - Step 97
- * 
- * Tracks user journey KPIs defined in the Blueprint:
- * - User engagement metrics
- * - Feature adoption
- * - Conversion funnels
- * - Performance metrics
+ * NOT WIRED — this records nothing, and nothing imports it.
+ *
+ * The event taxonomy, funnels and KPI helpers below were written for PostHog
+ * or Mixpanel, but neither SDK is in package.json and every call that would
+ * send an event (posthog.capture, mixpanel.track) is commented out, so track()
+ * builds its properties and then drops them. It used to describe itself as
+ * tracking the Blueprint's user-journey KPIs, and App.tsx called
+ * track('app_open') on every launch, which made it look as if app opens were
+ * being measured. They were not; that call is gone and this header no longer
+ * claims otherwise. Wiring it up means adding a provider SDK, a consent
+ * decision for a platform whose members include domestic-violence survivors,
+ * and the sends below — not uncommenting two lines.
  */
 
 import Constants from 'expo-constants';

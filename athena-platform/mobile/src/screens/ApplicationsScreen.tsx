@@ -14,7 +14,9 @@ import { ApplicationSkeleton } from '../components/Skeleton';
 import { LoadingError } from '../components/ErrorBoundary';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
-const STATUS_LABELS: Record<string, string> = { ...APPLICATION_STATUS_DISPLAY, ACCEPTED: 'Offer accepted' };
+// ACCEPTED used to be patched in here because the shared labels lacked it;
+// they now carry exactly the statuses the server has.
+const STATUS_LABELS: Record<string, string> = APPLICATION_STATUS_DISPLAY;
 
 function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status.charAt(0) + status.slice(1).toLowerCase().replace(/_/g, ' ');
@@ -24,7 +26,6 @@ function statusLabel(status: string): string {
 function statusTone(status: string): { bg: string; fg: string } {
   switch (status) {
     case 'OFFERED':
-    case 'OFFER':
     case 'ACCEPTED':
       return { bg: '#dcfce7', fg: '#166534' };
     case 'SHORTLISTED':

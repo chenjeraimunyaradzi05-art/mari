@@ -73,8 +73,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Nothing here calls the server. The tokens it would authenticate with are
    * exactly the ones that just stopped working, so /auth/logout and the
    * push-token handover would both 401; the phone keeps its push registration
-   * until the next sign-in moves it, which is the same handover the server
-   * already performs.
+   * until the next sign-in on it moves it. That handover is proved with the
+   * device key this phone keeps in its secure store (see pushNotifications),
+   * and it moves every row the phone has, so none is left delivering the
+   * previous member's notifications to it.
    */
   useEffect(() => {
     return onSessionExpired(() => {
@@ -104,6 +106,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // client had no caller at all and the app only ever saw new messages
         // on a pull-to-refresh.
         socketService.connect();
+        // And the same push registration: this is the one registration a
+        // cold start makes. App.tsx used to make a second at the same moment,
+        // and the two raced into duplicate rows on the server.
+        void syncPushToken();
         const preferences = await resolvePreferences({
           preferredLocale: userData?.preferredLocale,
           preferredCurrency: userData?.preferredCurrency,

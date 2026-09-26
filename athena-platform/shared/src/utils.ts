@@ -352,14 +352,16 @@ export const JOB_TYPES_DISPLAY = {
   CASUAL: 'Casual',
 };
 
+// One label per ApplicationStatus the database has, and no others: REVIEWING
+// and OFFER were labels for states that do not exist, while ACCEPTED, which
+// does, had none and every screen had to patch it in for itself.
 export const APPLICATION_STATUS_DISPLAY = {
   PENDING: 'Pending Review',
-  REVIEWING: 'Under Review',
   REVIEWED: 'Reviewed',
   SHORTLISTED: 'Shortlisted',
   INTERVIEW: 'Interview',
-  OFFER: 'Offer Extended',
   OFFERED: 'Offer Extended',
   REJECTED: 'Not Selected',
   WITHDRAWN: 'Withdrawn',
+  ACCEPTED: 'Offer accepted',
 };

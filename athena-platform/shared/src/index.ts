@@ -22,12 +22,17 @@ export enum UserRole {
   ADMIN = 'ADMIN',
 }
 
+// Exactly the members of Prisma's Persona enum (server/prisma/schema.prisma).
+// It used to carry three aliases as well — CAREER_CHANGER and
+// RETURNING_PROFESSIONAL were both 'MID_CAREER' and STUDENT was
+// 'EARLY_CAREER' — so a picker built from Object.values() listed
+// 'MID_CAREER' three times, a stored value could not be read back to the name
+// it was saved under, and the names themselves suggested personas the
+// database has never had. A persona the server does not know is one it
+// refuses at sign-up.
 export enum Persona {
   EARLY_CAREER = 'EARLY_CAREER',
   MID_CAREER = 'MID_CAREER',
-  CAREER_CHANGER = 'MID_CAREER',
-  RETURNING_PROFESSIONAL = 'MID_CAREER',
-  STUDENT = 'EARLY_CAREER',
   ENTREPRENEUR = 'ENTREPRENEUR',
   CREATOR = 'CREATOR',
   EMPLOYER = 'EMPLOYER',
@@ -53,16 +58,18 @@ export enum JobStatus {
   EXPIRED = 'EXPIRED',
 }
 
+// Prisma's ApplicationStatus, member for member. REVIEWING and OFFER were
+// never states an application could be in, and ACCEPTED — the one the
+// candidate's "Accept offer" moves to — was missing.
 export enum ApplicationStatus {
   PENDING = 'PENDING',
-  REVIEWING = 'REVIEWING',
   REVIEWED = 'REVIEWED',
   SHORTLISTED = 'SHORTLISTED',
   INTERVIEW = 'INTERVIEW',
-  OFFER = 'OFFER',
   OFFERED = 'OFFERED',
   REJECTED = 'REJECTED',
   WITHDRAWN = 'WITHDRAWN',
+  ACCEPTED = 'ACCEPTED',
 }
 
 export enum NotificationType {
@@ -306,28 +313,16 @@ export interface PaginatedResponse<T> {
 }
 
 // ==========================================
-// SOCKET.IO EVENT TYPES
+// SOCKET.IO EVENTS
 // ==========================================
-
-export interface SocketEvents {
-  // Client -> Server
-  'notification:subscribe': () => void;
-  'notification:mark_read': (data: { notificationId: string }) => void;
-  'notification:mark_all_read': () => void;
-  'message:join_conversation': (data: { conversationId: string }) => void;
-  'message:leave_conversation': (data: { conversationId: string }) => void;
-  'message:send': (data: { conversationId: string; content: string }) => void;
-  'typing:start': (data: { conversationId: string }) => void;
-  'typing:stop': (data: { conversationId: string }) => void;
-
-  // Server -> Client
-  'notification:new': (notification: Notification) => void;
-  'notification:read': (data: { notificationId: string }) => void;
-  'message:new': (message: Message) => void;
-  'message:read': (data: { messageId: string }) => void;
-  'typing:update': (data: { userId: string; isTyping: boolean }) => void;
-  'user:online': (data: { userId: string }) => void;
-  'user:offline': (data: { userId: string }) => void;
-  'job:application_update': (data: { applicationId: string; status: ApplicationStatus }) => void;
-  'job:new_match': (data: { job: Job }) => void;
-}
+//
+// A SocketEvents interface used to sit here, and it had drifted from the
+// server in the ways that matter: it declared 'notification:new',
+// 'message:new' and 'message:send' where the server emits and listens for
+// 'notifications:new', 'messages:new' and 'messages:send', with payloads of a
+// different shape. Nothing imported it, so nothing noticed, and anyone who
+// had typed a client against it would have listened for events that never
+// arrive. The contract is what server/src/services/socket.service.ts emits
+// and handles; the mobile client's copy of the names it uses is in
+// mobile/src/services/socket.ts. A second, unchecked copy here was only ever
+// going to be wrong.

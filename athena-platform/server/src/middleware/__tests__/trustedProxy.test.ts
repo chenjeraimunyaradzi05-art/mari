@@ -8,11 +8,15 @@ jest.mock('../../utils/logger', () => ({
 
 import {
   forwardedClientIp,
+  MIN_SECRET_LENGTH,
   PROXY_CLIENT_IP_HEADER,
+  PROXY_REJECTED_OPERATION,
   PROXY_SECRET_HEADER,
+  PROXY_TRUSTED_OPERATION,
   trustedProxyIdentity,
 } from '../trustedProxy';
 import { secretMatches, secretMatchesAny } from '../../utils/secret-compare';
+import { opsSnapshot, resetOpsMetrics } from '../../utils/ops-metrics';
 
 const SECRET = 'a-proxy-secret-that-is-long-enough-to-count';
 
@@ -76,6 +80,35 @@ describe('The address a request is judged by', () => {
   it('refuses a secret too short to be one', () => {
     process.env.PROXY_SHARED_SECRET = 'tiny';
     expect(forwardedClientIp({ [PROXY_SECRET_HEADER]: 'tiny', [PROXY_CLIENT_IP_HEADER]: '203.0.113.7' })).toBeNull();
+  });
+
+  it('holds a secret to the same 32 characters the production boot check does', () => {
+    // 20 characters used to be believed here while env.ts refused it at boot.
+    const twenty = 'twenty-characters-xx';
+    process.env.PROXY_SHARED_SECRET = twenty;
+    expect(forwardedClientIp({ [PROXY_SECRET_HEADER]: twenty, [PROXY_CLIENT_IP_HEADER]: '203.0.113.7' })).toBeNull();
+
+    const thirtyTwo = 'x'.repeat(MIN_SECRET_LENGTH);
+    process.env.PROXY_SHARED_SECRET = thirtyTwo;
+    expect(forwardedClientIp({ [PROXY_SECRET_HEADER]: thirtyTwo, [PROXY_CLIENT_IP_HEADER]: '203.0.113.7' })).toBe('203.0.113.7');
+  });
+
+  it('counts proved and refused proxy requests where an operator can see them', async () => {
+    resetOpsMetrics();
+    const app = appWithProxyIdentity();
+
+    await request(app).get('/whoami').set(PROXY_SECRET_HEADER, SECRET).set(PROXY_CLIENT_IP_HEADER, '203.0.113.7').expect(200);
+    await request(app).get('/whoami').set(PROXY_SECRET_HEADER, 'not-the-secret').set(PROXY_CLIENT_IP_HEADER, '203.0.113.7').expect(200);
+    // A request with no header at all is a phone or a direct caller, and is
+    // not counted either way.
+    await request(app).get('/whoami').expect(200);
+
+    const ops = opsSnapshot().operations;
+    expect(ops[PROXY_TRUSTED_OPERATION]).toMatchObject({ success: 1, failure: 0 });
+    // Ignored, not failed: a stranger sending a wrong header must not be able
+    // to hold the health check at degraded.
+    expect(ops[PROXY_REJECTED_OPERATION]).toMatchObject({ ignored: 1, failure: 0 });
+    expect(opsSnapshot().recentFailures).toEqual([]);
   });
 });
 

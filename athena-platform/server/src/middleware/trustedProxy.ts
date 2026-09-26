@@ -21,10 +21,31 @@ import net from 'net';
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 import { secretMatches } from '../utils/secret-compare';
+import { recordIgnored, recordSuccess } from '../utils/ops-metrics';
 
 export const PROXY_SECRET_HEADER = 'x-athena-proxy-secret';
 export const PROXY_CLIENT_IP_HEADER = 'x-athena-client-ip';
-const MIN_SECRET_LENGTH = 16;
+/**
+ * The same floor env.ts sets for production. This said 16 while the boot
+ * check said 32, so outside production a secret the boot check would refuse
+ * was believed here, and a deployment tested with one behaved differently
+ * from the production it was standing in for.
+ */
+export const MIN_SECRET_LENGTH = 32;
+
+/**
+ * Counted where /health/detailed shows them. The API cannot tell a web request
+ * that arrived without the secret from a phone calling it directly — neither
+ * carries the header — so a web host deployed without PROXY_SHARED_SECRET
+ * looks, from here, like a site with no web traffic at all. These counts are
+ * how an operator sees it: web members signing in while the trusted count
+ * sits at zero means the web host is not sending the secret, and a climbing
+ * rejected count means the two hosts hold different ones. Rejections are
+ * counted as ignored rather than failed: anyone can send a wrong header, and
+ * that must not be able to flip the health state.
+ */
+export const PROXY_TRUSTED_OPERATION = 'proxy-identity.trusted';
+export const PROXY_REJECTED_OPERATION = 'proxy-identity.rejected';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -64,7 +85,7 @@ function noteRejected(req: Request): void {
   const now = Date.now();
   if (now - lastRejectionLog < 60_000) return;
   lastRejectionLog = now;
-  logger.warn('Proxy identity headers presented with a secret that does not match', {
+  logger.warn('Proxy identity headers presented with a secret that does not match, or with an address that is not one', {
     ip: req.ip,
     path: req.path,
   });
@@ -76,9 +97,11 @@ export function trustedProxyIdentity(req: Request, _res: Response, next: NextFun
 
   const ip = forwardedClientIp(req.headers);
   if (!ip) {
+    recordIgnored(PROXY_REJECTED_OPERATION);
     noteRejected(req);
     return next();
   }
+  recordSuccess(PROXY_TRUSTED_OPERATION);
 
   // req.ip is a getter on Express's request prototype; an own property on
   // this request shadows it for everything downstream, the rate limiters and

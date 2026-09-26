@@ -66,6 +66,29 @@ export function captureException(error: Error, context?: Record<string, unknown>
 }
 
 /**
+ * A crash the mobile app reported about itself (see client-crash-report.ts).
+ * Built as an Error carrying the phone's own stack, so Sentry groups repeats
+ * of one crash together, and tagged so it never reads as a server fault.
+ */
+export function captureClientCrash(report: {
+  kind: string;
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  platform?: string;
+  appVersion?: string;
+}): void {
+  if (process.env.NODE_ENV !== 'production' || !process.env.SENTRY_DSN) return;
+  const error = new Error(report.message);
+  error.name = `MobileCrash(${report.kind})`;
+  if (report.stack) error.stack = `${error.name}: ${report.message}\n${report.stack}`;
+  Sentry.captureException(error, {
+    tags: { source: 'mobile', kind: report.kind, platform: report.platform ?? 'unknown', appVersion: report.appVersion ?? 'unknown' },
+    extra: report.componentStack ? { componentStack: report.componentStack } : undefined,
+  });
+}
+
+/**
  * Capture a message manually
  */
 export function captureMessage(message: string, level: Sentry.SeverityLevel = 'info'): void {

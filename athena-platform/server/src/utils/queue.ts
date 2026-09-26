@@ -260,6 +260,12 @@ export async function registerRecurringJobs(): Promise<void> {
   });
 }
 
+/**
+ * Queues an analytics job. Nothing stores it: the worker acknowledges it and
+ * records nothing, because the platform has no analytics store (see the
+ * analytics worker in services/workers.service.ts). Kept because the
+ * data-retention job still sends its purge request here.
+ */
 export async function queueAnalyticsEvent(job: AnalyticsJob) {
   return analyticsQueue.add('track-event', job, {
     removeOnComplete: true,

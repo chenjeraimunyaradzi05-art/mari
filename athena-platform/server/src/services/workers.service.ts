@@ -395,18 +395,22 @@ export const dataExportWorker = new Worker<DataExportJob>(
 export const analyticsWorker = new Worker<AnalyticsJob>(
   QUEUE_NAMES.ANALYTICS,
   async (job: Job<AnalyticsJob>) => {
-    const { eventType, userId, properties, timestamp } = job.data;
+    const { eventType, userId } = job.data;
 
-    try {
-      // In production, this would send to analytics service (Mixpanel, Amplitude, etc.)
-      // For now, just log
-      logger.debug('Analytics event', { eventType, userId, properties });
-      return { success: true };
-    } catch (error: any) {
-      // Don't throw for analytics failures - they're not critical
-      logger.warn('Analytics event failed', { eventType, error: error.message });
-      return { success: false, error: error.message };
-    }
+    // There is no analytics store behind this queue: no table, no provider,
+    // nothing that keeps a product event. The body used to say "in
+    // production, this would send to analytics service" and log at debug,
+    // which read as a pipeline waiting for a key when it is a pipeline with
+    // no end. The one producer today is the data-retention job asking for
+    // analytics events past their retention period to be purged, and with no
+    // store there is nothing to purge. So the job is acknowledged, the log
+    // says in so many words that nothing was recorded, and the result says
+    // the same to anyone reading the job back.
+    logger.info('Analytics job received; this platform has no analytics store, so nothing was recorded', {
+      eventType,
+      hasUser: Boolean(userId),
+    });
+    return { success: true, recorded: false };
   },
   { ...workerOptions, concurrency: 20 } // High concurrency for analytics
 );
