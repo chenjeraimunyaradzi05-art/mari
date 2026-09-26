@@ -8,6 +8,8 @@ import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/errorHandler';
 import { getStripe, isStripeConfigured } from '../utils/stripe';
+import { getPriceIdForTier, SubscriptionTierKey } from '../config/regions';
+import { minorUnitScale } from './stripe-connect.service';
 
 // Stripe comes from the one shared client in utils/stripe; `Stripe` is still
 // imported here for the PaymentIntent type the webhook handlers take. Whether a
@@ -174,25 +176,41 @@ function providerNotAvailable(provider: PaymentProvider): PaymentResult {
 }
 
 /**
- * Get best payment provider for region
+ * The provider a payment in this region should go through: the first one in
+ * order of preference that can actually take the money, or null when none can.
+ *
+ * The preference order is unchanged — a local wallet or mobile-money provider
+ * first when that is what was asked for, then the region's own list, then card
+ * — but it is now filtered through isProviderLive, the same test
+ * getAvailablePaymentMethods applies. This function used to return the first
+ * name in the table whether or not it was built, so /best-provider answered
+ * 'gcash' for the Philippines, 'upi' for India and 'pix' for Brazil, and
+ * processPayment, which routes by this answer, then refused every payment in
+ * PHP, IDR, INR, BRL or KES with "please pay by card" — to a member whom
+ * /methods had just offered card.
+ *
+ * Card (Stripe) is always the last candidate because Stripe charges in every
+ * region the table names, whether or not the region lists it.
  */
 export function getBestProvider(
   region: string,
   paymentType?: 'card' | 'wallet' | 'mobile_money'
-): PaymentProvider {
-  const providers = REGION_PROVIDERS[region] || ['stripe'];
-  
+): PaymentProvider | null {
+  const candidates: PaymentProvider[] = [];
+
   // For wallets and mobile money, prefer local providers
   if (paymentType === 'mobile_money') {
-    if (region === 'KE') return 'mpesa';
-    if (region === 'PH') return 'gcash';
+    if (region === 'KE') candidates.push('mpesa');
+    if (region === 'PH') candidates.push('gcash');
   }
-  
+
   if (paymentType === 'wallet') {
-    if (['SG', 'PH', 'ID'].includes(region)) return 'grabpay';
+    if (['SG', 'PH', 'ID'].includes(region)) candidates.push('grabpay');
   }
-  
-  return providers[0];
+
+  candidates.push(...(REGION_PROVIDERS[region] || []), 'stripe');
+
+  return candidates.find(isProviderLive) ?? null;
 }
 
 const PROVIDER_LABELS: Record<PaymentProvider, { type: string; name: string; icon: string }> = {
@@ -239,7 +257,11 @@ export async function processPayment(
   request: PaymentRequest
 ): Promise<PaymentResult> {
   const region = CURRENCY_REGION[request.currency] || 'AU';
-  const provider = getBestProvider(region);
+  // No live provider means Stripe has no key in this environment. Stripe is
+  // still the path, because its own branch is what says so — as a 503 in
+  // production and as the development result everywhere else — rather than
+  // this function inventing a third answer.
+  const provider: PaymentProvider = getBestProvider(region) ?? 'stripe';
 
   logger.info('Processing payment', {
     userId: request.userId,
@@ -389,78 +411,204 @@ export function convertCurrency(
   };
 }
 
-/**
- * Get regional pricing table
- */
-export function getRegionalPricing(region: string): {
-  currency: Currency;
-  subscriptionTiers: Record<string, number>;
-  creatorFees: { platformFee: number; paymentFee: number };
-} {
-  const pricing: Record<string, any> = {
-    AU: {
-      currency: 'AUD',
-      subscriptionTiers: {
-        PREMIUM_CAREER: 9.99,
-        PREMIUM_PROFESSIONAL: 24.99,
-        PREMIUM_ENTREPRENEUR: 19.99,
-        PREMIUM_CREATOR: 99,
-      },
-      creatorFees: { platformFee: 0.20, paymentFee: 0.029 },
-    },
-    US: {
-      currency: 'USD',
-      subscriptionTiers: {
-        PREMIUM_CAREER: 6.99,
-        PREMIUM_PROFESSIONAL: 16.99,
-        PREMIUM_ENTREPRENEUR: 13.99,
-        PREMIUM_CREATOR: 69,
-      },
-      creatorFees: { platformFee: 0.20, paymentFee: 0.029 },
-    },
-    UK: {
-      currency: 'GBP',
-      subscriptionTiers: {
-        PREMIUM_CAREER: 5.99,
-        PREMIUM_PROFESSIONAL: 14.99,
-        PREMIUM_ENTREPRENEUR: 11.99,
-        PREMIUM_CREATOR: 59,
-      },
-      creatorFees: { platformFee: 0.20, paymentFee: 0.025 },
-    },
-    SG: {
-      currency: 'SGD',
-      subscriptionTiers: {
-        PREMIUM_CAREER: 8.99,
-        PREMIUM_PROFESSIONAL: 22.99,
-        PREMIUM_ENTREPRENEUR: 17.99,
-        PREMIUM_CREATOR: 89,
-      },
-      creatorFees: { platformFee: 0.25, paymentFee: 0.034 },
-    },
-    PH: {
-      currency: 'PHP',
-      subscriptionTiers: {
-        PREMIUM_CAREER: 299,
-        PREMIUM_PROFESSIONAL: 799,
-        PREMIUM_ENTREPRENEUR: 599,
-        PREMIUM_CREATOR: 2999,
-      },
-      creatorFees: { platformFee: 0.25, paymentFee: 0.034 },
-    },
-    IN: {
-      currency: 'INR',
-      subscriptionTiers: {
-        PREMIUM_CAREER: 399,
-        PREMIUM_PROFESSIONAL: 999,
-        PREMIUM_ENTREPRENEUR: 799,
-        PREMIUM_CREATOR: 3999,
-      },
-      creatorFees: { platformFee: 0.25, paymentFee: 0.02 },
-    },
-  };
+// ==========================================
+// MEMBERSHIP PRICES
+// ==========================================
 
-  return pricing[region] || pricing['AU'];
+/** The paid membership tiers checkout sells. `ENTERPRISE` is not one: it has no Stripe price in any currency. */
+export const PAID_TIERS: SubscriptionTierKey[] = [
+  'PREMIUM_CAREER',
+  'PREMIUM_PROFESSIONAL',
+  'PREMIUM_ENTREPRENEUR',
+  'PREMIUM_CREATOR',
+];
+
+// The exact fallbacks in config/regions.ts, for a tier whose STRIPE_PRICE_*
+// variable is unset. If a tier is added there its placeholder belongs here too;
+// a placeholder missing from this list is not a crash, it is a checkout sent to
+// Stripe with a price that does not exist, which is why the list is written
+// out rather than inferred from a pattern that a real price id might also match.
+const PLACEHOLDER_PRICE_IDS = new Set([
+  'price_career',
+  'price_professional',
+  'price_entrepreneur',
+  'price_creator',
+]);
+
+/** Whether a price id is one of the literals config/regions.ts falls back to, rather than a real Stripe price. */
+export function isPlaceholderPriceId(priceId: string): boolean {
+  return PLACEHOLDER_PRICE_IDS.has(priceId);
+}
+
+/**
+ * What one membership tier costs, as Stripe will charge it.
+ *
+ * `available: false` means no price is shown for the tier at all: its price id
+ * is a placeholder, Stripe is not configured, or Stripe could not be asked. A
+ * page that gets one of those says it does not know the price rather than
+ * printing a number, because the number it used to print was invented.
+ */
+export interface SubscriptionPlanPrice {
+  tier: SubscriptionTierKey;
+  available: boolean;
+  /** Upper-case ISO code of the price itself, which is not always the one asked for. */
+  currency?: string;
+  /** In the currency's smallest unit, exactly as Stripe holds it. */
+  unitAmount?: number;
+  /** In major units, for display. */
+  amount?: number;
+  interval?: Stripe.Price.Recurring.Interval;
+  intervalCount?: number;
+}
+
+// Prices change when somebody edits them in the Stripe dashboard, which is
+// rare, and the public pricing page would otherwise make four Stripe calls for
+// every visitor. Ten minutes is short enough that a price change shows up
+// before anyone reaches checkout with the old number in mind. Only complete,
+// successful reads are kept, so an outage is not remembered after it ends.
+const PLAN_PRICE_TTL_MS = 10 * 60 * 1000;
+const planPriceCache = new Map<string, { at: number; plans: SubscriptionPlanPrice[] }>();
+
+/** Drops the cached prices, so the next read goes to Stripe. */
+export function clearPlanPriceCache(): void {
+  planPriceCache.clear();
+}
+
+/**
+ * The price of every paid tier, read from the Stripe price that checkout will
+ * actually charge for a member in `currency`.
+ *
+ * Before this, three places each held their own numbers and none of them was
+ * Stripe: the billing page said A$29 and A$99, lib/pricing.ts said A$29 a month
+ * or A$290 a year, and the table getRegionalPricing returned said A$9.99. The
+ * Pro button then started a monthly PREMIUM_CAREER checkout at whatever the
+ * Stripe price really was. The price shown at the point of sale has to be the
+ * price charged, so it is now read from the same price id checkout uses.
+ */
+export async function getSubscriptionPlanPrices(currency: string): Promise<SubscriptionPlanPrice[]> {
+  const code = currency.toUpperCase();
+
+  if (!isStripeConfigured()) {
+    return PAID_TIERS.map((tier) => ({ tier, available: false }));
+  }
+
+  const cached = planPriceCache.get(code);
+  if (cached && Date.now() - cached.at < PLAN_PRICE_TTL_MS) {
+    return cached.plans;
+  }
+
+  let complete = true;
+
+  const plans = await Promise.all(
+    PAID_TIERS.map(async (tier): Promise<SubscriptionPlanPrice> => {
+      const priceId = getPriceIdForTier(tier, code);
+      if (isPlaceholderPriceId(priceId)) {
+        return { tier, available: false };
+      }
+
+      try {
+        const price = await getStripe().prices.retrieve(priceId);
+
+        // A price with no fixed unit amount (tiered, metered or pay-what-you-
+        // want) has no single number to show, and an inactive one cannot be
+        // bought. Neither is shown as though it could be.
+        if (!price.active || price.unit_amount == null) {
+          return { tier, available: false };
+        }
+
+        const priceCurrency = price.currency.toUpperCase();
+        return {
+          tier,
+          available: true,
+          currency: priceCurrency,
+          unitAmount: price.unit_amount,
+          amount: price.unit_amount / minorUnitScale(priceCurrency),
+          interval: price.recurring?.interval,
+          intervalCount: price.recurring?.interval_count,
+        };
+      } catch (error) {
+        complete = false;
+        logger.error('Could not read a membership price from Stripe', { tier, currency: code, priceId, error });
+        return { tier, available: false };
+      }
+    })
+  );
+
+  if (complete) {
+    planPriceCache.set(code, { at: Date.now(), plans });
+  }
+
+  return plans;
+}
+
+// The currency each region is priced in. A region not listed is priced as
+// Australia, this being a Queensland platform.
+const REGION_CURRENCY: Record<string, string> = {
+  AU: 'AUD',
+  US: 'USD',
+  UK: 'GBP',
+  SG: 'SGD',
+  PH: 'PHP',
+  IN: 'INR',
+};
+
+// The platform's cut and the card processor's, per region. Unchanged from the
+// table these sat in; only the membership prices beside them were invented.
+const CREATOR_FEES: Record<string, { platformFee: number; paymentFee: number }> = {
+  AU: { platformFee: 0.20, paymentFee: 0.029 },
+  US: { platformFee: 0.20, paymentFee: 0.029 },
+  UK: { platformFee: 0.20, paymentFee: 0.025 },
+  SG: { platformFee: 0.25, paymentFee: 0.034 },
+  PH: { platformFee: 0.25, paymentFee: 0.034 },
+  IN: { platformFee: 0.25, paymentFee: 0.02 },
+};
+
+/**
+ * Membership prices for a region, for the mobile upgrade screen.
+ *
+ * `subscriptionTiers` used to be a hand-written table — A$9.99 for Career,
+ * A$24.99 for Professional — that nothing kept in step with Stripe, and that
+ * disagreed with every other price the platform showed. It is now built from
+ * getSubscriptionPlanPrices, and keeps its old shape (major units, one currency,
+ * per month) so the screens reading it still work. A tier is left out of it
+ * rather than guessed at when its price could not be read, is not monthly, or is
+ * in a different currency from the rest: a missing price renders as a dash, and
+ * a wrong one renders as a promise. `prices` carries the full detail for a
+ * caller that can use it.
+ */
+export async function getRegionalPricing(region: string): Promise<{
+  currency: string;
+  subscriptionTiers: Record<string, number>;
+  prices: SubscriptionPlanPrice[];
+  creatorFees: { platformFee: number; paymentFee: number };
+}> {
+  const regionCode = REGION_CURRENCY[region] ? region : 'AU';
+  const prices = await getSubscriptionPlanPrices(REGION_CURRENCY[regionCode]);
+
+  // The currency the prices really came back in. A region whose price ids are
+  // not all configured falls back to the Australian ones, so this is read from
+  // the prices rather than assumed from the region.
+  const readable = prices.filter((p) => p.available && p.currency);
+  const currency = readable[0]?.currency ?? REGION_CURRENCY[regionCode];
+
+  const subscriptionTiers: Record<string, number> = {};
+  for (const plan of readable) {
+    if (
+      plan.currency === currency &&
+      plan.interval === 'month' &&
+      (plan.intervalCount ?? 1) === 1 &&
+      plan.amount != null
+    ) {
+      subscriptionTiers[plan.tier] = plan.amount;
+    }
+  }
+
+  return {
+    currency,
+    subscriptionTiers,
+    prices,
+    creatorFees: CREATOR_FEES[regionCode],
+  };
 }
 
 // ==========================================

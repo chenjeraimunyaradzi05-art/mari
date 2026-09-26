@@ -38,6 +38,19 @@ function canUseMockStripe(feature: string): boolean {
   return true;
 }
 
+/**
+ * Where a development machine with no Stripe key sends a member who presses
+ * "Connect payouts". There is nothing to onboard with — the mock account is
+ * written ACTIVE the moment it is created — so she is sent straight to the
+ * earnings page, which reads the account back and shows it connected.
+ *
+ * This used to name /dashboard/payments/mock-onboarding, a page that was never
+ * built, so the local flow ended on a 404 and looked broken when it was not.
+ */
+function mockOnboardingUrl(): string {
+  return `${process.env.CLIENT_URL}/dashboard/earnings`;
+}
+
 export interface ConnectedAccountInput {
   userId: string;
   email: string;
@@ -48,7 +61,19 @@ export interface ConnectedAccountInput {
 
 export interface PayoutInput {
   connectedAccountId: string;
-  amount: number; // in cents
+  /**
+   * In major units — dollars, not cents — because that is the unit a member
+   * types into the withdraw box and the unit the route validates against its
+   * ceiling. createPayout converts it for Stripe.
+   *
+   * This field used to be documented as cents while its only caller sent
+   * dollars, and createPayout passed it straight to Stripe: a A$150 withdrawal
+   * became a A$1.50 payout under a toast saying the money was on its way, and
+   * "Withdraw all" on A$123.45 sent Stripe a fraction it refused, so the member
+   * got a 500. The conversion now happens in exactly one place, here, so a
+   * caller cannot do it a second time. Do not pass cents.
+   */
+  amount: number;
   currency: string;
   description?: string;
   /**
@@ -314,7 +339,7 @@ export async function createConnectedAccount(input: ConnectedAccountInput): Prom
     await writeAccountState(input.userId, mockAccountId, 'ACTIVE', true);
     return {
       accountId: mockAccountId,
-      onboardingUrl: `${process.env.CLIENT_URL}/dashboard/payments/mock-onboarding`,
+      onboardingUrl: mockOnboardingUrl(),
     };
   }
 
@@ -371,7 +396,7 @@ export async function getOnboardingLink(userId: string): Promise<string> {
   }
 
   if (canUseMockStripe('Creating a Stripe Connect onboarding link')) {
-    return `${process.env.CLIENT_URL}/dashboard/payments/mock-onboarding`;
+    return mockOnboardingUrl();
   }
 
   const accountLink = await getStripe().accountLinks.create({
@@ -931,6 +956,85 @@ async function recordEscrowReturn(
   logger.info('Escrow hold returned to the buyer', { paymentIntentId, escrowId, as });
 }
 
+/**
+ * What became of a hold that has outlived its card authorisation.
+ *
+ * - `captured`: the money reached the seller and only the row was behind; the
+ *   row now says CAPTURED.
+ * - `expired`: Stripe cancelled the intent, which is what it does when an
+ *   authorisation lapses uncaptured; the row now says CANCELED, with the reason.
+ * - `still_held`: Stripe still holds a capturable authorisation (some cards
+ *   allow longer than seven days), or Stripe could not be asked here.
+ * - `unpaid`: the buyer never put a card behind it, so there was never money to
+ *   lose.
+ *
+ * `changed` is false when the row had already left the held statuses by the
+ * time this wrote, because a release or a cancellation got there first; the
+ * caller then has nothing new to tell anyone.
+ */
+export type LapsedHoldOutcome =
+  | { state: 'captured' | 'expired'; changed: boolean }
+  | { state: 'still_held' | 'unpaid' };
+
+/**
+ * Brings a hold that has outlived its authorisation into line with Stripe.
+ *
+ * Before this, nothing ever moved such a row: it stayed PENDING or AUTHORIZED
+ * for good, the expiry sweep found it again every six hours, and it was
+ * reported to admins as a lapsed hold whose funds "may no longer be
+ * collectable" — including the ones whose capture had in fact succeeded and
+ * only the row update had failed, so the seller had been paid and the platform
+ * was saying she might not be. Each is now asked about once at Stripe and
+ * settled into the state that is actually true.
+ *
+ * Both writes are conditional on the row still being held, so a release or a
+ * cancellation that lands at the same moment is not overwritten.
+ */
+export async function resolveLapsedEscrowHold(paymentIntentId: string): Promise<LapsedHoldOutcome> {
+  if (!isStripeConfigured()) {
+    return { state: 'still_held' };
+  }
+
+  const intent = await getStripe().paymentIntents.retrieve(paymentIntentId);
+
+  if (intent.status === 'succeeded') {
+    const { count } = await prisma.escrowPayment.updateMany({
+      where: { paymentIntentId, status: { in: HELD_STATUSES } },
+      data: { status: 'CAPTURED', capturedAt: new Date() },
+    });
+    if (count > 0) {
+      logger.warn('Escrow row was behind Stripe: a hold reported as lapsed had been captured', {
+        paymentIntentId,
+        amountCaptured: intent.amount_received,
+      });
+    }
+    return { state: 'captured', changed: count > 0 };
+  }
+
+  if (intent.status === 'canceled') {
+    const reason =
+      intent.cancellation_reason === 'automatic'
+        ? 'The card authorisation lapsed before the payment was released'
+        : `Cancelled at Stripe (${intent.cancellation_reason ?? 'no reason given'})`;
+
+    const { count } = await prisma.escrowPayment.updateMany({
+      where: { paymentIntentId, status: { in: HELD_STATUSES } },
+      data: {
+        status: 'CANCELED',
+        canceledAt: intent.canceled_at ? new Date(intent.canceled_at * 1000) : new Date(),
+        cancelReason: reason,
+      },
+    });
+    return { state: 'expired', changed: count > 0 };
+  }
+
+  if (intent.status === 'requires_capture') {
+    return { state: 'still_held' };
+  }
+
+  return { state: 'unpaid' };
+}
+
 /** Holds where the money has moved to the seller. */
 const EARNED_STATUSES = ['CAPTURED'];
 /** Holds where the money exists but has not moved yet. */
@@ -940,6 +1044,42 @@ export interface EarningsByCurrency {
   currency: string;
   totalEarnings: number;
   pendingPayouts: number;
+  /** How many holds in this currency have been captured, over every row she has. */
+  completedCount: number;
+}
+
+/** One month of captured earnings in one currency, for the earnings chart. */
+export interface EarningsMonth {
+  /** `YYYY-MM`, in Queensland time. */
+  month: string;
+  currency: string;
+  /** Net of the platform fee, in minor units. */
+  earnings: number;
+  /** How many holds were captured that month. */
+  count: number;
+}
+
+/** How far back the monthly series reaches. The chart says so; it is not "all time". */
+export const EARNINGS_SERIES_MONTHS = 12;
+
+// Queensland keeps AEST all year, with no daylight saving, so a fixed offset is
+// exact. Bucketing by UTC instead would put a session paid at 9am on the 1st
+// into the previous month.
+const QUEENSLAND_OFFSET_MS = 10 * 60 * 60 * 1000;
+
+function queenslandMonth(date: Date): string {
+  return new Date(date.getTime() + QUEENSLAND_OFFSET_MS).toISOString().slice(0, 7);
+}
+
+/** Midnight on the first of the month EARNINGS_SERIES_MONTHS - 1 months ago, Queensland time. */
+function earningsSeriesStart(now: Date): Date {
+  const local = new Date(now.getTime() + QUEENSLAND_OFFSET_MS);
+  const startLocal = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth() - (EARNINGS_SERIES_MONTHS - 1),
+    1
+  );
+  return new Date(startLocal - QUEENSLAND_OFFSET_MS);
 }
 
 export interface EarningsDashboard {
@@ -957,6 +1097,16 @@ export interface EarningsDashboard {
   balanceUnavailable: boolean;
   /** Every currency she has earned in, including the one above. */
   byCurrency: EarningsByCurrency[];
+  /**
+   * Captured earnings by month over the last EARNINGS_SERIES_MONTHS months,
+   * every currency, oldest first. Months with nothing captured are absent.
+   *
+   * The chart and the "Total Sessions" count used to be derived on the client
+   * from `recentTransactions`, which is twenty rows long, so both capped out at
+   * twenty for exactly the mentors who had done the most work. They are counted
+   * here from the rows themselves.
+   */
+  monthly: EarningsMonth[];
   recentTransactions: {
     id: string;
     amount: number;
@@ -982,16 +1132,27 @@ export interface EarningsDashboard {
 export async function getEarningsDashboard(userId: string): Promise<EarningsDashboard> {
   const connectedAccountId = await resolveConnectedAccountId(userId);
 
-  const [totals, recent] = await Promise.all([
+  const [totals, recent, captured] = await Promise.all([
     prisma.escrowPayment.groupBy({
       by: ['currency', 'status'],
       where: { sellerId: userId, status: { in: [...EARNED_STATUSES, ...HELD_STATUSES] } },
       _sum: { amount: true, platformFee: true },
+      _count: { _all: true },
     }),
     prisma.escrowPayment.findMany({
       where: { sellerId: userId },
       orderBy: { createdAt: 'desc' },
       take: 20,
+    }),
+    // Only the columns the series needs, and only inside its window, so this
+    // stays small however long she has been selling.
+    prisma.escrowPayment.findMany({
+      where: {
+        sellerId: userId,
+        status: { in: EARNED_STATUSES },
+        capturedAt: { gte: earningsSeriesStart(new Date()) },
+      },
+      select: { amount: true, platformFee: true, currency: true, capturedAt: true },
     }),
   ]);
 
@@ -999,17 +1160,35 @@ export async function getEarningsDashboard(userId: string): Promise<EarningsDash
 
   for (const group of totals) {
     const currency = group.currency.toUpperCase();
-    const row = byCurrencyMap.get(currency) ?? { currency, totalEarnings: 0, pendingPayouts: 0 };
+    const row =
+      byCurrencyMap.get(currency) ??
+      { currency, totalEarnings: 0, pendingPayouts: 0, completedCount: 0 };
     const net = (group._sum.amount ?? 0) - (group._sum.platformFee ?? 0);
 
     if (EARNED_STATUSES.includes(group.status)) {
       row.totalEarnings += net;
+      row.completedCount += group._count?._all ?? 0;
     } else {
       row.pendingPayouts += net;
     }
 
     byCurrencyMap.set(currency, row);
   }
+
+  const monthlyMap = new Map<string, EarningsMonth>();
+  for (const row of captured) {
+    if (!row.capturedAt) continue;
+    const month = queenslandMonth(row.capturedAt);
+    const currency = row.currency.toUpperCase();
+    const key = `${month}|${currency}`;
+    const bucket = monthlyMap.get(key) ?? { month, currency, earnings: 0, count: 0 };
+    bucket.earnings += row.amount - row.platformFee;
+    bucket.count += 1;
+    monthlyMap.set(key, bucket);
+  }
+  const monthly = [...monthlyMap.values()].sort(
+    (a, b) => a.month.localeCompare(b.month) || a.currency.localeCompare(b.currency)
+  );
 
   const byCurrency = [...byCurrencyMap.values()].sort(
     (a, b) => b.totalEarnings + b.pendingPayouts - (a.totalEarnings + a.pendingPayouts)
@@ -1057,6 +1236,7 @@ export async function getEarningsDashboard(userId: string): Promise<EarningsDash
     availableBalance,
     balanceUnavailable,
     byCurrency,
+    monthly,
     recentTransactions: recent.map((p) => ({
       id: p.id,
       amount: p.amount - p.platformFee,
@@ -1070,18 +1250,108 @@ export async function getEarningsDashboard(userId: string): Promise<EarningsDash
 }
 
 /**
- * Initiate manual payout to connected account
+ * Currencies Stripe counts in whole units, with no cents at all. A payout of
+ * ¥1,500 is sent to Stripe as 1500, not 150000.
+ * https://docs.stripe.com/currencies#zero-decimal
  */
-export async function createPayout(input: PayoutInput): Promise<{ payoutId: string; status: string }> {
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga',
+  'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf',
+]);
+
+/**
+ * Currencies with three decimal places, which Stripe accepts only in multiples
+ * of ten of their smallest unit. ATHENA pays nobody in these, and getting the
+ * rounding rule half right would move the wrong amount, so they are refused
+ * rather than guessed at.
+ */
+const THREE_DECIMAL_CURRENCIES = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
+
+/**
+ * How many of a currency's smallest unit make one whole unit, as Stripe counts
+ * them: 100 cents to the dollar, 1 yen to the yen, 1000 fils to the dinar.
+ */
+export function minorUnitScale(currency: string): number {
+  const code = currency.trim().toLowerCase();
+  if (ZERO_DECIMAL_CURRENCIES.has(code)) return 1;
+  if (THREE_DECIMAL_CURRENCIES.has(code)) return 1000;
+  return 100;
+}
+
+/**
+ * A major-unit amount (dollars) as the integer Stripe expects (cents).
+ *
+ * Refuses rather than rounds an amount finer than the currency can hold: a
+ * payout is money leaving a member's balance, and quietly paying her 10.01 when
+ * she asked for 10.005 is a decision she did not make. The route already rounds
+ * to two places, so in practice this fires for a zero-decimal currency given
+ * cents (¥1,500.50), or for a caller that skipped the route's rounding.
+ */
+export function payoutAmountInMinorUnits(amount: number, currency: string): number {
+  const code = currency.trim().toLowerCase();
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(400, 'Enter an amount greater than zero');
+  }
+  if (THREE_DECIMAL_CURRENCIES.has(code)) {
+    throw new ApiError(400, `Payouts in ${code.toUpperCase()} are not supported`);
+  }
+
+  const scale = minorUnitScale(code);
+  const scaled = amount * scale;
+  const minor = Math.round(scaled);
+
+  // Floating point makes 123.45 * 100 come out as 12345.000000000002, so
+  // "exactly an integer" is tested with a tolerance far below one cent.
+  if (Math.abs(scaled - minor) > 1e-6) {
+    throw new ApiError(
+      400,
+      scale === 1
+        ? `${code.toUpperCase()} has no cents; enter a whole amount`
+        : 'Enter an amount in whole cents'
+    );
+  }
+  if (minor < 1) {
+    throw new ApiError(400, 'Enter an amount greater than zero');
+  }
+
+  return minor;
+}
+
+/** Whether a Stripe failure was the connected account not holding enough to cover the payout. */
+function isInsufficientBalance(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'balance_insufficient'
+  );
+}
+
+/**
+ * Initiate manual payout to connected account.
+ *
+ * Takes `input.amount` in major units (see PayoutInput) and returns what was
+ * actually asked of Stripe, in minor units and lower-case currency, so a caller
+ * or a test can see the number that left rather than the number that was typed.
+ */
+export async function createPayout(
+  input: PayoutInput
+): Promise<{ payoutId: string; status: string; amount: number; currency: string }> {
+  const currency = input.currency.trim().toLowerCase();
+  // Converted before the mock branch as well, so a unit mistake fails on a
+  // developer's machine instead of first showing up against a live account.
+  const amount = payoutAmountInMinorUnits(input.amount, currency);
+
   if (canUseMockStripe('Creating a Stripe payout')) {
-    return { payoutId: `po_mock_${Date.now()}`, status: 'pending' };
+    return { payoutId: `po_mock_${Date.now()}`, status: 'pending', amount, currency };
   }
 
   try {
     const payout = await getStripe().payouts.create(
       {
-        amount: input.amount,
-        currency: input.currency,
+        amount,
+        currency,
         description: input.description,
       },
       {
@@ -1090,9 +1360,23 @@ export async function createPayout(input: PayoutInput): Promise<{ payoutId: stri
       }
     );
 
-    return { payoutId: payout.id, status: payout.status };
+    return { payoutId: payout.id, status: payout.status, amount: payout.amount, currency: payout.currency };
   } catch (error) {
-    logger.error('Failed to create payout', { error, input });
+    // Asking for more than the account holds is the member's to fix — she can
+    // enter a smaller amount — so it is a 400 that says so, not the generic 500
+    // that told her something had broken.
+    if (isInsufficientBalance(error)) {
+      throw new ApiError(
+        400,
+        `Your available ${currency.toUpperCase()} balance is less than that amount`
+      );
+    }
+    logger.error('Failed to create payout', {
+      error,
+      connectedAccountId: input.connectedAccountId,
+      amount,
+      currency,
+    });
     throw new ApiError(500, 'Failed to create payout');
   }
 }

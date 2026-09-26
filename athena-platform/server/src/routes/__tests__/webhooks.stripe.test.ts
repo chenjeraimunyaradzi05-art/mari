@@ -2,8 +2,8 @@ import request from 'supertest';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import express from 'express';
 
-jest.mock('../../utils/prisma', () => ({
-  prisma: {
+jest.mock('../../utils/prisma', () => {
+  const prisma: any = {
     stripeWebhookEvent: {
       create: jest.fn(),
       delete: jest.fn(),
@@ -27,8 +27,14 @@ jest.mock('../../utils/prisma', () => ({
       count: jest.fn(),
       create: jest.fn(),
     },
-  },
-}));
+    // An invoice is filed inside a transaction that first takes an advisory
+    // lock on what it is for, so a webhook and an admin re-issue cannot both
+    // file one. The transaction hands back this same client.
+    $executeRaw: jest.fn(async () => 1),
+  };
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
+  return { prisma };
+});
 
 jest.mock('../../utils/logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -228,6 +234,54 @@ describe('Stripe webhooks', () => {
         }),
       })
     );
+  });
+
+  it('records what the member is actually paying from the price on the subscription', async () => {
+    // Nothing wrote Subscription.amount before, so the billing page had no
+    // figure to show and printed an invented A$29 in its place.
+    const stripe = getStripeClient();
+    const app = createTestApp();
+
+    (prisma.subscription.findFirst as any).mockResolvedValue({ id: 'sub_db_1' });
+
+    stripe.webhooks.constructEvent.mockReturnValue({
+      id: 'evt_sub_amount',
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_123',
+          customer: 'cus_123',
+          status: 'active',
+          cancel_at_period_end: false,
+          current_period_start: 1700000000,
+          current_period_end: 1700003600,
+          items: {
+            data: [
+              {
+                price: {
+                  id: 'price_professional',
+                  unit_amount: 2499,
+                  currency: 'aud',
+                  recurring: { interval: 'month', interval_count: 1 },
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await request(app)
+      .post('/api/webhooks/stripe')
+      .set('Content-Type', 'application/json')
+      .set('stripe-signature', 't=123,v1=abc')
+      .send(Buffer.from('{"ok":true}'))
+      .expect(200);
+
+    const data = (prisma.subscription.update as any).mock.calls[0][0].data;
+    expect(String(data.amount)).toBe('24.99');
+    expect(data.currency).toBe('AUD');
+    expect(data.interval).toBe('month');
   });
 
   it('POST /api/webhooks/stripe returns duplicate=true on replayed event', async () => {

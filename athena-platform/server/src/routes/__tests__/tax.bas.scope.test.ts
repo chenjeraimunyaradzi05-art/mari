@@ -5,7 +5,7 @@ jest.mock('../../utils/prisma', () => ({
   prisma: {
     journalLine: { findMany: jest.fn(async () => []) },
     organizationMember: { findFirst: jest.fn(async () => null) },
-    taxReturn: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    taxReturn: { create: jest.fn(async () => ({ id: 'ret-1' })), findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn(async () => []) },
   },
 }));
 
@@ -69,5 +69,65 @@ describe('The BAS worksheet needs membership of the organisation it reports on',
   it('answers a malformed organisation id with a 400 rather than a database error', async () => {
     await request(app).get(`/api/tax/bas?${PERIOD}&organizationId=not-a-uuid`).expect(400);
     expect(prisma.journalLine.findMany).not.toHaveBeenCalled();
+  });
+});
+
+// A BAS lodged against a business is the business's record, not the private
+// property of whichever colleague pressed Lodge. The list used to AND the
+// organisation with the caller's own id, so nobody else in the business could
+// see it.
+describe('Tax returns belong to the books they were filed in', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.organizationMember.findFirst.mockResolvedValue(null);
+  });
+
+  it('lists every return in an organisation for any member of it', async () => {
+    prisma.organizationMember.findFirst.mockResolvedValue({ id: 'm1' });
+
+    await request(app).get(`/api/tax/returns?organizationId=${ADA_ORG}`).expect(200);
+
+    expect(prisma.taxReturn.findMany.mock.calls[0][0].where).toEqual({ organizationId: ADA_ORG });
+  });
+
+  it('refuses the list for an organisation she is not a member of', async () => {
+    await request(app).get(`/api/tax/returns?organizationId=${OTHER_ORG}`).expect(403);
+    expect(prisma.taxReturn.findMany).not.toHaveBeenCalled();
+  });
+
+  it('lists only her own personal returns when she names no organisation', async () => {
+    await request(app).get('/api/tax/returns').expect(200);
+
+    expect(prisma.taxReturn.findMany.mock.calls[0][0].where).toEqual({ userId: 'ada', organizationId: null });
+  });
+
+  it('will not file a return into an organisation she is not a member of', async () => {
+    await request(app)
+      .post('/api/tax/returns')
+      .send({
+        organizationId: OTHER_ORG,
+        periodStart: '2026-07-01T00:00:00.000Z',
+        periodEnd: '2026-09-30T00:00:00.000Z',
+        totalSales: 1000,
+        totalTax: 100,
+      })
+      .expect(403);
+    expect(prisma.taxReturn.create).not.toHaveBeenCalled();
+  });
+
+  it('files one into her own organisation', async () => {
+    prisma.organizationMember.findFirst.mockResolvedValue({ id: 'm1' });
+
+    await request(app)
+      .post('/api/tax/returns')
+      .send({
+        organizationId: ADA_ORG,
+        periodStart: '2026-07-01T00:00:00.000Z',
+        periodEnd: '2026-09-30T00:00:00.000Z',
+        totalSales: 1000,
+        totalTax: 100,
+      })
+      .expect(201);
+    expect(prisma.taxReturn.create.mock.calls[0][0].data).toMatchObject({ organizationId: ADA_ORG, userId: 'ada' });
   });
 });

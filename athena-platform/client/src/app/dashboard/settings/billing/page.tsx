@@ -1,14 +1,17 @@
 'use client';
 
 import { Suspense, useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CreditCard,
   Check,
   Crown,
   Sparkles,
-  Download,
   ExternalLink,
+  FileText,
+  Building2,
 } from 'lucide-react';
 import {
   useAuth,
@@ -18,60 +21,48 @@ import {
   useCreateCheckout,
   usePaymentMethods,
 } from '@/lib/hooks';
-import { formatCurrency, formatDate, cn, getStoredPreference } from '@/lib/utils';
-import { safeHref } from '@/lib/safe-href';
+import { formatDate, cn, getStoredPreference, getPreferredLocale } from '@/lib/utils';
+import {
+  PRO_TIER,
+  formatPlanAmount,
+  formatPlanInterval,
+  usePlanPrices,
+} from '@/app/pricing/plan-prices';
 
-const plans = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: 0,
-    interval: 'month',
-    description: 'Get started with basic features',
-    features: [
-      '5 job applications/month',
-      'Basic job search',
-      'Community access',
-      'Limited AI tools',
-    ],
-    current: true,
-  },
-  {
-    id: 'pro',
-    name: 'ATHENA Pro',
-    price: 29,
-    interval: 'month',
-    description: 'For serious career growth',
-    features: [
-      'Unlimited job applications',
-      'AI-powered resume optimizer',
-      'Interview preparation coach',
-      'Career path insights',
-      'Priority support',
-      'Exclusive events access',
-    ],
-    popular: true,
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    price: 99,
-    interval: 'month',
-    description: 'For teams and organizations',
-    features: [
-      'Everything in Pro',
-      'Team management',
-      'Custom integrations',
-      'Dedicated account manager',
-      'SLA & premium support',
-      'Analytics dashboard',
-    ],
-  },
+/**
+ * The plans a member can move between here.
+ *
+ * This used to be a literal array — Free, ATHENA Pro at A$29 and Enterprise at
+ * A$99 — whose prices matched neither Stripe nor the server's own table. The Pro
+ * button checked out PREMIUM_CAREER at its real Stripe price, whatever that was,
+ * under a card promising A$29, and the Enterprise button sent 'ENTERPRISE', a
+ * tier checkout does not sell, so it failed with a 400 every time. Prices now
+ * come from the server, which reads them from the Stripe price checkout
+ * charges, and Enterprise is a conversation rather than a button that cannot
+ * work.
+ */
+const FREE_FEATURES = [
+  '5 job applications/month',
+  'Basic job search',
+  'Community access',
+  'Limited AI tools',
 ];
 
-const checkoutTierByPlan: Record<string, string> = {
-  pro: 'PREMIUM_CAREER',
-  enterprise: 'ENTERPRISE',
+const PRO_FEATURES = [
+  'Unlimited job applications',
+  'AI-powered resume optimizer',
+  'Interview preparation coach',
+  'Career path insights',
+  'Priority support',
+  'Exclusive events access',
+];
+
+const TIER_NAMES: Record<string, string> = {
+  FREE: 'Free',
+  PREMIUM_CAREER: 'ATHENA Pro',
+  PREMIUM_PROFESSIONAL: 'ATHENA Professional',
+  PREMIUM_ENTREPRENEUR: 'ATHENA Entrepreneur',
+  PREMIUM_CREATOR: 'ATHENA Creator',
 };
 
 const paymentRegionCodes: Record<string, string> = {
@@ -105,6 +96,33 @@ type PaymentMethod = {
   icon?: string;
 };
 
+/** The subscription row as GET /api/subscriptions/me returns it. */
+type SubscriptionRow = {
+  tier?: string;
+  status?: string;
+  amount?: string | number | null;
+  currency?: string | null;
+  interval?: string | null;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
+};
+
+/** What she pays, from the row the Stripe webhook keeps, or null when it has not been told. */
+function formatSubscriptionPrice(subscription: SubscriptionRow | undefined): string | null {
+  if (!subscription || subscription.amount == null || !subscription.currency) return null;
+  const amount = Number(subscription.amount);
+  if (!Number.isFinite(amount)) return null;
+  try {
+    const price = new Intl.NumberFormat(getPreferredLocale(), {
+      style: 'currency',
+      currency: subscription.currency,
+    }).format(amount);
+    return subscription.interval ? `${price}/${subscription.interval}` : price;
+  } catch {
+    return null;
+  }
+}
+
 export default function BillingSettingsPage() {
   return (
     <Suspense fallback={null}>
@@ -116,22 +134,35 @@ export default function BillingSettingsPage() {
 function BillingContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
-  const { data: subscription } = useSubscription();
+  const queryClient = useQueryClient();
+  const { data: subscription } = useSubscription() as { data: SubscriptionRow | undefined };
   const cancelSubscription = useCancelSubscription();
   const manageBilling = useManageBilling();
   const createCheckout = useCreateCheckout();
+  const planPrices = usePlanPrices();
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [region, setRegion] = useState<string>(user?.region || 'ANZ');
 
-  // Auto-trigger checkout if upgrade param is present
+  const checkoutOutcome = searchParams.get('checkout');
+
+  // Auto-trigger checkout if upgrade param is present. 'pro' is what the
+  // pricing page and the paywall send; anything else is passed through and the
+  // server decides whether it is a tier it sells.
   useEffect(() => {
     const upgradeTier = searchParams.get('upgrade');
     if (upgradeTier && !createCheckout.isPending && !createCheckout.isSuccess) {
-      const tier = checkoutTierByPlan[upgradeTier] || upgradeTier;
-      
-      createCheckout.mutate(tier);
+      createCheckout.mutate(upgradeTier === 'pro' ? PRO_TIER : upgradeTier);
     }
   }, [searchParams, createCheckout]);
+
+  // Back from Stripe Checkout. The tier changes when Stripe's webhook arrives,
+  // which is usually within seconds of the redirect but not always before it,
+  // so the membership is read again rather than assumed.
+  useEffect(() => {
+    if (checkoutOutcome === 'success') {
+      queryClient.invalidateQueries({ queryKey: ['subscription'] });
+    }
+  }, [checkoutOutcome, queryClient]);
 
   useEffect(() => {
     setRegion(user?.region || getStoredPreference('athena.region', 'ANZ'));
@@ -145,6 +176,12 @@ function BillingContent() {
   } = usePaymentMethods(paymentRegion);
   const currentPlan = user?.subscriptionTier || 'FREE';
   const isPremium = currentPlan !== 'FREE';
+  const currentPlanName = TIER_NAMES[currentPlan] ?? 'Paid membership';
+  const currentPrice = formatSubscriptionPrice(subscription);
+
+  const proPlan = planPrices.data?.plans.find((plan) => plan.tier === PRO_TIER);
+  const proAmount = proPlan ? formatPlanAmount(proPlan) : null;
+  const proInterval = proPlan ? formatPlanInterval(proPlan) : null;
 
   const handleManageBilling = async () => {
     manageBilling.mutate(undefined, {
@@ -176,14 +213,32 @@ function BillingContent() {
         </p>
       </div>
 
+      {checkoutOutcome === 'success' && (
+        <div
+          role="status"
+          className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-900/20 dark:text-green-300"
+        >
+          Stripe has taken your details. Your membership changes here as soon as Stripe confirms
+          it, which is usually within a minute. If it has not changed after that, refresh this page.
+        </div>
+      )}
+      {checkoutOutcome === 'cancelled' && (
+        <div
+          role="status"
+          className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300"
+        >
+          Checkout was cancelled. Nothing was charged.
+        </div>
+      )}
+
       {/* Current Subscription */}
       <div className="card">
         <div className="flex items-start justify-between mb-6">
           <div className="flex items-center space-x-4">
             <div className={cn(
               'p-3 rounded-xl',
-              isPremium 
-                ? 'bg-gradient-to-br from-primary-500 to-secondary-500' 
+              isPremium
+                ? 'bg-gradient-to-br from-primary-500 to-secondary-500'
                 : 'bg-slate-100 dark:bg-slate-800'
             )}>
               {isPremium ? (
@@ -194,11 +249,11 @@ function BillingContent() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-                {isPremium ? 'ATHENA Pro' : 'Free Plan'}
+                {isPremium ? currentPlanName : 'Free Plan'}
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {isPremium 
-                  ? 'You have access to all premium features' 
+                {isPremium
+                  ? 'You have access to all premium features'
                   : 'Upgrade to unlock all features'}
               </p>
             </div>
@@ -220,25 +275,32 @@ function BillingContent() {
               <div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">Plan</p>
                 <p className="font-medium text-slate-900 dark:text-white">
-                  {subscription.plan || 'Pro Monthly'}
+                  {TIER_NAMES[subscription.tier ?? currentPlan] ?? currentPlanName}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">Price</p>
+                {/* The figure Stripe last reported for her subscription. There
+                    used to be a fallback of A$29 here for when none had been
+                    recorded, which was every member, because nothing wrote it. */}
                 <p className="font-medium text-slate-900 dark:text-white">
-                  {formatCurrency(subscription.amount || 29)}/month
+                  {currentPrice ?? 'Shown in the billing portal'}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
-                <p className="font-medium text-green-600 dark:text-green-400">
-                  {subscription.status || 'Active'}
+                <p className="font-medium text-slate-900 dark:text-white">
+                  {subscription.status
+                    ? subscription.status.charAt(0) + subscription.status.slice(1).toLowerCase().replace(/_/g, ' ')
+                    : 'Not recorded'}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Next billing</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {subscription.cancelAtPeriodEnd ? 'Ends' : 'Next billing'}
+                </p>
                 <p className="font-medium text-slate-900 dark:text-white">
-                  {formatDate(subscription.currentPeriodEnd) || 'N/A'}
+                  {subscription.currentPeriodEnd ? formatDate(subscription.currentPeriodEnd) : 'Not recorded'}
                 </p>
               </div>
             </div>
@@ -303,85 +365,99 @@ function BillingContent() {
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
           Available Plans
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {plans.map((plan) => {
-            const isCurrentPlan = 
-              (plan.id === 'free' && currentPlan === 'FREE') ||
-              (plan.id === 'pro' && currentPlan.startsWith('PREMIUM')) ||
-              (plan.id === 'enterprise' && currentPlan === 'ENTERPRISE');
-
-            return (
-              <div
-                key={plan.id}
-                className={cn(
-                  'card relative overflow-hidden',
-                  plan.popular && 'border-2 border-primary-500',
-                  isCurrentPlan && 'ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-slate-900'
-                )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Free */}
+          <div
+            className={cn(
+              'card relative overflow-hidden',
+              !isPremium && 'ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-slate-900'
+            )}
+          >
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Free</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Get started with basic features
+              </p>
+            </div>
+            <div className="mb-6">
+              <span className="text-3xl font-bold text-slate-900 dark:text-white">Free</span>
+            </div>
+            <PlanFeatures features={FREE_FEATURES} />
+            {!isPremium ? (
+              <button disabled className="w-full btn-outline py-2.5 cursor-default">
+                Current Plan
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="w-full btn-outline py-2.5 text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
               >
-                {plan.popular && (
-                  <div className="absolute top-0 right-0 bg-primary-500 text-white text-xs font-medium px-3 py-1 rounded-bl-lg">
-                    Most Popular
-                  </div>
-                )}
-                <div className="mb-4">
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                    {plan.name}
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    {plan.description}
-                  </p>
-                </div>
-                <div className="mb-6">
-                  <span className="text-3xl font-bold text-slate-900 dark:text-white">
-                    {plan.price === 0 ? 'Free' : formatCurrency(plan.price)}
-                  </span>
-                  {plan.price > 0 && (
-                    <span className="text-slate-500 dark:text-slate-400">
-                      /{plan.interval}
-                    </span>
+                Downgrade
+              </button>
+            )}
+          </div>
+
+          {/* Pro */}
+          <div
+            className={cn(
+              'card relative overflow-hidden border-2 border-primary-500',
+              isPremium && 'ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-slate-900'
+            )}
+          >
+            <div className="absolute top-0 right-0 bg-primary-500 text-white text-xs font-medium px-3 py-1 rounded-bl-lg">
+              Most Popular
+            </div>
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">ATHENA Pro</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">For serious career growth</p>
+            </div>
+            <div className="mb-6 min-h-[2.5rem]">
+              {planPrices.isLoading ? (
+                <span className="inline-block h-9 w-28 rounded bg-slate-100 dark:bg-slate-800 animate-pulse" />
+              ) : proAmount ? (
+                <>
+                  <span className="text-3xl font-bold text-slate-900 dark:text-white">{proAmount}</span>
+                  {proInterval && (
+                    <span className="text-slate-500 dark:text-slate-400">/{proInterval}</span>
                   )}
-                </div>
-                <ul className="space-y-3 mb-6">
-                  {plan.features.map((feature, index) => (
-                    <li key={index} className="flex items-start space-x-2">
-                      <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                      <span className="text-sm text-slate-600 dark:text-slate-300">
-                        {feature}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {isCurrentPlan ? (
-                  <button
-                    disabled
-                    className="w-full btn-outline py-2.5 cursor-default"
-                  >
-                    Current Plan
-                  </button>
-                ) : plan.id === 'free' ? (
-                  <button
-                    onClick={() => setShowCancelModal(true)}
-                    disabled={currentPlan === 'FREE'}
-                    className="w-full btn-outline py-2.5 text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                  >
-                    Downgrade
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => createCheckout.mutate(checkoutTierByPlan[plan.id] || plan.id)}
-                    disabled={createCheckout.isPending}
-                    className={cn(
-                      'w-full py-2.5 text-center disabled:opacity-50',
-                      plan.popular ? 'btn-primary' : 'btn-outline'
-                    )}
-                  >
-                    {createCheckout.isPending ? 'Opening checkout...' : 'Upgrade'}
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                </>
+              ) : (
+                // Not a number: either the price could not be read or it is not
+                // set up on this deployment. Stripe Checkout shows the price
+                // before anything is charged, so she is not asked to pay blind.
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {planPrices.isError
+                    ? 'We could not load the price just now. Stripe shows it before you pay.'
+                    : 'The price is not available right now. Stripe shows it before you pay.'}
+                </p>
+              )}
+            </div>
+            <PlanFeatures features={PRO_FEATURES} />
+            {isPremium ? (
+              <button disabled className="w-full btn-outline py-2.5 cursor-default">
+                Current Plan
+              </button>
+            ) : (
+              <button
+                onClick={() => createCheckout.mutate(PRO_TIER)}
+                disabled={createCheckout.isPending}
+                className="w-full py-2.5 text-center disabled:opacity-50 btn-primary"
+              >
+                {createCheckout.isPending ? 'Opening checkout...' : 'Upgrade'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-6 flex items-start gap-3 rounded-lg border border-slate-200 p-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+          <Building2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-400" />
+          <p>
+            Buying for a team or an organisation? That is arranged with us directly rather than
+            through checkout.{' '}
+            <Link href="/contact-sales" className="font-medium text-primary-600 hover:text-primary-700">
+              Talk to us
+            </Link>
+          </p>
         </div>
       </div>
 
@@ -396,12 +472,13 @@ function BillingContent() {
               <div className="p-2 bg-white dark:bg-slate-700 rounded-lg shadow-sm">
                 <CreditCard className="w-6 h-6 text-slate-600 dark:text-slate-400" />
               </div>
+              {/* ATHENA does not hold card details; Stripe does. This used to
+                  read a cardLast4 field nothing ever returned, and so told every
+                  paying member she had no saved payment method. */}
               <div>
-                <p className="font-medium text-slate-900 dark:text-white">
-                  {subscription?.cardLast4 ? `•••• •••• •••• ${subscription.cardLast4}` : 'No saved payment method'}
-                </p>
+                <p className="font-medium text-slate-900 dark:text-white">Held securely by Stripe</p>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {subscription?.cardExpiry ? `Expires ${subscription.cardExpiry}` : 'Use the billing portal to add or update a card'}
+                  See or change the card you pay with in the billing portal
                 </p>
               </div>
             </div>
@@ -426,70 +503,30 @@ function BillingContent() {
               onClick={handleManageBilling}
               className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center space-x-1"
             >
-              <span>View All</span>
+              <span>Stripe receipts</span>
               <ExternalLink className="w-4 h-4" />
             </button>
           )}
         </div>
-        {isPremium && subscription?.invoices?.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
-                    Date
-                  </th>
-                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
-                    Description
-                  </th>
-                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
-                    Amount
-                  </th>
-                  <th className="text-left py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
-                    Status
-                  </th>
-                  <th className="text-right py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
-                    Invoice
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {subscription.invoices.map((invoice: any) => (
-                  <tr key={invoice.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="py-3 text-sm text-slate-900 dark:text-white">
-                      {formatDate(invoice.date)}
-                    </td>
-                    <td className="py-3 text-sm text-slate-600 dark:text-slate-300">
-                      {invoice.description || 'ATHENA Pro - Monthly'}
-                    </td>
-                    <td className="py-3 text-sm text-slate-900 dark:text-white">
-                      {formatCurrency(invoice.amount)}
-                    </td>
-                    <td className="py-3">
-                      <span className="px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full">
-                        Paid
-                      </span>
-                    </td>
-                    <td className="py-3 text-right">
-                      <a
-                        href={safeHref(invoice.invoiceUrl)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary-600 hover:text-primary-700"
-                      >
-                        <Download className="w-4 h-4" />
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
-            No billing history available
+        {/* The history table here read an `invoices` list that the subscription
+            endpoint never returns, so every paying member was told she had no
+            billing history. The tax invoices ATHENA issues are listed on their
+            own page, and Stripe keeps the receipts. */}
+        <div className="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+          <FileText className="mt-0.5 h-5 w-5 flex-shrink-0 text-slate-400" />
+          <p>
+            Your tax invoices are on the{' '}
+            <Link
+              href="/dashboard/finance/invoices"
+              className="font-medium text-primary-600 hover:text-primary-700"
+            >
+              Invoices page
+            </Link>
+            {isPremium
+              ? ', and every payment receipt is in the Stripe billing portal.'
+              : '.'}
           </p>
-        )}
+        </div>
       </div>
 
       {/* Cancel Subscription Modal */}
@@ -522,5 +559,18 @@ function BillingContent() {
         </div>
       )}
     </div>
+  );
+}
+
+function PlanFeatures({ features }: { features: string[] }) {
+  return (
+    <ul className="space-y-3 mb-6">
+      {features.map((feature) => (
+        <li key={feature} className="flex items-start space-x-2">
+          <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+          <span className="text-sm text-slate-600 dark:text-slate-300">{feature}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

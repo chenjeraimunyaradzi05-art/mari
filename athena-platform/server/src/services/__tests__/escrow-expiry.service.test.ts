@@ -34,6 +34,10 @@ jest.mock('../../utils/logger', () => ({
 
 jest.mock('../stripe-connect.service', () => ({
   captureEscrowPayment: jest.fn(async () => ({ status: 'succeeded', amountCaptured: 1000 })),
+  // Stripe still holding it is the answer that leaves the old behaviour in
+  // place, so it is the default; the tests about resolution say otherwise.
+  resolveLapsedEscrowHold: jest.fn(async () => ({ state: 'still_held' })),
+  minorUnitScale: () => 100,
 }));
 
 import { prisma } from '../../utils/prisma';
@@ -43,6 +47,7 @@ import { runEscrowExpirySweep } from '../escrow-expiry.service';
 
 const prismaAny: any = prisma;
 const captureMock = stripeConnect.captureEscrowPayment as jest.Mock;
+const resolveMock = stripeConnect.resolveLapsedEscrowHold as jest.Mock;
 const errorMock = logger.error as jest.Mock;
 const warnMock = logger.warn as jest.Mock;
 
@@ -59,6 +64,10 @@ const hold = (overrides: Record<string, unknown> = {}) => ({
   currency: 'AUD',
   createdAt: daysAgo(6),
   description: 'Car inspection',
+  status: 'AUTHORIZED',
+  sessionType: null,
+  metadata: null,
+  serviceOrder: null,
   ...overrides,
 });
 
@@ -229,5 +238,160 @@ describe('Escrow holds approaching the end of their authorisation', () => {
 
       expect(prismaAny.notification.create).not.toHaveBeenCalled();
     });
+  });
+});
+
+// A lapsed hold used to stay PENDING or AUTHORIZED for good, and every one was
+// reported as money that "may no longer be collectable" — including the ones
+// whose capture had succeeded and only the row update had failed, so the
+// seller had been paid and the admins were told she might not have been.
+describe('Holds that have outlived their authorisation are settled to what Stripe says', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete process.env.ESCROW_CAPTURE_BEFORE_EXPIRY;
+    prismaAny.mentorSession.findMany.mockResolvedValue([]);
+    prismaAny.user.findMany.mockResolvedValue([{ id: 'admin-1' }]);
+    prismaAny.notification.findFirst.mockResolvedValue(null);
+  });
+
+  const titlesSent = () =>
+    prismaAny.notification.create.mock.calls.map((call: any[]) => call[0].data.title);
+
+  it('counts a hold Stripe had in fact captured as repaired, and does not report the seller as unpaid', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ createdAt: daysAgo(9) })]);
+    resolveMock.mockResolvedValueOnce({ state: 'captured', changed: true });
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(resolveMock).toHaveBeenCalledWith('pi_1');
+    expect(result.repaired).toBe(1);
+    expect(result.alreadyLapsed).toBe(0);
+    expect(titlesSent()).not.toContain('Escrow holds need attention');
+  });
+
+  it('tells the buyer, the seller and the admins when Stripe let a hold expire', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([
+      hold({ createdAt: daysAgo(9), sessionType: 'car_service' }),
+    ]);
+    resolveMock.mockResolvedValueOnce({ state: 'expired', changed: true });
+    // A standing notice was sent within the day; a one-off expiry must still go.
+    prismaAny.notification.findFirst.mockResolvedValue({ id: 'notif-earlier' });
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.expired).toBe(1);
+    expect(result.alreadyLapsed).toBe(0);
+
+    const created = prismaAny.notification.create.mock.calls.map((call: any[]) => call[0].data);
+    const buyer = created.find((d: any) => d.userId === 'buyer-1');
+    const seller = created.find((d: any) => d.userId === 'seller-1');
+    const admin = created.find((d: any) => d.userId === 'admin-1');
+
+    expect(buyer.message).toMatch(/not been charged/);
+    expect(buyer.message).toContain('$250.00');
+    expect(buyer.link).toBe('/dashboard/cars/bookings');
+    expect(seller.message).toMatch(/has not reached you/);
+    expect(admin.title).toBe('Escrow holds expired before release');
+    expect(admin.data.escrowIds).toEqual(['escrow-1']);
+  });
+
+  it('tells nobody again about a hold another process had already settled', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ createdAt: daysAgo(9) })]);
+    resolveMock.mockResolvedValueOnce({ state: 'expired', changed: false });
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.expired).toBe(1);
+    expect(prismaAny.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('does not count a hold nobody ever paid for as lost money', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ createdAt: daysAgo(9), status: 'PENDING' })]);
+    resolveMock.mockResolvedValueOnce({ state: 'unpaid' });
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.neverPaid).toBe(1);
+    expect(result.alreadyLapsed).toBe(0);
+    expect(titlesSent()).not.toContain('Escrow holds need attention');
+  });
+
+  it('falls back to reporting the hold as lapsed when Stripe cannot be asked', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ createdAt: daysAgo(9) })]);
+    resolveMock.mockRejectedValueOnce(new Error('stripe is down'));
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.alreadyLapsed).toBe(1);
+    expect(titlesSent()).toContain('Escrow holds need attention');
+  });
+});
+
+// The buyer is the one whose confirmation releases most holds, and nothing
+// used to ask her. Only admins were told, and only in a log line until lately.
+describe('Asking the buyer to release a hold before it lapses', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete process.env.ESCROW_CAPTURE_BEFORE_EXPIRY;
+    prismaAny.mentorSession.findMany.mockResolvedValue([]);
+    prismaAny.user.findMany.mockResolvedValue([]);
+    prismaAny.notification.findFirst.mockResolvedValue(null);
+  });
+
+  const buyerNotices = () =>
+    prismaAny.notification.create.mock.calls
+      .map((call: any[]) => call[0].data)
+      .filter((d: any) => d.userId === 'buyer-1');
+
+  it('asks her once, with a link to the order she releases it from and the day it expires', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([
+      hold({ sessionType: 'service_order', serviceOrder: { id: 'order-7' } }),
+    ]);
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.buyersReminded).toBe(1);
+    const [notice] = buyerNotices();
+    expect(notice.title).toBe('A payment is waiting for you to release it');
+    expect(notice.link).toBe('/skills-marketplace/orders/order-7');
+    expect(notice.data).toEqual({ kind: 'ESCROW_RELEASE_REMINDER', escrowId: 'escrow-1' });
+    // Created six days before 17 September, so it lapses on the 18th.
+    expect(notice.message).toMatch(/18 September/);
+    expect(notice.message).toContain('$250.00');
+  });
+
+  it('does not ask her twice about the same hold', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ sessionType: 'car_service' })]);
+    prismaAny.notification.findFirst.mockResolvedValue({ id: 'already-asked' });
+
+    const result = await runEscrowExpirySweep(NOW);
+
+    expect(result.buyersReminded).toBe(0);
+    expect(buyerNotices()).toHaveLength(0);
+  });
+
+  it('does not ask about a payment she never completed', async () => {
+    prismaAny.escrowPayment.findMany.mockResolvedValue([
+      hold({ sessionType: 'car_service', status: 'PENDING' }),
+    ]);
+
+    await runEscrowExpirySweep(NOW);
+    expect(buyerNotices()).toHaveLength(0);
+  });
+
+  it('does not ask a buyer who has no screen to release it from', async () => {
+    // A mentor session is released when the session is completed, not by her.
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ sessionType: 'mentor_session' })]);
+
+    await runEscrowExpirySweep(NOW);
+    expect(buyerNotices()).toHaveLength(0);
+  });
+
+  it('does not ask her when the platform is capturing early instead', async () => {
+    process.env.ESCROW_CAPTURE_BEFORE_EXPIRY = 'true';
+    prismaAny.escrowPayment.findMany.mockResolvedValue([hold({ sessionType: 'car_service' })]);
+
+    await runEscrowExpirySweep(NOW);
+    expect(buyerNotices()).toHaveLength(0);
   });
 });

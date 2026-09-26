@@ -815,26 +815,55 @@ export function paidChargeFromStripeInvoice(invoice: Stripe.Invoice): PaidSubscr
   };
 }
 
+type InvoiceRow = Prisma.InvoiceGetPayload<Record<string, never>>;
+
 /**
- * Writes the row, minting a fresh number if two issuers raced for the same
- * one: the sequence is a count, so two webhooks landing together can both
- * compute the next number and the second create trips the unique index.
+ * Files an invoice once: looks for the one already filed against `existing`,
+ * and writes a new row only if there is none — with the look and the write
+ * holding one lock, keyed on what the invoice is for.
+ *
+ * The look used to be a findFirst and the write a separate create, with nothing
+ * between them. Invoice.paymentId has no unique index, so the Stripe webhook and
+ * an admin re-issue arriving together could each find nothing and each mint a
+ * number: two tax invoices, each showing GST, for one payment. The lock is a
+ * Postgres transaction-scoped advisory lock on `lockKey`, so the second issuer
+ * waits for the first to commit and then finds its row. It is released when the
+ * transaction ends, whichever way it ends. A unique index on paymentId would
+ * say the same thing in the schema, and is asked for separately; this holds
+ * until it exists and costs nothing after.
+ *
+ * A retry still re-mints the number if two issuers for *different* things
+ * raced for the same one: the sequence is a count, so two webhooks landing
+ * together can both compute the next number and the second create trips the
+ * unique index. That error aborts the transaction, so the retry runs a new one.
  */
-async function createInvoiceRow(data: Omit<Prisma.InvoiceUncheckedCreateInput, 'invoiceNumber' | 'pdfUrl'>) {
+async function fileInvoiceOnce(
+  lockKey: string,
+  existing: Prisma.InvoiceWhereInput,
+  data: Omit<Prisma.InvoiceUncheckedCreateInput, 'invoiceNumber' | 'pdfUrl'>
+): Promise<{ invoice: InvoiceRow; created: boolean }> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const invoiceNumber = await generateInvoiceNumber();
     try {
-      return await prisma.invoice.create({
-        // pdfUrl is deliberately not written. It used to be set to
-        // `invoices/<number>.pdf`, which is a path nothing ever stores a file
-        // at: the PDF is rendered on demand by GET /api/invoices/:id/pdf and
-        // never persisted. A grep for pdfUrl across the server and the client
-        // found the write and no reader, so the column said a document was
-        // filed somewhere when none was — and the first reader anyone added
-        // would have got a 404 for every invoice ever issued. Left null, it
-        // says the true thing: there is no stored file, only a renderer.
-        data: { ...data, invoiceNumber },
+      return await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+        const filed = await tx.invoice.findFirst({ where: existing });
+        if (filed) return { invoice: filed, created: false };
+
+        const invoiceNumber = await generateInvoiceNumber(tx);
+        const invoice = await tx.invoice.create({
+          // pdfUrl is deliberately not written. It used to be set to
+          // `invoices/<number>.pdf`, which is a path nothing ever stores a file
+          // at: the PDF is rendered on demand by GET /api/invoices/:id/pdf and
+          // never persisted. A grep for pdfUrl across the server and the client
+          // found the write and no reader, so the column said a document was
+          // filed somewhere when none was — and the first reader anyone added
+          // would have got a 404 for every invoice ever issued. Left null, it
+          // says the true thing: there is no stored file, only a renderer.
+          data: { ...data, invoiceNumber },
+        });
+        return { invoice, created: true };
       });
     } catch (err: any) {
       if (err?.code !== 'P2002') throw err;
@@ -921,8 +950,6 @@ export async function createInvoiceForPayment(
     throw new ApiError(404, 'Payment not found');
   }
 
-  const existing = await prisma.invoice.findFirst({ where: { paymentId: payment.id } });
-
   const total = payment.amount.toNumber();
   const tax = taxTreatmentFor({
     total,
@@ -933,7 +960,7 @@ export async function createInvoiceForPayment(
 
   // Build invoice data
   const invoiceData: InvoiceData = {
-    invoiceNumber: existing?.invoiceNumber ?? '',
+    invoiceNumber: '',
     invoiceDate: payment.createdAt,
     dueDate: payment.createdAt, // Immediate for completed payments
     status: payment.status === 'COMPLETED' ? 'PAID' : 'SENT',
@@ -977,43 +1004,35 @@ export async function createInvoiceForPayment(
   // situation a re-issue exists for.
   const emailRecipient = options?.sendEmail ? payment.user?.email : undefined;
 
-  if (existing) {
-    return {
-      invoiceId: existing.id,
-      invoiceNumber: existing.invoiceNumber,
-      created: false,
-      pdf: await generateInvoicePDF({ ...invoiceData, status: existing.status as InvoiceData['status'] }),
-      emailed: emailRecipient
-        ? await emailInvoiceReady({
-            to: emailRecipient,
-            invoiceNumber: existing.invoiceNumber,
-            documentTitle: tax.title,
-            total,
-            currency: payment.currency,
-          })
-        : 'not_requested',
-    };
+  const { invoice, created } = await fileInvoiceOnce(
+    `invoice:payment:${payment.id}`,
+    { paymentId: payment.id },
+    {
+      userId: payment.userId,
+      paymentId: payment.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: invoiceData.status,
+      issuedAt: invoiceData.invoiceDate,
+      dueAt: invoiceData.dueDate,
+      paidAt: invoiceData.paymentDate,
+    }
+  );
+
+  if (created) {
+    logger.info(`Generated invoice ${invoice.invoiceNumber} for payment ${paymentId}`);
   }
-
-  // Store invoice in database
-  const invoice = await createInvoiceRow({
-    userId: payment.userId,
-    paymentId: payment.id,
-    amount: payment.amount,
-    currency: payment.currency,
-    status: invoiceData.status,
-    issuedAt: invoiceData.invoiceDate,
-    dueAt: invoiceData.dueDate,
-    paidAt: invoiceData.paymentDate,
-  });
-
-  logger.info(`Generated invoice ${invoice.invoiceNumber} for payment ${paymentId}`);
 
   return {
     invoiceId: invoice.id,
     invoiceNumber: invoice.invoiceNumber,
-    created: true,
-    pdf: await generateInvoicePDF({ ...invoiceData, invoiceNumber: invoice.invoiceNumber }),
+    created,
+    // A re-issue renders the filed invoice with the status it was filed under.
+    pdf: await generateInvoicePDF({
+      ...invoiceData,
+      invoiceNumber: invoice.invoiceNumber,
+      ...(created ? {} : { status: invoice.status as InvoiceData['status'] }),
+    }),
     emailed: emailRecipient
       ? await emailInvoiceReady({
           to: emailRecipient,
@@ -1056,10 +1075,6 @@ export async function createInvoiceForSubscription(
     throw new ApiError(404, 'Subscription not found');
   }
 
-  const existing = await prisma.invoice.findFirst({
-    where: { subscriptionId: subscription.id, paidAt: paid.paidAt },
-  });
-
   const period =
     paid.periodStart && paid.periodEnd
       ? ` (${formatDate(paid.periodStart)} to ${formatDate(paid.periodEnd)})`
@@ -1075,7 +1090,7 @@ export async function createInvoiceForSubscription(
   });
 
   const invoiceData: InvoiceData = {
-    invoiceNumber: existing?.invoiceNumber ?? '',
+    invoiceNumber: '',
     invoiceDate: paid.paidAt,
     dueDate: paid.paidAt,
     status: 'PAID',
@@ -1106,38 +1121,36 @@ export async function createInvoiceForSubscription(
     paymentDate: paid.paidAt,
   };
 
-  if (existing) {
-    return {
-      invoiceId: existing.id,
-      invoiceNumber: existing.invoiceNumber,
-      created: false,
-      pdf: await generateInvoicePDF(invoiceData),
-      // The membership invoice path has no sendEmail option and never had one;
-      // it is called by the Stripe webhook, which must not block on a mail
-      // server. Named rather than left off, so the field means the same thing
-      // everywhere it appears.
-      emailed: 'not_requested',
-    };
+  const { invoice, created } = await fileInvoiceOnce(
+    // Keyed on the subscription and the instant Stripe says it was paid, which
+    // is what makes two deliveries of the same invoice.paid the same invoice.
+    `invoice:subscription:${subscription.id}:${paid.paidAt.toISOString()}`,
+    { subscriptionId: subscription.id, paidAt: paid.paidAt },
+    {
+      userId: subscription.userId,
+      subscriptionId: subscription.id,
+      amount: paid.amount,
+      currency: paid.currency,
+      status: 'PAID',
+      issuedAt: paid.paidAt,
+      dueAt: paid.paidAt,
+      paidAt: paid.paidAt,
+    }
+  );
+
+  if (created) {
+    logger.info(`Generated subscription invoice ${invoice.invoiceNumber}`, { subscriptionId: subscription.id });
   }
-
-  const invoice = await createInvoiceRow({
-    userId: subscription.userId,
-    subscriptionId: subscription.id,
-    amount: paid.amount,
-    currency: paid.currency,
-    status: 'PAID',
-    issuedAt: paid.paidAt,
-    dueAt: paid.paidAt,
-    paidAt: paid.paidAt,
-  });
-
-  logger.info(`Generated subscription invoice ${invoice.invoiceNumber}`, { subscriptionId: subscription.id });
 
   return {
     invoiceId: invoice.id,
     invoiceNumber: invoice.invoiceNumber,
-    created: true,
+    created,
     pdf: await generateInvoicePDF({ ...invoiceData, invoiceNumber: invoice.invoiceNumber }),
+    // The membership invoice path has no sendEmail option and never had one;
+    // it is called by the Stripe webhook, which must not block on a mail
+    // server. Named rather than left off, so the field means the same thing
+    // everywhere it appears.
     emailed: 'not_requested',
   };
 }
@@ -1145,12 +1158,12 @@ export async function createInvoiceForSubscription(
 /**
  * Generate unique invoice number
  */
-async function generateInvoiceNumber(): Promise<string> {
+async function generateInvoiceNumber(db: Prisma.TransactionClient): Promise<string> {
   const year = new Date().getFullYear();
   const month = String(new Date().getMonth() + 1).padStart(2, '0');
   
   // Get count of invoices this month
-  const count = await prisma.invoice.count({
+  const count = await db.invoice.count({
     where: {
       invoiceNumber: {
         startsWith: `INV-${year}${month}`,

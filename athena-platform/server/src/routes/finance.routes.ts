@@ -12,6 +12,28 @@ const router = Router();
 // SAVINGS GOALS
 // ===========================================
 
+/**
+ * Auto-save cannot be switched on, because nothing performs it.
+ *
+ * The invest page offered "Auto-save this on the emergency fund", set this flag
+ * and an amount, and told the member "Auto-save of $X a month set". No job
+ * reads the flag and none can: ATHENA holds no mandate or stored payment method
+ * to move a member's money off-session (utils/queue.ts records why the job is
+ * deliberately absent). A member told her savings were automatic had nothing
+ * going into them. Refused here rather than accepted and ignored, so no screen
+ * can make the claim again; `false` is still accepted, so a goal saved with the
+ * flag on before this can be switched off.
+ */
+const AUTO_SAVE_REFUSAL =
+  'ATHENA cannot move money into your savings automatically. Set a monthly target on the goal and a recurring transfer with your bank instead.';
+
+const refuseAutoSaveOn = (value: unknown) => {
+  if (value === true || value === 'true') {
+    throw new Error(AUTO_SAVE_REFUSAL);
+  }
+  return true;
+};
+
 // GET /api/finance/savings-goals - Get user's savings goals
 router.get(
   '/savings-goals',
@@ -60,7 +82,7 @@ router.post(
     body('targetAmount').isFloat({ gt: 0 }).withMessage('Target amount must be greater than 0'),
     body('targetDate').optional().isISO8601(),
     body('monthlyTarget').optional().isNumeric(),
-    body('autoSaveEnabled').optional().isBoolean(),
+    body('autoSaveEnabled').optional().isBoolean().bail().custom(refuseAutoSaveOn),
     body('autoSaveAmount').optional().isNumeric(),
   ],
   async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -182,7 +204,7 @@ router.patch(
     body('targetAmount').optional().isFloat({ gt: 0 }).withMessage('Target amount must be greater than 0'),
     body('targetDate').optional().isISO8601(),
     body('monthlyTarget').optional().isNumeric(),
-    body('autoSaveEnabled').optional().isBoolean(),
+    body('autoSaveEnabled').optional().isBoolean().bail().custom(refuseAutoSaveOn),
     body('autoSaveAmount').optional().isNumeric(),
     body('status').optional().isIn(['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']),
   ],
@@ -504,7 +526,11 @@ router.patch(
           ...(personalContr !== undefined && { personalContr: Number(personalContr) }),
           ...(investmentOpt && { investmentOpt }),
           ...(insuranceInc !== undefined && { insuranceInc }),
-          lastSyncAt: new Date(),
+          // lastSyncAt is not touched. It used to be set to now on every edit,
+          // so a balance the member had typed in by hand went out through this
+          // API and her data export stamped as synced from her fund, when
+          // nothing had asked the fund anything. ATHENA has no super-fund feed;
+          // the column stays empty until something real fills it.
         },
       });
 
@@ -587,7 +613,10 @@ async function computeFinancialHealthScore(userId: string) {
         emergencyFundScore < 50 && 'Build your emergency fund to cover 3-6 months of expenses',
         superScore < 70 && 'Consider salary sacrificing into your super',
         insuranceScore < 50 && 'Review your income protection options',
-        savingsRateScore < 50 && 'Set up automatic savings transfers',
+        // With her bank. ATHENA cannot move money into savings for her (see
+        // the auto-save refusal on the savings-goal routes), and the old
+        // wording sat beside an auto-save toggle that read as though it could.
+        savingsRateScore < 50 && 'Set up an automatic transfer into savings with your bank on payday',
       ].filter(Boolean),
       measures: SCORE_MEASURES,
     },

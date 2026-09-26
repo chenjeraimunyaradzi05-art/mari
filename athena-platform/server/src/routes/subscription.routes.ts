@@ -4,9 +4,14 @@ import { getStripe } from '../utils/stripe';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { getPriceIdForTier, SubscriptionTierKey } from '../config/regions';
 import { getCurrencyForUser } from '../utils/region';
+import {
+  PAID_TIERS,
+  isPlaceholderPriceId,
+  getSubscriptionPlanPrices,
+} from '../services/payments-orchestration.service';
 
 // Must match TRIAL_DAYS in client/src/lib/pricing.ts, which is what the
 // pricing page and its FAQ render. If these two drift, the site advertises
@@ -28,12 +33,11 @@ const router = Router();
 // getStripe() throws 503 'Payments are not configured on this deployment' on
 // first use, and elsewhere the placeholder key is refused by Stripe.
 
-const VALID_TIERS: SubscriptionTierKey[] = [
-  'PREMIUM_CAREER',
-  'PREMIUM_PROFESSIONAL',
-  'PREMIUM_ENTREPRENEUR',
-  'PREMIUM_CREATOR',
-];
+// The tiers checkout sells, and the placeholder price ids it refuses, live in
+// payments-orchestration beside the price reader that /plans and the mobile
+// pricing endpoint share, so the tiers a page prices and the tiers checkout
+// accepts cannot drift apart.
+const VALID_TIERS: SubscriptionTierKey[] = PAID_TIERS;
 
 // Price IDs for subscription tiers are resolved per currency in config/regions.ts
 //
@@ -44,16 +48,9 @@ const VALID_TIERS: SubscriptionTierKey[] = [
 // starts cleanly and the first anyone hears of it is a member pressing Upgrade
 // and getting Stripe's 'No such price: price_career' back as a 500.
 //
-// These are the exact fallbacks in config/regions.ts. If a tier is added there
-// its placeholder belongs here too; a placeholder missing from this list is not
-// a crash, it is the old behaviour back again, which is why the list is written
-// out rather than inferred from a pattern that a real price id might also match.
-const PLACEHOLDER_PRICE_IDS = new Set([
-  'price_career',
-  'price_professional',
-  'price_entrepreneur',
-  'price_creator',
-]);
+// The placeholders themselves are listed in payments-orchestration
+// (isPlaceholderPriceId), written out rather than inferred from a pattern that a
+// real price id might also match.
 
 /**
  * Refuses a checkout that would be sent to Stripe with a price that does not
@@ -64,7 +61,7 @@ const PLACEHOLDER_PRICE_IDS = new Set([
  * than left to decode a Stripe error.
  */
 function assertRealPriceId(priceId: string, tier: SubscriptionTierKey, currency: string): void {
-  if (!PLACEHOLDER_PRICE_IDS.has(priceId)) return;
+  if (!isPlaceholderPriceId(priceId)) return;
 
   logger.error('A checkout was attempted against a placeholder Stripe price id', {
     tier,
@@ -94,6 +91,49 @@ router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
     res.json({
       success: true,
       data: subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================================
+// WHAT EACH TIER COSTS
+// ===========================================
+/**
+ * The price of every paid tier, read from the Stripe price checkout will
+ * charge, in the currency checkout will charge it in.
+ *
+ * The billing and pricing pages used to print their own numbers - A$29 and
+ * A$99 a month, A$290 a year - while the Pro button started a checkout for
+ * whatever the Stripe price really was, and no yearly price existed at all.
+ * They read this instead, so the price shown at the point of sale is the one
+ * charged.
+ *
+ * Public, because the pricing page is. A signed-in member is priced in her own
+ * currency exactly as checkout resolves it; anyone else in the currency they
+ * ask for, or Australian dollars.
+ */
+router.get('/plans', optionalAuth, async (req: AuthRequest, res, next) => {
+  try {
+    let currency: string;
+
+    if (req.user) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { region: true, preferredCurrency: true },
+      });
+      currency = getCurrencyForUser(user);
+    } else {
+      const asked = typeof req.query.currency === 'string' ? req.query.currency.trim() : '';
+      currency = /^[A-Za-z]{3}$/.test(asked) ? asked.toUpperCase() : getCurrencyForUser(null);
+    }
+
+    const plans = await getSubscriptionPlanPrices(currency);
+
+    res.json({
+      success: true,
+      data: { currency, trialDays: TRIAL_DAYS, plans },
     });
   } catch (error) {
     next(error);
@@ -181,8 +221,12 @@ router.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
             },
           }
         : {}),
-      success_url: `${process.env.CLIENT_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/subscription/cancel`,
+      // Both used to name /subscription/success and /subscription/cancel, and
+      // neither page exists: a member who had just paid landed on a 404 with no
+      // word on whether it had worked. The billing page reads the flag and
+      // says what happened.
+      success_url: `${process.env.CLIENT_URL}/dashboard/settings/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.CLIENT_URL}/dashboard/settings/billing?checkout=cancelled`,
       metadata: {
         userId: user.id,
         tier,
@@ -219,7 +263,9 @@ router.post('/portal', authenticate, async (req: AuthRequest, res, next) => {
 
     const session = await getStripe().billingPortal.sessions.create({
       customer: subscription.stripeCustomerId,
-      return_url: `${process.env.CLIENT_URL}/settings/billing`,
+      // /settings/billing does not exist; the billing page is under /dashboard.
+      // A member who finished in the Stripe portal was sent back to a 404.
+      return_url: `${process.env.CLIENT_URL}/dashboard/settings/billing`,
     });
 
     res.json({

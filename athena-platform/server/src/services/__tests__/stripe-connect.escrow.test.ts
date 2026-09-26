@@ -15,6 +15,7 @@ jest.mock('../../utils/prisma', () => ({
       create: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(async () => ({ count: 1 })),
       findMany: jest.fn(async () => []),
       groupBy: jest.fn(async () => []),
     },
@@ -49,6 +50,7 @@ import {
   captureEscrowPayment,
   cancelEscrowPayment,
   getEarningsDashboard,
+  resolveLapsedEscrowHold,
   PLATFORM_ESCROW_ACTOR,
 } from '../stripe-connect.service';
 
@@ -324,9 +326,9 @@ describe('What a seller is told she has earned', () => {
       creatorProfile: null,
     });
     prisma.escrowPayment.groupBy.mockResolvedValue([
-      { currency: 'aud', status: 'CAPTURED', _sum: { amount: 500000, platformFee: 75000 } },
-      { currency: 'aud', status: 'AUTHORIZED', _sum: { amount: 20000, platformFee: 3000 } },
-      { currency: 'usd', status: 'CAPTURED', _sum: { amount: 10000, platformFee: 1500 } },
+      { currency: 'aud', status: 'CAPTURED', _sum: { amount: 500000, platformFee: 75000 }, _count: { _all: 34 } },
+      { currency: 'aud', status: 'AUTHORIZED', _sum: { amount: 20000, platformFee: 3000 }, _count: { _all: 2 } },
+      { currency: 'usd', status: 'CAPTURED', _sum: { amount: 10000, platformFee: 1500 }, _count: { _all: 1 } },
     ]);
     prisma.escrowPayment.findMany.mockResolvedValue([]);
 
@@ -337,9 +339,55 @@ describe('What a seller is told she has earned', () => {
     expect(dashboard.totalEarnings).toBe(425000);
     expect(dashboard.pendingPayouts).toBe(17000);
     expect(dashboard.byCurrency).toEqual([
-      { currency: 'AUD', totalEarnings: 425000, pendingPayouts: 17000 },
-      { currency: 'USD', totalEarnings: 8500, pendingPayouts: 0 },
+      // Thirty-four sessions, although the recent-activity list is twenty long:
+      // the client used to count sessions from that list and stopped at twenty.
+      { currency: 'AUD', totalEarnings: 425000, pendingPayouts: 17000, completedCount: 34 },
+      { currency: 'USD', totalEarnings: 8500, pendingPayouts: 0, completedCount: 1 },
     ]);
+  });
+
+  it('gives the chart a monthly series from the captured rows, in Queensland months and per currency', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      stripeConnectAccountId: null,
+      mentorProfile: null,
+      creatorProfile: null,
+    });
+    prisma.escrowPayment.groupBy.mockResolvedValue([]);
+    const now = new Date();
+    const thisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15, 2));
+    // 20:00 UTC on the last day of a month is 06:00 on the 1st in Brisbane,
+    // so this one belongs to the following month.
+    const lastDayLate = new Date(Date.UTC(2026, 6, 31, 20));
+    prisma.escrowPayment.findMany.mockImplementation(async (args: any) =>
+      args?.select
+        ? [
+            { amount: 10000, platformFee: 1500, currency: 'aud', capturedAt: thisMonth },
+            { amount: 20000, platformFee: 3000, currency: 'aud', capturedAt: thisMonth },
+            { amount: 5000, platformFee: 750, currency: 'usd', capturedAt: thisMonth },
+            { amount: 4000, platformFee: 600, currency: 'aud', capturedAt: lastDayLate },
+          ]
+        : []
+    );
+
+    const dashboard = await getEarningsDashboard(SELLER.id);
+
+    const seriesQuery = prisma.escrowPayment.findMany.mock.calls
+      .map((call: any[]) => call[0])
+      .find((args: any) => args?.select);
+    expect(seriesQuery.where).toMatchObject({ sellerId: SELLER.id, status: { in: ['CAPTURED'] } });
+    expect(seriesQuery.where.capturedAt.gte).toBeInstanceOf(Date);
+
+    const month = thisMonth.toISOString().slice(0, 7);
+    expect(dashboard.monthly).toEqual(
+      expect.arrayContaining([
+        { month: '2026-08', currency: 'AUD', earnings: 3400, count: 1 },
+        { month, currency: 'AUD', earnings: 25500, count: 2 },
+        { month, currency: 'USD', earnings: 4250, count: 1 },
+      ])
+    );
+    // Oldest first, so the chart can draw it as it comes.
+    const months = dashboard.monthly.map((m) => m.month);
+    expect([...months].sort()).toEqual(months);
   });
 
   it('says the balance is unknown rather than zero when Stripe cannot be reached', async () => {
@@ -383,5 +431,48 @@ describe('What a seller is told she has earned', () => {
 
     expect(dashboard.availableBalance).toBe(120000);
     expect(dashboard.balanceUnavailable).toBe(false);
+  });
+});
+
+describe('Settling a hold that has outlived its authorisation', () => {
+  it('marks a hold Stripe captured as CAPTURED, and only if it is still held', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValue({ status: 'succeeded', amount_received: 25000 });
+
+    const outcome = await resolveLapsedEscrowHold('pi_1');
+
+    expect(outcome).toEqual({ state: 'captured', changed: true });
+    const [args] = prisma.escrowPayment.updateMany.mock.calls[0];
+    expect(args.where).toEqual({ paymentIntentId: 'pi_1', status: { in: ['PENDING', 'AUTHORIZED'] } });
+    expect(args.data.status).toBe('CAPTURED');
+  });
+
+  it('marks a hold Stripe cancelled as CANCELED with the reason, and says when nothing changed', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValue({
+      status: 'canceled',
+      cancellation_reason: 'automatic',
+      canceled_at: 1789000000,
+    });
+    prisma.escrowPayment.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    const outcome = await resolveLapsedEscrowHold('pi_1');
+
+    // A release got there first; the caller must not tell anyone again.
+    expect(outcome).toEqual({ state: 'expired', changed: false });
+    const [args] = prisma.escrowPayment.updateMany.mock.calls[0];
+    expect(args.data).toMatchObject({
+      status: 'CANCELED',
+      cancelReason: 'The card authorisation lapsed before the payment was released',
+      canceledAt: new Date(1789000000 * 1000),
+    });
+  });
+
+  it('leaves a hold Stripe still holds, and one nobody paid for, exactly as they are', async () => {
+    stripe.paymentIntents.retrieve.mockResolvedValueOnce({ status: 'requires_capture' });
+    expect(await resolveLapsedEscrowHold('pi_1')).toEqual({ state: 'still_held' });
+
+    stripe.paymentIntents.retrieve.mockResolvedValueOnce({ status: 'requires_payment_method' });
+    expect(await resolveLapsedEscrowHold('pi_1')).toEqual({ state: 'unpaid' });
+
+    expect(prisma.escrowPayment.updateMany).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
+import { assertOrgMembership } from '../utils/org-scope';
+import { booksScope } from './accounting.service';
 
 const toDecimal = (value: number) => new Prisma.Decimal(value);
 const CURRENCY_REGEX = /^[A-Z]{3}$/;
@@ -102,12 +104,23 @@ export async function updateTaxRate(id: string, data: {
   });
 }
 
-export async function listTaxReturns(params: { organizationId?: string; userId?: string }) {
+/**
+ * The returns in one set of books: an organisation's, for a member of it, or
+ * the caller's own personal ones.
+ *
+ * This used to AND the organisation with the caller's own id, so a BAS that one
+ * colleague lodged against the business could be listed by her and by nobody
+ * else in it — the bookkeeper, the co-founder, the person who has to answer the
+ * ATO's letter. It now resolves scope through booksScope, exactly as the ledger
+ * and the accounts beside it do: the organisation's returns for any member,
+ * and a 403 for anyone who is not one.
+ */
+export async function listTaxReturns(params: { organizationId?: string; userId: string }) {
+  const scope = await booksScope(params);
   return prisma.taxReturn.findMany({
-    where: {
-      organizationId: params.organizationId || undefined,
-      userId: params.userId || undefined,
-    },
+    where: scope.organizationId
+      ? { organizationId: scope.organizationId }
+      : { userId: scope.userId, organizationId: null },
     orderBy: { periodEnd: 'desc' },
   });
 }
@@ -142,6 +155,17 @@ export async function createTaxReturn(data: {
   }
   if (data.totalTax !== undefined && data.totalTax < 0) {
     throw new ApiError(400, 'Total tax must be non-negative');
+  }
+
+  // An organisation id from the request body used to be stamped on the return
+  // as given, so anyone could file a return into a business they have nothing
+  // to do with. Checked against membership, as every other write to the books
+  // is; lodgeBas has already checked and pays one more lookup for it.
+  if (data.organizationId) {
+    if (!data.userId) {
+      throw new ApiError(403, 'Access denied');
+    }
+    await assertOrgMembership(data.organizationId, data.userId);
   }
 
   return prisma.taxReturn.create({

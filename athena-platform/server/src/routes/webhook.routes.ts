@@ -17,7 +17,7 @@ import {
   confirmAcceleratorEnrollmentPayment,
   recordAcceleratorPaymentFailure,
 } from '../services/payments-orchestration.service';
-import { syncConnectedAccountFromStripe } from '../services/stripe-connect.service';
+import { syncConnectedAccountFromStripe, minorUnitScale } from '../services/stripe-connect.service';
 // Tax invoices: see the header of routes/invoice.routes.ts for who issues them.
 import {
   createInvoiceForPayment,
@@ -531,12 +531,29 @@ router.post(
             }
 
             const inferredTier = tierFromPriceId(priceId);
+
+            // What she is actually paying, from the price on the subscription
+            // itself. Nothing wrote these columns before, so the billing page
+            // had no amount to show and filled the gap with an invented A$29.
+            // Written only when Stripe gave a fixed amount; a price without one
+            // leaves the last known figure rather than blanking it.
+            const price = subscription.items?.data?.[0]?.price;
+            const billed =
+              price && typeof price.unit_amount === 'number' && price.currency
+                ? {
+                    amount: new Prisma.Decimal(price.unit_amount).div(minorUnitScale(price.currency)),
+                    currency: price.currency.toUpperCase(),
+                    interval: price.recurring?.interval ?? null,
+                  }
+                : {};
+
             await prisma.subscription.update({
               where: { id: dbSubscription.id },
               data: {
                 stripeCustomerId: customerId || undefined,
                 stripeSubscriptionId,
                 stripePriceId: priceId,
+                ...billed,
                 ...(inferredTier ? { tier: inferredTier } : {}),
                 status: mapStripeSubscriptionStatus(subscription.status),
                 currentPeriodStart: subscription.current_period_start

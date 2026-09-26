@@ -13,6 +13,15 @@
  * sooner than she agreed to, which is a decision for the operator rather than
  * for a background job, so the capture path is behind
  * ESCROW_CAPTURE_BEFORE_EXPIRY and is off unless it is deliberately turned on.
+ *
+ * With capture off, the person whose action actually releases the money is
+ * the buyer, so she is the one asked, while there is still time: once per hold,
+ * inside the warning window, with a link to the screen she releases it from.
+ * And a hold that has outlived its authorisation is no longer left in PENDING
+ * or AUTHORIZED for good. Stripe is asked what became of it and the row is
+ * settled to the answer: captured after all (the seller was paid and only the
+ * row was behind), or expired, in which case both parties are told and the
+ * admins are given the order to decide.
  */
 
 import { Prisma } from '@prisma/client';
@@ -35,7 +44,8 @@ const HELD_STATUSES = ['PENDING', 'AUTHORIZED'];
 /**
  * How long before the same standing condition is raised with the admins again.
  *
- * The sweep runs every six hours and nothing in it moves a hold out of
+ * The sweep runs every six hours. A hold still inside its authorisation, or one
+ * past it that Stripe still reports held or could not be asked about, stays in
  * HELD_STATUSES, so the same holds come back on every run for as long as they
  * go unresolved. A day is long enough that a person who has already been told
  * is not told three more times before they have had a chance to act, and short
@@ -48,6 +58,13 @@ const NOTIFY_AGAIN_AFTER_MS = 24 * 60 * 60 * 1000;
 const EXPIRING_TITLE = 'Escrow holds are about to lapse';
 /** Raised once it most likely cannot. */
 const LAPSED_TITLE = 'Escrow holds need attention';
+/** Raised for each batch of holds Stripe let lapse, which are now marked cancelled. */
+const EXPIRED_TITLE = 'Escrow holds expired before release';
+
+/** What the buyer is sent, once per hold, while she can still release it. */
+const BUYER_CHASE_TITLE = 'A payment is waiting for you to release it';
+const BUYER_EXPIRED_TITLE = 'A payment hold on your card has expired';
+const SELLER_EXPIRED_TITLE = 'A payment for you expired before it was released';
 
 const captureEnabled = (): boolean => process.env.ESCROW_CAPTURE_BEFORE_EXPIRY === 'true';
 
@@ -56,7 +73,168 @@ export interface EscrowExpirySweep {
   expiringSoon: number;
   captured: number;
   failed: number;
+  /** Past its authorisation and, as far as Stripe or this run can tell, still unresolved. */
   alreadyLapsed: number;
+  /** Past its authorisation, but Stripe had captured it: the row was behind and is now CAPTURED. */
+  repaired: number;
+  /** Past its authorisation and cancelled at Stripe: the row is now CANCELED. */
+  expired: number;
+  /** Past its authorisation with no card ever put behind it, so no money was at stake. */
+  neverPaid: number;
+  /** Buyers asked to release a hold this run. */
+  buyersReminded: number;
+}
+
+type HeldEscrow = {
+  id: string;
+  paymentIntentId: string | null;
+  buyerId: string;
+  sellerId: string;
+  amount: number;
+  currency: string;
+  status: string;
+  createdAt: Date;
+  description: string | null;
+  sessionType: string | null;
+  metadata: Prisma.JsonValue;
+  serviceOrder: { id: string } | null;
+};
+
+/** A hold's amount as a member would read it: A$250.00, not 25000. */
+function formatHoldAmount(escrow: Pick<HeldEscrow, 'amount' | 'currency'>): string {
+  const major = escrow.amount / stripeConnect.minorUnitScale(escrow.currency);
+  try {
+    return new Intl.NumberFormat('en-AU', {
+      style: 'currency',
+      currency: escrow.currency.toUpperCase(),
+    }).format(major);
+  } catch {
+    return `${major} ${escrow.currency.toUpperCase()}`;
+  }
+}
+
+/** The day a hold's authorisation runs out, in Queensland time. */
+function formatLapseDate(createdAt: Date): string {
+  const lapses = new Date(createdAt.getTime() + AUTHORISATION_LIFETIME_DAYS * 24 * 60 * 60 * 1000);
+  return lapses.toLocaleDateString('en-AU', {
+    timeZone: 'Australia/Brisbane',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
+function metadataString(metadata: Prisma.JsonValue, key: string): string | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === 'string' && value ? value : null;
+}
+
+/**
+ * The screen a buyer releases this hold from, or null when she does not
+ * release it herself.
+ *
+ * Only the flows where the buyer's confirmation is what moves the money are
+ * listed. A mentor session is released when the session is completed, not by
+ * the buyer; a car purchase has its own release timer and reminders; and a hold
+ * made through the generic Connect route has no release screen at all. Sending
+ * any of those buyers a "please release this" with nowhere to do it would be a
+ * request she cannot act on.
+ */
+function releaseScreenFor(escrow: HeldEscrow): string | null {
+  switch (escrow.sessionType) {
+    case 'service_order':
+      return escrow.serviceOrder ? `/skills-marketplace/orders/${escrow.serviceOrder.id}` : null;
+    case 'car_service':
+      return '/dashboard/cars/bookings';
+    case 'vehicle_inspection': {
+      const listingId = metadataString(escrow.metadata, 'listingId');
+      return listingId ? `/cars/preloved/${listingId}` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Asks the buyer to release a hold before it lapses. Once per hold: the sweep
+ * runs every six hours, and the check is on the hold's id in the notification's
+ * data rather than on a time window, so she is asked once and not nagged.
+ * Returns whether a notification was written.
+ */
+async function chaseBuyer(escrow: HeldEscrow, link: string): Promise<boolean> {
+  return bestEffort(
+    'notification.escrow-expiry-buyer',
+    async () => {
+      const already = await prisma.notification.findFirst({
+        where: {
+          userId: escrow.buyerId,
+          title: BUYER_CHASE_TITLE,
+          data: { path: ['escrowId'], equals: escrow.id },
+        },
+        select: { id: true },
+      });
+      if (already) return false;
+
+      await prisma.notification.create({
+        data: {
+          userId: escrow.buyerId,
+          type: 'SYSTEM',
+          title: BUYER_CHASE_TITLE,
+          message:
+            `You paid ${formatHoldAmount(escrow)} for "${escrow.description ?? 'your order'}" and ATHENA is holding it until you confirm. ` +
+            `If you have received what you paid for, please release it by ${formatLapseDate(escrow.createdAt)}. ` +
+            'After that the hold on your card expires, the payment can no longer be released, and the seller is not paid.',
+          link,
+          data: { kind: 'ESCROW_RELEASE_REMINDER', escrowId: escrow.id } as Prisma.InputJsonValue,
+        },
+      });
+      return true;
+    },
+    false
+  );
+}
+
+/**
+ * Tells both parties that a hold expired at Stripe. Each is written once,
+ * because it is sent only from the sweep that moved the row out of the held
+ * statuses, and that move happens once.
+ */
+async function tellPartiesHoldExpired(escrow: HeldEscrow): Promise<void> {
+  const amount = formatHoldAmount(escrow);
+  const what = escrow.description ?? 'an order';
+
+  await Promise.all([
+    bestEffort(
+      'notification.escrow-expired-buyer',
+      () =>
+        prisma.notification.create({
+          data: {
+            userId: escrow.buyerId,
+            type: 'SYSTEM',
+            title: BUYER_EXPIRED_TITLE,
+            message: `The hold of ${amount} on your card for "${what}" expired before it was released, so you have not been charged for it. ATHENA's team has been told about the order.`,
+            link: releaseScreenFor(escrow),
+            data: { kind: 'ESCROW_EXPIRED', escrowId: escrow.id } as Prisma.InputJsonValue,
+          },
+        }),
+      null
+    ),
+    bestEffort(
+      'notification.escrow-expired-seller',
+      () =>
+        prisma.notification.create({
+          data: {
+            userId: escrow.sellerId,
+            type: 'SYSTEM',
+            title: SELLER_EXPIRED_TITLE,
+            message: `The buyer's card hold of ${amount} for "${what}" expired before it was released, so this payment has not reached you. ATHENA's team has been told about the order.`,
+            data: { kind: 'ESCROW_EXPIRED', escrowId: escrow.id } as Prisma.InputJsonValue,
+          },
+        }),
+      null
+    ),
+  ]);
 }
 
 /**
@@ -80,7 +258,8 @@ async function noteAdmins(
   title: string,
   message: string,
   data: Record<string, unknown>,
-  now: Date
+  now: Date,
+  { standing = true }: { standing?: boolean } = {}
 ): Promise<void> {
   // An empty list on failure, exactly as the `.catch(() => [])` this replaces:
   // there is nobody to notify if we cannot find out who the admins are, and the
@@ -108,20 +287,28 @@ async function noteAdmins(
       bestEffort(
         'notification.escrow-expiry-admins',
         async () => {
-          // Nothing here moves a hold out of HELD_STATUSES, so the sweep finds
-          // the same ones every six hours. Without this check a single lapsed
+          // A hold that is only close to lapsing, or still unresolved past it,
+          // stays in HELD_STATUSES, so the sweep finds the same ones every six
+          // hours. Without this check a single lapsed
           // hold sent every admin four identical notifications a day until
           // somebody dealt with it by hand — which is how a channel that only
           // ever carries "money is about to stop being collectable" becomes a
           // channel nobody reads. Matched on the title, because that is what
           // distinguishes the two conditions this sweep raises and it is a
           // literal on our side rather than anything a member can set.
-          const recent = await prisma.notification.findFirst({
-            where: { userId: a.id, type: 'SYSTEM', title, createdAt: { gte: repeatsAfter } },
-            select: { id: true },
-          });
+          //
+          // A one-off event (`standing: false`) skips the check: holds that
+          // expired are moved out of HELD_STATUSES by the run that reports
+          // them, so they are never found again, and suppressing the notice
+          // would lose them rather than merely not repeat them.
+          if (standing) {
+            const recent = await prisma.notification.findFirst({
+              where: { userId: a.id, type: 'SYSTEM', title, createdAt: { gte: repeatsAfter } },
+              select: { id: true },
+            });
 
-          if (recent) return null;
+            if (recent) return null;
+          }
 
           return prisma.notification.create({
             data: {
@@ -153,8 +340,12 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
       sellerId: true,
       amount: true,
       currency: true,
+      status: true,
       createdAt: true,
       description: true,
+      sessionType: true,
+      metadata: true,
+      serviceOrder: { select: { id: true } },
     },
     orderBy: { createdAt: 'asc' },
   });
@@ -192,16 +383,65 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
     captured: 0,
     failed: 0,
     alreadyLapsed: 0,
+    repaired: 0,
+    expired: 0,
+    neverPaid: 0,
+    buyersReminded: 0,
   };
+
+  const newlyExpired: HeldEscrow[] = [];
 
   for (const escrow of held) {
     const lapsed = escrow.createdAt <= lapsesAt;
 
     if (lapsed) {
+      // Asked at Stripe first, because "lapsed" is a guess from the row's age
+      // and Stripe knows. A failure to ask falls through to the old report, so
+      // an outage costs nothing but a repeat of it on the next sweep.
+      const paymentIntentId = escrow.paymentIntentId;
+      const outcome = paymentIntentId
+        ? await bestEffort(
+            'escrow-expiry.resolve-lapsed',
+            () => stripeConnect.resolveLapsedEscrowHold(paymentIntentId),
+            null
+          )
+        : null;
+
+      if (outcome?.state === 'captured') {
+        // The seller was paid. This used to reach the admins as a hold whose
+        // "funds may no longer be collectable", which was the opposite of true.
+        result.repaired += 1;
+        continue;
+      }
+
+      if (outcome?.state === 'expired') {
+        result.expired += 1;
+        if (outcome.changed) {
+          newlyExpired.push(escrow);
+          await tellPartiesHoldExpired(escrow);
+        }
+        logger.error('Escrow hold expired at Stripe before it was released', {
+          escrowId: escrow.id,
+          heldSince: escrow.createdAt,
+          amount: escrow.amount,
+          currency: escrow.currency,
+        });
+        continue;
+      }
+
+      if (outcome?.state === 'unpaid') {
+        // No card was ever put behind it, so no money was held and none can
+        // have been lost. Kept out of the lapsed count so that count means
+        // what the admins are told it means.
+        result.neverPaid += 1;
+        logger.info('Escrow hold was never paid for', { escrowId: escrow.id, heldSince: escrow.createdAt });
+        continue;
+      }
+
       result.alreadyLapsed += 1;
       // Counted after the loop as a condition rather than here as a failure.
-      // Nothing below moves a lapsed hold out of HELD_STATUSES, so the query
-      // above finds the same ones on every sweep; recording a failure per hold
+      // A hold that reaches this line is still in HELD_STATUSES, so the query
+      // above finds it again on every sweep; recording a failure per hold
       // per sweep meant the count climbed by the same holds every six hours and
       // /health/detailed could never go back to healthy after a single lapse.
       // An error rather than a warning: by this point the money is most likely
@@ -216,6 +456,13 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
     }
 
     result.expiringSoon += 1;
+
+    // Only a hold with a card behind it: asking a buyer to release a payment
+    // she never completed would be asking her to do something impossible.
+    const releaseScreen = escrow.status === 'AUTHORIZED' ? releaseScreenFor(escrow) : null;
+    if (!captureEnabled() && releaseScreen && (await chaseBuyer(escrow, releaseScreen))) {
+      result.buyersReminded += 1;
+    }
 
     if (!captureEnabled() || !escrow.paymentIntentId) {
       logger.warn('Escrow hold is close to expiring', {
@@ -311,18 +558,30 @@ export async function runEscrowExpirySweep(now = new Date()): Promise<EscrowExpi
     );
   }
 
+  // Holds that Stripe let lapse, now marked cancelled. Both parties have been
+  // told; what happens to each order - a new payment, or closing it - is a
+  // decision for a person, so the ids go with the notice. Sent every time
+  // there are new ones rather than once a day, because these rows will not be
+  // found again.
+  if (newlyExpired.length) {
+    await noteAdmins(
+      EXPIRED_TITLE,
+      `${newlyExpired.length} hold(s) expired at Stripe before they were released and are now marked cancelled. The buyers were not charged and the sellers were not paid; each order needs a decision.`,
+      { kind: 'ESCROW_EXPIRED', escrowIds: newlyExpired.map(e => e.id) },
+      now,
+      { standing: false }
+    );
+  }
+
   // Raised while there is still something to be done about it.
   //
   // The only escalation this sweep had fired once a hold had already lapsed —
   // that is, once the seller had most likely lost the money for work she had
   // already delivered and the decision left to make was about compensation
   // rather than collection. The warning window exists precisely so somebody can
-  // act inside it; until now it went no further than a log line that nobody is
-  // watching at three in the morning. Building the buyer-facing release chase
-  // this really wants is a larger job — every order type releases from a
-  // different screen — but telling the people who can already release a hold
-  // from /admin, in time to do it, is the whole of the gap that can be closed
-  // here, and it is closed rather than half-closed.
+  // act inside it. The buyers whose confirmation releases a hold have been
+  // asked above; this tells the people who can release any hold from /admin,
+  // including the ones no buyer screen releases.
   if (result.expiringSoon) {
     await noteAdmins(
       EXPIRING_TITLE,

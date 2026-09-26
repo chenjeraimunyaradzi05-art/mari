@@ -10,6 +10,29 @@ interface OrganizationOption {
   name: string;
 }
 
+async function fetchInventory() {
+  const [itemsRes, levelsRes, locationsRes, transactionsRes] = await Promise.all([
+    api.get('/inventory/items'),
+    api.get('/inventory/stock-levels'),
+    api.get('/inventory/locations'),
+    api.get('/inventory/transactions'),
+  ]);
+  return {
+    items: itemsRes.data?.data || [],
+    levels: levelsRes.data?.data || [],
+    locations: locationsRes.data?.data || [],
+    transactions: transactionsRes.data?.data || [],
+  };
+}
+
+/** Why the stock could not be read, in words she can act on. */
+function describeLoadError(error: unknown): string {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 401) return 'Your session has ended. Sign in again to see your stock.';
+  if (status === 403) return 'You do not have access to this stock.';
+  return 'We could not load your inventory. Nothing has been lost; try again in a moment.';
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -20,6 +43,12 @@ export default function InventoryPage() {
   // only ever produce a rejection, so she picks from the ones she has.
   const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed read is not an empty stockroom. Every load error used to be
+  // caught and turned into four empty lists, so a 403, an expired session or a
+  // dropped connection read exactly like a business with no stock at all.
+  // `loaded` is whether the lists on screen came from the server at least once.
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [itemForm, setItemForm] = useState({
@@ -96,24 +125,17 @@ export default function InventoryPage() {
 
     const load = async () => {
       try {
-        const [itemsRes, levelsRes, locationsRes, transactionsRes] = await Promise.all([
-          api.get('/inventory/items'),
-          api.get('/inventory/stock-levels'),
-          api.get('/inventory/locations'),
-          api.get('/inventory/transactions'),
-        ]);
-
+        const data = await fetchInventory();
         if (!isMounted) return;
-        setItems(itemsRes.data?.data || []);
-        setLevels(levelsRes.data?.data || []);
-        setLocations(locationsRes.data?.data || []);
-        setTransactions(transactionsRes.data?.data || []);
-      } catch {
+        setItems(data.items);
+        setLevels(data.levels);
+        setLocations(data.locations);
+        setTransactions(data.transactions);
+        setLoaded(true);
+        setLoadError(null);
+      } catch (error) {
         if (!isMounted) return;
-        setItems([]);
-        setLevels([]);
-        setLocations([]);
-        setTransactions([]);
+        setLoadError(describeLoadError(error));
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -126,17 +148,35 @@ export default function InventoryPage() {
     };
   }, []);
 
+  // Called after a change has already been saved. It used to have no catch at
+  // all, so a refresh that failed surfaced through the caller's catch as
+  // "Failed to create item" for an item that had in fact been created. A failed
+  // refresh now says what actually happened and leaves the last lists in place.
   const reload = async () => {
-    const [itemsRes, levelsRes, locationsRes, transactionsRes] = await Promise.all([
-      api.get('/inventory/items'),
-      api.get('/inventory/stock-levels'),
-      api.get('/inventory/locations'),
-      api.get('/inventory/transactions'),
-    ]);
-    setItems(itemsRes.data?.data || []);
-    setLevels(levelsRes.data?.data || []);
-    setLocations(locationsRes.data?.data || []);
-    setTransactions(transactionsRes.data?.data || []);
+    try {
+      const data = await fetchInventory();
+      setItems(data.items);
+      setLevels(data.levels);
+      setLocations(data.locations);
+      setTransactions(data.transactions);
+      setLoaded(true);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(
+        loaded
+          ? 'Your change was saved, but the lists below could not be refreshed, so they may be out of date.'
+          : describeLoadError(error)
+      );
+    }
+  };
+
+  const retryLoad = async () => {
+    setLoading(true);
+    try {
+      await reload();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateItem = async () => {
@@ -481,22 +521,34 @@ export default function InventoryPage() {
         <div className="card">
           <p className="text-sm text-slate-500 dark:text-slate-400">Items</p>
           <p className="text-2xl font-semibold text-slate-900 dark:text-white">
-            {loading ? '—' : items.length}
+            {loading || !loaded ? '—' : items.length}
           </p>
         </div>
         <div className="card">
           <p className="text-sm text-slate-500 dark:text-slate-400">Stock Positions</p>
           <p className="text-2xl font-semibold text-slate-900 dark:text-white">
-            {loading ? '—' : levels.length}
+            {loading || !loaded ? '—' : levels.length}
           </p>
         </div>
         <div className="card">
           <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
           <p className="text-2xl font-semibold text-slate-900 dark:text-white">
-            {loading ? 'Loading' : 'Ready'}
+            {loading ? 'Loading' : loadError ? (loaded ? 'Out of date' : 'Not loaded') : 'Ready'}
           </p>
         </div>
       </div>
+
+      {loadError && !loading && (
+        <div
+          role="alert"
+          className="card flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 text-sm text-amber-800"
+        >
+          <span>{loadError}</span>
+          <button type="button" onClick={retryLoad} className="btn-outline px-3 py-1.5 text-sm">
+            Try again
+          </button>
+        </div>
+      )}
 
       {formError && (
         <div className="card border border-red-200 bg-red-50 text-sm text-red-700">
@@ -742,6 +794,8 @@ export default function InventoryPage() {
         </div>
         {loading ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading items...</p>
+        ) : !loaded ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Not loaded. See the message above.</p>
         ) : items.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">No items added yet.</p>
         ) : (
@@ -858,6 +912,8 @@ export default function InventoryPage() {
         </div>
         {loading ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading locations...</p>
+        ) : !loaded ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Not loaded. See the message above.</p>
         ) : locations.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">No locations added yet.</p>
         ) : (
@@ -939,6 +995,8 @@ export default function InventoryPage() {
         </div>
         {loading ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading transactions...</p>
+        ) : !loaded ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Not loaded. See the message above.</p>
         ) : transactions.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">No transactions yet.</p>
         ) : (
@@ -1047,6 +1105,8 @@ export default function InventoryPage() {
         </div>
         {loading ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading stock levels...</p>
+        ) : !loaded ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Not loaded. See the message above.</p>
         ) : levels.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">No stock movements yet.</p>
         ) : (

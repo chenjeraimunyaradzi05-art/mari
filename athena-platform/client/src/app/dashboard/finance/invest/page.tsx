@@ -86,7 +86,7 @@ export default function InvestPage() {
   const [peers, setPeers] = useState<Peers | null>(null);
   const [roundUps, setRoundUps] = useState<RoundUps | null>(null);
   const [roundUpsError, setRoundUpsError] = useState<string | null>(null);
-  const [autoSaving, setAutoSaving] = useState(false);
+  const [settingTarget, setSettingTarget] = useState(false);
   const profileId = profile.result?.profile;
   const taxable = num(form.taxableIncome);
 
@@ -125,19 +125,23 @@ export default function InvestPage() {
       .catch((err) => setRoundUpsError(apiMessage(err, 'Connect a bank or paste a statement to see round-ups.')));
   }, [roundTo]);
 
+  // Sets the emergency fund's monthly target, which is all ATHENA can truly do
+  // with this number. It used to switch on "auto-save" and toast that it was
+  // set, when nothing moves money into a goal — the member's savings were not
+  // automatic at all. The toast now says who does the moving.
   const applyRoundUps = async () => {
     if (!roundUps) return;
-    setAutoSaving(true);
+    setSettingTarget(true);
     try {
       const goals: Array<{ id: string; type: string; status: string }> = (await financeApi.getSavingsGoals()).data?.data ?? [];
       const ef = goals.find((g) => g.type === 'EMERGENCY_FUND' && g.status === 'ACTIVE');
       if (!ef) { toast.error('Start an emergency fund goal first, just above.'); return; }
-      await financeApi.updateSavingsGoal(ef.id, { autoSaveEnabled: true, autoSaveAmount: roundUps.monthlyEstimate });
-      toast.success(`Auto-save of ${aud(roundUps.monthlyEstimate)} a month set on the emergency fund`);
+      await financeApi.updateSavingsGoal(ef.id, { monthlyTarget: roundUps.monthlyEstimate });
+      toast.success(`${aud(roundUps.monthlyEstimate)} a month is now the emergency fund's target. A recurring transfer with your bank is what puts it aside.`);
     } catch (err) {
       toast.error(apiMessage(err, 'That could not be set.'));
     } finally {
-      setAutoSaving(false);
+      setSettingTarget(false);
     }
   };
 
@@ -258,7 +262,7 @@ export default function InvestPage() {
         )}
       </Panel>
 
-      <Panel id="round-ups" icon={Coins} title="Round-ups" intro="What rounding every card purchase up would have put aside last month, read from your bank feed. Set it as the auto-save on the emergency fund and the decision is made once." aside={<Link href="/dashboard/finance/banking" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Bank feeds</Link>}>
+      <Panel id="round-ups" icon={Coins} title="Round-ups" intro="What rounding every card purchase up would have put aside last month, read from your bank feed. Make it the emergency fund’s monthly target, then set up the same amount as a recurring transfer with your bank — ATHENA does not move the money itself." aside={<Link href="/dashboard/finance/banking" className="text-sm font-medium text-rose-600 hover:underline dark:text-rose-400">Bank feeds</Link>}>
         <div className="max-w-xs"><Field label="Round each purchase up to the nearest"><SelectInput value={form.roundTo} onChange={set('roundTo')} options={[{ value: '1', label: '$1' }, { value: '5', label: '$5' }, { value: '10', label: '$10' }]} /></Field></div>
         {roundUpsError && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{roundUpsError}</p>}
         {roundUps && (
@@ -269,7 +273,7 @@ export default function InvestPage() {
               <Stat label="A year, in a savings account" value={aud(roundUps.yearlyWithReturn)} sub="at 4.5%" />
             </div>
             {roundUps.examples.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{roundUps.examples.map((e) => `${e.description} ${aud(e.spent)} → +${aud(e.roundUp)}`).join(' · ')}</p>}
-            {roundUps.monthlyEstimate > 0 && <button type="button" onClick={applyRoundUps} disabled={autoSaving} className="btn-secondary inline-flex items-center gap-2"><Coins className="h-4 w-4" /> {autoSaving ? 'Setting…' : 'Auto-save this on the emergency fund'}</button>}
+            {roundUps.monthlyEstimate > 0 && <button type="button" onClick={applyRoundUps} disabled={settingTarget} className="btn-secondary inline-flex items-center gap-2"><Coins className="h-4 w-4" /> {settingTarget ? 'Setting…' : 'Make this the emergency fund’s monthly target'}</button>}
           </div>
         )}
       </Panel>

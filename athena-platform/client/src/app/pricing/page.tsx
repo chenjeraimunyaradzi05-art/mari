@@ -12,17 +12,27 @@ import {
   HelpCircle,
   Star,
 } from 'lucide-react';
-import { cn, formatCurrency } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/lib/store';
-import { TRIAL_DAYS, REFUND_DAYS, PLAN_PRICING, yearlySavingsPercent } from '@/lib/pricing';
+import { TRIAL_DAYS, REFUND_DAYS } from '@/lib/pricing';
+import { PRO_TIER, formatPlanAmount, formatPlanInterval, usePlanPrices } from './plan-prices';
 
+/**
+ * The three cards. None of them carries a price of its own any more.
+ *
+ * Pro used to say A$29 a month, or A$290 billed annually with the toggle on
+ * its default of yearly, and Enterprise A$99. None of those was a price
+ * anything charged: the Pro button starts a monthly PREMIUM_CAREER checkout at
+ * its real Stripe price, no yearly price exists anywhere, and Enterprise is not
+ * a tier checkout sells. Pro's price is now read from the server, which reads
+ * it from the Stripe price checkout charges; Free is free; Enterprise is priced
+ * in conversation, so it shows no number.
+ */
 const plans = [
   {
     id: 'free',
     name: 'Free',
     description: 'Perfect for exploring the platform',
-    monthlyPrice: 0,
-    yearlyPrice: 0,
     icon: Zap,
     color: 'gray',
     popular: false,
@@ -46,8 +56,6 @@ const plans = [
     id: 'pro',
     name: 'Pro',
     description: 'For serious career growth',
-    monthlyPrice: 29,
-    yearlyPrice: 290, // 2 months free
     icon: Crown,
     color: 'primary',
     popular: true,
@@ -71,8 +79,6 @@ const plans = [
     id: 'enterprise',
     name: 'Enterprise',
     description: 'For teams and organizations',
-    monthlyPrice: 99,
-    yearlyPrice: 990,
     icon: Building2,
     color: 'purple',
     popular: false,
@@ -128,7 +134,10 @@ const faqs = [
 export default function PricingPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('yearly');
+  const planPrices = usePlanPrices();
+  const proPlan = planPrices.data?.plans.find((plan) => plan.tier === PRO_TIER);
+  const proAmount = proPlan ? formatPlanAmount(proPlan) : null;
+  const proInterval = proPlan ? formatPlanInterval(proPlan) : null;
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
   const handleSelectPlan = (planId: string) => {
@@ -150,41 +159,6 @@ export default function PricingPage() {
           <p className="text-xl text-slate-600 dark:text-slate-300 max-w-2xl mx-auto">
             Invest in your career with the tools, connections, and support you need to thrive
           </p>
-        </div>
-
-        {/* Billing Toggle */}
-        <div className="flex items-center justify-center mb-12">
-          <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-full flex items-center">
-            <button
-              onClick={() => setBillingPeriod('monthly')}
-              className={cn(
-                'px-6 py-2 rounded-full text-sm font-medium transition',
-                billingPeriod === 'monthly'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow'
-                  : 'text-slate-500 dark:text-slate-400'
-              )}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setBillingPeriod('yearly')}
-              className={cn(
-                'px-6 py-2 rounded-full text-sm font-medium transition flex items-center',
-                billingPeriod === 'yearly'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow'
-                  : 'text-slate-500 dark:text-slate-400'
-              )}
-            >
-              Yearly
-              {/* Computed, not asserted. $29/mo against $290/yr is a 16% saving,
-                  and lib/pricing.ts floors it precisely so the badge can never
-                  overstate what someone actually saves. The hardcoded "Save 20%"
-                  that used to sit here overstated it by four points. */}
-              <span className="ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-xs rounded-full">
-                Save {yearlySavingsPercent(PLAN_PRICING.pro)}%
-              </span>
-            </button>
-          </div>
         </div>
 
         {/* Pricing Cards */}
@@ -235,24 +209,31 @@ export default function PricingPage() {
                 </div>
 
                 {/* Pricing */}
-                <div className="mb-6">
-                  <div className="flex items-baseline">
-                    <span className="text-4xl font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(
-                        billingPeriod === 'monthly'
-                          ? plan.monthlyPrice
-                          : plan.yearlyPrice / 12
-                      )}
-                    </span>
-                    {plan.monthlyPrice > 0 && (
-                      <span className="text-slate-500 dark:text-slate-400 ml-2">
-                        /month
-                      </span>
-                    )}
-                  </div>
-                  {plan.monthlyPrice > 0 && billingPeriod === 'yearly' && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                      {formatCurrency(plan.yearlyPrice)} billed annually
+                <div className="mb-6 min-h-[3rem]">
+                  {plan.id === 'free' ? (
+                    <span className="text-4xl font-bold text-slate-900 dark:text-white">Free</span>
+                  ) : plan.id === 'pro' ? (
+                    planPrices.isLoading ? (
+                      <span className="inline-block h-10 w-32 rounded bg-slate-100 dark:bg-slate-700 animate-pulse" />
+                    ) : proAmount ? (
+                      <div className="flex items-baseline">
+                        <span className="text-4xl font-bold text-slate-900 dark:text-white">{proAmount}</span>
+                        {proInterval && (
+                          <span className="text-slate-500 dark:text-slate-400 ml-2">/{proInterval}</span>
+                        )}
+                      </div>
+                    ) : (
+                      // No number rather than a guessed one. Stripe Checkout
+                      // shows the price before anything is charged.
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        {planPrices.isError
+                          ? 'We could not load the price just now. Stripe shows it before you pay.'
+                          : 'The price is not available right now. Stripe shows it before you pay.'}
+                      </p>
+                    )
+                  ) : (
+                    <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                      Priced with your organisation
                     </p>
                   )}
                 </div>

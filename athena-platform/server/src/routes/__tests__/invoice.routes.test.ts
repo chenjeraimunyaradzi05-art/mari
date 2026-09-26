@@ -1,8 +1,8 @@
 import request from 'supertest';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
-jest.mock('../../utils/prisma', () => ({
-  prisma: {
+jest.mock('../../utils/prisma', () => {
+  const prisma: any = {
     payment: { findUnique: jest.fn() },
     subscription: { findUnique: jest.fn() },
     invoice: {
@@ -12,8 +12,15 @@ jest.mock('../../utils/prisma', () => ({
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
-  },
-}));
+    // Filing runs inside a transaction that first takes an advisory lock on
+    // what the invoice is for. The transaction hands back the same client, so
+    // the assertions below on invoice.findFirst and invoice.create still see
+    // every call.
+    $executeRaw: jest.fn(async () => 1),
+  };
+  prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
+  return { prisma };
+});
 
 // Only authenticate is replaced, so requireRole really refuses a member.
 let currentUser = { id: 'admin-1', role: 'ADMIN', email: 'admin@athena.com', twoFactorEnabled: true };
@@ -174,6 +181,29 @@ describe('POST /api/invoices/payment/:paymentId', () => {
       // about the email is now part of the contract.
       emailed: 'not_requested',
     });
+  });
+
+  it('looks for an invoice already filed only while holding the lock for that payment', async () => {
+    // Invoice.paymentId has no unique index, so the webhook and an admin
+    // re-issue arriving together could each find nothing and each file one:
+    // two tax invoices, each showing GST, for one payment.
+    stubPayment();
+    const order: string[] = [];
+    prisma.$executeRaw.mockImplementationOnce(async () => {
+      order.push('lock');
+      return 1;
+    });
+    prisma.invoice.findFirst.mockImplementationOnce(async () => {
+      order.push('look');
+      return null;
+    });
+
+    await request(app).post('/api/invoices/payment/pay-1').send({}).expect(200);
+
+    expect(order).toEqual(['lock', 'look']);
+    const [, key] = prisma.$executeRaw.mock.calls[0];
+    expect(key).toBe('invoice:payment:pay-1');
+    expect(prisma.invoice.create).toHaveBeenCalledTimes(1);
   });
 
   it('says so when the payment does not exist', async () => {

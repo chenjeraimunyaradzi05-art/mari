@@ -60,6 +60,9 @@ router.get('/best-provider', authenticate, async (req: Request, res: Response, n
     const { region, paymentType } = req.query;
     const regionCode = (region as string) || DEFAULT_REGION;
 
+    // Only a provider that can take the money is named, the same filter
+    // /methods applies, and null when nothing can in this environment. This
+    // used to answer 'gcash', 'mpesa', 'pix' or 'upi' — none of them built.
     const provider = paymentsService.getBestProvider(
       regionCode,
       paymentType as 'card' | 'wallet' | 'mobile_money' | undefined
@@ -81,7 +84,9 @@ router.get('/pricing', async (req: Request, res: Response, next: NextFunction) =
     const { region } = req.query;
     const regionCode = (region as string) || DEFAULT_REGION;
 
-    const pricing = paymentsService.getRegionalPricing(regionCode);
+    // Read from the Stripe prices checkout charges, not from a table of its
+    // own; see getRegionalPricing for what is left out and why.
+    const pricing = await paymentsService.getRegionalPricing(regionCode);
     res.json(pricing);
   } catch (error) {
     next(error);
