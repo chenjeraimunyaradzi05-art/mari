@@ -128,8 +128,17 @@ fly secrets set \
   METRICS_TOKEN="$(openssl rand -hex 32)" \
   HEALTH_DIAGNOSTICS_TOKEN="$(openssl rand -hex 32)" \
   REDIS_URL='<Upstash or Fly Redis URL>'
-fly deploy
+fly deploy --ha=false
+fly status                                 # must list exactly one machine
 ```
+
+**One machine, always.** `--ha=false` matters: the first `fly deploy` of an app
+with an HTTP service otherwise creates two machines, and `fly.toml` has no
+setting that caps the count. Socket.IO has no Redis adapter in this codebase, so
+with two machines a chat message, a typing indicator or a live notification
+emitted on one never reaches a member connected to the other, and nothing logs
+it. If `fly status` shows two, `fly scale count 1`. Render is held to one
+instance by `render.yaml` for the same reason.
 
 `fly.toml` sits next to the `Dockerfile` because `fly deploy` builds from the
 directory it runs in. Everything non-secret is already in its `[env]` block;
@@ -204,8 +213,9 @@ Workflows live in `.github/workflows/`:
 | `ci.yml` | Push and pull request to `main` | Typechecks, builds and tests the server and the client; applies the Prisma migrations to a throwaway database and checks they still match `schema.prisma`; runs the API-contract, doc-reference and dead-interaction checks. |
 | `build-and-deploy.yml` | **A successful `CI` run on `main`**, or manual | Migrates the Neon database, deploys the API, then builds and publishes the web app to Netlify. Each target runs only when its secrets are set. |
 | `netlify-deploy.yml` | Pull request touching the client | Netlify preview deploy. |
-| `mobile-build.yml` | Manual, or push to `mobile/**` | EAS builds for iOS and Android. |
+| `mobile-build.yml` | Manual, or push to `mobile/**` | EAS builds for iOS and Android; a manual `production` run also submits to the stores. |
 | `security-audit.yml` | Weekly | `npm audit` over server, client and mobile. |
+| `uptime.yml` | Every 15 minutes | Asks the API's `/readyz` and the site's `/api/health`; opens a "Production is down" issue after three failures and closes it on recovery. Skipped until `PRODUCTION_API_URL` is set. Not a pager — see `athena-platform/docs/runbooks/ONCALL.md`. |
 
 The release runs in one order, and each step blocks the next: **migrate the
 database → deploy the API → publish the web app**. Migrations are written to be
@@ -235,6 +245,23 @@ turn auto-deploy off: it fires on the push and reintroduces exactly that race.
 | `NEXT_PUBLIC_API_URL` | Netlify deploys | The API host's public URL. Required — the build fails without it. |
 | `NEXT_PUBLIC_APP_URL` | Netlify deploys | The Netlify site URL |
 | `EXPO_TOKEN` | Mobile builds | expo.dev, Account, Access Tokens |
+| `EAS_PROJECT_ID` | Mobile builds and submissions | The id `eas init` prints in `athena-platform/mobile`. With `EXPO_TOKEN` set and this missing, the mobile workflow fails and says so. |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | Android store submission | The Google Play service-account JSON key, pasted whole. Or upload it with `eas credentials` and set the `EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT` variable to `true` instead. |
+| `EXPO_APPLE_APP_SPECIFIC_PASSWORD` | iOS store submission, when signing in with an Apple ID | appleid.apple.com, Sign-In and Security, App-Specific Passwords. Not needed when an App Store Connect API key is stored on the EAS project. |
+
+### Repository variables
+
+Not secret — they are public identifiers and URLs — so they live under
+Settings → Secrets and variables → Actions → **Variables**.
+
+| Variable | Used by | Value |
+|---|---|---|
+| `MOBILE_API_URL` | Mobile builds and submissions | The API origin, the same as the EAS project's `API_URL` secret. The runner needs its own copy to evaluate `app.config.js`, which refuses to run without one. |
+| `ASC_APP_ID` | iOS store submission | App Store Connect, the app, App Information, "Apple ID" (a number). |
+| `APPLE_TEAM_ID`, `APPLE_ID` | iOS store submission (optional) | developer.apple.com, Membership; and the Apple ID email with App Manager rights. |
+| `EAS_HOLDS_GOOGLE_SERVICE_ACCOUNT` | Android store submission | `true` once the key is uploaded to EAS, if the `GOOGLE_SERVICE_ACCOUNT_KEY` secret is not used. |
+| `PRODUCTION_API_URL` | Uptime | The API origin. The uptime workflow is skipped until it is set. |
+| `PRODUCTION_SITE_URL` | Uptime (optional) | The Netlify site, to check the web tier's proxy as well. |
 
 ## Services Summary
 
@@ -270,6 +297,16 @@ take; putting the pooled URL in both is what makes a deploy hang.
 wellness records, and `dv-safe.service.ts` refuses it in production unless it is
 64 hex characters. Back it up somewhere the API host cannot take with it:
 without this exact value, those rows cannot be read again.
+
+`ALLOWED_ORIGINS` is the whole CORS allowlist; add a custom domain here when the
+site moves. Do not reach for `CORS_ALLOW_PREVIEW_ORIGINS=true` to make a Netlify
+deploy preview talk to production. It does not admit this site's previews — it
+admits every `https://<anything>.netlify.app` origin, and anyone can register
+one for free — with credentialed CORS and on the socket. On any deployment
+where the browser holds a cookie for the API's own origin (`COOKIE_SAMESITE=none`,
+the browser-calls-the-API-directly setup), a stranger's Netlify page can then
+act as the signed-in member and read the answers. Point previews at a staging
+API instead.
 
 There is no `TRUST_PROXY` variable, despite what earlier versions of this guide
 said — nothing under `src/` reads one. `src/index.ts` sets
