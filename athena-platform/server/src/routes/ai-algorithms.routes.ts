@@ -1,29 +1,26 @@
 /**
  * AI algorithm routes (/api/ai-algorithms/*)
  *
- * ## Three of these tables are placeholder-only
+ * ## Four tables here were placeholder-only, and their routes are withdrawn
  *
  * `careerPrediction`, `mentorMatchScore` and `opportunityMatch` were built for
- * an ML service that was never connected. Nothing on the server writes any of
- * the three, so GET /mentor-match and GET /opportunity-scan here are always
- * empty. careerPrediction had one writer — POST /career-compass/generate — and
- * it invented every figure it stored; it is gone, that route answers 501, and
- * GET /career-compass refuses to serve the rows it left behind. See the comment
- * above the route for what those rows contained and why a 503 in front of them
- * was not enough.
+ * an ML service that was never connected, and nothing on the server writes
+ * mentorMatchScore or opportunityMatch, so the routes that read them could
+ * only ever answer with an empty list. careerPrediction had one writer — POST
+ * /career-compass/generate — and it invented every figure it stored; it is
+ * gone, that route answers 501, and GET /career-compass refuses to serve the
+ * rows it left behind. The userTrustScore row behind GET /trust-score started
+ * at 50 and moved only on a report or a block. The opportunity-scan, mentor-
+ * match and trust-score routes now answer 410 with the address of the real
+ * feature, rather than an empty answer a member reads as a verdict on her.
  *
- * The web app no longer reads any of the three. /dashboard/ai/career-compass,
- * /dashboard/ai/mentors and /dashboard/ai/opportunities read
- * /api/algorithms/career-compass, /mentor-match and /opportunity-scan, which
- * are real queries (see algorithm.routes.ts). /dashboard/ai/trust reads
- * /api/trust-score, which returns the factors behind the score. The
- * userTrustScore row that GET /trust-score here returns starts at 50 and only
- * moves on a report or a block (trust.service applyTrustDelta), so it and
- * user.trustScore are two stores that still need reconciling server-side.
+ * /dashboard/ai/career-compass, /dashboard/ai/mentors and
+ * /dashboard/ai/opportunities read /api/algorithms/career-compass,
+ * /mentor-match and /opportunity-scan, which are real queries (see
+ * algorithm.routes.ts). /dashboard/ai/trust reads /api/trust-score.
  *
- * Do not build a screen against the placeholder tables. The salary routes
- * (/salary-equity/*), POST /report, creator analytics and feed preferences
- * below read and write real rows and stay in use.
+ * What stays in use: the salary routes (/salary-equity/*), POST /report,
+ * creator analytics and feed preferences below, which read and write real rows.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -119,88 +116,23 @@ router.post('/career-compass/generate', async (_req: Request, _res: Response, ne
 // =============================================
 // OPPORTUNITY SCAN - Real-Time Opportunity Surfacing
 // =============================================
-// Placeholder-only: no code writes opportunityMatch, so this list is always
-// empty. The web app reads /api/algorithms/opportunity-scan.
-
-// Get matched opportunities
-router.get('/opportunity-scan', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { type, viewed } = req.query;
-
-    const opportunities = await prisma.opportunityMatch.findMany({
-      where: {
-        userId,
-        ...(type && { opportunityType: type as string }),
-        ...(viewed === 'false' && { isViewed: false }),
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gte: new Date() } },
-        ],
-      },
-      orderBy: { matchScore: 'desc' },
-      take: 20,
-    });
-
-    res.json({ data: opportunities });
-  } catch (error) {
-    next(error);
+//
+// The list read opportunityMatch, which nothing on the server writes, so it
+// was always empty, and the two PATCH routes could never find a row to update.
+// /dashboard/ai/opportunities reads /api/algorithms/opportunity-scan — the
+// newest roles, courses and events, and it says it is not personalised. All
+// three answer 410 rather than an empty list that reads as "nothing for you".
+router.all(
+  ['/opportunity-scan', '/opportunity-scan/:id/view', '/opportunity-scan/:id/feedback'],
+  (_req: Request, _res: Response, next: NextFunction) => {
+    next(
+      new ApiError(
+        410,
+        'Opportunity scanning is at /api/algorithms/opportunity-scan. The matches this route read were never computed.'
+      )
+    );
   }
-});
-
-// Mark opportunity as viewed
-router.patch('/opportunity-scan/:id/view', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { id } = req.params;
-
-    const opportunity = await prisma.opportunityMatch.update({
-      where: { id, userId },
-      data: {
-        isViewed: true,
-        viewedAt: new Date(),
-      },
-    });
-
-    res.json({ data: opportunity });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Record interest/feedback on opportunity
-router.patch('/opportunity-scan/:id/feedback', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { id } = req.params;
-    const { isInterested, feedback } = req.body;
-
-    const opportunity = await prisma.opportunityMatch.update({
-      where: { id, userId },
-      data: {
-        isInterested,
-        feedback,
-        interactionAt: new Date(),
-      },
-    });
-
-    res.json({ data: opportunity });
-  } catch (error) {
-    next(error);
-  }
-});
+);
 
 // =============================================
 // SALARY EQUITY - Pay Gap Detection
@@ -239,7 +171,21 @@ const toAmount = (value: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-// Submit anonymous salary data
+/**
+ * How many roles one member may add pay for in a rolling year.
+ *
+ * Validation stopped a single absurd figure, and aiLimiter stopped a burst, but
+ * neither stopped a patient account: ten a minute is about six hundred points
+ * an hour, each one a plausible salary, every one of them moving the median a
+ * woman takes into her next negotiation. A member reports her own pay, for the
+ * role she holds and perhaps the one before it; five roles a year is more than
+ * that and far less than a campaign.
+ */
+const SALARY_ROLES_PER_MEMBER_PER_YEAR = 5;
+const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+// Submit salary data. It is saved against her account (see the salary page's
+// own wording); what is anonymous is what other members are shown.
 router.post(
   '/salary-equity/submit',
   // The route that moves everyone else's number had no limiter at all. A
@@ -283,7 +229,13 @@ router.post(
       throw new ApiError(400, errors.array()[0].msg);
     }
 
-    const userId = (req as any).user?.id; // Optional for anonymous
+    // Every route here sits behind authenticate, and the per-member rules
+    // below are keyed on this id: without one, "her earlier figure for this
+    // role" would be a query for everybody's.
+    const userId: string | undefined = (req as AuthRequest).user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const {
       jobTitle,
@@ -309,39 +261,140 @@ router.post(
     const bonus = toAmount(req.body.bonus);
     const equity = toAmount(req.body.equity);
 
-    const dataPoint = await prisma.salaryDataPoint.create({
-      data: {
-        userId,
-        jobTitle: String(jobTitle).trim(),
-        normalizedTitle: String(jobTitle).toLowerCase().trim(),
-        company,
-        companySize,
-        industry,
-        city,
-        state,
-        country: country || 'Australia',
-        isRemote: isRemote || false,
-        baseSalary,
-        currency: currency || 'AUD',
-        bonus,
-        equity,
-        totalComp: baseSalary + (bonus || 0) + (equity || 0),
-        yearsExperience,
-        yearsInRole,
-        educationLevel,
-        gender,
-        ageRange,
-      },
+    const normalizedTitle = String(jobTitle).toLowerCase().trim();
+    const pointCurrency = currency || 'AUD';
+
+    const fields = {
+      jobTitle: String(jobTitle).trim(),
+      normalizedTitle,
+      company,
+      companySize,
+      industry,
+      city,
+      state,
+      country: country || 'Australia',
+      isRemote: isRemote || false,
+      baseSalary,
+      currency: pointCurrency,
+      bonus,
+      equity,
+      totalComp: baseSalary + (bonus || 0) + (equity || 0),
+      yearsExperience,
+      yearsInRole,
+      educationLevel,
+      gender,
+      ageRange,
+    };
+
+    // One figure per member per role. A second submission for the same role
+    // is her correcting herself, not a second person earning that salary, so
+    // it replaces the first rather than joining it — which is also what stops
+    // one account from filling a role's pool with copies of the same number.
+    const existing = await prisma.salaryDataPoint.findFirst({
+      where: { userId, normalizedTitle, currency: pointCurrency },
+      orderBy: { submittedAt: 'desc' },
+      select: { id: true },
     });
 
-    res.json({ data: { id: dataPoint.id }, message: 'Salary data submitted successfully' });
+    if (existing) {
+      await prisma.salaryDataPoint.update({
+        where: { id: existing.id },
+        data: { ...fields, submittedAt: new Date() },
+      });
+      return res.json({
+        data: { id: existing.id, replaced: true },
+        message: 'Your figure for this role has replaced the one you gave before.',
+      });
+    }
+
+    const rolesThisYear = await prisma.salaryDataPoint.count({
+      where: { userId, submittedAt: { gte: new Date(Date.now() - YEAR_MS) } },
+    });
+    if (rolesThisYear >= SALARY_ROLES_PER_MEMBER_PER_YEAR) {
+      throw new ApiError(
+        429,
+        `You have added pay for ${SALARY_ROLES_PER_MEMBER_PER_YEAR} roles in the last year, which is the most one member can. You can still correct the figure for a role you have already reported.`
+      );
+    }
+
+    const dataPoint = await prisma.salaryDataPoint.create({
+      data: { userId, ...fields },
+    });
+
+    res.json({ data: { id: dataPoint.id, replaced: false }, message: 'Salary data submitted successfully' });
   } catch (error) {
     next(error);
   }
 });
 
-/** Below this, a "market median" is a handful of people's pay wearing the word market. */
-const ANALYSIS_MIN_POINTS = 5;
+/**
+ * How many contributors must sit below a published cut point, and how many
+ * above it, before it is published.
+ *
+ * The floor used to be five points for the whole analysis, and with five points
+ * p10, p25, p50, p75 and p90 are salaries[0] to salaries[4]: the "band" was
+ * every contributor's exact pay, in order, published to anyone who typed the
+ * title — on a page that told her "other members never see your row". Up to
+ * about nine points each percentile was still one real person's figure. A cut
+ * point with at least five people on either side of it is a position in a
+ * crowd rather than the edge of one, so:
+ *
+ *   median     needs 10 contributors
+ *   p25, p75   need 20
+ *   p10, p90   need 50
+ *
+ * and a percentile below its floor is withheld (null) rather than shown thin.
+ */
+const CONTRIBUTORS_EACH_SIDE = 5;
+const ANALYSIS_MIN_POINTS = CONTRIBUTORS_EACH_SIDE * 2;
+
+/**
+ * Every published figure is rounded to this, so that even a cut point that
+ * happens to fall exactly on somebody's salary is not that salary to the
+ * dollar. A thousand is well inside what anyone negotiates over.
+ */
+const PUBLISHED_ROUNDING = 1_000;
+
+const roundForPublication = (value: number) => Math.round(value / PUBLISHED_ROUNDING) * PUBLISHED_ROUNDING;
+
+/**
+ * The p-th percentile of sorted values by linear interpolation, or null when
+ * fewer than CONTRIBUTORS_EACH_SIDE values sit on either side of it.
+ */
+export function publishablePercentile(sorted: number[], p: number): number | null {
+  const n = sorted.length;
+  if (n === 0) return null;
+  const below = Math.floor(n * p);
+  const above = n - Math.ceil(n * p);
+  if (below < CONTRIBUTORS_EACH_SIDE || above < CONTRIBUTORS_EACH_SIDE) return null;
+
+  const index = p * (n - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  const value = sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+  return roundForPublication(value);
+}
+
+/**
+ * One figure per contributor. The submit route now replaces a member's earlier
+ * figure for a role, but rows written before it did are still in the table,
+ * and one account's twenty copies of a number are one person, not twenty. Rows
+ * with no member on them predate accounts being required and are kept as they
+ * are, because there is nothing to tell them apart by.
+ */
+export function onePerContributor<T extends { userId: string | null; submittedAt: Date }>(rows: T[]): T[] {
+  const latest = new Map<string, T>();
+  const anonymous: T[] = [];
+  for (const row of rows) {
+    if (!row.userId) {
+      anonymous.push(row);
+      continue;
+    }
+    const seen = latest.get(row.userId);
+    if (!seen || row.submittedAt > seen.submittedAt) latest.set(row.userId, row);
+  }
+  return [...latest.values(), ...anonymous];
+}
 /**
  * Per gender, before a gender gap is published for a role.
  *
@@ -349,10 +402,11 @@ const ANALYSIS_MIN_POINTS = 5;
  * pay is a room in which each of them can work out what the others earn — the
  * gap is a difference of two medians over a sample small enough to name, and
  * publishing it to anyone who types the title is a disclosure the three of them
- * never agreed to. Eight is still small; it is the point at which one person's
- * figure stops being recoverable from the published one.
+ * never agreed to. It then became eight, which was still one short of what
+ * the rule for any published median needs (five contributors either side of
+ * it, below), so each gender's median is now held to exactly that rule.
  */
-const GENDER_GAP_MIN_PER_GENDER = 8;
+const GENDER_GAP_MIN_PER_GENDER = ANALYSIS_MIN_POINTS;
 
 // Get salary analysis for a role
 router.get('/salary-equity/analyze', async (req: Request, res: Response, next: NextFunction) => {
@@ -378,53 +432,60 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
         : 'AUD';
 
     // Get salary data points for analysis
-    const salaryData = await prisma.salaryDataPoint.findMany({
+    const rows = await prisma.salaryDataPoint.findMany({
       where: {
         normalizedTitle: { contains: role.toLowerCase() },
         currency,
-        ...(location && { city: { contains: location as string } }),
+        ...(typeof location === 'string' && location.trim() && { city: { contains: location } }),
       },
       select: {
+        userId: true,
+        submittedAt: true,
         baseSalary: true,
-        totalComp: true,
         gender: true,
-        yearsExperience: true,
-        educationLevel: true,
-        companySize: true,
       },
     });
+    const salaryData = onePerContributor(rows);
 
-    if (salaryData.length < ANALYSIS_MIN_POINTS) {
+    // Calculate statistics
+    const salaries = salaryData.map(d => Number(d.baseSalary)).sort((a, b) => a - b);
+    const median = publishablePercentile(salaries, 0.5);
+
+    if (median === null) {
       return res.json({
         data: null,
         currency,
         sampleSize: salaryData.length,
-        message: `Insufficient data for analysis. Need at least ${ANALYSIS_MIN_POINTS} salary data points reported in ${currency}.`,
+        message: `Not enough members have reported pay for this role yet. A median is published once ${ANALYSIS_MIN_POINTS} people have reported in ${currency}, so that no one person's salary can be read off it.`,
       });
     }
 
-    // Calculate statistics
-    const salaries = salaryData.map(d => Number(d.baseSalary)).sort((a, b) => a - b);
-    const median = salaries[Math.floor(salaries.length / 2)];
-    const p10 = salaries[Math.floor(salaries.length * 0.1)];
-    const p25 = salaries[Math.floor(salaries.length * 0.25)];
-    const p75 = salaries[Math.floor(salaries.length * 0.75)];
-    const p90 = salaries[Math.floor(salaries.length * 0.9)];
+    const p10 = publishablePercentile(salaries, 0.1);
+    const p25 = publishablePercentile(salaries, 0.25);
+    const p75 = publishablePercentile(salaries, 0.75);
+    const p90 = publishablePercentile(salaries, 0.9);
 
     // Gender gap analysis
-    const womenSalaries = salaryData.filter(d => d.gender === 'WOMAN').map(d => Number(d.baseSalary));
-    const menSalaries = salaryData.filter(d => d.gender === 'MAN').map(d => Number(d.baseSalary));
+    const womenSalaries = salaryData.filter(d => d.gender === 'WOMAN').map(d => Number(d.baseSalary)).sort((a, b) => a - b);
+    const menSalaries = salaryData.filter(d => d.gender === 'MAN').map(d => Number(d.baseSalary)).sort((a, b) => a - b);
 
-    let genderGapAmount = null;
-    let genderGapPercent = null;
+    let genderGapAmount: number | null = null;
+    let genderGapPercent: number | null = null;
     if (
       womenSalaries.length >= GENDER_GAP_MIN_PER_GENDER &&
       menSalaries.length >= GENDER_GAP_MIN_PER_GENDER
     ) {
-      const womenMedian = womenSalaries.sort((a, b) => a - b)[Math.floor(womenSalaries.length / 2)];
-      const menMedian = menSalaries.sort((a, b) => a - b)[Math.floor(menSalaries.length / 2)];
-      genderGapAmount = menMedian - womenMedian;
-      genderGapPercent = menMedian === 0 ? null : ((menMedian - womenMedian) / menMedian) * 100;
+      // Ten a side is exactly what the five-each-side rule needs for a median,
+      // so both of these are publishable figures and neither is one person's
+      // pay. The null checks are the rule speaking, not a formality: if the
+      // floor above is ever lowered, the gap is withheld rather than computed
+      // from a median that could not be published on its own.
+      const womenMedian = publishablePercentile(womenSalaries, 0.5);
+      const menMedian = publishablePercentile(menSalaries, 0.5);
+      if (womenMedian !== null && menMedian !== null) {
+        genderGapAmount = menMedian - womenMedian;
+        genderGapPercent = menMedian === 0 ? null : ((menMedian - womenMedian) / menMedian) * 100;
+      }
     }
 
     // Save or update analysis
@@ -458,6 +519,10 @@ router.get('/salary-equity/analyze', async (req: Request, res: Response, next: N
         (womenSalaries.length > 0 || menSalaries.length > 0)
           ? `A gender pay gap is published only once at least ${GENDER_GAP_MIN_PER_GENDER} women and ${GENDER_GAP_MIN_PER_GENDER} men have reported pay for this role.`
           : null,
+      bandWithheld:
+        p25 === null
+          ? `A salary range is published once ${CONTRIBUTORS_EACH_SIDE * 4} members have reported pay for this role; until then only the median is shown.`
+          : null,
     });
   } catch (error) {
     next(error);
@@ -487,134 +552,41 @@ router.get('/salary-equity/my-analyses', async (req: Request, res: Response, nex
 // =============================================
 // MENTOR MATCH - AI-Powered Mentor Pairing
 // =============================================
-// Placeholder-only: no code writes mentorMatchScore, so this list is always
-// empty. The web app reads /api/algorithms/mentor-match.
-
-// Get mentor recommendations
-router.get('/mentor-match', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const matches = await prisma.mentorMatchScore.findMany({
-      where: {
-        menteeId: userId,
-        isActive: true,
-      },
-      orderBy: { overallScore: 'desc' },
-      take: 10,
-      include: {
-        mentor: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            headline: true,
-            avatar: true,
-          },
-        },
-      },
-    });
-
-    res.json({ data: matches });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get match details with a specific mentor
-router.get('/mentor-match/:mentorId', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { mentorId } = req.params;
-
-    const match = await prisma.mentorMatchScore.findUnique({
-      where: {
-        menteeId_mentorId: {
-          menteeId: userId,
-          mentorId,
-        },
-      },
-      include: {
-        mentor: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            headline: true,
-            avatar: true,
-            bio: true,
-          },
-        },
-      },
-    });
-
-    res.json({ data: match });
-  } catch (error) {
-    next(error);
-  }
+//
+// These read mentorMatchScore, which nothing on the server has ever written, so
+// they could only ever answer with nothing — an empty list a member reads as
+// "no mentor suits you". /dashboard/ai/mentors reads /api/algorithms/mentor-
+// match, which ranks the mentors who are actually available by shared skills,
+// rating and years mentoring, with the reasons shown. These answer 410 and say
+// so, rather than an empty list or a 404 that reads as a broken deploy.
+router.get(['/mentor-match', '/mentor-match/:mentorId'], (_req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      410,
+      'Mentor matching is at /api/algorithms/mentor-match. The scores this route read were never computed.'
+    )
+  );
 });
 
 // =============================================
 // SAFETY SCORE - Trust & Verification
 // =============================================
-// The row here starts at 50 with no badges and only moves on a report or a
-// block. The web app reads /api/trust-score for the factor breakdown; POST
-// /report below is still the report path.
-
-// Get user's trust score
-router.get('/trust-score', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    let trustScore = await prisma.userTrustScore.findUnique({
-      where: { userId },
-    });
-
-    // Create default trust score if doesn't exist
-    if (!trustScore) {
-      trustScore = await prisma.userTrustScore.create({
-        data: {
-          userId,
-          trustScore: 50,
-          badges: [],
-        },
-      });
-    }
-
-    res.json({ data: trustScore });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get trust score for another user (limited info)
-router.get('/trust-score/:userId', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { userId } = req.params;
-
-    const trustScore = await prisma.userTrustScore.findUnique({
-      where: { userId },
-      select: {
-        trustScore: true,
-        badges: true,
-        identityVerified: true,
-      },
-    });
-
-    res.json({ data: trustScore });
-  } catch (error) {
-    next(error);
-  }
+//
+// GET /trust-score and GET /trust-score/:userId read the userTrustScore row,
+// which started at 50 with no badges the first time anyone asked and moved
+// only on a report or a block — and the second of them handed any signed-in
+// member another member's score, badges and identity-verification flag by id.
+// Nothing in the web or mobile app called either. /dashboard/ai/trust reads
+// /api/trust-score, which returns the factors behind the score and only ever
+// her own. Both answer 410 so a stale caller is told where the real one is;
+// POST /report below is still the report path.
+router.get(['/trust-score', '/trust-score/:userId'], (_req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      410,
+      'This trust score has been withdrawn. Your own trust score, and what it is made of, is at /api/trust-score.'
+    )
+  );
 });
 
 // Report content
@@ -727,6 +699,45 @@ router.get('/creator-analytics/projections', async (req: Request, res: Response,
 // =============================================
 // FEED PREFERENCES - OpportunityVerse Algorithm
 // =============================================
+//
+// Two things on this table were stored and never read, and the rule for a
+// store with no reader on a platform like this one is that it stops storing.
+//
+// outNetworkRatio and trendingRatio were written straight from the request
+// body — any number, any type — and nothing on the server has ever read
+// either; only inNetworkRatio drives the feed (feed.service). They are no
+// longer accepted, so the settings a member can change are the settings that
+// do something.
+//
+// searchHistory kept the raw text of her last fifty searches, with no length
+// or type check, no reader anywhere on the server and no way to clear it: a
+// behavioural log with no product purpose, on a platform whose members include
+// women whose searches are exactly what someone else wants to see. Nothing in
+// the web or mobile app ever called the route that wrote it. It is no longer
+// written, no longer returned, and DELETE /feed-preferences/search empties
+// what was already kept.
+
+/** How much of the feed comes from people she follows; the rest is discovery. */
+const clampInNetworkRatio = (value: unknown): number =>
+  Math.min(0.9, Math.max(0.1, Number(value) || 0.3));
+
+/** The list fields are ids and tags; anything else in them is refused, not stored. */
+const MAX_PREFERENCE_LIST = 500;
+const stringListOrUndefined = (value: unknown, field: string): string[] | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_PREFERENCE_LIST || value.some((v) => typeof v !== 'string' || v.length > 200)) {
+    throw new ApiError(400, `${field} must be a list of at most ${MAX_PREFERENCE_LIST} short strings`);
+  }
+  return value;
+};
+
+/** What the settings page is shown: everything except the fields described above. */
+function publicPreferences<T extends { searchHistory: string[]; outNetworkRatio: number; trendingRatio: number }>(
+  prefs: T
+): Omit<T, 'searchHistory' | 'outNetworkRatio' | 'trendingRatio'> {
+  const { searchHistory: _history, outNetworkRatio: _out, trendingRatio: _trending, ...rest } = prefs;
+  return rest;
+}
 
 // Get feed preferences
 router.get('/feed-preferences', async (req: Request, res: Response, next: NextFunction) => {
@@ -769,7 +780,7 @@ router.get('/feed-preferences', async (req: Request, res: Response, next: NextFu
         }))
       : [];
 
-    res.json({ data: { ...prefs, blockedCreatorProfiles } });
+    res.json({ data: { ...publicPreferences(prefs), blockedCreatorProfiles } });
   } catch (error) {
     next(error);
   }
@@ -783,17 +794,10 @@ router.patch('/feed-preferences', async (req: Request, res: Response, next: Next
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const {
-      followedCategories,
-      followedHashtags,
-      blockedHashtags,
-      blockedCreators,
-      inNetworkRatio,
-      outNetworkRatio,
-      trendingRatio,
-      preferredDuration,
-      autoplayEnabled,
-    } = req.body;
+    const { followedCategories, inNetworkRatio, preferredDuration, autoplayEnabled } = req.body;
+    const followedHashtags = stringListOrUndefined(req.body.followedHashtags, 'followedHashtags');
+    const blockedHashtags = stringListOrUndefined(req.body.blockedHashtags, 'blockedHashtags');
+    const blockedCreators = stringListOrUndefined(req.body.blockedCreators, 'blockedCreators');
 
     const prefs = await prisma.userFeedPreferences.upsert({
       where: { userId },
@@ -802,10 +806,7 @@ router.patch('/feed-preferences', async (req: Request, res: Response, next: Next
         ...(followedHashtags && { followedHashtags }),
         ...(blockedHashtags && { blockedHashtags }),
         ...(blockedCreators && { blockedCreators }),
-        // How much of the feed comes from people you follow; the rest is discovery.
-        ...(inNetworkRatio !== undefined && { inNetworkRatio: Math.min(0.9, Math.max(0.1, Number(inNetworkRatio) || 0.3)) }),
-        ...(outNetworkRatio !== undefined && { outNetworkRatio }),
-        ...(trendingRatio !== undefined && { trendingRatio }),
+        ...(inNetworkRatio !== undefined && { inNetworkRatio: clampInNetworkRatio(inNetworkRatio) }),
         ...(preferredDuration && { preferredDuration }),
         ...(autoplayEnabled !== undefined && { autoplayEnabled }),
       },
@@ -816,55 +817,42 @@ router.patch('/feed-preferences', async (req: Request, res: Response, next: Next
         blockedHashtags: blockedHashtags || [],
         blockedCreators: blockedCreators || [],
         searchHistory: [],
-        inNetworkRatio: inNetworkRatio || 0.3,
-        outNetworkRatio: outNetworkRatio || 0.5,
-        trendingRatio: trendingRatio || 0.2,
+        inNetworkRatio: inNetworkRatio !== undefined ? clampInNetworkRatio(inNetworkRatio) : 0.3,
         preferredDuration,
         autoplayEnabled: autoplayEnabled ?? true,
       },
     });
 
-    res.json({ data: prefs });
+    res.json({ data: publicPreferences(prefs) });
   } catch (error) {
     next(error);
   }
 });
 
-// Add to search history
-router.post('/feed-preferences/search', async (req: Request, res: Response, next: NextFunction) => {
+// Search history is no longer kept. See the comment at the top of this section.
+router.post('/feed-preferences/search', (_req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      410,
+      'ATHENA no longer keeps a history of your searches. Nothing was recorded.'
+    )
+  );
+});
+
+// Empty whatever search history was kept before it stopped being kept.
+router.delete('/feed-preferences/search', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { query } = req.body;
-    if (!query) {
-      return res.status(400).json({ error: 'Search query is required' });
-    }
-
-    const prefs = await prisma.userFeedPreferences.findUnique({
+    await prisma.userFeedPreferences.updateMany({
       where: { userId },
+      data: { searchHistory: [] },
     });
 
-    const currentHistory = prefs?.searchHistory || [];
-    // Keep last 50 searches, remove duplicates
-    const newHistory = [query, ...currentHistory.filter(q => q !== query)].slice(0, 50);
-
-    await prisma.userFeedPreferences.upsert({
-      where: { userId },
-      update: { searchHistory: newHistory },
-      create: {
-        userId,
-        followedCategories: [],
-        followedHashtags: [],
-        blockedHashtags: [],
-        blockedCreators: [],
-        searchHistory: newHistory,
-      },
-    });
-
-    res.json({ message: 'Search recorded' });
+    res.json({ message: 'Your search history has been cleared.' });
   } catch (error) {
     next(error);
   }

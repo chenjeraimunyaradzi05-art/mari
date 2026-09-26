@@ -1,8 +1,8 @@
 /**
  * Algorithm routes (/api/algorithms/*)
  *
- * This file is two different things, and the next person needs to know which
- * half they are reading before wiring anything to it.
+ * Everything still served here is a real query. One route that was not is
+ * withdrawn, and is listed at the end so nobody rebuilds it.
  *
  * ## Real queries, used by the web app
  *
@@ -29,33 +29,39 @@
  *                          pay as the employer's own figure. Its `tips` are
  *                          canned coaching lines, not data; the client does
  *                          not render them.
+ *   GET /income-stream     Gifts she has actually received in the last thirty
+ *                          days, her follower count and whether monetisation
+ *                          is on, read by /dashboard/ai/creator. It used to
+ *                          carry a fixed 55/20/15/10 revenue mix and two
+ *                          scores with hand-picked weights; those are no
+ *                          longer sent (see IncomeStreamResult). `actionPlan`
+ *                          is general advice, the same for everyone, and the
+ *                          page heads it as that.
  *
- * ## Numbers nothing computed; do not build a screen against these
+ * ## Withdrawn
  *
- *   GET /income-stream            The revenue `channels` are fixed shares
- *                                 (55/20/15/10) and the `actionPlan` is the
- *                                 same four sentences for everyone. Only the
- *                                 gift earnings, follower count and post count
- *                                 come from the database.
- *   GET /recommendation-engine-2  Every `score` is 90 (or 85, 80, 75) minus
+ *   GET /recommendation-engine-2  Every `score` was 90 (or 85, 80, 75) minus
  *                                 the row's position in a newest-first list,
- *                                 and every `reason` is a canned sentence. It
- *                                 ranks nothing.
+ *                                 every `reason` a canned sentence, and it was
+ *                                 open to signed-out callers — who were handed
+ *                                 the first forty characters of the five
+ *                                 most-viewed posts whether or not their
+ *                                 authors had made them public. Nothing called
+ *                                 it. It answers 410.
  *
- * Both stay mounted so nothing breaks, with no client helper. The mirrored
- * tables under /api/ai-algorithms/* (careerPrediction, mentorMatchScore,
- * opportunityMatch) have no writer; see that file's header.
+ * The mirrored tables under /api/ai-algorithms/* (careerPrediction,
+ * mentorMatchScore, opportunityMatch) have no writer; see that file's header.
  */
 
 import { Router, Response, NextFunction } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
+import { ApiError } from '../middleware/errorHandler';
 import {
   getCareerCompass,
   getOpportunityScan,
   getSalaryEquity,
   getMentorMatch,
   getIncomeStream,
-  getRecommendationEngineV2,
 } from '../services/algorithm.service';
 
 const router = Router();
@@ -145,17 +151,15 @@ router.get('/income-stream', authenticate, async (req: AuthRequest, res: Respons
 // ===========================================
 // RECOMMENDATION ENGINE 2.0
 // ===========================================
-router.get('/recommendation-engine-2', optionalAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const data = await getRecommendationEngineV2(req.user?.id);
-
-    res.json({
-      success: true,
-      data,
-    });
-  } catch (error) {
-    next(error);
-  }
+// Withdrawn; see the header. 410 rather than 404 so a stale caller is told
+// the difference between "gone on purpose" and "the deploy is broken".
+router.get('/recommendation-engine-2', (_req: AuthRequest, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      410,
+      'This recommendation list has been withdrawn: its scores and reasons were not computed from anything.'
+    )
+  );
 });
 
 export default router;

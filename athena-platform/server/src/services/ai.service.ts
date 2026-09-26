@@ -1,6 +1,9 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger';
 import { sanitizeChatHistory, truncate, asUntrustedBlock, DEFAULT_MAX_TOKENS } from '../utils/llm';
+import { recordAiSpend, type AiMeter } from './ai-budget.service';
+
+export type { AiMeter } from './ai-budget.service';
 
 /**
  * The one shape a resume analysis leaves this service in, whether the model
@@ -227,7 +230,36 @@ class AiService {
     throw new Error(`AI service not configured for ${feature}. Configure AI_OPENAI_API_KEY or OPENAI_API_KEY.`);
   }
 
-  async optimizeResume(resumeText: string, jobDescription?: string): Promise<ResumeAnalysis> {
+  /**
+   * Every completion this service makes goes through here, for two reasons.
+   *
+   * The reply cap. Four call sites — the career path, both interview calls
+   * and the post enrichment — set no max_tokens, so each ran as long as the
+   * model chose to on the platform's key. A call site may still ask for less
+   * than DEFAULT_MAX_TOKENS; none may leave it unset.
+   *
+   * The count. Nothing read `completion.usage`, so nothing could say what a
+   * day of AI had cost or whose it was. It is recorded against the member the
+   * call was made for (see ai-budget.service), which is also what the daily
+   * budgets in front of the AI routes read.
+   */
+  private async complete(
+    feature: string,
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+    meter?: AiMeter
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    if (!this.openai) {
+      throw new Error(`AI service not configured for ${feature}.`);
+    }
+    const completion = await this.openai.chat.completions.create({
+      ...params,
+      max_tokens: Math.min(params.max_tokens ?? DEFAULT_MAX_TOKENS, DEFAULT_MAX_TOKENS),
+    });
+    await recordAiSpend(meter, feature, completion.usage);
+    return completion;
+  }
+
+  async optimizeResume(resumeText: string, jobDescription?: string, meter?: AiMeter): Promise<ResumeAnalysis> {
     if (!this.openai) {
       this.ensureOpenAI('resume optimization');
       return this.getSimulatedResumeResponse();
@@ -256,16 +288,20 @@ class AiService {
 
       const model = process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106';
 
-      const completion = await this.openai.chat.completions.create({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        model: model,
-        response_format: { type: 'json_object' },
-        temperature: 0.7,
-        max_tokens: DEFAULT_MAX_TOKENS,
-      });
+      const completion = await this.complete(
+        'resume_optimizer',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          model: model,
+          response_format: { type: 'json_object' },
+          temperature: 0.7,
+          max_tokens: DEFAULT_MAX_TOKENS,
+        },
+        meter
+      );
 
       const content = completion.choices[0].message.content;
       if (!content) throw new Error('No response from AI');
@@ -278,7 +314,7 @@ class AiService {
     }
   }
 
-  async generateCareerPath(profileData: any, goal?: string): Promise<CareerPathPlan> {
+  async generateCareerPath(profileData: string, goal?: string, meter?: AiMeter): Promise<CareerPathPlan> {
      if (!this.openai) {
        this.ensureOpenAI('career path generation');
        return this.getSimulatedCareerPathResponse();
@@ -305,30 +341,31 @@ class AiService {
         "careerAdvice": "General strategic advice based on their specific background"
       }`;
 
-      // If profileData is a string, use it. If object, stringify it (or formatted by caller)
-      const profileContext = typeof profileData === 'string' ? profileData : JSON.stringify(profileData);
+      // The profile is assembled by the route from what she typed and what her
+      // profile holds — a role title, her experience lines — so it is quoted
+      // as data, the way the resume and the business idea already were.
+      const userPrompt = [
+        'Analyze this professional profile and provide career advancement recommendations.',
+        asUntrustedBlock('profile', profileData, 6000),
+        goal?.trim() ? asUntrustedBlock('specific goal', goal, 1000) : 'Specific goal: advancement in current field.',
+        'Provide recommendations focusing on:\n1. Current career stage assessment\n2. 3 potential career paths with timelines\n3. Skills to develop for each path\n4. Recommended certifications',
+      ].join('\n\n');
 
-      const userPrompt = `Analyze this professional profile and provide career advancement recommendations:
-      
-      Profile Context: ${profileContext}
-      Specific Goal: ${goal || 'Advancement in current field'}
-      
-      Provide recommendations focusing on:
-      1. Current career stage assessment
-      2. 3 potential career paths with timelines
-      3. Skills to develop for each path
-      4. Recommended certifications`;
-      
       const model = process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106';
 
-      const completion = await this.openai.chat.completions.create({
-        messages: [
-           { role: 'system', content: systemPrompt },
-           { role: 'user', content: userPrompt }
-        ],
-        model: model,
-        response_format: { type: 'json_object' },
-      });
+      const completion = await this.complete(
+        'career_path',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          model: model,
+          response_format: { type: 'json_object' },
+          max_tokens: DEFAULT_MAX_TOKENS,
+        },
+        meter
+      );
 
       const content = completion.choices[0].message.content;
       if (!content) throw new Error('No response from AI');
@@ -340,42 +377,68 @@ class AiService {
     }
   }
 
+  /**
+   * The search-ranking score a post gets when no model read it.
+   *
+   * It was `parseInt(AI_SOCIAL_FALLBACK_SCORE, 10)` against a scale of 0-100,
+   * while .env.example ships the value 0.5 — so every deployment copied from
+   * the example indexed every unread post at 0, the bottom of the scale, and
+   * the setting's own documentation was the thing breaking it. Both spellings
+   * are now read the way an operator means them: a fraction up to 1 is a share
+   * of 100, anything else is taken as a score, and the result is clamped.
+   */
+  private socialFallbackScore(): number {
+    const raw = Number(process.env.AI_SOCIAL_FALLBACK_SCORE ?? '40');
+    if (!Number.isFinite(raw) || raw < 0) return 40;
+    const score = raw > 0 && raw <= 1 ? raw * 100 : raw;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  /** The tag count the prompt asks for, as a bounded integer rather than raw env text. */
+  private socialMaxTags(): number {
+    const parsed = Number.parseInt(process.env.AI_SOCIAL_MAX_TAGS ?? '5', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 10) : 5;
+  }
+
   async enrichSocialContent(content: string, mediaUrls?: string[]): Promise<any> {
+    const fallback = () => ({
+      qualityScore: this.socialFallbackScore(),
+      tags: [] as string[],
+      sentiment: 'neutral',
+      isSafe: true,
+    });
+
     if (process.env.AI_SOCIAL_CONTENT_ENABLED !== 'true') {
-      const fallbackScore = parseInt(process.env.AI_SOCIAL_FALLBACK_SCORE || '40', 10);
-      return {
-        qualityScore: fallbackScore,
-        tags: [],
-        sentiment: 'neutral',
-        isSafe: true
-      };
+      return fallback();
     }
 
     if (!this.openai) {
       this.ensureOpenAI('social content enrichment');
-      const fallbackScore = parseInt(process.env.AI_SOCIAL_FALLBACK_SCORE || '40', 10);
-      return {
-        qualityScore: fallbackScore,
-        tags: [],
-        sentiment: 'neutral',
-        isSafe: true
-      };
+      return fallback();
     }
+
+    const maxTags = this.socialMaxTags();
 
     try {
         const systemPrompt = `You are a social media content moderator and strategist. Analyze this post content.
         Return a valid JSON object:
         {
             "qualityScore": number (0-100, based on engagement potential/clarity),
-            "tags": ["tag1", "tag2"] (max ${process.env.AI_SOCIAL_MAX_TAGS || 5} tags),
+            "tags": ["tag1", "tag2"] (max ${maxTags} tags),
             "sentiment": "positive" | "negative" | "neutral",
             "isSafe": boolean (content moderation check)
         }`;
-        
-        const userPrompt = `Content: "${content}"\nHas Media: ${mediaUrls?.length ? 'Yes' : 'No'}`;
+
+        // The post used to be pasted between two quotation marks, so a post
+        // that closed the quote could write the rest of the prompt. It is
+        // quoted as data like every other member-written field in this file.
+        const userPrompt = [
+          asUntrustedBlock('post', content, 8000),
+          `Has media: ${mediaUrls?.length ? 'Yes' : 'No'}`,
+        ].join('\n');
         const model = process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106';
 
-        const completion = await this.openai.chat.completions.create({
+        const completion = await this.complete('post_enrichment', {
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt }
@@ -383,26 +446,39 @@ class AiService {
             model: model,
             response_format: { type: 'json_object' },
             temperature: 0.5,
+            max_tokens: 200,
         });
 
         const result = completion.choices[0].message.content;
         if(!result) throw new Error("No AI response");
-        
-        return JSON.parse(result);
+
+        // What comes back is written into the search index, so it is held to
+        // the shape the index expects rather than passed through whole.
+        const raw = JSON.parse(result);
+        const sentiment = ['positive', 'negative', 'neutral'].includes(raw?.sentiment) ? raw.sentiment : 'neutral';
+        return {
+          qualityScore: scoreOrNull(raw?.qualityScore) ?? this.socialFallbackScore(),
+          tags: stringList(raw?.tags).map((tag) => tag.slice(0, 50)).slice(0, maxTags),
+          sentiment,
+          isSafe: typeof raw?.isSafe === 'boolean' ? raw.isSafe : true,
+        };
     } catch (error) {
         logger.error('AI Content Enrichment failed:', error);
-        return { 
-            qualityScore: parseInt(process.env.AI_SOCIAL_FALLBACK_SCORE || '40', 10), 
-            tags: [], 
-            sentiment: 'neutral', 
-            isSafe: true 
-        };
+        return fallback();
     }
   }
 
+  /**
+   * The kinds of interview the coach screen offers, plus the route's own
+   * 'mixed' default. Spoken to the model as an instruction, so it is an
+   * allowlist and never raw caller text.
+   */
+  static readonly INTERVIEW_TYPES = new Set(['behavioral', 'technical', 'case', 'situational', 'mixed']);
+
   async generateInterviewQuestions(
     jobDescription: string,
-    type: 'behavioral' | 'technical' | 'mixed' = 'mixed'
+    type: string = 'mixed',
+    meter?: AiMeter
   ): Promise<InterviewQuestionSet> {
     if (!this.openai) {
       this.ensureOpenAI('interview question generation');
@@ -430,18 +506,27 @@ class AiService {
             "answers": ["Key points to hit for Q1", "Key points for Q2"]
         }`;
 
-        const userPrompt = `Job Description: ${jobDescription}\nType: ${type}`;
+        const spokenType = AiService.INTERVIEW_TYPES.has(type) ? type : 'mixed';
+        const userPrompt = [
+          asUntrustedBlock('job description', jobDescription, 8000),
+          `Interview type: ${spokenType}`,
+        ].join('\n\n');
         const model = process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106';
 
-        const completion = await this.openai.chat.completions.create({
+        const completion = await this.complete(
+          'interview_questions',
+          {
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt }
             ],
             model: model,
             response_format: { type: 'json_object' },
-        });
-        
+            max_tokens: DEFAULT_MAX_TOKENS,
+          },
+          meter
+        );
+
         const content = completion.choices[0].message.content;
         if (!content) throw new Error("No response");
         const raw = JSON.parse(content);
@@ -457,13 +542,16 @@ class AiService {
     }
   }
 
-  async evaluateInterviewAnswer(params: {
-    question: string;
-    answer: string;
-    jobRole?: string;
-    interviewType?: string;
-    difficulty?: string;
-  }): Promise<InterviewAnswerFeedback> {
+  async evaluateInterviewAnswer(
+    params: {
+      question: string;
+      answer: string;
+      jobRole?: string;
+      interviewType?: string;
+      difficulty?: string;
+    },
+    meter?: AiMeter
+  ): Promise<InterviewAnswerFeedback> {
     if (!this.openai) {
       this.ensureOpenAI('interview answer feedback');
       // The rating used to be 3, with "Answer submitted successfully" listed
@@ -491,20 +579,35 @@ class AiService {
   "nextQuestion": "A relevant follow-up interview question"
 }`;
 
-      const userPrompt = `Job role: ${params.jobRole || 'Not specified'}
-Interview type: ${params.interviewType || 'mixed'}
-Difficulty: ${params.difficulty || 'mid'}
-Question: ${params.question}
-Candidate answer: ${params.answer}`;
+      // Her answer, the question it answers and the role she typed all come
+      // from the browser, so each is quoted as data rather than spliced into
+      // the instructions, and the two free-form labels are held to lists.
+      const interviewType =
+        params.interviewType && AiService.INTERVIEW_TYPES.has(params.interviewType) ? params.interviewType : 'mixed';
+      const difficulty = ['entry', 'mid', 'senior', 'executive'].includes(params.difficulty ?? '')
+        ? params.difficulty
+        : 'mid';
+      const userPrompt = [
+        params.jobRole?.trim() ? asUntrustedBlock('job role', params.jobRole, 200) : 'Job role: not specified',
+        `Interview type: ${interviewType}`,
+        `Difficulty: ${difficulty}`,
+        asUntrustedBlock('interview question', params.question, 2000),
+        asUntrustedBlock('candidate answer', params.answer, 8000),
+      ].join('\n\n');
 
-      const completion = await this.openai.chat.completions.create({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
-        response_format: { type: 'json_object' },
-      });
+      const completion = await this.complete(
+        'interview_feedback',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+          response_format: { type: 'json_object' },
+          max_tokens: DEFAULT_MAX_TOKENS,
+        },
+        meter
+      );
 
       const content = completion.choices[0]?.message?.content;
       if (!content) throw new Error('No response from AI');
@@ -545,7 +648,8 @@ Candidate answer: ${params.answer}`;
     contentType: string = 'post',
     platform: string = 'LinkedIn',
     tone?: string,
-    context?: string
+    context?: string,
+    meter?: AiMeter
   ): Promise<GeneratedContent> {
      if (!this.openai) {
        this.ensureOpenAI('content generation');
@@ -570,11 +674,15 @@ Candidate answer: ${params.answer}`;
        ];
        const userPrompt = parts.filter(Boolean).join('\n');
 
-       const completion = await this.openai.chat.completions.create({
-         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-         model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
-         max_tokens: DEFAULT_MAX_TOKENS,
-       });
+       const completion = await this.complete(
+         'content_generator',
+         {
+           messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+           model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+           max_tokens: DEFAULT_MAX_TOKENS,
+         },
+         meter
+       );
        return { content: stringOrNull(completion.choices[0]?.message?.content), simulated: false };
      } catch (e) {
        logger.error('AI Content Gen failed', e);
@@ -603,7 +711,8 @@ Candidate answer: ${params.answer}`;
     idea: string,
     targetMarket?: string,
     problemSolved?: string,
-    category?: string
+    category?: string,
+    meter?: AiMeter
   ): Promise<IdeaValidation> {
     if (!this.openai) {
       this.ensureOpenAI('idea validation');
@@ -634,15 +743,19 @@ Candidate answer: ${params.answer}`;
         category?.trim() ? asUntrustedBlock('idea category', category, 200) : '',
       ];
 
-      const completion = await this.openai.chat.completions.create({
-         messages: [
-           { role: 'system', content: systemPrompt },
-           { role: 'user', content: parts.filter(Boolean).join('\n\n') },
-         ],
-         model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
-         response_format: { type: 'json_object' },
-         max_tokens: DEFAULT_MAX_TOKENS,
-      });
+      const completion = await this.complete(
+        'idea_validator',
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: parts.filter(Boolean).join('\n\n') },
+          ],
+          model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+          response_format: { type: 'json_object' },
+          max_tokens: DEFAULT_MAX_TOKENS,
+        },
+        meter
+      );
 
       const content = completion.choices[0]?.message?.content;
       if (!content) throw new Error('No response from AI');
@@ -675,7 +788,7 @@ Candidate answer: ${params.answer}`;
     };
   }
 
-  async chat(message: string, history: any[] = []): Promise<string> {
+  async chat(message: string, history: unknown[] = [], meter?: AiMeter): Promise<string> {
      if (!this.openai) {
        this.ensureOpenAI('chat');
        return "I am ATHENA (Simulated). How can I help?";
@@ -704,17 +817,21 @@ Candidate answer: ${params.answer}`;
          // that is not a well-formed user/assistant turn.
          const validHistory = sanitizeChatHistory(history);
 
-         const messages: any[] = [
+         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
              { role: 'system', content: systemPrompt },
              ...validHistory,
              { role: 'user', content: truncate(message, 8000) }
          ];
 
-         const completion = await this.openai.chat.completions.create({
+         const completion = await this.complete(
+           'chat',
+           {
              messages,
              model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
              max_tokens: DEFAULT_MAX_TOKENS,
-         });
+           },
+           meter
+         );
          return completion.choices[0]?.message?.content || '';
      } catch (e) {
          logger.error('AI Chat failed', e);
@@ -732,7 +849,8 @@ Candidate answer: ${params.answer}`;
    */
   async evaluateJobMatch(
     userProfile: string,
-    jobDescription: string
+    jobDescription: string,
+    meter?: AiMeter
   ): Promise<{ score: number | null; analysis: string | null; missingSkills: string[] } | null> {
     if (!this.openai) {
       return null;
@@ -745,12 +863,16 @@ Candidate answer: ${params.answer}`;
           asUntrustedBlock('job description', jobDescription, 8000),
         ];
 
-        const completion = await this.openai.chat.completions.create({
-             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: parts.join('\n\n') }],
-             model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
-             response_format: { type: 'json_object' },
-             max_tokens: DEFAULT_MAX_TOKENS,
-        });
+        const completion = await this.complete(
+          'job_match',
+          {
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: parts.join('\n\n') }],
+            model: process.env.AI_OPENAI_CHAT_MODEL || 'gpt-3.5-turbo-1106',
+            response_format: { type: 'json_object' },
+            max_tokens: DEFAULT_MAX_TOKENS,
+          },
+          meter
+        );
         const raw = JSON.parse(completion.choices[0]?.message?.content || '{}');
         const score = Number(raw?.score);
 

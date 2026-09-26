@@ -70,34 +70,26 @@ export interface MentorMatchResult {
   }>;
 }
 
+/**
+ * What a creator's money looks like, from live rows only.
+ *
+ * Three fields are gone from this shape, and the reason is the same for each:
+ * nothing measured them. `channels` was a fixed array — Gifts 55%,
+ * Subscriptions 20%, Brand Deals 15%, Digital Products 10% — identical for
+ * every member and sent under an analytics route as though it were her revenue
+ * mix. `revenuePotentialScore` added three capped terms with hand-picked
+ * weights and called the sum her potential, and `diversificationScore` started
+ * at 40 and added 20 twice on thresholds nobody derived. The creator page had
+ * already stopped rendering all three; they are now not sent, so no other
+ * client can pick them up and show them.
+ */
 export interface IncomeStreamResult {
   creatorStatus: 'non_creator' | 'emerging' | 'growing' | 'established';
-  revenuePotentialScore: number;
-  diversificationScore: number;
   monthlyEarnings: number;
   avgGiftValue: number;
   followerCount: number;
+  /** General advice, the same for every creator, and presented as that. */
   actionPlan: string[];
-  channels: Array<{
-    name: string;
-    currentShare: number;
-    potentialShare: number;
-  }>;
-}
-
-export interface RecommendationEngineResult {
-  generatedAt: Date;
-  items: Array<{
-    type: 'job' | 'course' | 'mentor' | 'post';
-    id: string;
-    title: string;
-    score: number;
-    reason: string;
-  }>;
-  userSignals: {
-    persona: string | null;
-    skillCount: number;
-  };
 }
 
 const normalizeSkill = (value: string) => value.trim().toLowerCase();
@@ -370,7 +362,7 @@ export async function getMentorMatch(userId: string): Promise<MentorMatchResult>
 export async function getIncomeStream(userId: string): Promise<IncomeStreamResult> {
   const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [creatorProfile, giftStats, recentPosts] = await Promise.all([
+  const [creatorProfile, giftStats] = await Promise.all([
     prisma.creatorProfile.findUnique({
       where: { userId },
       select: { isMonetized: true, tier: true, followerCount: true, totalEarnings: true },
@@ -381,24 +373,11 @@ export async function getIncomeStream(userId: string): Promise<IncomeStreamResul
       _avg: { giftValue: true },
       _count: true,
     }),
-    prisma.post.count({
-      where: { authorId: userId, createdAt: { gte: monthAgo } },
-    }),
   ]);
 
   const followerCount = creatorProfile?.followerCount || 0;
   const monthlyEarnings = (giftStats._sum.giftValue || 0) * 0.01;
   const avgGiftValue = (giftStats._avg.giftValue || 0) * 0.01;
-
-  const activityScore = Math.min(40, recentPosts * 4);
-  const audienceScore = Math.min(35, followerCount / 100);
-  const revenueScore = Math.min(25, monthlyEarnings * 2);
-  const revenuePotentialScore = Math.round(activityScore + audienceScore + revenueScore);
-
-  const diversificationScore = Math.max(
-    10,
-    Math.min(100, 40 + (recentPosts > 6 ? 20 : 0) + (monthlyEarnings > 200 ? 20 : 0))
-  );
 
   const creatorStatus: IncomeStreamResult['creatorStatus'] = creatorProfile?.isMonetized
     ? followerCount > 20000
@@ -407,13 +386,6 @@ export async function getIncomeStream(userId: string): Promise<IncomeStreamResul
         ? 'growing'
         : 'emerging'
     : 'non_creator';
-
-  const channels = [
-    { name: 'Gifts', currentShare: 55, potentialShare: 45 },
-    { name: 'Subscriptions', currentShare: 20, potentialShare: 25 },
-    { name: 'Brand Deals', currentShare: 15, potentialShare: 20 },
-    { name: 'Digital Products', currentShare: 10, potentialShare: 10 },
-  ];
 
   const actionPlan = [
     'Schedule 2 revenue-focused live sessions per week.',
@@ -424,104 +396,9 @@ export async function getIncomeStream(userId: string): Promise<IncomeStreamResul
 
   return {
     creatorStatus,
-    revenuePotentialScore,
-    diversificationScore,
     monthlyEarnings,
     avgGiftValue,
     followerCount,
     actionPlan,
-    channels,
-  };
-}
-
-export async function getRecommendationEngineV2(userId?: string): Promise<RecommendationEngineResult> {
-  const [user, userSkills] = userId
-    ? await Promise.all([
-        prisma.user.findUnique({ where: { id: userId }, select: { persona: true } }),
-        getUserSkills(userId),
-      ])
-    : [null, []];
-
-  const skillSet = new Set(userSkills);
-
-  const [jobs, courses, mentors, posts] = await Promise.all([
-    prisma.job.findMany({
-      where: { status: 'ACTIVE' },
-      select: { id: true, title: true, city: true, state: true, country: true },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    }),
-    prisma.course.findMany({
-      where: { isActive: true },
-      select: { id: true, title: true, providerName: true },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    }),
-    prisma.mentorProfile.findMany({
-      where: { isAvailable: true },
-      select: { id: true, user: { select: { firstName: true, lastName: true } }, specializations: true },
-      take: 5,
-    }),
-    prisma.post.findMany({
-      where: { isHidden: false },
-      select: { id: true, content: true, viewCount: true },
-      orderBy: { viewCount: 'desc' },
-      take: 5,
-    }),
-  ]);
-
-  const items: RecommendationEngineResult['items'] = [];
-
-  jobs.forEach((job, index) => {
-    items.push({
-      type: 'job',
-      id: job.id,
-      title: job.title,
-      score: 90 - index * 5,
-      reason: 'High-growth role aligned with your search activity.',
-    });
-  });
-
-  courses.forEach((course, index) => {
-    items.push({
-      type: 'course',
-      id: course.id,
-      title: course.title,
-      score: 85 - index * 4,
-      reason: `Upskill pathway from ${course.providerName || 'verified provider'}.`,
-    });
-  });
-
-  mentors.forEach((mentor, index) => {
-    const mentorSkills = toStringArray(mentor.specializations).map(normalizeSkill);
-    const overlap = mentorSkills.filter((skill) => skillSet.has(skill)).length;
-    items.push({
-      type: 'mentor',
-      id: mentor.id,
-      title: `${mentor.user.firstName} ${mentor.user.lastName}`.trim(),
-      score: 80 + overlap * 3 - index * 3,
-      reason: overlap ? 'Shared skills and specialization match.' : 'Top-rated mentor in your domain.',
-    });
-  });
-
-  posts.forEach((post, index) => {
-    items.push({
-      type: 'post',
-      id: post.id,
-      title: post.content.slice(0, 40),
-      score: 75 - index * 2,
-      reason: 'Trending in your community feed.',
-    });
-  });
-
-  items.sort((a, b) => b.score - a.score);
-
-  return {
-    generatedAt: new Date(),
-    items: items.slice(0, 12),
-    userSignals: {
-      persona: user?.persona || null,
-      skillCount: userSkills.length,
-    },
   };
 }

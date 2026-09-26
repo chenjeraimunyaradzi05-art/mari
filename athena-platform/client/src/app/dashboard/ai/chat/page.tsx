@@ -7,12 +7,14 @@ import { useAIChat, useAIChatUsage, type AIChatUsage } from '@/lib/hooks';
 /**
  * AI chat.
  *
- * Free-tier chat is capped (20 messages per 24 hours by default) and the cap
- * used to arrive as a 429 in the middle of a conversation, because nothing read
- * GET /ai/chat/usage before she typed or the `usage` object every reply
+ * Chat is capped (20 messages per 24 hours on the free plan by default) and the
+ * cap used to arrive as a 429 in the middle of a conversation, because nothing
+ * read GET /ai/chat/usage before she typed or the `usage` object every reply
  * carries. Now one line under the composer says how many messages are left and
  * when the window resets, follows each reply, and offers the upgrade only once
- * there are none left. Paid tiers have no cap and see no line.
+ * there are none left. ATHENA Pro has a larger daily window rather than none —
+ * the "unlimited chat" this page used to offer was never true — so a paying
+ * member sees the same line with her own numbers, and no upgrade offer.
  *
  * The second thing this page had to learn is what to do when the conversation
  * stops being about work. The server screens every message and every reply now,
@@ -61,6 +63,13 @@ const dialable = (phone: string) => phone.replace(/[^\d+]/g, '');
 
 type Usage = NonNullable<AIChatUsage['usage']>;
 
+/**
+ * GET /ai/chat/usage also says whether she is on ATHENA Pro and what its daily
+ * window is, so the upgrade offer can name a number. Both are optional here
+ * because an older server did not send them.
+ */
+type ChatUsageAnswer = AIChatUsage & { premium?: boolean; premiumLimit?: number | null };
+
 /** "3h 20m", "45 min", "under a minute": the wait until the window resets. */
 function formatReset(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 60) return 'under a minute';
@@ -82,6 +91,9 @@ export default function AIChatPage() {
   const usage = liveUsage ?? usageQuery.data?.usage ?? null;
   const exhausted = usage !== null && usage.remaining <= 0;
   const windowLabel = usage?.windowSeconds === DAY_SECONDS ? 'today' : 'in this window';
+  const answer: ChatUsageAnswer | undefined = usageQuery.data;
+  const onPro = answer?.premium === true;
+  const proLimit = typeof answer?.premiumLimit === 'number' ? answer.premiumLimit : null;
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -249,14 +261,18 @@ export default function AIChatPage() {
             className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
             aria-live="polite"
           >
-            {exhausted ? (
+            {exhausted && onPro ? (
+              <>
+                That is all {usage.limit} messages {windowLabel}. More in {formatReset(usage.resetIn)}.
+              </>
+            ) : exhausted ? (
               <>
                 That is all {usage.limit} messages {windowLabel}. More in {formatReset(usage.resetIn)}, or{' '}
                 <Link
                   href="/dashboard/settings/billing"
                   className="font-medium text-rose-600 hover:underline dark:text-rose-400"
                 >
-                  upgrade for unlimited chat
+                  {proLimit ? `ATHENA Pro raises the limit to ${proLimit}` : 'see what ATHENA Pro gives you'}
                 </Link>
                 .
               </>

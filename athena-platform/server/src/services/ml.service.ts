@@ -248,6 +248,11 @@ export interface MlServiceHealth {
   reachable: boolean;
   /** The service answered and reported itself able to serve every endpoint. */
   ready: boolean;
+  /**
+   * The service answered as "healthy" or "degraded", which is all the feed
+   * ranker needs: its router reads no model. False when it did not answer.
+   */
+  feedRankerCanRun: boolean;
   /** Per-model load status as the service reports it, or null if it did not answer. */
   models: Record<string, boolean> | null;
   checkedAt: string | null;
@@ -277,6 +282,8 @@ class MLServiceClient {
   private baseUrl: string;
   private timeout: number;
   private isHealthy: boolean = false;
+  /** The service answered its health check as "healthy" or "degraded". */
+  private isAnswering: boolean = false;
   private lastHealthCheck: number = 0;
   private healthCheckInterval: number = 30000; // 30 seconds
   private lastModels: Record<string, boolean> | null = null;
@@ -415,9 +422,11 @@ class MLServiceClient {
       // "healthy" is the only word that means every endpoint over there can
       // answer. The service also says "degraded", which it uses when it started
       // without a model artefact some endpoint needs — it is alive and most of
-      // its routers work, but treating that as ready is how a deployment with
-      // nothing loaded came to look identical to one serving real predictions.
+      // its routers work, but treating that as fully ready is how a deployment
+      // with nothing loaded came to look identical to one serving real
+      // predictions. Both words are kept (see isReady for what each allows).
       this.isHealthy = response.status === 'healthy';
+      this.isAnswering = response.status === 'healthy' || response.status === 'degraded';
       this.lastModels =
         response.models_loaded && typeof response.models_loaded === 'object' ? response.models_loaded : null;
       this.lastError = null;
@@ -425,6 +434,7 @@ class MLServiceClient {
       return this.isHealthy;
     } catch (error) {
       this.isHealthy = false;
+      this.isAnswering = false;
       this.lastModels = null;
       this.lastError = error instanceof Error ? error.message : String(error);
       this.lastHealthCheck = Date.now();
@@ -432,12 +442,38 @@ class MLServiceClient {
     }
   }
 
-  async isReady(): Promise<boolean> {
+  /**
+   * Whether the service can answer a caller that needs `requiredModel` — or,
+   * with no model named, a caller that needs none.
+   *
+   * This used to mean "every endpoint over there can answer", which the
+   * service reports as "healthy" only when every model an endpoint reads is
+   * loaded. The one caller that asked is the feed ranker, whose router reads
+   * no model at all — and career_compass, the one model that is read, has no
+   * artefact and cannot be given one honestly (the trainer refuses to produce
+   * a servable one from synthetic data). So with ML_SERVICE_URL set, every
+   * feed load counted as skippedNotReady and kept the engagement order, while
+   * the runbook and ml/README told operators the ranker worked without an
+   * artefact. A "degraded" service is alive and its model-free routers answer;
+   * a caller that needs a model names it, and is told yes only when the
+   * service reports that model loaded.
+   */
+  async isReady(requiredModel?: string): Promise<boolean> {
     // Use cached health status if recent
-    if (Date.now() - this.lastHealthCheck < this.healthCheckInterval) {
-      return this.isHealthy;
+    if (Date.now() - this.lastHealthCheck >= this.healthCheckInterval) {
+      await this.checkHealth();
     }
-    return this.checkHealth();
+    if (!this.isAnswering) return false;
+    if (!requiredModel) return true;
+    return this.lastModels?.[requiredModel] === true;
+  }
+
+  /** Every endpoint over there can answer: the service said "healthy". */
+  private async isFullyReady(): Promise<boolean> {
+    if (Date.now() - this.lastHealthCheck >= this.healthCheckInterval) {
+      return this.checkHealth();
+    }
+    return this.isHealthy;
   }
 
   /**
@@ -455,13 +491,14 @@ class MLServiceClient {
         url: this.baseUrl,
         reachable: false,
         ready: false,
+        feedRankerCanRun: false,
         models: null,
         checkedAt: null,
         error: null,
       };
     }
 
-    const ready = await this.isReady();
+    const ready = await this.isFullyReady();
     return {
       configured: true,
       url: this.baseUrl,
@@ -469,6 +506,8 @@ class MLServiceClient {
       // last probe came back without a transport error, whatever it said.
       reachable: ready || this.lastError === null,
       ready,
+      // What the feed ranker needs, which is less than `ready`: see isReady.
+      feedRankerCanRun: this.isAnswering,
       models: this.lastModels,
       checkedAt: this.lastHealthCheck ? new Date(this.lastHealthCheck).toISOString() : null,
       error: this.lastError,

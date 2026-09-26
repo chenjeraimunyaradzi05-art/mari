@@ -18,7 +18,7 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { useContentGenerator } from '@/lib/hooks';
-import PaywallGate from '@/components/subscription/PaywallGate';
+import PremiumGate from '../PremiumGate';
 import { cn } from '@/lib/utils';
 
 const contentTypes = [
@@ -75,12 +75,14 @@ export default function ContentGeneratorPage() {
   const [additionalContext, setAdditionalContext] = useState('');
   const [generatedContent, setGeneratedContent] = useState('');
   const [copied, setCopied] = useState(false);
-  const [variations, setVariations] = useState<string[]>([]);
-  const [selectedVariation, setSelectedVariation] = useState(0);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
   const { mutate: generateContent, isPending } = useContentGenerator();
 
+  // There was an "Alternative Variations" switcher here, filled from
+  // `data.variations` — a field POST /ai/content-generator has never sent. It
+  // could not show anything, so it is gone rather than kept waiting for a
+  // feature nobody built; "Regenerate" asks for another draft.
   const handleGenerate = () => {
     if (!topic.trim()) return;
     setGenerationError(null);
@@ -91,15 +93,16 @@ export default function ContentGeneratorPage() {
         onSuccess: (data) => {
           const content = data?.content || '';
           setGeneratedContent(content);
-          setVariations(data.variations || []);
-          setSelectedVariation(0);
           if (!content) {
-            setGenerationError('The generator completed but did not return content.');
+            setGenerationError(
+              data?.simulated
+                ? 'The content generator is not connected to its AI model on this deployment, so nothing was written.'
+                : 'The generator completed but did not return content.'
+            );
           }
         },
         onError: (error: any) => {
           setGeneratedContent('');
-          setVariations([]);
           setGenerationError(
             error?.response?.data?.message ||
               'Content generation is unavailable right now. Please try again later.'
@@ -142,7 +145,7 @@ export default function ContentGeneratorPage() {
           here a free member picked a content type, wrote her brief, pressed
           Generate and was answered with a toast that read like a fault rather
           than a price. */}
-      <PaywallGate feature="ai_content_generator" featureName="Content Generator">
+      <PremiumGate featureName="Content Generator">
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Input Section */}
         <div className="space-y-6">
@@ -334,35 +337,6 @@ export default function ContentGeneratorPage() {
                 </div>
               </div>
 
-              {/* Variations */}
-              {variations.length > 0 && (
-                <div className="card">
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-4">
-                    Alternative Variations
-                  </h3>
-                  <div className="space-y-2">
-                    {variations.map((variation, index) => (
-                      <button
-                        key={index}
-                        onClick={() => {
-                          setGeneratedContent(variation);
-                          setSelectedVariation(index);
-                        }}
-                        className={cn(
-                          'w-full text-left p-3 rounded-lg border transition',
-                          selectedVariation === index
-                            ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                        )}
-                      >
-                        <span className="text-sm text-slate-600 dark:text-slate-300 line-clamp-2">
-                          {variation}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>
@@ -393,7 +367,7 @@ export default function ContentGeneratorPage() {
           </div>
         </div>
       </div>
-      </PaywallGate>
+      </PremiumGate>
     </div>
   );
 }

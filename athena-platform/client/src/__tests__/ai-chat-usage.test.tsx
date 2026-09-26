@@ -62,7 +62,11 @@ describe('AI chat usage line', () => {
     render(<AIChatPage />);
 
     expect(screen.getByText(/That is all 20 messages today/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'upgrade for unlimited chat' })).toHaveAttribute('href', '/dashboard/settings/billing');
+    // Not "unlimited": Pro has a daily limit of its own, and the page shows a Pro
+    // member hitting it. Selling an upgrade as unlimited when it is not was a
+    // claim the product could not keep. Without a premiumLimit in the answer the
+    // link says what Pro gives rather than inventing a number.
+    expect(screen.getByRole('link', { name: 'see what ATHENA Pro gives you' })).toHaveAttribute('href', '/dashboard/settings/billing');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 

@@ -21,18 +21,22 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import PaywallGate from '@/components/subscription/PaywallGate';
+import PremiumGate from '../PremiumGate';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   feedback?: {
-    rating: number;
+    /** Null when the model offered no rating; drawn as "no rating", never as zero stars. */
+    rating: number | null;
     strengths: string[];
     improvements: string[];
   };
 }
+
+/** What POST /ai/interview-coach answers with. */
+type QuestionSet = { questions: string[]; tips: string | null; simulated: boolean };
 
 const interviewTypes = [
   { id: 'behavioral', name: 'Behavioral', icon: '🗣️' },
@@ -61,6 +65,15 @@ export default function InterviewCoachPage() {
   const [recordedAnswerUrl, setRecordedAnswerUrl] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [coachError, setCoachError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  // The question her next answer is graded against. It used to be read off
+  // the last message on screen, so when a reply carried no follow-up question
+  // her next answer was graded against the coach's own feedback text.
+  const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
+  // The rest of the questions the model wrote for this role, asked in turn
+  // whenever a reply comes back without a follow-up of its own.
+  const [queuedQuestions, setQueuedQuestions] = useState<string[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -105,42 +118,70 @@ export default function InterviewCoachPage() {
     };
   }, []);
 
-  const startSession = () => {
-    if (!jobRole) return;
+  /**
+   * The session opens with a question the model wrote for the role she typed.
+   *
+   * It used to open with one of four fixed sentences keyed only by interview
+   * type — the same "tell me about a time you faced a challenge" for a nurse
+   * and a site engineer — under a hub card that promised questions tailored to
+   * her target role. The server's question generator existed the whole time;
+   * nothing called it. If it cannot write one, the session does not start and
+   * she is told why, rather than being handed a canned question as though it
+   * were hers.
+   */
+  const startSession = async () => {
+    const role = jobRole.trim();
+    if (!role || isStarting) return;
 
-    const systemMessage: Message = {
-      id: '1',
-      role: 'system',
-      content: `Interview session started for ${jobRole} position. Interview type: ${interviewType}, Difficulty: ${difficulty}`,
-    };
+    setIsStarting(true);
+    setStartError(null);
+    try {
+      const response = await api.post<{ success: boolean; data: QuestionSet }>('/ai/interview-coach', {
+        jobRole: role,
+        interviewType,
+      });
+      const set = response.data?.data;
+      const questions = Array.isArray(set?.questions) ? set.questions.filter((q) => q.trim()) : [];
 
-    const firstQuestion: Message = {
-      id: '2',
-      role: 'assistant',
-      content: getFirstQuestion(interviewType),
-    };
+      if (!set || set.simulated || questions.length === 0) {
+        setStartError(
+          set?.simulated
+            ? 'The interview coach is not connected to its AI model on this deployment, so it has no questions to ask. Nothing was started.'
+            : 'The coach did not write any questions for this role. Try describing the role differently.'
+        );
+        return;
+      }
 
-    setMessages([systemMessage, firstQuestion]);
-    setSessionStarted(true);
-  };
-
-  const getFirstQuestion = (type: string) => {
-    const questions: Record<string, string> = {
-      behavioral: "Let's start with a classic. Tell me about a time when you faced a significant challenge at work. How did you handle it, and what was the outcome?",
-      technical: "Great, let's begin. Can you walk me through your technical background and describe a complex project you've worked on recently?",
-      case: "Here's your first case study: A retail company is seeing declining in-store sales while their online presence grows. How would you approach analyzing and solving this problem?",
-      situational: "Imagine you're leading a project and a key team member suddenly leaves mid-project. How would you handle this situation?",
-    };
-    return questions[type] || questions.behavioral;
+      const [first, ...rest] = questions;
+      setMessages([
+        {
+          id: '1',
+          role: 'system',
+          content: `Interview session started for ${role}. Interview type: ${interviewType}, difficulty: ${difficulty}.`,
+        },
+        { id: '2', role: 'assistant', content: first },
+      ]);
+      setCurrentQuestion(first);
+      setQueuedQuestions(rest);
+      setCoachError(null);
+      setSessionStarted(true);
+    } catch (error: unknown) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setStartError(message || 'The coach could not be reached just now. Nothing was started; please try again.');
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   const handleSend = () => {
-    if (!input.trim() || isPending) return;
+    if (!input.trim() || isPending || !currentQuestion) return;
 
+    const answer = input;
+    const question = currentQuestion;
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: answer,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -151,8 +192,8 @@ export default function InterviewCoachPage() {
 
     api
       .post('/ai/interview-coach/feedback', {
-        question: messages[messages.length - 1]?.content || '',
-        answer: input,
+        question,
+        answer,
         jobRole,
         interviewType,
         difficulty,
@@ -171,15 +212,28 @@ export default function InterviewCoachPage() {
           feedback: data.analysis,
         };
 
+        // The next question is the coach's follow-up if it wrote one, and
+        // otherwise the next of the questions it wrote for this role. When
+        // both have run out there is no question, and the box says so rather
+        // than grading an answer against the feedback above it.
+        const next: string | null =
+          typeof data.nextQuestion === 'string' && data.nextQuestion.trim()
+            ? data.nextQuestion
+            : queuedQuestions[0] ?? null;
+        if (!(typeof data.nextQuestion === 'string' && data.nextQuestion.trim()) && next) {
+          setQueuedQuestions((queue) => queue.slice(1));
+        }
+
         const nextMessages: Message[] = [feedbackMessage];
-        if (data.nextQuestion) {
+        if (next) {
           nextMessages.push({
             id: (Date.now() + 2).toString(),
             role: 'assistant',
-            content: data.nextQuestion,
+            content: next,
           });
         }
 
+        setCurrentQuestion(next);
         setMessages((prev) => [...prev, ...nextMessages]);
       })
       .catch((error) => {
@@ -280,7 +334,8 @@ export default function InterviewCoachPage() {
       const recognition = new SpeechRecognitionConstructor();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      // Australian English: members here are transcribed in their own accent.
+      recognition.lang = 'en-AU';
       recognition.onresult = (event: any) => {
         let finalTranscript = '';
         let interimTranscript = '';
@@ -388,11 +443,11 @@ export default function InterviewCoachPage() {
           </div>
         </div>
 
-        {/* Both interview-coach routes on the server carry requirePremium.
-            This page had no gate, so a free member set up a session, typed her
+        {/* Both interview-coach routes on the server are premium-only. This
+            page had no gate, so a free member set up a session, typed her
             first answer and was told the coach was "unavailable right now" —
-            which was a 401 about her plan, not an outage. */}
-        <PaywallGate feature="ai_interview_coach" featureName="Interview Coach">
+            which was a refusal about her plan, not an outage. */}
+        <PremiumGate featureName="Interview Coach">
         {/* Setup */}
         <div className="card">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">
@@ -467,14 +522,29 @@ export default function InterviewCoachPage() {
             </div>
           </div>
 
+          {startError && (
+            <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+              {startError}
+            </p>
+          )}
+
           <button
-            onClick={startSession}
-            disabled={!jobRole}
+            onClick={() => void startSession()}
+            disabled={!jobRole.trim() || isStarting}
             className="w-full btn-primary py-3 flex items-center justify-center space-x-2 disabled:opacity-50"
           >
-            <MessageCircle className="w-5 h-5" />
-            <span>Start Practice Session</span>
+            {isStarting ? <RefreshCw className="w-5 h-5 animate-spin" /> : <MessageCircle className="w-5 h-5" />}
+            <span>{isStarting ? 'Writing questions for this role…' : 'Start Practice Session'}</span>
           </button>
+
+          {/* What happens to a session, said before she starts one. Nothing
+              is stored on ATHENA's side: the server keeps no record of the
+              questions, her answers or the feedback. */}
+          <p className="mt-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+            Nothing from a practice session is saved. Your answers are sent to ATHENA&apos;s AI
+            model to be marked, and the questions, your answers and the feedback are gone when
+            you leave this page.
+          </p>
         </div>
 
         {/* Tips */}
@@ -490,7 +560,7 @@ export default function InterviewCoachPage() {
             <li>• Take your time to think before answering - it's okay to pause</li>
           </ul>
         </div>
-        </PaywallGate>
+        </PremiumGate>
       </div>
     );
   }
@@ -524,6 +594,8 @@ export default function InterviewCoachPage() {
             onClick={() => {
               setSessionStarted(false);
               setMessages([]);
+              setCurrentQuestion(null);
+              setQueuedQuestions([]);
             }}
             className="btn-outline text-sm py-1.5"
           >
@@ -580,21 +652,29 @@ export default function InterviewCoachPage() {
                         <span className="text-sm font-medium text-slate-900 dark:text-white">
                           Performance Rating:
                         </span>
-                        <div className="flex">
-                          {[1, 2, 3, 4, 5].map((star) => (
-                            <span
-                              key={star}
-                              className={cn(
-                                'text-lg',
-                                star <= message.feedback!.rating
-                                  ? 'text-yellow-500'
-                                  : 'text-slate-300'
-                              )}
-                            >
-                              ★
-                            </span>
-                          ))}
-                        </div>
+                        {/* No rating is not a rating of nothing: five grey
+                            stars would read as the worst mark there is. */}
+                        {typeof message.feedback.rating === 'number' ? (
+                          <div className="flex" aria-label={`${message.feedback.rating} out of 5`}>
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <span
+                                key={star}
+                                className={cn(
+                                  'text-lg',
+                                  star <= (message.feedback!.rating ?? 0)
+                                    ? 'text-yellow-500'
+                                    : 'text-slate-300'
+                                )}
+                              >
+                                ★
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                            The coach did not rate this answer
+                          </span>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
@@ -648,6 +728,13 @@ export default function InterviewCoachPage() {
             {coachError}
           </div>
         )}
+
+        {!currentQuestion && !isPending && (
+          <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            That is every question the coach wrote for this session. End the session and start
+            another to practise more.
+          </div>
+        )}
       </div>
 
       {/* Input Area */}
@@ -663,15 +750,16 @@ export default function InterviewCoachPage() {
                   handleSend();
                 }
               }}
-              placeholder="Type your answer... (Press Enter to send)"
-              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none"
+              placeholder={currentQuestion ? 'Type your answer... (Press Enter to send)' : 'No question to answer'}
+              disabled={!currentQuestion}
+              className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 resize-none disabled:opacity-60"
               rows={3}
             />
           </div>
           <div className="flex flex-col space-y-2">
             <button
               onClick={toggleRecording}
-              disabled={isPending}
+              disabled={isPending || (!currentQuestion && !isRecording)}
               className={cn(
                 'p-3 rounded-lg transition',
                 isRecording
@@ -689,7 +777,7 @@ export default function InterviewCoachPage() {
             </button>
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isPending}
+              disabled={!input.trim() || isPending || !currentQuestion}
               className="p-3 bg-primary-500 hover:bg-primary-600 text-white rounded-lg disabled:opacity-50 transition"
             >
               <Send className="w-5 h-5" />
@@ -731,6 +819,15 @@ export default function InterviewCoachPage() {
         )}
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
           💡 Tip: Use specific examples and structure your answers with the STAR method
+        </p>
+        {/* Said beside the microphone, because it is the microphone that does
+            it. The transcript comes from the browser's own speech service, and
+            in Chrome and Edge that means her voice leaves the device for Google
+            or Microsoft. The clip itself is never uploaded anywhere. */}
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          The microphone records to this device only; the clip is never uploaded and is gone when
+          you leave. Turning speech into text is done by your browser, and in Chrome and Edge
+          that sends your voice to Google or Microsoft to transcribe.
         </p>
       </div>
     </div>

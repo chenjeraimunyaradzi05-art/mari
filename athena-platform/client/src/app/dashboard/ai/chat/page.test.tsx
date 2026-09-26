@@ -47,6 +47,37 @@ describe('AI chat safety on the page', () => {
     mockedUsage.mockReturnValue({ data: { tier: 'PREMIUM', unlimited: true, usage: null } });
   });
 
+  it('never offers "unlimited" chat, and offers a paying member no upgrade at all', () => {
+    // Premium has a daily window now; it was never unlimited, because the
+    // per-minute limiter always applied.
+    mockedUsage.mockReturnValue({
+      data: {
+        tier: 'FREE',
+        premium: false,
+        premiumLimit: 200,
+        unlimited: false,
+        usage: { limit: 20, remaining: 0, resetIn: 3600, windowSeconds: 86400 },
+      },
+    });
+    const { unmount } = render(<AIChatPage />);
+    expect(screen.queryByText(/unlimited/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /ATHENA Pro raises the limit to 200/ })).toBeInTheDocument();
+    unmount();
+
+    mockedUsage.mockReturnValue({
+      data: {
+        tier: 'PREMIUM_CAREER',
+        premium: true,
+        premiumLimit: null,
+        unlimited: false,
+        usage: { limit: 200, remaining: 0, resetIn: 3600, windowSeconds: 86400 },
+      },
+    });
+    render(<AIChatPage />);
+    expect(screen.getByText(/That is all 200 messages today/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /ATHENA Pro/ })).not.toBeInTheDocument();
+  });
+
   it('shows the disclaimer and the numbers before she has typed anything', () => {
     render(<AIChatPage />);
 

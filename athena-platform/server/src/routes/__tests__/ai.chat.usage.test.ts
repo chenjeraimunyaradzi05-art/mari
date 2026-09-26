@@ -58,10 +58,13 @@ describe('AI chat usage endpoint', () => {
     expect(getRateLimitStatus).toHaveBeenCalledTimes(1);
   });
 
-  it('GET /api/ai/chat/usage returns unlimited for PREMIUM tier', async () => {
+  // This used to assert `unlimited: true` and `usage: null` for a paying
+  // member. It was never true — the per-minute limiter always applied — and it
+  // is now deliberately false: Premium buys a larger daily window, not none.
+  it('GET /api/ai/chat/usage reports the premium window for an active PREMIUM tier', async () => {
     (prisma.user.findUnique as any).mockResolvedValue({
       id: 'user-free-1',
-      subscription: { tier: 'PREMIUM' },
+      subscription: { tier: 'PREMIUM_CAREER', status: 'ACTIVE' },
     });
 
     const res = await request(app).get('/api/ai/chat/usage').expect(200);
@@ -69,10 +72,28 @@ describe('AI chat usage endpoint', () => {
     expect(res.body).toHaveProperty('success', true);
     expect(res.body.data).toEqual(
       expect.objectContaining({
-        tier: 'PREMIUM',
-        unlimited: true,
-        usage: null,
+        tier: 'PREMIUM_CAREER',
+        premium: true,
+        unlimited: false,
+        premiumLimit: null,
+        usage: expect.objectContaining({ limit: 200, windowSeconds: 86400 }),
       })
+    );
+    expect(getRateLimitStatus).toHaveBeenCalledWith('ai:chat:user-free-1', 200, 86400);
+  });
+
+  it('holds a lapsed Premium subscription to the free window', async () => {
+    // A tier that still names Premium on a subscription that is past due is
+    // not a paying member, which is the rule the premium routes apply.
+    (prisma.user.findUnique as any).mockResolvedValue({
+      id: 'user-free-1',
+      subscription: { tier: 'PREMIUM_CAREER', status: 'PAST_DUE' },
+    });
+
+    const res = await request(app).get('/api/ai/chat/usage').expect(200);
+
+    expect(res.body.data).toEqual(
+      expect.objectContaining({ premium: false, premiumLimit: 200, usage: expect.objectContaining({ limit: 20 }) })
     );
   });
 });

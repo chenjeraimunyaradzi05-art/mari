@@ -1,9 +1,10 @@
 import { NextFunction, Response, Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { ApiError } from '../middleware/errorHandler';
-import { authenticate, AuthRequest, requirePremium } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { aiLimiter } from '../middleware/rateLimiter';
 import { aiService } from '../services/ai.service';
+import { checkAiBudget } from '../services/ai-budget.service';
 import {
   AI_CHAT_DISCLAIMER,
   crisisReply,
@@ -71,31 +72,111 @@ export function resetLocalChatWindows(): void {
   localChatWindows.clear();
 }
 
-function getFreeChatQuotaConfig() {
-  const defaultWindowSeconds = 24 * 60 * 60;
-  const defaultMaxRequests = 20;
+function quotaFromEnv(
+  windowName: string,
+  maxName: string,
+  defaults: { windowSeconds: number; maxRequests: number }
+): { windowSeconds: number; maxRequests: number } {
+  const windowSeconds = Number.parseInt(process.env[windowName] || String(defaults.windowSeconds), 10);
+  const maxRequests = Number.parseInt(process.env[maxName] || String(defaults.maxRequests), 10);
 
-  const windowSeconds = Number.parseInt(
-    process.env.AI_CHAT_FREE_WINDOW_SECONDS || String(defaultWindowSeconds),
-    10
-  );
-  const maxRequests = Number.parseInt(
-    process.env.AI_CHAT_FREE_MAX_REQUESTS || String(defaultMaxRequests),
-    10
-  );
-
-  const effectiveWindowSeconds = Number.isFinite(windowSeconds) && windowSeconds > 0
-    ? windowSeconds
-    : defaultWindowSeconds;
-  const effectiveMaxRequests = Number.isFinite(maxRequests) && maxRequests > 0
-    ? maxRequests
-    : defaultMaxRequests;
-
-  return { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests };
+  return {
+    windowSeconds: Number.isFinite(windowSeconds) && windowSeconds > 0 ? windowSeconds : defaults.windowSeconds,
+    maxRequests: Number.isFinite(maxRequests) && maxRequests > 0 ? maxRequests : defaults.maxRequests,
+  };
 }
 
-/** The free-tier window as every chat response reports it. */
+function getFreeChatQuotaConfig() {
+  return quotaFromEnv('AI_CHAT_FREE_WINDOW_SECONDS', 'AI_CHAT_FREE_MAX_REQUESTS', {
+    windowSeconds: 24 * 60 * 60,
+    maxRequests: 20,
+  });
+}
+
+/**
+ * Premium chat had no period quota at all: the quota block ran only when the
+ * tier was FREE, so a paying account's one ceiling was aiLimiter's ten a minute
+ * — fourteen thousand completions a day — and /chat/usage told her she was
+ * "unlimited". Premium now buys a much larger window rather than none, and the
+ * daily token budget in ai-budget.service sits behind both.
+ */
+function getPremiumChatQuotaConfig() {
+  return quotaFromEnv('AI_CHAT_PREMIUM_WINDOW_SECONDS', 'AI_CHAT_PREMIUM_MAX_REQUESTS', {
+    windowSeconds: 24 * 60 * 60,
+    maxRequests: 200,
+  });
+}
+
+/** The chat window as every chat response reports it, whichever tier she is on. */
 type ChatUsage = { limit: number; remaining: number; resetIn: number; windowSeconds: number };
+
+/**
+ * Whether a subscription row buys the premium AI tools today.
+ *
+ * The one rule, used by the gate on every premium route, by GET /access that
+ * the web app asks before it draws a premium page, and by the chat to pick a
+ * quota — so the page, the route and the quota cannot disagree about who has
+ * paid. It is the rule requirePremium in middleware/auth applied: a tier other
+ * than FREE, and a subscription that is ACTIVE or TRIALING. A lapsed or
+ * past-due Premium is not Premium, whatever tier the row still names.
+ */
+type SubscriptionStanding = { tier: string; status: string } | null | undefined;
+
+export function hasActivePremium(subscription: SubscriptionStanding): boolean {
+  return Boolean(
+    subscription &&
+      subscription.tier !== 'FREE' &&
+      (subscription.status === 'ACTIVE' || subscription.status === 'TRIALING')
+  );
+}
+
+/**
+ * The premium gate on this router.
+ *
+ * It used to be requirePremium, which refused with 401 through
+ * UnauthorizedError. A 401 is what the web app's axios interceptor reads as an
+ * expired session, so every paywall refusal made the client rotate the member's
+ * refresh token and retry before it gave up and showed the error. Refusing a
+ * signed-in member for her plan is a 403, and it carries a code the client can
+ * recognise without parsing the sentence.
+ */
+async function requireAiPremium(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const subscription = await prisma.subscription.findUnique({
+      where: { userId: req.user!.id },
+      select: { tier: true, status: true },
+    });
+
+    if (hasActivePremium(subscription)) return next();
+
+    const lapsed = Boolean(subscription && subscription.tier !== 'FREE');
+    return res.status(403).json({
+      success: false,
+      code: 'PREMIUM_REQUIRED',
+      message: lapsed
+        ? `Your ATHENA Pro subscription is ${subscription!.status.toLowerCase().replace(/_/g, ' ')}, so this tool is paused. Update your billing to use it again.`
+        : 'This tool is part of ATHENA Pro.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * The daily token budget, in front of every route that calls the model. It
+ * runs after the rate limiter so a burst is refused cheaply before anything
+ * reads a counter. See ai-budget.service for the two budgets and why.
+ */
+async function aiBudgetGate(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const verdict = await checkAiBudget(req.user!.id);
+    if (verdict.allowed) return next();
+    res.set('Retry-After', String(verdict.resetIn));
+    return next(new ApiError(verdict.scope === 'global' ? 503 : 429, verdict.message));
+  } catch (error) {
+    next(error);
+  }
+}
 
 /**
  * The one place the chat answers a member in crisis, so that the three ways of
@@ -126,6 +207,38 @@ async function respondWithCrisis(
 }
 
 const router = Router();
+
+// ===========================================
+// ACCESS - what her plan opens, asked of the server
+// ===========================================
+//
+// The web app's premium gate read `user.subscriptionTier`, a field no server
+// response has ever set: /auth/me sends `subscription: { tier, status }`, and
+// login, register and refresh send no tier at all. So the gate saw undefined for
+// everyone — paying members were shown "Upgrade to Pro" in place of the tool
+// they had paid for — while the AI hub, testing `!== 'FREE'` against the same
+// undefined, sent free members straight through. Neither looked at the status,
+// which the server's own gate does. Rather than teach the client to recompute
+// the rule from whichever response last filled its store, it asks the rule.
+router.get('/access', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const subscription = await prisma.subscription.findUnique({
+      where: { userId: req.user!.id },
+      select: { tier: true, status: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        premium: hasActivePremium(subscription),
+        tier: subscription?.tier ?? 'FREE',
+        status: subscription?.status ?? null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ===========================================
 // OPPORTUNITY RADAR - Personalized Job Matches
@@ -272,11 +385,17 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
     // model liked jumped a threshold the overlap said it should not clear, and
     // three roles were measured one way while the other seven were measured
     // another. One column, one meaning.
-    const topJobs = jobsWithScores.slice(0, 3);
+    //
+    // The enrichment is the one AI call on this route, and it is optional, so
+    // the daily budget skips it rather than refusing the scan: a member whose
+    // allowance is used still gets her skill-overlap matches, and is told why
+    // they carry no AI reading.
+    const budget = await checkAiBudget(req.user!.id);
+    const topJobs = budget.allowed ? jobsWithScores.slice(0, 3) : [];
     const enrichedTopJobs = await Promise.all(topJobs.map(async (job) => {
         try {
             const profileContext = `Headline: ${user.headline}. Skills: ${skills.join(', ')}. Experience: ${user.experience.length} roles.`;
-            const analysis = await aiService.evaluateJobMatch(profileContext, job.description);
+            const analysis = await aiService.evaluateJobMatch(profileContext, job.description, { userId: req.user!.id });
             if (!analysis) return job;
             return {
                 ...job,
@@ -293,7 +412,7 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
     // skill-overlap order established above and nothing below re-sorts it.
     const finalJobs = [
         ...enrichedTopJobs,
-        ...jobsWithScores.slice(3, 10)
+        ...jobsWithScores.slice(topJobs.length, 10)
     ].filter((job) => !Number.isFinite(minMatch) || job.matchScore >= minMatch);
 
     const opportunities = finalJobs.map(normalizeOpportunity);
@@ -305,6 +424,7 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
         opportunities,
         totalMatches: matchingJobs.length,
         scanDate: new Date(),
+        aiInsightsWithheld: budget.allowed ? null : budget.message,
       },
     });
   } catch (error) {
@@ -312,13 +432,13 @@ async function opportunityRadarHandler(req: AuthRequest, res: Response, next: Ne
   }
 }
 
-router.get('/opportunity-radar', authenticate, requirePremium, aiLimiter, opportunityRadarHandler);
-router.post('/opportunity-radar', authenticate, requirePremium, aiLimiter, opportunityRadarHandler);
+router.get('/opportunity-radar', authenticate, requireAiPremium, aiLimiter, opportunityRadarHandler);
+router.post('/opportunity-radar', authenticate, requireAiPremium, aiLimiter, opportunityRadarHandler);
 
 // ===========================================
 // RESUME OPTIMIZER
 // ===========================================
-router.post('/resume-optimizer', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+router.post('/resume-optimizer', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     // Both resume screens have always posted `resume` and a pasted
     // `jobDescription`; this handler read `resumeText` and `targetJobId`, so
@@ -346,19 +466,12 @@ router.post('/resume-optimizer', authenticate, requirePremium, aiLimiter, async 
       }
     }
 
-    const data = await aiService.optimizeResume(resumeBody, jobDescription);
+    const data = await aiService.optimizeResume(resumeBody, jobDescription, { userId: req.user!.id });
 
-    // Log AI usage
-    /*
-    await prisma.notification.create({
-      data: {
-        userId: req.user!.id,
-        type: 'SYSTEM',
-        title: 'Resume Analysis Complete',
-        message: 'Your AI resume analysis is ready to view.',
-      },
-    });
-    */
+    // Nothing here is stored: there is no table for an analysis yet, so the
+    // result lives in her browser tab and nowhere else. The commented-out
+    // "analysis complete" notification that sat here would have pointed her at
+    // a record that does not exist, so it is gone rather than kept for later.
 
     res.json({
       success: true,
@@ -376,27 +489,56 @@ router.post('/resume-optimizer', authenticate, requirePremium, aiLimiter, async 
 // ===========================================
 // INTERVIEW COACH
 // ===========================================
-router.post('/interview-coach', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+//
+// Two ways in. With a `jobId` the questions are drawn from that listing's own
+// description, which is what this route always did and nothing on the web app
+// ever called. With a `jobRole` — the role she typed on the coach screen — they
+// are drawn from the role. The screen used to open every session with one of
+// four fixed sentences keyed only by interview type, whatever role she had
+// entered, beside a hub card promising "questions tailored to your target
+// role"; the role form is what makes that true.
+router.post('/interview-coach', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
-    const { jobId, questionType = 'mixed' } = req.body;
+    const { jobId } = req.body;
+    const questionType =
+      typeof req.body.questionType === 'string'
+        ? req.body.questionType
+        : typeof req.body.interviewType === 'string'
+          ? req.body.interviewType
+          : 'mixed';
+    const jobRole = typeof req.body.jobRole === 'string' ? req.body.jobRole.trim().slice(0, 200) : '';
 
-    const job = await prisma.job.findUnique({
-      where: { id: jobId },
-      select: { description: true, title: true, organization: { select: { name: true } } }
-    });
+    let description: string;
+    let jobTitle: string;
+    let company: string | null = null;
 
-    if (!job) {
-        throw new ApiError(404, 'Job not found');
+    if (typeof jobId === 'string' && jobId) {
+      const job = await prisma.job.findUnique({
+        where: { id: jobId },
+        select: { description: true, title: true, organization: { select: { name: true } } }
+      });
+
+      if (!job) {
+          throw new ApiError(404, 'Job not found');
+      }
+      description = job.description;
+      jobTitle = job.title;
+      company = job.organization?.name ?? null;
+    } else if (jobRole) {
+      description = `The candidate is preparing to interview for this role: ${jobRole}. No job advertisement was supplied; ask what an interviewer for that role would ask.`;
+      jobTitle = jobRole;
+    } else {
+      throw new ApiError(400, 'A job or the role you are interviewing for is required');
     }
 
-    const data = await aiService.generateInterviewQuestions(job.description, questionType);
+    const data = await aiService.generateInterviewQuestions(description, questionType, { userId: req.user!.id });
 
     res.json({
       success: true,
       data: {
         ...data,
-        jobTitle: job.title,
-        company: job.organization?.name
+        jobTitle,
+        company,
       }
     });
   } catch (error) {
@@ -404,21 +546,24 @@ router.post('/interview-coach', authenticate, requirePremium, aiLimiter, async (
   }
 });
 
-router.post('/interview-coach/feedback', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+router.post('/interview-coach/feedback', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     const { question, answer, jobRole, interviewType, difficulty } = req.body;
 
-    if (!question || !answer) {
+    if (!question || !answer || typeof question !== 'string' || typeof answer !== 'string') {
       throw new ApiError(400, 'Question and answer are required');
     }
 
-    const data = await aiService.evaluateInterviewAnswer({
-      question,
-      answer,
-      jobRole,
-      interviewType,
-      difficulty,
-    });
+    const data = await aiService.evaluateInterviewAnswer(
+      {
+        question,
+        answer,
+        jobRole: typeof jobRole === 'string' ? jobRole : undefined,
+        interviewType: typeof interviewType === 'string' ? interviewType : undefined,
+        difficulty: typeof difficulty === 'string' ? difficulty : undefined,
+      },
+      { userId: req.user!.id }
+    );
 
     res.json({
       success: true,
@@ -432,7 +577,7 @@ router.post('/interview-coach/feedback', authenticate, requirePremium, aiLimiter
 // ===========================================
 // CAREER PATH ANALYZER
 // ===========================================
-router.get('/career-path', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+router.get('/career-path', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
@@ -458,7 +603,7 @@ Education:
 ${user.education.map(e => `- ${e.degree} in ${e.fieldOfStudy || 'N/A'} from ${e.institution}`).join('\n')}
     `;
 
-    const data = await aiService.generateCareerPath(profileSummary);
+    const data = await aiService.generateCareerPath(profileSummary, undefined, { userId: req.user!.id });
 
     res.json({
       success: true,
@@ -486,7 +631,7 @@ ${user.education.map(e => `- ${e.degree} in ${e.fieldOfStudy || 'N/A'} from ${e.
 // The GET above derives everything from the stored profile. The career-path page
 // asks the user for a current role, a target role, and years of experience, so
 // this variant plans against the goal they typed rather than only their history.
-router.post('/career-path', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+router.post('/career-path', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     const currentRole = typeof req.body.currentRole === 'string' ? req.body.currentRole.trim() : '';
     const targetRole = typeof req.body.targetRole === 'string' ? req.body.targetRole.trim() : '';
@@ -515,7 +660,7 @@ Persona: ${user.persona}
 Skills: ${user.skills.map((s) => `${s.skill.name} (${s.level})`).join(', ') || 'Not specified'}
     `;
 
-    const data = await aiService.generateCareerPath(profileSummary);
+    const data = await aiService.generateCareerPath(profileSummary, undefined, { userId: req.user!.id });
 
     res.json({
       success: true,
@@ -539,7 +684,7 @@ Skills: ${user.skills.map((s) => `${s.skill.name} (${s.level})`).join(', ') || '
 // ===========================================
 // CONTENT GENERATOR (For Creators)
 // ===========================================
-router.post('/content-generator', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+router.post('/content-generator', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     // The generator screen has always sent `type`, `tone` and `context`; this
     // handler read `contentType` and passed only the topic on, so every choice
@@ -552,7 +697,7 @@ router.post('/content-generator', authenticate, requirePremium, aiLimiter, async
       throw new ApiError(400, 'Topic is required');
     }
 
-    const generated = await aiService.generateContent(topic, kind, platform, tone, context);
+    const generated = await aiService.generateContent(topic, kind, platform, tone, context, { userId: req.user!.id });
 
     res.json({
       success: true,
@@ -576,7 +721,7 @@ router.post('/content-generator', authenticate, requirePremium, aiLimiter, async
 // ===========================================
 // BUSINESS IDEA VALIDATOR (For Entrepreneurs)
 // ===========================================
-router.post('/idea-validator', authenticate, requirePremium, aiLimiter, async (req: AuthRequest, res, next) => {
+router.post('/idea-validator', authenticate, requireAiPremium, aiLimiter, aiBudgetGate, async (req: AuthRequest, res, next) => {
   try {
     // The validator screen has always sent `category`, which this handler
     // discarded, and has never sent `problemSolved`, which it read — so the
@@ -594,7 +739,8 @@ router.post('/idea-validator', authenticate, requirePremium, aiLimiter, async (r
       idea,
       typeof targetMarket === 'string' ? targetMarket : undefined,
       typeof problemSolved === 'string' ? problemSolved : typeof problem === 'string' ? problem : undefined,
-      typeof category === 'string' ? category : undefined
+      typeof category === 'string' ? category : undefined,
+      { userId: req.user!.id }
     );
 
     res.json({
@@ -623,20 +769,13 @@ router.get('/chat/usage', authenticate, async (req: AuthRequest, res, next) => {
     });
 
     const tier = user?.subscription?.tier || 'FREE';
+    const premium = hasActivePremium(user?.subscription);
 
-    if (tier !== 'FREE') {
-      return res.json({
-        success: true,
-        data: {
-          tier,
-          unlimited: true,
-          usage: null,
-          timestamp: new Date(),
-        },
-      });
-    }
-
-    const { windowSeconds, maxRequests } = getFreeChatQuotaConfig();
+    // Every tier has a window now, so every tier is told where it stands. The
+    // premium answer used to be `unlimited: true` with no usage at all, which
+    // was never true: the per-minute limiter always applied, and now there is
+    // a daily window as well.
+    const { windowSeconds, maxRequests } = premium ? getPremiumChatQuotaConfig() : getFreeChatQuotaConfig();
     const shared = await getRateLimitStatus(`ai:chat:${req.user!.id}`, maxRequests, windowSeconds);
     // Whichever window has less left is the one she will actually hit, so it is
     // the one to report. Reading the local window never consumes from it.
@@ -647,6 +786,7 @@ router.get('/chat/usage', authenticate, async (req: AuthRequest, res, next) => {
       success: true,
       data: {
         tier,
+        premium,
         unlimited: false,
         usage: {
           limit: maxRequests,
@@ -654,6 +794,9 @@ router.get('/chat/usage', authenticate, async (req: AuthRequest, res, next) => {
           resetIn: binding.resetIn,
           windowSeconds,
         },
+        // What ATHENA Pro would give her, so the upgrade offer can name a
+        // number rather than promise "unlimited".
+        premiumLimit: premium ? null : getPremiumChatQuotaConfig().maxRequests,
         timestamp: new Date(),
       },
     });
@@ -708,50 +851,50 @@ router.post('/chat', authenticate, chatLimiter, async (req: AuthRequest, res, ne
       return await respondWithCrisis(res, req.user!.id, { ...crisis, flagged: true, kind: crisis.kind }, undefined);
     }
 
-    // Check usage limits for free tier
+    // The chat window for her plan. Premium used to skip this block entirely,
+    // which left aiLimiter's ten a minute as the only ceiling on a paying
+    // account; it now has a larger window of its own.
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
       include: { subscription: true },
     });
 
-    const tier = user?.subscription?.tier || 'FREE';
+    const premium = hasActivePremium(user?.subscription);
+    const { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests } = premium
+      ? getPremiumChatQuotaConfig()
+      : getFreeChatQuotaConfig();
 
-    let usage: ChatUsage | undefined;
+    // Both windows are consumed and both must allow. The shared one is the
+    // real quota; the local one is what is left of it when Redis is not
+    // there to keep it. See localChatWindow above for why that matters.
+    const shared = await checkRateLimit(
+      `ai:chat:${req.user!.id}`,
+      effectiveMaxRequests,
+      effectiveWindowSeconds
+    );
+    const local = localChatWindow(
+      req.user!.id,
+      effectiveWindowSeconds,
+      effectiveMaxRequests,
+      'consume'
+    );
+    const rate = local.remaining < shared.remaining ? local : shared;
 
-    if (tier === 'FREE') {
-      const { windowSeconds: effectiveWindowSeconds, maxRequests: effectiveMaxRequests } =
-        getFreeChatQuotaConfig();
+    const usage: ChatUsage = {
+      limit: effectiveMaxRequests,
+      remaining: rate.remaining,
+      resetIn: rate.resetIn,
+      windowSeconds: effectiveWindowSeconds,
+    };
 
-      // Both windows are consumed and both must allow. The shared one is the
-      // real quota; the local one is what is left of it when Redis is not
-      // there to keep it. See localChatWindow above for why that matters.
-      const shared = await checkRateLimit(
-        `ai:chat:${req.user!.id}`,
-        effectiveMaxRequests,
-        effectiveWindowSeconds
+    if (!shared.allowed || !local.allowed) {
+      res.set('Retry-After', String(rate.resetIn));
+      throw new ApiError(
+        429,
+        premium
+          ? `AI chat limit reached. Try again in ${rate.resetIn} seconds.`
+          : `AI chat limit reached. Try again in ${rate.resetIn} seconds, or upgrade to ATHENA Pro.`
       );
-      const local = localChatWindow(
-        req.user!.id,
-        effectiveWindowSeconds,
-        effectiveMaxRequests,
-        'consume'
-      );
-      const rate = local.remaining < shared.remaining ? local : shared;
-
-      usage = {
-        limit: effectiveMaxRequests,
-        remaining: rate.remaining,
-        resetIn: rate.resetIn,
-        windowSeconds: effectiveWindowSeconds,
-      };
-
-      if (!shared.allowed || !local.allowed) {
-        res.set('Retry-After', String(rate.resetIn));
-        throw new ApiError(
-          429,
-          `AI chat limit reached. Try again in ${rate.resetIn} seconds, or upgrade to Premium.`
-        );
-      }
     }
 
     // The provider screen, which reads what a phrase list cannot: it routes a
@@ -765,7 +908,17 @@ router.post('/chat', authenticate, chatLimiter, async (req: AuthRequest, res, ne
       return await respondWithCrisis(res, req.user!.id, screening.check, usage);
     }
 
-    const response = await aiService.chat(message, context); // context is passed as history array
+    // The daily token budget is read here, after both crisis screens and
+    // immediately before the one call that costs money. Placed any earlier, a
+    // member whose disclosure only the provider recognised would be told the
+    // AI was paused instead of being given the numbers.
+    const budget = await checkAiBudget(req.user!.id);
+    if (!budget.allowed) {
+      res.set('Retry-After', String(budget.resetIn));
+      throw new ApiError(budget.scope === 'global' ? 503 : 429, budget.message);
+    }
+
+    const response = await aiService.chat(message, context, { userId: req.user!.id }); // context is passed as history array
 
     // The model's reply is screened too. It is a general-purpose model behind a
     // short system prompt, and what it says is published to a member in her own

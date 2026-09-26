@@ -21,7 +21,7 @@ import {
   Scale,
 } from 'lucide-react';
 import { useIdeaValidator } from '@/lib/hooks';
-import PaywallGate from '@/components/subscription/PaywallGate';
+import PremiumGate from '../PremiumGate';
 import { cn } from '@/lib/utils';
 
 /**
@@ -221,7 +221,7 @@ export default function IdeaValidatorPage() {
       {/* POST /ai/idea-validator carries requirePremium. A free member used
           to reach this form from the AI hub and the platform directory, write
           out the idea she had been sitting on, and get back a toast. */}
-      <PaywallGate feature="ai_idea_validator" featureName="Business Idea Validator">
+      <PremiumGate featureName="Business Idea Validator">
       {!result ? (
         <div className="max-w-3xl mx-auto space-y-6">
           {/* Idea Input */}
@@ -614,7 +614,7 @@ export default function IdeaValidatorPage() {
           </div>
         </div>
       )}
-      </PaywallGate>
+      </PremiumGate>
     </div>
   );
 }

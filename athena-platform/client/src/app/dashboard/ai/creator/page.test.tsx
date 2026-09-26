@@ -15,16 +15,18 @@ const algorithms = aiAlgorithmsApi as unknown as {
 };
 const http = api as unknown as { get: jest.Mock };
 
-/** What /api/algorithms/income-stream returns for a member with no gifts yet. */
+/**
+ * What /api/algorithms/income-stream returns for a member with no gifts yet.
+ * It no longer carries `channels`, `revenuePotentialScore` or
+ * `diversificationScore`; the test below that feeds the page a stale payload
+ * with `channels` in it is the guard for a server that still sends them.
+ */
 const QUIET_INCOME_STREAM = {
   creatorStatus: 'non_creator',
-  revenuePotentialScore: 0,
-  diversificationScore: 40,
   monthlyEarnings: 0,
   avgGiftValue: 0,
   followerCount: 0,
   actionPlan: ['Schedule 2 revenue-focused live sessions per week.'],
-  channels: [{ name: 'Gifts', currentShare: 55, potentialShare: 45 }],
 };
 
 /**

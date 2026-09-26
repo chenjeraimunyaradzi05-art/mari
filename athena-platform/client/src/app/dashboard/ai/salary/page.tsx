@@ -14,12 +14,18 @@ type SalaryAnalysis = {
   genderGapAmount?: string | number;
   genderGapPercent?: number;
   sampleSize: number;
+  /**
+   * Each cut point is published only once five contributors sit on either side
+   * of it, and is null until then: the median at ten contributors, the
+   * quartiles at twenty, the deciles at fifty. Analyses saved before that rule
+   * may still carry all five.
+   */
   salaryBands: {
-    p10: number;
-    p25: number;
+    p10: number | null;
+    p25: number | null;
     p50: number;
-    p75: number;
-    p90: number;
+    p75: number | null;
+    p90: number | null;
   };
   negotiationTips?: Array<{ tip: string; priority: number }>;
   generatedAt: string;
@@ -28,6 +34,9 @@ type SalaryAnalysis = {
 export default function SalaryEquityPage() {
   const [analyses, setAnalyses] = useState<SalaryAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept apart from `analyses` being empty: a list that failed to load is not
+  // a member with no analyses, and must not be drawn as one.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -50,12 +59,14 @@ export default function SalaryEquityPage() {
 
   const loadAnalyses = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const response = await aiAlgorithmsApi.getMySalaryAnalyses();
       setAnalyses(response.data?.data || []);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error?.response?.data?.error || 'Failed to load analyses');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -103,7 +114,7 @@ export default function SalaryEquityPage() {
     setContributing(true);
     setError(null);
     try {
-      await aiAlgorithmsApi.submitSalaryData({
+      const response = await aiAlgorithmsApi.submitSalaryData({
         jobTitle: contributeForm.jobTitle,
         company: contributeForm.company || undefined,
         city: contributeForm.city || undefined,
@@ -112,7 +123,13 @@ export default function SalaryEquityPage() {
         gender: contributeForm.gender || undefined,
       });
 
-      setSuccess('Thank you. Your salary data has been added to the pay-gap pool.');
+      // A second figure for the same role replaces her first rather than
+      // joining it, and she is told which of the two happened.
+      setSuccess(
+        response.data?.data?.replaced
+          ? 'Thank you. Your new figure has replaced the one you gave for this role before.'
+          : 'Thank you. Your salary data has been added to the pay-gap pool.'
+      );
       setShowContribute(false);
       setContributeForm({
         jobTitle: '',
@@ -125,17 +142,27 @@ export default function SalaryEquityPage() {
 
       setTimeout(() => setSuccess(null), 5000);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error?.response?.data?.error || 'Failed to submit salary data');
+      const error = err as { response?: { data?: { error?: string; message?: string } } };
+      setError(error?.response?.data?.error || error?.response?.data?.message || 'Failed to submit salary data');
     } finally {
       setContributing(false);
     }
   };
 
-  const formatCurrency = (value?: string | number) => {
-    if (!value) return '$0';
+  // A missing figure is shown as missing. This used to print "$0" for any
+  // value it did not have, which reads as a salary of nothing.
+  const formatCurrency = (value?: string | number | null) => {
+    if (value === null || value === undefined || value === '') return '—';
     const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (!Number.isFinite(num)) return '—';
     return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(num);
+  };
+
+  /** The widest range this analysis is allowed to publish, or null for the median alone. */
+  const bandOf = (bands: SalaryAnalysis['salaryBands']) => {
+    if (bands.p10 !== null && bands.p90 !== null) return { low: bands.p10, high: bands.p90, lowLabel: '10th', highLabel: '90th', inset: '10%' };
+    if (bands.p25 !== null && bands.p75 !== null) return { low: bands.p25, high: bands.p75, lowLabel: '25th', highLabel: '75th', inset: '25%' };
+    return null;
   };
 
   return (
@@ -283,12 +310,20 @@ export default function SalaryEquityPage() {
               relies on before typing her employer's name. Until the server stops
               linking the row — see the handoff on ai-algorithms.routes.ts — the
               page says exactly what happens instead.
+
+              "Other members never see your row" was not true either while the
+              server published a band from five contributors: p10 to p90 were
+              then the five salaries themselves. The server now publishes a
+              figure only with five contributors on either side of it, rounded
+              to the nearest thousand, and the numbers below are its numbers.
             */}
             <p className="mt-4 text-xs text-purple-700 dark:text-purple-300 leading-relaxed">
               What happens to this: your entry is saved against your ATHENA account, so it is not
-              anonymous to us. Other members never see your row — a role is only ever reported as
-              a median and a salary band once at least five people have contributed to it, and a
-              gender gap only once at least three women and three men have.
+              anonymous to us. Other members never see your row. A role is reported as a median only
+              once ten people have contributed to it, as a salary range once twenty have, and as a
+              gender gap only once ten women and ten men have — every figure rounded to the nearest
+              thousand, so that no one person&apos;s pay can be read off it. You can give one figure per
+              role; giving another replaces it.
             </p>
             <button
               onClick={handleContribute}
@@ -310,6 +345,13 @@ export default function SalaryEquityPage() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          </div>
+        ) : loadFailed && analyses.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center" role="alert">
+            <h3 className="font-semibold text-slate-900 dark:text-white mb-2">We could not load your analyses</h3>
+            <button onClick={loadAnalyses} className="text-sm text-emerald-600 hover:underline">
+              Try again
+            </button>
           </div>
         ) : analyses.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
@@ -336,40 +378,63 @@ export default function SalaryEquityPage() {
                   </span>
                 </div>
 
-                {/* Salary Bands */}
-                <div className="mb-4">
-                  <p className="text-sm text-slate-500 mb-2">Salary distribution (n={analysis.sampleSize})</p>
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-slate-500">10th</span>
-                    <div className="flex-1 h-3 bg-slate-100 dark:bg-slate-800 rounded-full relative overflow-hidden">
-                      <div
-                        className="absolute h-full bg-gradient-to-r from-emerald-300 to-emerald-500 rounded-full"
-                        style={{ left: '10%', right: '10%' }}
-                      />
-                      <div
-                        className="absolute h-full w-1 bg-emerald-700"
-                        style={{ left: '50%' }}
-                      />
+                {/* Salary Bands. The bar draws the widest range the server
+                    was allowed to publish, and says so when it could publish
+                    only the median. */}
+                {(() => {
+                  const band = bandOf(analysis.salaryBands);
+                  return (
+                    <div className="mb-4">
+                      <p className="text-sm text-slate-500 mb-2">
+                        Reported by {analysis.sampleSize} members
+                      </p>
+                      {band ? (
+                        <>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-500">{band.lowLabel}</span>
+                            <div className="flex-1 h-3 bg-slate-100 dark:bg-slate-800 rounded-full relative overflow-hidden">
+                              <div
+                                className="absolute h-full bg-gradient-to-r from-emerald-300 to-emerald-500 rounded-full"
+                                style={{ left: band.inset, right: band.inset }}
+                              />
+                              <div className="absolute h-full w-1 bg-emerald-700" style={{ left: '50%' }} />
+                            </div>
+                            <span className="text-slate-500">{band.highLabel}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-slate-500 mt-1">
+                            <span>{formatCurrency(band.low)}</span>
+                            <span className="font-semibold text-emerald-600">{formatCurrency(analysis.salaryBands.p50)} median</span>
+                            <span>{formatCurrency(band.high)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-lg font-semibold text-emerald-600">
+                            {formatCurrency(analysis.salaryBands.p50)} median
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            A range is shown once twenty members have reported pay for this role.
+                          </p>
+                        </>
+                      )}
                     </div>
-                    <span className="text-slate-500">90th</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-500 mt-1">
-                    <span>{formatCurrency(analysis.salaryBands.p10)}</span>
-                    <span className="font-semibold text-emerald-600">{formatCurrency(analysis.salaryBands.p50)} median</span>
-                    <span>{formatCurrency(analysis.salaryBands.p90)}</span>
-                  </div>
-                </div>
+                  );
+                })()}
 
-                {/* Gender Gap */}
+                {/* Gender Gap. Medians, not averages, and the gap can run
+                    either way; this used to say "Women earn X less on average"
+                    whatever the sign. */}
                 {analysis.genderGapPercent !== null && analysis.genderGapPercent !== undefined && (
                   <div className="flex items-center gap-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg mb-4">
                     <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
                     <div>
                       <p className="text-sm font-medium text-red-800 dark:text-red-200">
-                        Gender Pay Gap Detected: {analysis.genderGapPercent.toFixed(1)}%
+                        Gender pay gap: {Math.abs(analysis.genderGapPercent).toFixed(1)}%
                       </p>
                       <p className="text-xs text-red-600 dark:text-red-400">
-                        Women earn {formatCurrency(analysis.genderGapAmount)} less on average in this role
+                        The median woman reporting pay for this role earns{' '}
+                        {formatCurrency(Math.abs(Number(analysis.genderGapAmount)))}{' '}
+                        {Number(analysis.genderGapAmount) >= 0 ? 'less' : 'more'} than the median man
                       </p>
                     </div>
                   </div>

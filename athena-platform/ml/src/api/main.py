@@ -6,6 +6,7 @@ Exposes ML algorithms as REST endpoints for the Node.js backend.
 
 from __future__ import annotations
 
+import hmac
 import os
 import time
 from contextlib import asynccontextmanager
@@ -24,7 +25,43 @@ from src.api.routers import (
     ranker,
     feed,
 )
-from src.api.services.model_loader import ModelLoader
+from src.api.services.model_loader import ModelLoader, _environment_name
+
+
+def _truthy(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# ===========================================
+# DEPLOYMENT POSTURE
+# ===========================================
+#
+# Three settings decide how exposed this service is, and each one used to fail
+# open.
+#
+# DEBUG was tested for presence, so DEBUG=false turned it on as surely as
+# DEBUG=true, and it makes the exception handler below return the exception's
+# own text to whoever caused it. It is now read as a boolean, and it is never
+# honoured in production whatever it says.
+#
+# ML_SERVICE_KEY, when empty, turned the shared-key check into a no-op — every
+# endpoint open to anything that could reach the port — and nothing said so.
+# In production an empty key now stops the service at startup with a sentence
+# saying why; elsewhere it is announced at startup rather than discovered.
+#
+# /docs, /redoc and /openapi.json were exempt from the key, so a published port
+# handed out a map of every endpoint and its schema even when a key was set.
+# They are now behind the key like everything else except /health.
+IS_PRODUCTION = _environment_name() == "production"
+DEBUG = _truthy(os.getenv("DEBUG")) and not IS_PRODUCTION
+ML_SERVICE_KEY = os.environ.get("ML_SERVICE_KEY", "").strip()
+
+if IS_PRODUCTION and not ML_SERVICE_KEY:
+    raise RuntimeError(
+        "ML_SERVICE_KEY is not set, and this is a production environment. Without it every endpoint "
+        "of this service answers anyone who can reach its port. Set ML_SERVICE_KEY here and the same "
+        "value on the Node API, which sends it as X-ML-Key."
+    )
 
 # ===========================================
 # LIFESPAN - Load Models on Startup
@@ -43,6 +80,8 @@ async def lifespan(app: FastAPI):
     anything else. Now that a missing artefact is a reported state rather than a
     crash, the line has to say which of the two happened.
     """
+    if not ML_SERVICE_KEY:
+        print("⚠ ML_SERVICE_KEY is not set: every endpoint is open to anything that can reach this port")
     print("🚀 Loading ML models...")
     await model_loader.load_all_models()
     if model_loader.is_ready():
@@ -71,14 +110,14 @@ app = FastAPI(
 # The service is meant to sit on a private network behind the Node API. When a
 # shared key is configured (ML_SERVICE_KEY, the same value the API sends as
 # X-ML-Key) every request except the health check has to carry it, so an
-# exposed port cannot be driven by anyone else.
-ML_SERVICE_KEY = os.environ.get("ML_SERVICE_KEY", "").strip()
-
-
+# exposed port cannot be driven by anyone else. The comparison is constant-time,
+# so how long a wrong key takes to refuse says nothing about how much of it
+# was right.
 @app.middleware("http")
 async def require_shared_key(request: Request, call_next):
-    if ML_SERVICE_KEY and request.url.path not in ("/health", "/docs", "/redoc", "/openapi.json"):
-        if request.headers.get("x-ml-key", "") != ML_SERVICE_KEY:
+    if ML_SERVICE_KEY and request.url.path != "/health":
+        presented = request.headers.get("x-ml-key", "")
+        if not hmac.compare_digest(presented.encode("utf-8"), ML_SERVICE_KEY.encode("utf-8")):
             return JSONResponse(status_code=401, content={"detail": "A valid X-ML-Key header is required"})
     return await call_next(request)
 
@@ -182,7 +221,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "internal_server_error",
-            "message": str(exc) if os.getenv("DEBUG") else "An unexpected error occurred",
+            "message": str(exc) if DEBUG else "An unexpected error occurred",
             "path": str(request.url),
         },
     )

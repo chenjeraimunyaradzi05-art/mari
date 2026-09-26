@@ -18,7 +18,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useResumeOptimizer } from '@/lib/hooks';
-import PaywallGate from '@/components/subscription/PaywallGate';
+import PremiumGate from '../PremiumGate';
 import { downloadText } from '@/lib/download';
 
 /** The one shape the analysis arrives in; `score` null means none was made. */
@@ -41,16 +41,42 @@ export default function ResumePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { mutate: optimize, isPending: isOptimizing } = useResumeOptimizer();
+  const [fileError, setFileError] = useState<string | null>(null);
 
+  /**
+   * Plain text only.
+   *
+   * This accepted .pdf and .docx and read every file with readAsText, so a PDF
+   * or Word résumé arrived in the box as its raw bytes — compressed streams and
+   * XML — and was sent to the model to be scored as though it were her CV.
+   * Nothing on this page or the server can pull the text out of either format,
+   * so the honest thing is to take the files it can read and ask her to paste
+   * the rest.
+   */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setResume(event.target?.result as string);
-      };
-      reader.readAsText(file);
+    e.target.value = '';
+    if (!file) return;
+
+    setFileError(null);
+    const isText = file.type === 'text/plain' || /\.(txt|md)$/i.test(file.name);
+    if (!isText) {
+      setFileError(
+        'That file is not plain text, so it cannot be read here. Open it, copy the text of your résumé, and paste it into the box below.'
+      );
+      return;
     }
+    if (file.size > 5 * 1024 * 1024) {
+      setFileError('That file is larger than 5MB. Paste the text of your résumé into the box below instead.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setResume(typeof event.target?.result === 'string' ? event.target.result : '');
+    };
+    reader.onerror = () => setFileError('That file could not be read. Paste the text into the box below instead.');
+    reader.readAsText(file);
   };
 
   const handleOptimize = () => {
@@ -102,7 +128,7 @@ export default function ResumePage() {
         </div>
       </div>
 
-      <PaywallGate feature="ai_resume_optimizer" featureName="AI Resume Optimizer">
+      <PremiumGate featureName="AI Resume Optimizer">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Input Section */}
           <div className="space-y-6">
@@ -120,19 +146,24 @@ export default function ResumePage() {
                 >
                   <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Click to upload or drag and drop
+                    Click to choose a file
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    TXT, PDF, or DOCX (max 5MB)
+                    Plain text (.txt), up to 5MB. For a PDF or Word file, paste the text below.
                   </p>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".txt,.pdf,.docx"
+                    accept=".txt,.md,text/plain"
                     className="hidden"
                     onChange={handleFileUpload}
                   />
                 </div>
+                {fileError && (
+                  <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                    {fileError}
+                  </p>
+                )}
 
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
@@ -390,7 +421,7 @@ export default function ResumePage() {
             )}
           </div>
         </div>
-      </PaywallGate>
+      </PremiumGate>
     </div>
   );
 }

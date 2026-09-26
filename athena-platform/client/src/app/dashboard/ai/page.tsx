@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import {
   Sparkles,
@@ -20,7 +19,7 @@ import {
   Shield,
   Video,
 } from 'lucide-react';
-import { useAuth } from '@/lib/hooks';
+import { usePremiumAccess } from './PremiumGate';
 
 /**
  * Every description below is read as a promise about what the tool will do, and
@@ -67,8 +66,10 @@ const tools = [
   {
     id: 'salary-equity',
     name: 'SalaryEquity',
+    // The page this opens reads what members report they are paid, not the
+    // ranges employers advertise; that comparison lives on /salary-insights.
     description:
-      'The median of advertised ranges for your role, against what you are asking for',
+      'What members in your role report they are paid, once enough have reported that no one can be singled out',
     icon: DollarSign,
     href: '/dashboard/ai/salary',
     color: 'bg-emerald-500',
@@ -133,7 +134,10 @@ const tools = [
   {
     id: 'interview-coach',
     name: 'Interview Coach',
-    description: 'Practice with AI-generated questions tailored to your target role',
+    // This promised tailored questions while the first question of every
+    // session was one of four fixed sentences. The coach now asks the model
+    // for an opening question for the role she types, so the promise holds.
+    description: 'Practise answering questions written for the role you are interviewing for, with feedback on each answer',
     icon: MessageSquare,
     href: '/dashboard/ai/interview-coach',
     color: 'bg-green-500',
@@ -169,8 +173,14 @@ const tools = [
 ];
 
 export default function AIToolsPage() {
-  const { user } = useAuth();
-  const isPremium = user?.subscriptionTier !== 'FREE';
+  // `user.subscriptionTier !== 'FREE'` was true for everyone, because no server
+  // response sets that field, so free members were sent straight to the tools
+  // and never saw the upgrade card. The hub now asks the same question the
+  // tools' own gate asks. Until the answer arrives — or if it cannot — every
+  // card links to its tool, where the gate says what her plan opens; nothing
+  // here tells a member she has not paid on the strength of a failed request.
+  const access = usePremiumAccess();
+  const isPremium = access.data?.premium !== false;
 
   return (
     <div className="p-6 space-y-8">
@@ -195,11 +205,12 @@ export default function AIToolsPage() {
                 <span className="text-xl font-bold">Unlock Premium AI Tools</span>
               </div>
               {/* "Unlimited" was never true: every AI route on the server is
-                  rate limited per minute whatever the tier. Premium removes the
-                  free-tier quota, which is the thing worth saying. */}
+                  rate limited per minute whatever the tier, and Premium chat
+                  has a daily window of its own. What Premium buys is a larger
+                  one, which is the thing worth saying. */}
               <p className="text-white/90 max-w-xl">
                 Premium opens the Resume Optimizer, Interview Coach, Career Path Analyzer,
-                Opportunity Radar and the rest, and lifts the free limit on ATHENA chat.
+                Opportunity Radar and the rest, and raises your daily limit on ATHENA chat.
               </p>
             </div>
             <Link

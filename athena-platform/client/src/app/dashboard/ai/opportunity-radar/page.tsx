@@ -21,7 +21,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useScanOpportunities } from '@/lib/hooks';
-import PaywallGate from '@/components/subscription/PaywallGate';
+import PremiumGate from '../PremiumGate';
 import { cn, formatSalary, JOB_TYPE_LABELS } from '@/lib/utils';
 
 interface Opportunity {
@@ -43,6 +43,9 @@ export default function OpportunityRadarPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [scanError, setScanError] = useState<string | null>(null);
+  // Set when the server skipped the AI reading of the top matches because the
+  // daily AI allowance was used; the matches themselves are still real.
+  const [aiWithheld, setAiWithheld] = useState<string | null>(null);
   /**
    * minMatch used to default to 70, which meant a member had to already hold
    * 70% of a role's listed skills before the role would appear at all — and
@@ -99,6 +102,7 @@ export default function OpportunityRadarPage() {
                 }))
               : [];
           setOpportunities(normalized);
+          setAiWithheld(typeof data?.aiInsightsWithheld === 'string' ? data.aiInsightsWithheld : null);
           setIsScanning(false);
         },
         onError: (error: any) => {
@@ -151,7 +155,7 @@ export default function OpportunityRadarPage() {
       {/* Both /ai/opportunity-radar routes carry requirePremium, and the AI
           hub advertised this tool as free. A free member arrived here, set her
           filters, pressed Scan and was told the scan was unavailable. */}
-      <PaywallGate feature="ai_opportunity_radar" featureName="Opportunity Radar">
+      <PremiumGate featureName="Opportunity Radar">
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card text-center">
@@ -269,6 +273,12 @@ export default function OpportunityRadarPage() {
           </div>
         </div>
       </div>
+
+      {aiWithheld && opportunities.length > 0 && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+          These matches are by shared skills only; the AI reading of the top few was skipped. {aiWithheld}
+        </p>
+      )}
 
       {/* Opportunities List */}
       {opportunities.length === 0 && !isScanning ? (
@@ -471,7 +481,7 @@ Lower the minimum skills-held filter or broaden your scan settings.
           </div>
         </div>
       </div>
-      </PaywallGate>
+      </PremiumGate>
     </div>
   );
 }

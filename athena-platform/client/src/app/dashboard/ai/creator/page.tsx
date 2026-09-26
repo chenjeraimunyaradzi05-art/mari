@@ -86,19 +86,16 @@ type IncomeProjections = {
  * It is the one creator endpoint that aggregates live tables at request time —
  * gifts actually received in the last thirty days, posts actually published,
  * and whether Stripe Connect has been switched on — so it is what the page
- * leads with. `channels` is deliberately not rendered: its currentShare
- * percentages are fixed constants in algorithm.service, and printing them as a
- * creator's revenue mix would be making a number up about her.
+ * leads with. It used to send a fixed revenue mix (`channels`) and two scores
+ * with hand-picked weights beside those figures; the page never rendered them,
+ * and the server no longer sends them, so they are not in this type either.
  */
 type IncomeStreamResult = {
   creatorStatus: 'non_creator' | 'emerging' | 'growing' | 'established';
-  revenuePotentialScore: number;
-  diversificationScore: number;
   monthlyEarnings: number;
   avgGiftValue: number;
   followerCount: number;
   actionPlan: string[];
-  channels: Array<{ name: string; currentShare: number; potentialShare: number }>;
 };
 
 type IncomeStreamEnvelope = { success: boolean; data: IncomeStreamResult };
